@@ -17,7 +17,7 @@
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ use crate::resolver::version::resolve_target_version;
 use crate::service::{
     ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider, MetadataFormat,
 };
-use crate::spec::{Catalogs, PackageSpec, Protocol};
+use crate::spec::{Catalogs, PackageSpec, Protocol, SpecStr};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::RegistryError;
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -756,6 +756,244 @@ impl FetchDone {
 
 type FetchFuture = tokio::task::JoinHandle<FetchDone>;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FetchPriority {
+    Demand,
+    Prefetch,
+}
+
+#[derive(Default)]
+struct FetchQueues {
+    demand: VecDeque<ManifestJob>,
+    prefetch: VecDeque<ManifestJob>,
+    queued: HashMap<FetchKey, FetchPriority>,
+    active: HashMap<FetchKey, FetchPriority>,
+}
+
+impl FetchQueues {
+    fn enqueue(&mut self, request: ManifestJob, priority: FetchPriority) {
+        let key = request.key();
+        if self.active.contains_key(&key) {
+            return;
+        }
+
+        match (self.queued.get(&key).copied(), priority) {
+            (Some(FetchPriority::Demand), _)
+            | (Some(FetchPriority::Prefetch), FetchPriority::Prefetch) => {}
+            (Some(FetchPriority::Prefetch), FetchPriority::Demand) => {
+                self.queued.insert(key, FetchPriority::Demand);
+                self.demand.push_back(request);
+            }
+            (None, FetchPriority::Demand) => {
+                self.queued.insert(key, FetchPriority::Demand);
+                self.demand.push_back(request);
+            }
+            (None, FetchPriority::Prefetch) => {
+                self.queued.insert(key, FetchPriority::Prefetch);
+                self.prefetch.push_back(request);
+            }
+        }
+    }
+
+    fn complete(&mut self, key: &FetchKey) {
+        self.queued.remove(key);
+        self.active.remove(key);
+    }
+
+    fn pop_next(&mut self, prefetch_concurrency: usize) -> Option<ManifestJob> {
+        if let Some(request) = self.pop_priority(FetchPriority::Demand) {
+            return Some(request);
+        }
+
+        let prefetch_concurrency = if self
+            .queued
+            .values()
+            .any(|priority| *priority == FetchPriority::Demand)
+        {
+            prefetch_concurrency
+        } else {
+            usize::MAX
+        };
+
+        if self.active_prefetches() >= prefetch_concurrency {
+            return None;
+        }
+
+        self.pop_priority(FetchPriority::Prefetch)
+    }
+
+    fn pop_priority(&mut self, priority: FetchPriority) -> Option<ManifestJob> {
+        loop {
+            let request = match priority {
+                FetchPriority::Demand => self.demand.pop_front(),
+                FetchPriority::Prefetch => self.prefetch.pop_front(),
+            }?;
+            let key = request.key();
+            if self.queued.get(&key).copied() != Some(priority) {
+                continue;
+            }
+            self.queued.remove(&key);
+            self.active.insert(key, priority);
+            return Some(request);
+        }
+    }
+
+    fn active_prefetches(&self) -> usize {
+        self.active
+            .values()
+            .filter(|priority| **priority == FetchPriority::Prefetch)
+            .count()
+    }
+}
+
+fn prefetch_concurrency_limit(concurrency: usize) -> usize {
+    (concurrency / 4).max(1)
+}
+
+#[derive(Default)]
+struct ManifestState {
+    full_cache: HashMap<String, Arc<FullManifest>>,
+    versions_cache: HashMap<String, Arc<crate::service::VersionsInfo>>,
+    version_cache: HashMap<VersionKey, Arc<CoreVersionManifest>>,
+    full_waiters: HashMap<String, Vec<WaitingEdge>>,
+    version_waiters: HashMap<VersionKey, Vec<WaitingEdge>>,
+    full_failures: HashMap<String, String>,
+    version_failures: HashMap<VersionKey, String>,
+    fetch_queues: FetchQueues,
+}
+
+impl ManifestState {
+    fn schedule_registry_fetch(
+        &mut self,
+        name: String,
+        spec: String,
+        supports_semver: bool,
+        priority: FetchPriority,
+    ) {
+        let (real_name, real_spec) = normalize_spec(&name, &spec);
+        if supports_semver {
+            let key = (real_name, real_spec);
+            if self.version_cache.contains_key(&key) || self.version_failures.contains_key(&key) {
+                return;
+            }
+            self.fetch_queues.enqueue(
+                ManifestJob::Version {
+                    name: key.0.clone(),
+                    spec: key.1.clone(),
+                    fetch_spec: key.1,
+                    format: version_metadata_format(supports_semver),
+                },
+                priority,
+            );
+        } else {
+            if self.full_cache.contains_key(&real_name)
+                || self.versions_cache.contains_key(&real_name)
+                || self.full_failures.contains_key(&real_name)
+            {
+                return;
+            }
+            self.fetch_queues
+                .enqueue(ManifestJob::Full { name: real_name }, priority);
+        }
+    }
+
+    fn enqueue_version_extract(
+        &mut self,
+        name: String,
+        spec: String,
+        version: String,
+        full: Arc<FullManifest>,
+    ) {
+        self.fetch_queues.enqueue(
+            ManifestJob::ExtractVersion {
+                name,
+                spec,
+                version,
+                full,
+            },
+            FetchPriority::Demand,
+        );
+    }
+
+    fn enqueue_version_fetch(
+        &mut self,
+        name: String,
+        spec: String,
+        fetch_spec: String,
+        supports_semver: bool,
+    ) {
+        self.fetch_queues.enqueue(
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format: version_metadata_format(supports_semver),
+            },
+            FetchPriority::Demand,
+        );
+    }
+
+    fn schedule_transitive_prefetches(
+        &mut self,
+        manifest: &CoreVersionManifest,
+        peer_deps: PeerDeps,
+        supports_semver: bool,
+    ) {
+        for (name, spec) in collect_registry_prefetches(manifest, peer_deps) {
+            self.schedule_registry_fetch(name, spec, supports_semver, FetchPriority::Prefetch);
+        }
+    }
+
+    fn apply_fetch_result(
+        &mut self,
+        done: FetchDone,
+        supports_semver: bool,
+        peer_deps: PeerDeps,
+        level_pending: &mut VecDeque<WaitingEdge>,
+    ) {
+        let done_key = done.key();
+        self.fetch_queues.complete(&done_key);
+
+        match done {
+            FetchDone::Full { name, result } => {
+                match result {
+                    Ok(ManifestFullData::Full(full)) => {
+                        self.full_cache.insert(name.clone(), full);
+                    }
+                    Ok(ManifestFullData::Versions(versions)) => {
+                        self.versions_cache.insert(name.clone(), versions);
+                    }
+                    Err(e) => {
+                        self.full_failures.insert(name.clone(), e);
+                    }
+                }
+                if let Some(waiters) = self.full_waiters.remove(&name) {
+                    level_pending.extend(waiters);
+                }
+            }
+            FetchDone::Version { name, spec, result } => {
+                let key = (name, spec);
+                match result {
+                    Ok(manifest) => {
+                        self.version_cache
+                            .insert(key.clone(), Arc::clone(&manifest));
+                        self.version_cache
+                            .entry((key.0.clone(), manifest.version.clone()))
+                            .or_insert_with(|| Arc::clone(&manifest));
+                        self.schedule_transitive_prefetches(&manifest, peer_deps, supports_semver);
+                    }
+                    Err(e) => {
+                        self.version_failures.insert(key.clone(), e);
+                    }
+                }
+                if let Some(waiters) = self.version_waiters.remove(&key) {
+                    level_pending.extend(waiters);
+                }
+            }
+        }
+    }
+}
+
 fn version_metadata_format(supports_semver: bool) -> MetadataFormat {
     if supports_semver {
         MetadataFormat::Abbreviated
@@ -825,108 +1063,20 @@ where
 
 fn pump_fetches<R>(
     fetches: &mut FuturesUnordered<FetchFuture>,
-    fetch_queue: &mut VecDeque<ManifestJob>,
-    inflight_fetches: &mut HashSet<FetchKey>,
+    fetch_queues: &mut FetchQueues,
     registry: &R,
     concurrency: usize,
 ) where
     R: ManifestProvider,
     R::Error: Send,
 {
+    let prefetch_concurrency = prefetch_concurrency_limit(concurrency);
     while fetches.len() < concurrency {
-        let Some(request) = fetch_queue.pop_front() else {
+        let Some(request) = fetch_queues.pop_next(prefetch_concurrency) else {
             break;
         };
-        inflight_fetches.insert(request.key());
         fetches.push(fetch_registry_manifest(registry.clone(), request));
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn schedule_registry_fetch(
-    name: String,
-    spec: String,
-    supports_semver: bool,
-    full_cache: &HashMap<String, Arc<FullManifest>>,
-    version_cache: &HashMap<VersionKey, Arc<CoreVersionManifest>>,
-    full_failures: &HashMap<String, String>,
-    version_failures: &HashMap<VersionKey, String>,
-    queued_fetches: &mut HashSet<FetchKey>,
-    inflight_fetches: &HashSet<FetchKey>,
-    versions_cache: &HashMap<String, Arc<crate::service::VersionsInfo>>,
-    fetch_queue: &mut VecDeque<ManifestJob>,
-) {
-    let (real_name, real_spec) = normalize_spec(&name, &spec);
-    if supports_semver {
-        let key = (real_name, real_spec);
-        let fetch_key = FetchKey::Version(key.0.clone(), key.1.clone());
-        if version_cache.contains_key(&key)
-            || version_failures.contains_key(&key)
-            || inflight_fetches.contains(&fetch_key)
-            || !queued_fetches.insert(fetch_key)
-        {
-            return;
-        }
-        fetch_queue.push_back(ManifestJob::Version {
-            name: key.0.clone(),
-            spec: key.1.clone(),
-            fetch_spec: key.1,
-            format: version_metadata_format(supports_semver),
-        });
-    } else {
-        let fetch_key = FetchKey::Full(real_name.clone());
-        if full_cache.contains_key(&real_name)
-            || versions_cache.contains_key(&real_name)
-            || full_failures.contains_key(&real_name)
-            || inflight_fetches.contains(&fetch_key)
-            || !queued_fetches.insert(fetch_key)
-        {
-            return;
-        }
-        fetch_queue.push_back(ManifestJob::Full { name: real_name });
-    }
-}
-
-fn enqueue_version_extract(
-    name: String,
-    spec: String,
-    version: String,
-    full: Arc<FullManifest>,
-    queued_fetches: &mut HashSet<FetchKey>,
-    inflight_fetches: &HashSet<FetchKey>,
-    fetch_queue: &mut VecDeque<ManifestJob>,
-) {
-    let fetch_key = FetchKey::Version(name.clone(), spec.clone());
-    if inflight_fetches.contains(&fetch_key) || !queued_fetches.insert(fetch_key) {
-        return;
-    }
-    fetch_queue.push_back(ManifestJob::ExtractVersion {
-        name,
-        spec,
-        version,
-        full,
-    });
-}
-
-fn enqueue_version_fetch(
-    name: String,
-    spec: String,
-    fetch_spec: String,
-    supports_semver: bool,
-    queued_fetches: &mut HashSet<FetchKey>,
-    inflight_fetches: &HashSet<FetchKey>,
-    fetch_queue: &mut VecDeque<ManifestJob>,
-) {
-    let fetch_key = FetchKey::Version(name.clone(), spec.clone());
-    if inflight_fetches.contains(&fetch_key) || !queued_fetches.insert(fetch_key) {
-        return;
-    }
-    fetch_queue.push_back(ManifestJob::Version {
-        name,
-        spec,
-        fetch_spec,
-        format: version_metadata_format(supports_semver),
-    });
 }
 
 fn try_reuse_dependency(
@@ -1099,59 +1249,17 @@ fn resolve_version_from_full_manifest<RE>(
     resolve_version_from_versions(edge, &full.name, full.into(), real_spec)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn apply_fetch_result(
-    done: FetchDone,
-    full_cache: &mut HashMap<String, Arc<FullManifest>>,
-    versions_cache: &mut HashMap<String, Arc<crate::service::VersionsInfo>>,
-    version_cache: &mut HashMap<VersionKey, Arc<CoreVersionManifest>>,
-    full_waiters: &mut HashMap<String, Vec<WaitingEdge>>,
-    version_waiters: &mut HashMap<VersionKey, Vec<WaitingEdge>>,
-    full_failures: &mut HashMap<String, String>,
-    version_failures: &mut HashMap<VersionKey, String>,
-    queued_fetches: &mut HashSet<FetchKey>,
-    inflight_fetches: &mut HashSet<FetchKey>,
-    level_pending: &mut VecDeque<WaitingEdge>,
-) {
-    let done_key = done.key();
-    queued_fetches.remove(&done_key);
-    inflight_fetches.remove(&done_key);
-
-    match done {
-        FetchDone::Full { name, result } => {
-            match result {
-                Ok(ManifestFullData::Full(full)) => {
-                    full_cache.insert(name.clone(), full);
-                }
-                Ok(ManifestFullData::Versions(versions)) => {
-                    versions_cache.insert(name.clone(), versions);
-                }
-                Err(e) => {
-                    full_failures.insert(name.clone(), e);
-                }
-            }
-            if let Some(waiters) = full_waiters.remove(&name) {
-                level_pending.extend(waiters);
-            }
+fn collect_registry_prefetches(
+    manifest: &CoreVersionManifest,
+    peer_deps: PeerDeps,
+) -> Vec<(String, String)> {
+    let mut deps = Vec::new();
+    manifest.for_each_dep(peer_deps, DevDeps::Exclude, |_, name, spec| {
+        if spec.is_registry_spec() {
+            deps.push((name.to_string(), spec.to_string()));
         }
-        FetchDone::Version { name, spec, result } => {
-            let key = (name, spec);
-            match result {
-                Ok(manifest) => {
-                    version_cache.insert(key.clone(), Arc::clone(&manifest));
-                    version_cache
-                        .entry((key.0.clone(), manifest.version.clone()))
-                        .or_insert_with(|| Arc::clone(&manifest));
-                }
-                Err(e) => {
-                    version_failures.insert(key.clone(), e);
-                }
-            }
-            if let Some(waiters) = version_waiters.remove(&key) {
-                level_pending.extend(waiters);
-            }
-        }
-    }
+    });
+    deps
 }
 
 async fn run_main_loop_bfs<R, E>(
@@ -1165,21 +1273,10 @@ where
     R::Error: Send,
     E: EventReceiver,
 {
-    use crate::spec::SpecStr;
-
     let supports_semver = registry.supports_semver_resolution();
     let concurrency = config.concurrency.max(1);
 
-    let mut full_cache: HashMap<String, Arc<FullManifest>> = HashMap::new();
-    let mut versions_cache: HashMap<String, Arc<crate::service::VersionsInfo>> = HashMap::new();
-    let mut version_cache: HashMap<VersionKey, Arc<CoreVersionManifest>> = HashMap::new();
-    let mut full_waiters: HashMap<String, Vec<WaitingEdge>> = HashMap::new();
-    let mut version_waiters: HashMap<VersionKey, Vec<WaitingEdge>> = HashMap::new();
-    let mut full_failures: HashMap<String, String> = HashMap::new();
-    let mut version_failures: HashMap<VersionKey, String> = HashMap::new();
-    let mut queued_fetches: HashSet<FetchKey> = HashSet::new();
-    let mut inflight_fetches: HashSet<FetchKey> = HashSet::new();
-    let mut fetch_queue: VecDeque<ManifestJob> = VecDeque::new();
+    let mut state = ManifestState::default();
     let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
 
     let root_idx = graph.root_index;
@@ -1215,13 +1312,7 @@ where
         }
 
         loop {
-            pump_fetches(
-                &mut fetches,
-                &mut fetch_queue,
-                &mut inflight_fetches,
-                registry,
-                concurrency,
-            );
+            pump_fetches(&mut fetches, &mut state.fetch_queues, registry, concurrency);
 
             while let Some((parent, edge)) = level_pending.pop_front() {
                 receiver.on_event(BuildEvent::Resolving { name: &edge.name });
@@ -1242,7 +1333,7 @@ where
                 let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
                 if supports_semver {
                     let key = (real_name.clone(), real_spec.clone());
-                    if let Some(error) = version_failures.get(&key) {
+                    if let Some(error) = state.version_failures.get(&key) {
                         if edge.edge_type == EdgeType::Optional {
                             receiver.on_event(BuildEvent::Skipped {
                                 name: &edge.name,
@@ -1258,7 +1349,7 @@ where
                         ));
                     }
 
-                    if let Some(manifest) = version_cache.get(&key).cloned() {
+                    if let Some(manifest) = state.version_cache.get(&key).cloned() {
                         let processed = handle_resolved_registry_manifest(
                             graph, registry, receiver, parent, &edge, manifest, config,
                         )
@@ -1274,25 +1365,19 @@ where
                         continue;
                     }
 
-                    version_waiters
+                    state
+                        .version_waiters
                         .entry(key.clone())
                         .or_default()
                         .push((parent, edge));
-                    schedule_registry_fetch(
+                    state.schedule_registry_fetch(
                         key.0,
                         key.1,
                         supports_semver,
-                        &full_cache,
-                        &version_cache,
-                        &full_failures,
-                        &version_failures,
-                        &mut queued_fetches,
-                        &inflight_fetches,
-                        &versions_cache,
-                        &mut fetch_queue,
+                        FetchPriority::Demand,
                     );
                 } else {
-                    if let Some(error) = full_failures.get(&real_name) {
+                    if let Some(error) = state.full_failures.get(&real_name) {
                         if edge.edge_type == EdgeType::Optional {
                             receiver.on_event(BuildEvent::Skipped {
                                 name: &edge.name,
@@ -1309,7 +1394,7 @@ where
                     }
 
                     let version_key = (real_name.clone(), real_spec.clone());
-                    if let Some(error) = version_failures.get(&version_key) {
+                    if let Some(error) = state.version_failures.get(&version_key) {
                         if edge.edge_type == EdgeType::Optional {
                             receiver.on_event(BuildEvent::Skipped {
                                 name: &edge.name,
@@ -1325,7 +1410,7 @@ where
                         ));
                     }
 
-                    if let Some(manifest) = version_cache.get(&version_key).cloned() {
+                    if let Some(manifest) = state.version_cache.get(&version_key).cloned() {
                         let processed = handle_resolved_registry_manifest(
                             graph, registry, receiver, parent, &edge, manifest, config,
                         )
@@ -1341,7 +1426,7 @@ where
                         continue;
                     }
 
-                    if let Some(full) = full_cache.get(&real_name).cloned() {
+                    if let Some(full) = state.full_cache.get(&real_name).cloned() {
                         let Some(resolved_version) =
                             resolve_version_from_full_manifest::<R::Error>(
                                 &edge, &full, &real_spec,
@@ -1356,8 +1441,10 @@ where
                         };
 
                         let exact_key = (real_name.clone(), resolved_version.clone());
-                        if let Some(manifest) = version_cache.get(&exact_key).cloned() {
-                            version_cache.insert(version_key, Arc::clone(&manifest));
+                        if let Some(manifest) = state.version_cache.get(&exact_key).cloned() {
+                            state
+                                .version_cache
+                                .insert(version_key, Arc::clone(&manifest));
                             let processed = handle_resolved_registry_manifest(
                                 graph, registry, receiver, parent, &edge, manifest, config,
                             )
@@ -1373,23 +1460,21 @@ where
                             continue;
                         }
 
-                        version_waiters
+                        state
+                            .version_waiters
                             .entry(version_key.clone())
                             .or_default()
                             .push((parent, edge));
-                        enqueue_version_extract(
+                        state.enqueue_version_extract(
                             version_key.0,
                             version_key.1,
                             resolved_version,
                             full,
-                            &mut queued_fetches,
-                            &inflight_fetches,
-                            &mut fetch_queue,
                         );
                         continue;
                     }
 
-                    if let Some(versions) = versions_cache.get(&real_name).cloned() {
+                    if let Some(versions) = state.versions_cache.get(&real_name).cloned() {
                         let Some(resolved_version) = resolve_version_from_versions::<R::Error>(
                             &edge,
                             &real_name,
@@ -1406,8 +1491,10 @@ where
                         };
 
                         let exact_key = (real_name.clone(), resolved_version.clone());
-                        if let Some(manifest) = version_cache.get(&exact_key).cloned() {
-                            version_cache.insert(version_key, Arc::clone(&manifest));
+                        if let Some(manifest) = state.version_cache.get(&exact_key).cloned() {
+                            state
+                                .version_cache
+                                .insert(version_key, Arc::clone(&manifest));
                             let processed = handle_resolved_registry_manifest(
                                 graph, registry, receiver, parent, &edge, manifest, config,
                             )
@@ -1423,60 +1510,71 @@ where
                             continue;
                         }
 
-                        version_waiters
+                        state
+                            .version_waiters
                             .entry(version_key.clone())
                             .or_default()
                             .push((parent, edge));
-                        enqueue_version_fetch(
+                        state.enqueue_version_fetch(
                             version_key.0,
                             version_key.1,
                             resolved_version,
                             supports_semver,
-                            &mut queued_fetches,
-                            &inflight_fetches,
-                            &mut fetch_queue,
                         );
                         continue;
                     }
 
-                    full_waiters
+                    state
+                        .full_waiters
                         .entry(real_name.clone())
                         .or_default()
                         .push((parent, edge));
-                    schedule_registry_fetch(
+                    state.schedule_registry_fetch(
                         real_name,
                         real_spec,
                         supports_semver,
-                        &full_cache,
-                        &version_cache,
-                        &full_failures,
-                        &version_failures,
-                        &mut queued_fetches,
-                        &inflight_fetches,
-                        &versions_cache,
-                        &mut fetch_queue,
+                        FetchPriority::Demand,
                     );
                 }
 
-                pump_fetches(
-                    &mut fetches,
-                    &mut fetch_queue,
-                    &mut inflight_fetches,
-                    registry,
-                    concurrency,
+                pump_fetches(&mut fetches, &mut state.fetch_queues, registry, concurrency);
+            }
+
+            loop {
+                let ready = std::future::poll_fn(|cx| match fetches.poll_next_unpin(cx) {
+                    std::task::Poll::Ready(done) => std::task::Poll::Ready(done),
+                    std::task::Poll::Pending => std::task::Poll::Ready(None),
+                })
+                .await;
+                let Some(done) = ready else {
+                    break;
+                };
+                let done = done.map_err(|e| {
+                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+                })?;
+
+                state.apply_fetch_result(
+                    done,
+                    supports_semver,
+                    config.peer_deps,
+                    &mut level_pending,
                 );
             }
 
-            if full_waiters.is_empty() && version_waiters.is_empty() {
+            if !level_pending.is_empty() {
+                continue;
+            }
+
+            if state.full_waiters.is_empty() && state.version_waiters.is_empty() {
                 break;
             }
 
             let Some(done) = fetches.next().await else {
                 let mut fallback = Vec::new();
-                for (_, waiters) in full_waiters.drain() {
+                for (_, waiters) in state.full_waiters.drain() {
                     fallback.extend(waiters);
                 }
-                for (_, waiters) in version_waiters.drain() {
+                for (_, waiters) in state.version_waiters.drain() {
                     fallback.extend(waiters);
                 }
                 for (parent, edge) in fallback {
@@ -1491,19 +1589,7 @@ where
                 registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
             })?;
 
-            apply_fetch_result(
-                done,
-                &mut full_cache,
-                &mut versions_cache,
-                &mut version_cache,
-                &mut full_waiters,
-                &mut version_waiters,
-                &mut full_failures,
-                &mut version_failures,
-                &mut queued_fetches,
-                &mut inflight_fetches,
-                &mut level_pending,
-            );
+            state.apply_fetch_result(done, supports_semver, config.peer_deps, &mut level_pending);
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
@@ -1739,47 +1825,32 @@ mod tests {
 
     #[test]
     fn test_schedule_registry_fetch_dedupes_semver_request() {
-        let full_cache = HashMap::new();
-        let versions_cache = HashMap::new();
-        let version_cache = HashMap::new();
-        let full_failures = HashMap::new();
-        let version_failures = HashMap::new();
-        let mut queued_fetches = std::collections::HashSet::new();
-        let inflight_fetches = std::collections::HashSet::new();
-        let mut fetch_queue = std::collections::VecDeque::new();
+        let mut state = ManifestState::default();
 
-        schedule_registry_fetch(
+        state.schedule_registry_fetch(
             "pkg".to_string(),
             "^1.0.0".to_string(),
             true,
-            &full_cache,
-            &version_cache,
-            &full_failures,
-            &version_failures,
-            &mut queued_fetches,
-            &inflight_fetches,
-            &versions_cache,
-            &mut fetch_queue,
+            FetchPriority::Demand,
         );
-        schedule_registry_fetch(
+        state.schedule_registry_fetch(
             "pkg".to_string(),
             "^1.0.0".to_string(),
             true,
-            &full_cache,
-            &version_cache,
-            &full_failures,
-            &version_failures,
-            &mut queued_fetches,
-            &inflight_fetches,
-            &versions_cache,
-            &mut fetch_queue,
+            FetchPriority::Demand,
         );
 
-        assert_eq!(fetch_queue.len(), 1);
         assert!(
-            queued_fetches.contains(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
         );
-        match fetch_queue.pop_front().unwrap() {
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
             ManifestJob::Version {
                 name,
                 spec,
@@ -1796,82 +1867,210 @@ mod tests {
     }
 
     #[test]
+    fn test_fetch_queues_prioritize_demand_over_prefetch() {
+        let mut fetch_queues = FetchQueues::default();
+        fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: "prefetch".to_string(),
+            },
+            FetchPriority::Prefetch,
+        );
+        fetch_queues.enqueue(
+            ManifestJob::Version {
+                name: "demand".to_string(),
+                spec: "^1.0.0".to_string(),
+                fetch_spec: "^1.0.0".to_string(),
+                format: MetadataFormat::Abbreviated,
+            },
+            FetchPriority::Demand,
+        );
+
+        assert_eq!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .unwrap()
+                .key(),
+            FetchKey::Version("demand".to_string(), "^1.0.0".to_string())
+        );
+        assert_eq!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .unwrap()
+                .key(),
+            FetchKey::Full("prefetch".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fetch_queues_promotes_prefetch_to_demand() {
+        let mut fetch_queues = FetchQueues::default();
+        fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: "pkg".to_string(),
+            },
+            FetchPriority::Prefetch,
+        );
+        fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: "pkg".to_string(),
+            },
+            FetchPriority::Demand,
+        );
+
+        let key = FetchKey::Full("pkg".to_string());
+        assert_eq!(fetch_queues.queued.get(&key), Some(&FetchPriority::Demand));
+        assert_eq!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .unwrap()
+                .key(),
+            key
+        );
+        assert_eq!(
+            fetch_queues.active.get(&FetchKey::Full("pkg".to_string())),
+            Some(&FetchPriority::Demand)
+        );
+        assert!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_prefetch_concurrency_limit_tracks_fetch_concurrency() {
+        assert_eq!(prefetch_concurrency_limit(1), 1);
+        assert_eq!(prefetch_concurrency_limit(3), 1);
+        assert_eq!(prefetch_concurrency_limit(8), 2);
+    }
+
+    #[test]
     fn test_apply_fetch_result_caches_exact_version_and_wakes_waiters() {
-        let mut full_cache = HashMap::new();
-        let mut versions_cache = HashMap::new();
-        let mut version_cache = HashMap::new();
-        let mut full_waiters = HashMap::new();
-        let mut version_waiters = HashMap::from([(
-            ("pkg".to_string(), "^1.0.0".to_string()),
-            vec![(
-                NodeIndex::new(0),
-                DependencyEdgeInfo {
-                    edge_id: petgraph::graph::EdgeIndex::new(0),
-                    name: "pkg".to_string(),
-                    spec: "^1.0.0".to_string(),
-                    edge_type: EdgeType::Prod,
-                },
-            )],
-        )]);
-        let mut full_failures = HashMap::new();
-        let mut version_failures = HashMap::new();
-        let mut queued_fetches = std::collections::HashSet::from([FetchKey::Version(
-            "pkg".to_string(),
-            "^1.0.0".to_string(),
-        )]);
-        let mut inflight_fetches = queued_fetches.clone();
+        let mut state = ManifestState {
+            version_waiters: HashMap::from([(
+                ("pkg".to_string(), "^1.0.0".to_string()),
+                vec![(
+                    NodeIndex::new(0),
+                    DependencyEdgeInfo {
+                        edge_id: petgraph::graph::EdgeIndex::new(0),
+                        name: "pkg".to_string(),
+                        spec: "^1.0.0".to_string(),
+                        edge_type: EdgeType::Prod,
+                    },
+                )],
+            )]),
+            ..Default::default()
+        };
+        state.fetch_queues.active.insert(
+            FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()),
+            FetchPriority::Demand,
+        );
         let mut level_pending = std::collections::VecDeque::new();
         let manifest = Arc::new(create_version_manifest("pkg", "1.2.3"));
 
-        apply_fetch_result(
+        state.apply_fetch_result(
             FetchDone::Version {
                 name: "pkg".to_string(),
                 spec: "^1.0.0".to_string(),
                 result: Ok(manifest),
             },
-            &mut full_cache,
-            &mut versions_cache,
-            &mut version_cache,
-            &mut full_waiters,
-            &mut version_waiters,
-            &mut full_failures,
-            &mut version_failures,
-            &mut queued_fetches,
-            &mut inflight_fetches,
+            true,
+            PeerDeps::Skip,
             &mut level_pending,
         );
 
-        assert!(version_cache.contains_key(&("pkg".to_string(), "^1.0.0".to_string())));
-        assert!(version_cache.contains_key(&("pkg".to_string(), "1.2.3".to_string())));
-        assert!(version_waiters.is_empty());
-        assert!(queued_fetches.is_empty());
-        assert!(inflight_fetches.is_empty());
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "1.2.3".to_string()))
+        );
+        assert!(state.version_waiters.is_empty());
+        assert!(state.fetch_queues.queued.is_empty());
+        assert!(state.fetch_queues.active.is_empty());
         assert_eq!(level_pending.len(), 1);
     }
 
     #[test]
+    fn test_apply_fetch_result_prefetches_transitive_registry_deps() {
+        let mut state = ManifestState::default();
+        state.fetch_queues.active.insert(
+            FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()),
+            FetchPriority::Demand,
+        );
+        let mut level_pending = std::collections::VecDeque::new();
+        let manifest = Arc::new(create_version_manifest_with_deps(
+            "pkg",
+            "1.2.3",
+            vec![("dep", "^1.0.0"), ("local", "file:../local")],
+        ));
+
+        state.apply_fetch_result(
+            FetchDone::Version {
+                name: "pkg".to_string(),
+                spec: "^1.0.0".to_string(),
+                result: Ok(manifest),
+            },
+            true,
+            PeerDeps::Skip,
+            &mut level_pending,
+        );
+
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("dep".to_string(), "^1.0.0".to_string()))
+        );
+        assert!(!state.fetch_queues.queued.contains_key(&FetchKey::Version(
+            "local".to_string(),
+            "file:../local".to_string()
+        )));
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                assert_eq!(name, "dep");
+                assert_eq!(spec, "^1.0.0");
+                assert_eq!(fetch_spec, "^1.0.0");
+                assert!(matches!(format, MetadataFormat::Abbreviated));
+            }
+            _ => panic!("expected version prefetch request"),
+        }
+    }
+
+    #[test]
     fn test_apply_fetch_result_caches_versions_and_wakes_waiters() {
-        let mut full_cache = HashMap::new();
-        let mut versions_cache = HashMap::new();
-        let mut version_cache = HashMap::new();
-        let mut full_waiters = HashMap::from([(
-            "pkg".to_string(),
-            vec![(
-                NodeIndex::new(0),
-                DependencyEdgeInfo {
-                    edge_id: petgraph::graph::EdgeIndex::new(0),
-                    name: "pkg".to_string(),
-                    spec: "^1.0.0".to_string(),
-                    edge_type: EdgeType::Prod,
-                },
-            )],
-        )]);
-        let mut version_waiters = HashMap::new();
-        let mut full_failures = HashMap::new();
-        let mut version_failures = HashMap::new();
-        let mut queued_fetches =
-            std::collections::HashSet::from([FetchKey::Full("pkg".to_string())]);
-        let mut inflight_fetches = queued_fetches.clone();
+        let mut state = ManifestState {
+            full_waiters: HashMap::from([(
+                "pkg".to_string(),
+                vec![(
+                    NodeIndex::new(0),
+                    DependencyEdgeInfo {
+                        edge_id: petgraph::graph::EdgeIndex::new(0),
+                        name: "pkg".to_string(),
+                        spec: "^1.0.0".to_string(),
+                        edge_type: EdgeType::Prod,
+                    },
+                )],
+            )]),
+            ..Default::default()
+        };
+        state
+            .fetch_queues
+            .active
+            .insert(FetchKey::Full("pkg".to_string()), FetchPriority::Demand);
         let mut level_pending = std::collections::VecDeque::new();
         let versions = Arc::new(crate::service::VersionsInfo {
             versions: crate::service::Versions {
@@ -1882,51 +2081,46 @@ mod tests {
             last_updated: 1,
         });
 
-        apply_fetch_result(
+        state.apply_fetch_result(
             FetchDone::Full {
                 name: "pkg".to_string(),
                 result: Ok(ManifestFullData::Versions(versions)),
             },
-            &mut full_cache,
-            &mut versions_cache,
-            &mut version_cache,
-            &mut full_waiters,
-            &mut version_waiters,
-            &mut full_failures,
-            &mut version_failures,
-            &mut queued_fetches,
-            &mut inflight_fetches,
+            false,
+            PeerDeps::Skip,
             &mut level_pending,
         );
 
-        assert!(full_cache.is_empty());
-        assert!(versions_cache.contains_key("pkg"));
-        assert!(full_waiters.is_empty());
-        assert!(queued_fetches.is_empty());
-        assert!(inflight_fetches.is_empty());
+        assert!(state.full_cache.is_empty());
+        assert!(state.versions_cache.contains_key("pkg"));
+        assert!(state.full_waiters.is_empty());
+        assert!(state.fetch_queues.queued.is_empty());
+        assert!(state.fetch_queues.active.is_empty());
         assert_eq!(level_pending.len(), 1);
     }
 
     #[test]
     fn test_enqueue_version_fetch_preserves_waiter_key() {
-        let mut queued_fetches = std::collections::HashSet::new();
-        let inflight_fetches = std::collections::HashSet::new();
-        let mut fetch_queue = std::collections::VecDeque::new();
+        let mut state = ManifestState::default();
 
-        enqueue_version_fetch(
+        state.enqueue_version_fetch(
             "pkg".to_string(),
             "^1.0.0".to_string(),
             "1.2.3".to_string(),
             false,
-            &mut queued_fetches,
-            &inflight_fetches,
-            &mut fetch_queue,
         );
 
         assert!(
-            queued_fetches.contains(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
         );
-        match fetch_queue.pop_front().unwrap() {
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
             ManifestJob::Version {
                 name,
                 spec,
