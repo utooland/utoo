@@ -394,7 +394,7 @@ impl SchedulerState {
 
     fn pump_downloads(&mut self) {
         while self.download_active.len() < self.download_limit
-            && self.extract_backlog() < self.download_limit
+            && self.extract_backlog() < self.extract_limit * 4
         {
             let Some(package) = self.download_queue.pop_front() else {
                 break;
