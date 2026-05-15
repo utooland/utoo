@@ -1,16 +1,16 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_ee0f7192.js"],"runtimeModuleIds":[48]}
+    {"otherChunks":["input_6d9b1652.js"],"runtimeModuleIds":[44]}
 ]);
 (() => {
 if (!Array.isArray(globalThis["TURBOPACK"])) {
     return;
 }
 
-var CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
+var CHUNK_BASE_PATH = "__AUTO_PUBLIC_PATH__";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
-var RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
+var RUNTIME_PUBLIC_PATH = "__AUTO_PUBLIC_PATH__";
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
 var WORKER_FORWARDED_GLOBALS = [];
