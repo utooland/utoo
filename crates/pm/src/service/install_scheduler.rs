@@ -2,14 +2,15 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, anyhow};
+use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
 use crate::util::cloner::{clone_count, clone_package_from_cache};
 use crate::util::downloader::{
-    download_and_extract_to_cache, download_stats, is_registry_tarball_url,
-    resolve_seeded_cache_path,
+    download_bytes, download_stats, extract_to_cache, is_registry_tarball_url,
+    registry_cache_lookup, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 
@@ -99,6 +100,11 @@ struct ReadyClone {
     cache_path: PathBuf,
 }
 
+struct DownloadedPackage {
+    package: PackageFetch,
+    bytes: Bytes,
+}
+
 type CloneResponder = oneshot::Sender<Result<(), String>>;
 
 enum Command {
@@ -114,6 +120,10 @@ enum OpDone {
         result: Result<Option<PathBuf>, String>,
     },
     Download {
+        package: PackageFetch,
+        result: Result<DownloadOutcome, String>,
+    },
+    Extract {
         key: String,
         result: Result<PathBuf, String>,
     },
@@ -121,6 +131,11 @@ enum OpDone {
         target: PathBuf,
         result: Result<(), String>,
     },
+}
+
+enum DownloadOutcome {
+    Cached(PathBuf),
+    Bytes(Bytes),
 }
 
 #[derive(Clone)]
@@ -220,11 +235,14 @@ struct SchedulerState {
     rx: mpsc::UnboundedReceiver<Command>,
     shutdown: bool,
     download_limit: usize,
+    extract_limit: usize,
     clone_limit: usize,
     download_done: HashMap<String, PathBuf>,
     download_active: HashSet<String>,
     download_waiters: HashMap<String, Vec<CloneSpec>>,
     download_queue: VecDeque<PackageFetch>,
+    extract_active: HashSet<String>,
+    extract_queue: VecDeque<DownloadedPackage>,
     clone_done: HashSet<PathBuf>,
     clone_active: HashSet<PathBuf>,
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
@@ -239,11 +257,14 @@ impl SchedulerState {
             rx,
             shutdown: false,
             download_limit: get_manifests_concurrency_limit_sync().max(1),
+            extract_limit: extract_concurrency_limit(),
             clone_limit: clone_concurrency_limit(),
             download_done: HashMap::new(),
             download_active: HashSet::new(),
             download_waiters: HashMap::new(),
             download_queue: VecDeque::new(),
+            extract_active: HashSet::new(),
+            extract_queue: VecDeque::new(),
             clone_done: HashSet::new(),
             clone_active: HashSet::new(),
             clone_waiters: HashMap::new(),
@@ -256,6 +277,7 @@ impl SchedulerState {
     async fn run(mut self) {
         loop {
             self.pump_downloads();
+            self.pump_extracts();
             self.pump_clones();
 
             if self.shutdown && self.is_idle() {
@@ -294,8 +316,10 @@ impl SchedulerState {
 
     fn is_idle(&self) -> bool {
         self.download_queue.is_empty()
+            && self.extract_queue.is_empty()
             && self.clone_queue.is_empty()
             && self.download_active.is_empty()
+            && self.extract_active.is_empty()
             && self.clone_active.is_empty()
             && self.ops.is_empty()
     }
@@ -369,7 +393,9 @@ impl SchedulerState {
     }
 
     fn pump_downloads(&mut self) {
-        while self.download_active.len() < self.download_limit {
+        while self.download_active.len() < self.download_limit
+            && self.extract_backlog() < self.download_limit
+        {
             let Some(package) = self.download_queue.pop_front() else {
                 break;
             };
@@ -379,14 +405,42 @@ impl SchedulerState {
             }
 
             self.ops.push(tokio::spawn(async move {
-                let result = download_and_extract_to_cache(
-                    &package.name,
-                    &package.version,
-                    &package.tarball_url,
+                let result = match registry_cache_lookup(&package.name, &package.version).await {
+                    Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
+                    Ok(None) => download_bytes(&package.tarball_url)
+                        .await
+                        .map(DownloadOutcome::Bytes)
+                        .map_err(|e| format!("{e:#}")),
+                    Err(e) => Err(format!("{e:#}")),
+                };
+                OpDone::Download { package, result }
+            }));
+        }
+    }
+
+    fn extract_backlog(&self) -> usize {
+        self.extract_queue.len() + self.extract_active.len()
+    }
+
+    fn pump_extracts(&mut self) {
+        while self.extract_active.len() < self.extract_limit {
+            let Some(downloaded) = self.extract_queue.pop_front() else {
+                break;
+            };
+            let key = downloaded.package.key();
+            if self.download_done.contains_key(&key) || !self.extract_active.insert(key.clone()) {
+                continue;
+            }
+
+            self.ops.push(tokio::spawn(async move {
+                let result = extract_to_cache(
+                    &downloaded.package.name,
+                    &downloaded.package.version,
+                    downloaded.bytes,
                 )
                 .await
                 .map_err(|e| format!("{e:#}"));
-                OpDone::Download { key, result }
+                OpDone::Extract { key, result }
             }));
         }
     }
@@ -423,29 +477,49 @@ impl SchedulerState {
                 Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
                 Err(error) => self.complete_clone(spec.target, Err(error)),
             },
-            OpDone::Download { key, result } => {
+            OpDone::Download { package, result } => {
+                let key = package.key();
                 self.download_active.remove(&key);
-                let waiters = self.download_waiters.remove(&key).unwrap_or_default();
                 match result {
-                    Ok(cache_path) => {
-                        self.download_done.insert(key, cache_path.clone());
-                        for spec in waiters {
-                            self.clone_queue.push_back(ReadyClone {
-                                spec,
-                                cache_path: cache_path.clone(),
-                            });
-                        }
+                    Ok(DownloadOutcome::Cached(cache_path)) => {
+                        self.complete_download(key, Ok(cache_path));
+                    }
+                    Ok(DownloadOutcome::Bytes(bytes)) => {
+                        self.extract_queue
+                            .push_back(DownloadedPackage { package, bytes });
                     }
                     Err(error) => {
-                        for spec in waiters {
-                            self.complete_clone(spec.target, Err(error.clone()));
-                        }
+                        self.complete_download(key, Err(error));
                     }
                 }
+            }
+            OpDone::Extract { key, result } => {
+                self.extract_active.remove(&key);
+                self.complete_download(key, result);
             }
             OpDone::Clone { target, result } => {
                 self.clone_active.remove(&target);
                 self.complete_clone(target, result);
+            }
+        }
+    }
+
+    fn complete_download(&mut self, key: String, result: Result<PathBuf, String>) {
+        let waiters = self.download_waiters.remove(&key).unwrap_or_default();
+        match result {
+            Ok(cache_path) => {
+                self.download_done.insert(key, cache_path.clone());
+                for spec in waiters {
+                    self.clone_queue.push_back(ReadyClone {
+                        spec,
+                        cache_path: cache_path.clone(),
+                    });
+                }
+            }
+            Err(error) => {
+                for spec in waiters {
+                    self.complete_clone(spec.target, Err(error.clone()));
+                }
             }
         }
     }
@@ -490,6 +564,12 @@ fn clone_concurrency_limit() -> usize {
         .unwrap_or(8)
 }
 
+fn extract_concurrency_limit() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().clamp(2, 8))
+        .unwrap_or(4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,6 +606,47 @@ mod tests {
 
         assert_eq!(state.download_queue.len(), 1);
         assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+    }
+
+    #[test]
+    fn download_completion_releases_slot_and_queues_extract() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let key = package.key();
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+
+        state.download_active.insert(key.clone());
+        state.download_waiters.insert(key.clone(), vec![waiter]);
+
+        state.handle_done(OpDone::Download {
+            package: package.clone(),
+            result: Ok(DownloadOutcome::Bytes(Bytes::from_static(b"tgz"))),
+        });
+
+        assert!(!state.download_active.contains(&key));
+        assert!(state.download_waiters.contains_key(&key));
+        assert_eq!(state.extract_queue.len(), 1);
+        assert_eq!(state.extract_queue[0].package.key(), key);
+    }
+
+    #[test]
+    fn extract_completion_wakes_clone_waiters() {
+        let mut state = state();
+        let key = "react@18.2.0".to_string();
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+
+        state.extract_active.insert(key.clone());
+        state.download_waiters.insert(key.clone(), vec![waiter]);
+
+        state.handle_done(OpDone::Extract {
+            key: key.clone(),
+            result: Ok(cache_path.clone()),
+        });
+
+        assert!(!state.extract_active.contains(&key));
+        assert_eq!(state.download_done[&key], cache_path);
+        assert_eq!(state.clone_queue.len(), 1);
     }
 
     #[tokio::test]

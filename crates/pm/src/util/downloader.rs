@@ -147,7 +147,39 @@ pub async fn download_and_extract_to_cache(
     version: &str,
     tarball_url: &str,
 ) -> Result<PathBuf> {
-    let cache_path = get_cache_dir().join(name).join(version);
+    if let Some(cache_path) = registry_cache_lookup(name, version).await? {
+        return Ok(cache_path);
+    }
+
+    let bytes = download_bytes(tarball_url)
+        .await
+        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
+
+    extract_to_cache(name, version, bytes).await
+}
+
+/// Return the registry cache path for a package version.
+pub fn registry_cache_path(name: &str, version: &str) -> PathBuf {
+    get_cache_dir().join(name).join(version)
+}
+
+/// Look up an already extracted registry package cache.
+pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<PathBuf>> {
+    let cache_path = registry_cache_path(name, version);
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(cache_path))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Extract already downloaded registry tarball bytes into the package cache.
+pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result<PathBuf> {
+    let cache_path = registry_cache_path(name, version);
 
     if crate::fs::try_exists(&cache_path.join("_resolved"))
         .await
@@ -156,10 +188,6 @@ pub async fn download_and_extract_to_cache(
         REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
         return Ok(cache_path);
     }
-
-    let bytes = download_bytes(tarball_url)
-        .await
-        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
 
     extract_and_write(bytes, &cache_path)
         .await
