@@ -771,7 +771,7 @@ enum FetchKey {
 impl ManifestJob {
     fn key(&self) -> FetchKey {
         match self {
-            Self::Full { name } => FetchKey::Full(name.clone()),
+            Self::Full { name, .. } => FetchKey::Full(name.clone()),
             Self::Version { name, spec, .. } | Self::ExtractVersion { name, spec, .. } => {
                 FetchKey::Version(name.clone(), spec.clone())
             }
@@ -971,8 +971,13 @@ impl ManifestState {
             {
                 return;
             }
-            self.fetch_queues
-                .enqueue(ManifestJob::Full { name: real_name }, priority);
+            self.fetch_queues.enqueue(
+                ManifestJob::Full {
+                    name: real_name,
+                    spec: Some(real_spec),
+                },
+                priority,
+            );
         }
     }
 
@@ -1024,7 +1029,22 @@ impl ManifestState {
         match done {
             FetchDone::Full { name, result } => {
                 match result {
-                    Ok(ManifestFullData::Full(full)) => {
+                    Ok(ManifestFullData::Full {
+                        manifest: full,
+                        speculative,
+                    }) => {
+                        if let Some((resolved_spec, manifest)) = speculative {
+                            self.version_cache
+                                .insert((name.clone(), resolved_spec), Arc::clone(&manifest));
+                            self.version_cache
+                                .entry((name.clone(), manifest.version.clone()))
+                                .or_insert_with(|| Arc::clone(&manifest));
+                            self.schedule_transitive_prefetches(
+                                &manifest,
+                                peer_deps,
+                                supports_semver,
+                            );
+                        }
                         self.full_cache.insert(name.clone(), full);
                     }
                     Ok(ManifestFullData::Versions(versions)) => {
@@ -1939,7 +1959,9 @@ mod tests {
         ) -> Result<ManifestJobDone, Self::Error> {
             if matches!(
                 &job,
-                ManifestJob::Version { name, .. } | ManifestJob::ExtractVersion { name, .. }
+                ManifestJob::Full { name, .. }
+                    | ManifestJob::Version { name, .. }
+                    | ManifestJob::ExtractVersion { name, .. }
                     if name == "shared"
             ) {
                 self.shared_version_jobs.fetch_add(1, Ordering::Relaxed);
@@ -2035,6 +2057,7 @@ mod tests {
         fetch_queues.enqueue(
             ManifestJob::Full {
                 name: "prefetch".to_string(),
+                spec: None,
             },
             FetchPriority::Prefetch,
         );
@@ -2070,12 +2093,14 @@ mod tests {
         fetch_queues.enqueue(
             ManifestJob::Full {
                 name: "pkg".to_string(),
+                spec: None,
             },
             FetchPriority::Prefetch,
         );
         fetch_queues.enqueue(
             ManifestJob::Full {
                 name: "pkg".to_string(),
+                spec: None,
             },
             FetchPriority::Demand,
         );
@@ -2260,6 +2285,57 @@ mod tests {
         assert!(state.fetch_queues.queued.is_empty());
         assert!(state.fetch_queues.active.is_empty());
         assert_eq!(level_pending.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_fetch_result_caches_speculative_full_extract() {
+        let mut state = ManifestState::default();
+        state
+            .fetch_queues
+            .active
+            .insert(FetchKey::Full("pkg".to_string()), FetchPriority::Demand);
+        let mut level_pending = std::collections::VecDeque::new();
+        let full = Arc::new(FullManifest {
+            name: "pkg".to_string(),
+            versions: vec!["1.2.3".to_string()],
+            ..Default::default()
+        });
+        let manifest = Arc::new(create_version_manifest_with_deps(
+            "pkg",
+            "1.2.3",
+            vec![("dep", "^1.0.0")],
+        ));
+
+        state.apply_fetch_result(
+            FetchDone::Full {
+                name: "pkg".to_string(),
+                result: Ok(ManifestFullData::Full {
+                    manifest: full,
+                    speculative: Some(("^1.0.0".to_string(), manifest)),
+                }),
+            },
+            false,
+            PeerDeps::Skip,
+            &mut level_pending,
+        );
+
+        assert!(state.full_cache.contains_key("pkg"));
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "1.2.3".to_string()))
+        );
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Full("dep".to_string()))
+        );
     }
 
     #[test]

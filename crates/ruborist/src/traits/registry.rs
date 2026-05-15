@@ -399,11 +399,22 @@ pub mod mock {
             use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone};
 
             match job {
-                ManifestJob::Full { name } => {
+                ManifestJob::Full { name, spec } => {
                     let full = self.fetch_full_manifest(&name).await?;
+                    let speculative = spec.and_then(|spec| {
+                        resolve_target_version((&*full).into(), &spec)
+                            .ok()
+                            .and_then(|version| {
+                                full.get_core_version(&version)
+                                    .map(|core| (spec, Arc::new(core)))
+                            })
+                    });
                     Ok(ManifestJobDone::Full {
                         name,
-                        data: ManifestFullData::Full(full),
+                        data: ManifestFullData::Full {
+                            manifest: full,
+                            speculative,
+                        },
                     })
                 }
                 ManifestJob::Version {

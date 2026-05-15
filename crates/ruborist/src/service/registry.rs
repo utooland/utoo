@@ -153,11 +153,18 @@ impl Clone for UnifiedRegistry {
 impl ManifestProvider for UnifiedRegistry {
     async fn execute_manifest_job(&self, job: ManifestJob) -> Result<ManifestJobDone, Self::Error> {
         match job {
-            ManifestJob::Full { name } => {
+            ManifestJob::Full { name, spec } => {
                 let data = match self.fetch_full_manifest_job(&name).await? {
                     ProviderFullManifestBytes::Fresh { bytes, etag } => {
-                        let manifest =
-                            Arc::new(manifest::parse_full_manifest_off_runtime(bytes).await?);
+                        let (manifest, speculative) =
+                            manifest::parse_full_manifest_with_core_off_runtime(bytes, spec)
+                                .await?;
+                        let manifest = Arc::new(manifest);
+                        let speculative = speculative.map(|(spec, core)| {
+                            let core = Arc::new(core);
+                            self.store_version_manifest(&name, Arc::clone(&core));
+                            (spec, core)
+                        });
                         let versions = Arc::new(VersionsInfo {
                             versions: Versions {
                                 version_list: manifest.versions.clone(),
@@ -167,7 +174,10 @@ impl ManifestProvider for UnifiedRegistry {
                             last_updated: current_timestamp_secs(),
                         });
                         self.store.store_versions(&name, versions);
-                        ManifestFullData::Full(manifest)
+                        ManifestFullData::Full {
+                            manifest,
+                            speculative,
+                        }
                     }
                     ProviderFullManifestBytes::NotModified { versions } => {
                         ManifestFullData::Versions(versions)
@@ -358,13 +368,21 @@ impl UnifiedRegistry {
         match self
             .execute_manifest_job(ManifestJob::Full {
                 name: name.to_string(),
+                spec: Some(spec.to_string()),
             })
             .await?
         {
             ManifestJobDone::Full {
-                data: ManifestFullData::Full(full),
+                data:
+                    ManifestFullData::Full {
+                        manifest: full,
+                        speculative,
+                    },
                 ..
             } => {
+                if let Some((_, manifest)) = speculative {
+                    return Ok(manifest);
+                }
                 if full.versions.is_empty() {
                     return Err(RegistryError(anyhow!("No versions available for {}", name)));
                 }
@@ -407,11 +425,16 @@ impl RegistryClient for UnifiedRegistry {
         match self
             .execute_manifest_job(ManifestJob::Full {
                 name: name.to_string(),
+                spec: None,
             })
             .await?
         {
             ManifestJobDone::Full {
-                data: ManifestFullData::Full(manifest),
+                data:
+                    ManifestFullData::Full {
+                        manifest,
+                        speculative: _,
+                    },
                 ..
             } => Ok(manifest),
             ManifestJobDone::Full {
