@@ -61,8 +61,18 @@ use crate::{
 pub async fn get_server_compile_time_info(
     browserslist_query: RcStr,
     define_env: Vc<EnvMap>,
+    mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
 ) -> Result<Vc<CompileTimeInfo>> {
+    let mut define_env = (*define_env.await?).clone();
+    define_env.extend([(
+        "process.env.NODE_ENV".into(),
+        serde_json::to_string(mode.await?.node_env())
+            .unwrap()
+            .into(),
+    )]);
+    let define_env = Vc::cell(define_env);
+
     let distribs = browserslist::resolve(
         browserslist_query.split(","),
         &browserslist::Opts {

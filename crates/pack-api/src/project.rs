@@ -1158,10 +1158,10 @@ impl Project {
 
     #[turbo_tasks::function]
     pub(super) async fn server_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
-        let define_env = (*self.config.define_env().await?).clone();
         Ok(get_server_compile_time_info(
             (*self.config.target().await?).clone(),
-            Vc::cell(define_env),
+            self.config.define_env(),
+            self.config.mode(),
             self.config.provider_config(),
         ))
     }
@@ -1177,14 +1177,12 @@ impl Project {
                 self.config.mode(),
                 self.config.provider_config(),
             )),
-            Platform::Node => {
-                let define_env = (*self.config.define_env().await?).clone();
-                Ok(get_server_compile_time_info(
-                    target,
-                    Vc::cell(define_env),
-                    self.config.provider_config(),
-                ))
-            }
+            Platform::Node => Ok(get_server_compile_time_info(
+                target,
+                self.config.define_env(),
+                self.config.mode(),
+                self.config.provider_config(),
+            )),
         }
     }
 
