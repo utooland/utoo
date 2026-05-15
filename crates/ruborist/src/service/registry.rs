@@ -39,8 +39,6 @@ fn current_timestamp_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
-use dashmap::DashSet;
-
 use super::cache::{Versions, VersionsInfo};
 use super::manifest;
 use super::provider::{
@@ -76,11 +74,6 @@ pub struct UnifiedRegistry {
     registry_url: String,
     store: Arc<dyn ManifestStore>,
     supports_semver: bool,
-    /// Dedup set for `store_version_manifest` disk writes keyed by
-    /// `(name, resolved_version)`. The BFS loop may schedule sibling specs
-    /// (e.g. `^1.0.0` and `^1.2.0`) that resolve to the same version; first
-    /// insert wins and subsequent specs skip the redundant write.
-    stored_version: Arc<DashSet<(String, String)>>,
 }
 
 /// Builder for `UnifiedRegistry`.
@@ -135,7 +128,6 @@ impl UnifiedRegistryBuilder {
             registry_url,
             store,
             supports_semver,
-            stored_version: Arc::new(DashSet::new()),
         }
     }
 }
@@ -152,7 +144,6 @@ impl Clone for UnifiedRegistry {
             registry_url: self.registry_url.clone(),
             store: Arc::clone(&self.store),
             supports_semver: self.supports_semver,
-            stored_version: Arc::clone(&self.stored_version),
         }
     }
 }
@@ -215,7 +206,7 @@ impl ManifestProvider for UnifiedRegistry {
                 let manifest = Arc::new(
                     manifest::parse_json_vec_off_runtime::<CoreVersionManifest>(bytes).await?,
                 );
-                self.store_version_manifest_once(&name, Arc::clone(&manifest));
+                self.store_version_manifest(&name, Arc::clone(&manifest));
                 Ok(ManifestJobDone::Version {
                     name,
                     spec,
@@ -237,7 +228,7 @@ impl ManifestProvider for UnifiedRegistry {
                         name
                     ))
                 })?;
-                self.store_version_manifest_once(&name, Arc::clone(&manifest));
+                self.store_version_manifest(&name, Arc::clone(&manifest));
                 Ok(ManifestJobDone::Version {
                     name,
                     spec,
@@ -264,14 +255,9 @@ impl UnifiedRegistry {
         self.supports_semver
     }
 
-    fn store_version_manifest_once(&self, name: &str, manifest: Arc<CoreVersionManifest>) {
-        if self
-            .stored_version
-            .insert((name.to_string(), manifest.version.clone()))
-        {
-            self.store
-                .store_version_manifest(name, &manifest.version, Arc::clone(&manifest));
-        }
+    fn store_version_manifest(&self, name: &str, manifest: Arc<CoreVersionManifest>) {
+        self.store
+            .store_version_manifest(name, &manifest.version, Arc::clone(&manifest));
     }
 
     fn version_metadata_format(&self) -> manifest::MetadataFormat {
@@ -533,16 +519,12 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_registry_clone_shares_store_dedup() {
+    fn test_unified_registry_clone_shares_store() {
         let registry = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
             .build();
         let cloned = registry.clone();
 
         assert!(Arc::ptr_eq(&registry.store, &cloned.store));
-        assert!(Arc::ptr_eq(
-            &registry.stored_version,
-            &cloned.stored_version
-        ));
     }
 }
