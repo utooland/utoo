@@ -43,8 +43,6 @@ where
     F: FnMut(EdgeType, &str, &str),
 {
     if let Some(deps) = deps {
-        let mut deps: Vec<_> = deps.iter().collect();
-        deps.sort_unstable_by_key(|(name, _)| *name);
         for (name, spec) in deps {
             f(edge_type, name, spec);
         }
@@ -86,15 +84,11 @@ impl DependencySource for CoreVersionManifest {
         // npm registry may copy optionalDependencies into dependencies (legacy bug)
         // Skip deps that also appear in optionalDependencies to avoid duplicate edges
         let optional_deps = self.optional_dependencies.as_ref();
-        iter_deps(
-            self.dependencies.as_ref(),
-            EdgeType::Prod,
-            &mut |_, name, spec| {
-                if !optional_deps.is_some_and(|opt| opt.contains_key(name)) {
-                    f(EdgeType::Prod, name, spec);
-                }
-            },
-        );
+        for (name, spec) in self.dependencies.as_ref().into_iter().flatten() {
+            if !optional_deps.is_some_and(|opt| opt.contains_key(name)) {
+                f(EdgeType::Prod, name, spec);
+            }
+        }
         if dev_deps == DevDeps::Include {
             iter_deps(self.dev_dependencies.as_ref(), EdgeType::Dev, &mut f);
         }
