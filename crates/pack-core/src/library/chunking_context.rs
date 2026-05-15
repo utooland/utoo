@@ -677,49 +677,64 @@ impl ChunkingContext for LibraryChunkingContext {
             );
 
             let chunks = chunks.await?;
+            let is_node_platform = self.await?.is_node_platform();
 
             let assets: Vec<ResolvedVc<Box<dyn OutputAsset>>> = chunks
                 .iter()
-                .map(async |chunk| {
-                    if let Some(ecmascript_chunk) =
-                        ResolvedVc::try_downcast_type::<EcmascriptChunk>(*chunk)
+                .filter_map(|chunk| {
+                    // Node-targeted libraries don't load CSS at runtime, and
+                    // emitting one is unsafe here: when CSS items span `src/`
+                    // and `node_modules/`, `CssChunk::ident_for_path` collapses
+                    // to the filesystem root and produces an empty-named `.css`
+                    // file in `dist/`. Skip the chunk entirely.
+                    if let Some(_) = ResolvedVc::try_downcast_type::<CssChunk>(*chunk)
+                        && is_node_platform
                     {
-                        let ident = self.ecmascript_chunk_ident_with_filename_template(
-                            ident,
-                            *ecmascript_chunk,
-                        );
-                        let other_chunks = chunks
-                            .iter()
-                            .filter_map(|c| {
-                                // We have no more than two output chunks for library,
-                                // one .js chunk and one .css chunk, so this is simple enough
-                                if c == chunk {
-                                    None
-                                } else {
-                                    ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*c)
-                                }
-                            })
-                            .collect::<Vec<_>>();
-
-                        Ok(ResolvedVc::upcast(
-                            EcmascriptLibraryEvaluateChunk::new(
-                                *self,
+                        return None;
+                    }
+                    let chunks = &chunks;
+                    let output_asset = async move {
+                        if let Some(ecmascript_chunk) =
+                            ResolvedVc::try_downcast_type::<EcmascriptChunk>(*chunk)
+                        {
+                            let ident = self.ecmascript_chunk_ident_with_filename_template(
                                 ident,
                                 *ecmascript_chunk,
-                                Vc::cell(other_chunks),
-                                evaluatable_assets,
-                                module_graph,
-                            )
-                            .to_resolved()
-                            .await?,
-                        ))
-                    } else if let Some(output_asset) =
-                        ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*chunk)
-                    {
-                        Ok(output_asset)
-                    } else {
-                        bail!("Unable to generate output asset for chunk");
-                    }
+                            );
+                            let other_chunks = chunks
+                                .iter()
+                                .filter_map(|c| {
+                                    // We have no more than two output chunks for library,
+                                    // one .js chunk and one .css chunk, so this is simple enough
+                                    if c == chunk {
+                                        None
+                                    } else {
+                                        ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*c)
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+
+                            Ok(ResolvedVc::upcast(
+                                EcmascriptLibraryEvaluateChunk::new(
+                                    *self,
+                                    ident,
+                                    *ecmascript_chunk,
+                                    Vc::cell(other_chunks),
+                                    evaluatable_assets,
+                                    module_graph,
+                                )
+                                .to_resolved()
+                                .await?,
+                            ))
+                        } else if let Some(output_asset) =
+                            ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*chunk)
+                        {
+                            Ok(output_asset)
+                        } else {
+                            bail!("Unable to generate output asset for chunk");
+                        }
+                    };
+                    Some(output_asset)
                 })
                 .try_join()
                 .await?;

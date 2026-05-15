@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["./../library/node_auto_css_modules/input/index.css%3Fmodules"],"sourcesContent":[".title {\n  color: tomato;\n}\n\n.primaryButton {\n  background: black;\n  color: white;\n}\n"],"names":[],"mappings":"AAAA;;;;AAIA"}}]
-}
