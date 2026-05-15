@@ -6,8 +6,7 @@ use utoo_ruborist::service::{
     BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
 };
 
-use crate::service::install_scheduler::InstallScheduler;
-use crate::service::pipeline::PipelineReceiver;
+use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};
 use crate::util::cache::get_cache_dir;
 use crate::util::logger::ProgressReceiver;
 use crate::util::manifest_store::DiskManifestStore;
@@ -68,13 +67,12 @@ impl Context {
         }
     }
 
-    /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
-    /// The receiver forwards package events to the install scheduler.
-    pub async fn pipeline_deps_options(
+    /// Create BuildDepsOptions that forwards package events to the install scheduler.
+    pub async fn install_deps_options(
         cwd: PathBuf,
         scheduler: InstallScheduler,
-    ) -> BuildDepsOptions<GlobImpl, PipelineReceiver<ProgressReceiver>> {
-        let receiver = PipelineReceiver::new(ProgressReceiver, scheduler, cwd.clone());
+    ) -> BuildDepsOptions<GlobImpl, InstallEventReceiver<ProgressReceiver>> {
+        let receiver = InstallEventReceiver::new(ProgressReceiver, scheduler, cwd.clone());
         Self::deps_options(cwd, receiver).await
     }
 

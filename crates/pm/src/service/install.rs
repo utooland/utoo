@@ -1,6 +1,5 @@
 use crate::util::cli_enum::ScriptPolicy;
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
@@ -10,8 +9,9 @@ use crate::fs;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
     Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
-    prepare_global_package_json, update_package_json,
+    prepare_global_package_json, save_package_lock, update_package_json,
 };
+use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
@@ -62,7 +62,7 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
-pub async fn install_packages(
+async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
@@ -178,6 +178,19 @@ pub async fn install_packages(
     Ok(())
 }
 
+async fn resolve_package_lock_with_scheduler(
+    root_path: &Path,
+    scheduler: super::install_scheduler::InstallScheduler,
+) -> Result<utoo_ruborist::lock::PackageLock> {
+    let options = Context::install_deps_options(root_path.to_path_buf(), scheduler).await;
+    let output = utoo_ruborist::service::build_deps(options).await?;
+
+    save_package_lock(root_path, &output.lock).await?;
+    spawn_save_project_cache(root_path.to_path_buf(), output.project_cache);
+
+    Ok(output.lock)
+}
+
 pub struct InstallService;
 
 impl InstallService {
@@ -248,7 +261,7 @@ impl InstallService {
         let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, used_pipeline) = if use_fresh_lock {
+        let (package_lock, used_scheduler_prefetch) = if use_fresh_lock {
             let lock = match load_package_lock_json_from_path(root_path).await {
                 Ok(lock) => lock,
                 Err(e) => {
@@ -260,16 +273,16 @@ impl InstallService {
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
-            let result =
-                match super::pipeline::resolve_with_pipeline(root_path, scheduler.clone()).await {
-                    Ok(result) => result,
-                    Err(e) => {
-                        scheduler_handle.shutdown().await;
-                        return Err(e);
-                    }
-                };
+            let lock = match resolve_package_lock_with_scheduler(root_path, scheduler.clone()).await
+            {
+                Ok(lock) => lock,
+                Err(e) => {
+                    scheduler_handle.shutdown().await;
+                    return Err(e);
+                }
+            };
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-            (result.package_lock, true)
+            (lock, true)
         };
 
         let groups = group_by_depth(&package_lock.packages);
@@ -285,8 +298,8 @@ impl InstallService {
             .context("Failed to install packages");
 
         scheduler_handle.shutdown().await;
-        if used_pipeline {
-            super::pipeline::print_pipeline_summary();
+        if used_scheduler_prefetch {
+            super::install_scheduler::print_summary();
         }
         install_result?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));

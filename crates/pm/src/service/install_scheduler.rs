@@ -4,12 +4,75 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow};
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
+use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
-use crate::util::cloner::clone_package_from_cache;
+use crate::util::cloner::{clone_count, clone_package_from_cache};
 use crate::util::downloader::{
-    download_and_extract_to_cache, is_registry_tarball_url, resolve_seeded_cache_path,
+    download_and_extract_to_cache, download_stats, is_registry_tarball_url,
+    resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
+
+/// Build event receiver that forwards install prefetch work to the scheduler.
+pub(crate) struct InstallEventReceiver<R: EventReceiver> {
+    scheduler: InstallScheduler,
+    cwd: PathBuf,
+    inner: R,
+}
+
+impl<R: EventReceiver> InstallEventReceiver<R> {
+    pub(crate) fn new(inner: R, scheduler: InstallScheduler, cwd: PathBuf) -> Self {
+        Self {
+            scheduler,
+            cwd,
+            inner,
+        }
+    }
+}
+
+impl<R: EventReceiver> EventReceiver for InstallEventReceiver<R> {
+    fn on_event(&self, event: BuildEvent<'_>) {
+        self.inner.on_event(event);
+
+        match event {
+            BuildEvent::PackageResolved(info) if info.is_platform_compatible() => {
+                let Some(tarball_url) = info.tarball_url else {
+                    return;
+                };
+                self.scheduler.prefetch_download(
+                    info.name.to_string(),
+                    info.version.to_string(),
+                    tarball_url.to_string(),
+                );
+            }
+            BuildEvent::PackagePlaced {
+                package,
+                path,
+                parent_path,
+            } if package.is_platform_compatible() => {
+                let Some(tarball_url) = package.tarball_url else {
+                    return;
+                };
+                self.scheduler.prefetch_clone(
+                    package.name.to_string(),
+                    package.version.to_string(),
+                    tarball_url.to_string(),
+                    self.cwd.join(path),
+                    parent_path.map(|p| self.cwd.join(p)),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn print_summary() {
+    tracing::debug!(
+        "Install scheduler stats: downloaded={}, cloned={}",
+        download_stats().downloaded,
+        clone_count(),
+    );
+}
 
 #[derive(Clone, Debug)]
 struct PackageFetch {
@@ -61,17 +124,17 @@ enum OpDone {
 }
 
 #[derive(Clone)]
-pub struct InstallScheduler {
+pub(crate) struct InstallScheduler {
     tx: mpsc::UnboundedSender<Command>,
 }
 
-pub struct InstallSchedulerHandle {
+pub(crate) struct InstallSchedulerHandle {
     scheduler: InstallScheduler,
     handle: tokio::task::JoinHandle<()>,
 }
 
 impl InstallSchedulerHandle {
-    pub fn start() -> Self {
+    pub(crate) fn start() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             SchedulerState::new(rx).run().await;
@@ -82,11 +145,11 @@ impl InstallSchedulerHandle {
         }
     }
 
-    pub fn scheduler(&self) -> InstallScheduler {
+    pub(crate) fn scheduler(&self) -> InstallScheduler {
         self.scheduler.clone()
     }
 
-    pub async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         let _ = self.scheduler.tx.send(Command::Shutdown);
         if let Err(e) = self.handle.await {
             tracing::warn!("Install scheduler task failed: {e}");
@@ -95,14 +158,7 @@ impl InstallSchedulerHandle {
 }
 
 impl InstallScheduler {
-    #[cfg(test)]
-    pub(crate) fn closed_for_test() -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-        drop(rx);
-        Self { tx }
-    }
-
-    pub fn prefetch_download(&self, name: String, version: String, tarball_url: String) {
+    pub(crate) fn prefetch_download(&self, name: String, version: String, tarball_url: String) {
         if !is_registry_tarball_url(&tarball_url) {
             return;
         }
@@ -113,7 +169,7 @@ impl InstallScheduler {
         }));
     }
 
-    pub fn prefetch_clone(
+    pub(crate) fn prefetch_clone(
         &self,
         name: String,
         version: String,
@@ -132,7 +188,7 @@ impl InstallScheduler {
         }));
     }
 
-    pub async fn ensure_clone(
+    pub(crate) async fn ensure_clone(
         &self,
         name: String,
         version: String,
