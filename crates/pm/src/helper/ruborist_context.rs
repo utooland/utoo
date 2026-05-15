@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use utoo_ruborist::service::{
-    BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, NoopStore, UnifiedRegistry,
+    BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
 };
 
 use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
@@ -45,35 +45,10 @@ impl Context {
         Arc::new(DiskManifestStore::new(get_cache_dir()))
     }
 
-    fn noop_manifest_store() -> Arc<dyn ManifestStore> {
-        Arc::new(NoopStore)
-    }
-
     /// Create BuildDepsOptions with a custom event receiver.
     pub async fn deps_options<R: utoo_ruborist::progress::EventReceiver>(
         cwd: PathBuf,
         receiver: R,
-    ) -> BuildDepsOptions<GlobImpl, R> {
-        Self::deps_options_with_store(cwd, receiver, Self::manifest_store()).await
-    }
-
-    /// Create BuildDepsOptions without persistent manifest cache.
-    ///
-    /// `utoo deps` is a lockfile-only resolve path. Keeping manifest cache
-    /// persistence out of that hot path matches the main-loop-only fetch model
-    /// from the original performance PR while install keeps using the disk
-    /// store for warm-cache behavior.
-    pub async fn deps_options_without_manifest_store<R: utoo_ruborist::progress::EventReceiver>(
-        cwd: PathBuf,
-        receiver: R,
-    ) -> BuildDepsOptions<GlobImpl, R> {
-        Self::deps_options_with_store(cwd, receiver, Self::noop_manifest_store()).await
-    }
-
-    async fn deps_options_with_store<R: utoo_ruborist::progress::EventReceiver>(
-        cwd: PathBuf,
-        receiver: R,
-        manifest_store: Arc<dyn ManifestStore>,
     ) -> BuildDepsOptions<GlobImpl, R> {
         let catalogs = get_catalogs().await;
         let warm_project_cache = Some(project_cache::load(&cwd).await);
@@ -81,7 +56,7 @@ impl Context {
             cwd,
             registry_url: get_registry(),
             cache_dir: Some(get_cache_dir()),
-            manifest_store,
+            manifest_store: Self::manifest_store(),
             warm_project_cache,
             concurrency: get_resolver_manifests_concurrency_limit().await,
             peer_deps: get_peer_deps().await,
@@ -110,18 +85,6 @@ impl Context {
     /// persisted in the background.
     pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
         let options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
-        let output = utoo_ruborist::service::build_deps(options).await?;
-        spawn_save_project_cache(cwd, output.project_cache.clone());
-        Ok(output)
-    }
-
-    /// Resolve dependency tree for lockfile-only `utoo deps` without touching
-    /// the persistent manifest store.
-    pub async fn build_deps_without_manifest_store(
-        cwd: PathBuf,
-    ) -> anyhow::Result<BuildDepsOutput> {
-        let options =
-            Self::deps_options_without_manifest_store(cwd.clone(), ProgressReceiver).await;
         let output = utoo_ruborist::service::build_deps(options).await?;
         spawn_save_project_cache(cwd, output.project_cache.clone());
         Ok(output)
