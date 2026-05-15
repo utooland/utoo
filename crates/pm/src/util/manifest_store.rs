@@ -23,16 +23,11 @@ use crate::util::json::read_json_file;
 
 pub struct DiskManifestStore {
     cache_dir: PathBuf,
-    load_enabled: bool,
 }
 
 impl DiskManifestStore {
     pub fn new(cache_dir: PathBuf) -> Self {
-        let load_enabled = cache_dir.exists();
-        Self {
-            cache_dir,
-            load_enabled,
-        }
+        Self { cache_dir }
     }
 
     fn versions_path(&self, name: &str) -> PathBuf {
@@ -50,9 +45,6 @@ impl DiskManifestStore {
 #[async_trait]
 impl ManifestStore for DiskManifestStore {
     async fn load_versions(&self, name: &str) -> Option<VersionsInfo> {
-        if !self.load_enabled {
-            return None;
-        }
         read_json_file(&self.versions_path(name)).await.ok()
     }
 
@@ -61,9 +53,6 @@ impl ManifestStore for DiskManifestStore {
         name: &str,
         version: &str,
     ) -> Option<CoreVersionManifest> {
-        if !self.load_enabled {
-            return None;
-        }
         read_json_file(&self.manifest_path(name, version))
             .await
             .ok()
@@ -110,34 +99,5 @@ fn write_json_sync<T: Serialize>(path: &Path, value: &T) {
             }
         }
         Err(e) => tracing::debug!("Failed to write {path:?}: {e}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use utoo_ruborist::service::{Versions, VersionsInfo};
-
-    #[tokio::test]
-    async fn cold_start_store_skips_read_misses_until_next_process() {
-        let temp = tempfile::tempdir().unwrap();
-        let cache_dir = temp.path().join("missing-cache");
-        let store = DiskManifestStore::new(cache_dir.clone());
-
-        let versions = VersionsInfo {
-            versions: Versions {
-                version_list: vec!["1.0.0".to_string()],
-                dist_tags: Default::default(),
-            },
-            etag: Some("etag".to_string()),
-            last_updated: 1,
-        };
-        let versions_path = cache_dir.join("pkg").join("versions.json");
-        write_json_sync(&versions_path, &versions);
-
-        assert!(store.load_versions("pkg").await.is_none());
-
-        let warm_store = DiskManifestStore::new(cache_dir);
-        assert!(warm_store.load_versions("pkg").await.is_some());
     }
 }
