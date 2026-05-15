@@ -17,7 +17,7 @@ use crate::fs;
 use crate::helper::workspace::find_workspaces;
 use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::cloner::clone_package;
-use crate::util::downloader::{is_git_url, resolve_cache_path};
+use crate::util::downloader::{download_and_extract_to_cache, is_git_url};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
 
@@ -267,9 +267,9 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
 
     // Download and extract package to cache.
-    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url)
+    let cache_path = download_and_extract_to_cache(&name, &resolved.version, tarball_url)
         .await
-        .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
+        .with_context(|| format!("Failed to download package {name}"))?;
 
     // If the package has install scripts, create a flag file
     // in linux, we can use hardlink when FICLONE is not supported

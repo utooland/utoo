@@ -3,7 +3,6 @@ use anyhow::Context;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
@@ -24,12 +23,10 @@ use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
-use tokio::task::JoinSet;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
-use tokio::sync::Semaphore;
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
@@ -65,57 +62,12 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
-const DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT: usize = 64;
-const DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT: usize = 24;
-
-fn parse_install_clone_concurrency_limit(value: Option<&str>) -> usize {
-    match value.and_then(|value| value.parse::<usize>().ok()) {
-        // Keep an escape hatch for A/B runs and unusual filesystems.
-        Some(0) => usize::MAX,
-        Some(limit) => limit,
-        None => DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT,
-    }
-}
-
-fn install_clone_concurrency_limit() -> usize {
-    parse_install_clone_concurrency_limit(
-        std::env::var("UTOO_INSTALL_CLONE_CONCURRENCY")
-            .ok()
-            .as_deref(),
-    )
-}
-
-fn parse_install_clone_io_concurrency_limit(value: Option<&str>) -> usize {
-    match value.and_then(|value| value.parse::<usize>().ok()) {
-        // Escape hatch for A/B runs and unusual filesystems.
-        Some(0) => usize::MAX,
-        Some(limit) => limit,
-        None => DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT,
-    }
-}
-
-fn install_clone_io_concurrency_limit() -> usize {
-    parse_install_clone_io_concurrency_limit(
-        std::env::var("UTOO_INSTALL_CLONE_IO_CONCURRENCY")
-            .ok()
-            .as_deref(),
-    )
-}
-
-async fn join_next_clone_task(tasks: &mut JoinSet<Result<()>>) -> Result<()> {
-    if let Some(result) = tasks.join_next().await {
-        result??;
-    }
-    Ok(())
-}
-
 pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
+    scheduler: &super::install_scheduler::InstallScheduler,
 ) -> Result<()> {
-    use crate::util::cloner::clone_package_once;
-
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
@@ -123,18 +75,14 @@ pub async fn install_packages(
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
-    // children. Within each level, tasks run concurrently. The pipeline's
-    // clone_worker may have already cloned some packages — clone_package_once
-    // deduplicates via CLONE_CACHE so no double work occurs.
+    // children. Within each level, tasks run concurrently. The install
+    // scheduler owns clone/download dedupe, so package tasks only request the
+    // concrete target they need.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
-    let clone_concurrency_limit = install_clone_concurrency_limit();
-    let clone_io_concurrency_limit = install_clone_io_concurrency_limit();
-    let clone_limiter = (clone_io_concurrency_limit != usize::MAX)
-        .then(|| Arc::new(Semaphore::new(clone_io_concurrency_limit)));
 
     for depth in depths.iter() {
-        let mut clone_tasks: JoinSet<Result<()>> = JoinSet::new();
+        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
@@ -191,25 +139,16 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
-                    let clone_limiter = clone_limiter.clone();
+                    let scheduler = scheduler.clone();
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
-                    while clone_tasks.len() >= clone_concurrency_limit {
-                        join_next_clone_task(&mut clone_tasks).await?;
-                    }
-
-                    clone_tasks.spawn(async move {
-                        if let Err(e) = clone_package_once(
-                            &name,
-                            &version,
-                            &resolved,
-                            &target_path,
-                            clone_limiter,
-                        )
-                        .await
+                    let task = tokio::spawn(async move {
+                        if let Err(e) = scheduler
+                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                            .await
                         {
                             if is_optional {
                                 tracing::warn!(
@@ -224,14 +163,15 @@ pub async fn install_packages(
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
+                    clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
                 }
             }
         }
 
-        while !clone_tasks.is_empty() {
-            join_next_clone_task(&mut clone_tasks).await?;
+        for task in clone_tasks {
+            task.await??;
         }
     }
 
@@ -305,16 +245,31 @@ impl InstallService {
         // itself emits a `tracing::warn` with the specific mismatch reason.
         let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
             && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
+        let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
+        let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, pipeline_handles) = if use_fresh_lock {
-            let lock = load_package_lock_json_from_path(root_path).await?;
-            (lock, None)
+        let (package_lock, used_pipeline) = if use_fresh_lock {
+            let lock = match load_package_lock_json_from_path(root_path).await {
+                Ok(lock) => lock,
+                Err(e) => {
+                    scheduler_handle.shutdown().await;
+                    return Err(e);
+                }
+            };
+            (lock, false)
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
-            let result = super::pipeline::resolve_with_pipeline(root_path).await?;
+            let result =
+                match super::pipeline::resolve_with_pipeline(root_path, scheduler.clone()).await {
+                    Ok(result) => result,
+                    Err(e) => {
+                        scheduler_handle.shutdown().await;
+                        return Err(e);
+                    }
+                };
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-            (result.package_lock, Some(result.handles))
+            (result.package_lock, true)
         };
 
         let groups = group_by_depth(&package_lock.packages);
@@ -325,15 +280,15 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        install_packages(&groups, root_path, omit)
+        let install_result = install_packages(&groups, root_path, omit, &scheduler)
             .await
-            .context("Failed to install packages")?;
+            .context("Failed to install packages");
 
-        // Wait for pipeline workers to complete (if any)
-        if let Some(handles) = pipeline_handles {
-            handles.await_completion().await;
+        scheduler_handle.shutdown().await;
+        if used_pipeline {
             super::pipeline::print_pipeline_summary();
         }
+        install_result?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
@@ -464,37 +419,6 @@ mod tests {
         omit_dev_optional.insert(OmitType::Dev);
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
-    }
-
-    #[test]
-    fn test_parse_install_clone_concurrency_limit() {
-        assert_eq!(parse_install_clone_concurrency_limit(Some("64")), 64);
-        assert_eq!(
-            parse_install_clone_concurrency_limit(None),
-            DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT
-        );
-        assert_eq!(parse_install_clone_concurrency_limit(Some("0")), usize::MAX);
-        assert_eq!(
-            parse_install_clone_concurrency_limit(Some("not-a-number")),
-            DEFAULT_INSTALL_CLONE_CONCURRENCY_LIMIT
-        );
-    }
-
-    #[test]
-    fn test_parse_install_clone_io_concurrency_limit() {
-        assert_eq!(parse_install_clone_io_concurrency_limit(Some("16")), 16);
-        assert_eq!(
-            parse_install_clone_io_concurrency_limit(None),
-            DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT
-        );
-        assert_eq!(
-            parse_install_clone_io_concurrency_limit(Some("0")),
-            usize::MAX
-        );
-        assert_eq!(
-            parse_install_clone_io_concurrency_limit(Some("not-a-number")),
-            DEFAULT_INSTALL_CLONE_IO_CONCURRENCY_LIMIT
-        );
     }
 
     #[test]

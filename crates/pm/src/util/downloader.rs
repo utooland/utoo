@@ -1,41 +1,29 @@
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
-use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
 use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
-use utoo_ruborist::util::OnceMap;
 
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
-use super::user_config::get_manifests_concurrency_limit_sync;
 
-// Global downloader client: reqwest has no per-host pool cap here; tarball
-// concurrency is controlled by DOWNLOAD_SEMAPHORE and duplicate work by
-// DOWNLOAD_CACHE.
+// Global downloader client. Concurrency and duplicate work are controlled by
+// the caller's scheduler.
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
-
-/// Global download cache shared between pipeline and install phases.
-/// Key: "name@version", Value: cache path.
-static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
-
-/// Semaphore controlling concurrent download count.
-static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Process-global counters for tarball outcomes, matching pnpm's
-/// vocabulary. Each unique `(name, version)` pair lands in exactly one
-/// bucket thanks to `DOWNLOAD_CACHE`'s `OnceMap` dedup; git/file/link
-/// packages bypass this path and are not counted in either bucket.
+/// vocabulary. Scheduler-level dedupe keeps each unique `(name, version)` pair
+/// in exactly one bucket; git/file/link packages bypass this path and are not
+/// counted in either bucket.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DownloadStats {
     /// Tarballs fetched from the registry this run.
@@ -65,6 +53,11 @@ pub fn download_stats() -> DownloadStats {
 /// Check whether a tarball URL refers to a git-resolved package.
 pub fn is_git_url(url: &str) -> bool {
     matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
+}
+
+/// Check whether a tarball URL should be fetched by the registry downloader.
+pub fn is_registry_tarball_url(url: &str) -> bool {
+    matches!(url.parse::<Protocol>(), Ok(Protocol::Http))
 }
 
 /// Look up the cache path for a git-resolved package.
@@ -125,95 +118,55 @@ pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<
     slot_cache_lookup(name, http_cache_slot(tarball_url)).await
 }
 
-/// Resolve the local cache path for a package, downloading if necessary.
-///
-/// The cloner calls this with a fully-qualified URL (never a relative
-/// path) — the install loop is responsible for any lockfile-format
-/// rewriting before we get here.
-pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+/// Resolve cache slots that may have been seeded during dependency resolution
+/// without falling through to registry download. `Ok(None)` means this is a
+/// registry-style HTTP tarball that should be downloaded into `<name>/<version>`.
+pub async fn resolve_seeded_cache_path(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<Option<PathBuf>> {
     match tarball_url.parse::<Protocol>() {
-        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url).await,
-        Ok(Protocol::File) => file_cache_lookup(name, tarball_url).await,
-        // Otherwise try the URL-hashed http slot BFS may have seeded,
-        // then fall through to the registry `<name>/<version>/` path.
-        _ => match http_tarball_cache_lookup(name, tarball_url).await {
-            Some(p) => Some(p),
-            None => download_to_cache(name, version, tarball_url).await,
-        },
+        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}")),
+        Ok(Protocol::File) => file_cache_lookup(name, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("file tarball cache not found for {name}@{version}")),
+        _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
     }
 }
 
-/// Download a registry tarball to the global cache directory, returning the cache path.
-///
-/// Uses `OnceMap` to deduplicate: the same `name@version` is only downloaded once,
-/// even when called concurrently from multiple tasks (pipeline workers, install phase, etc.).
-///
-/// For git-resolved packages, use [`resolve_cache_path`] instead.
-pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
-    let key = format!("{}@{}", name, version);
+/// Download and extract a registry tarball without global single-flight or
+/// semaphore state. Callers that already own scheduling/deduplication should use
+/// this primitive directly.
+pub async fn download_and_extract_to_cache(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<PathBuf> {
+    let cache_path = get_cache_dir().join(name).join(version);
 
-    // Skip the param clones + future construction on cache hit.
-    if let Some(cache_path) = DOWNLOAD_CACHE.get(&key) {
-        return Some((*cache_path).clone());
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        return Ok(cache_path);
     }
 
-    let cache_dir = get_cache_dir();
-    let name = name.to_string();
-    let version = version.to_string();
-    let tarball_url = tarball_url.to_string();
-
-    DOWNLOAD_CACHE
-        .get_or_init(key, || async move {
-            let cache_path = cache_dir.join(&name).join(&version);
-
-            // Fast path: already extracted in cache
-            if crate::fs::try_exists(&cache_path.join("_resolved"))
-                .await
-                .unwrap_or(false)
-            {
-                REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
-                return Some(cache_path);
-            }
-
-            // Download (semaphore controlled). Permit held through extract
-            // — A/B-revert experiment to test if early permit release is
-            // the source of utoo p0 σ being ~2× baseline.
-            let semaphore = DOWNLOAD_SEMAPHORE
-                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
-            let _permit = semaphore.acquire().await.ok()?;
-            let bytes = download_bytes(&tarball_url)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Download {}@{} from {}: {:#}",
-                        name,
-                        version,
-                        tarball_url,
-                        e
-                    )
-                })
-                .ok()?;
-
-            // Extract
-            extract_and_write(bytes, &cache_path)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Extract {}@{} into {}: {:#}",
-                        name,
-                        version,
-                        cache_path.display(),
-                        e
-                    )
-                })
-                .ok()?;
-
-            DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-            Some(cache_path)
-        })
+    let bytes = download_bytes(tarball_url)
         .await
-        .as_deref()
-        .cloned()
+        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
+
+    extract_and_write(bytes, &cache_path)
+        .await
+        .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
+
+    DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
+    Ok(cache_path)
 }
 
 /// Download tarball bytes with retries (network phase only).
