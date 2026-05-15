@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::cmd::deps::build_deps;
+use crate::cmd::deps::build_deps_with_manifest_store;
 use crate::fs;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
@@ -278,7 +278,7 @@ impl InstallService {
         .context("Failed to update package.json")?;
 
         // Rebuild dependencies - the result will be used by install() via ensure_package_lock()
-        build_deps(&root_path)
+        build_deps_with_manifest_store(&root_path)
             .await
             .context("Failed to build package-lock.json")?;
 
