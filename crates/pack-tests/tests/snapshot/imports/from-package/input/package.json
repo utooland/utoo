@@ -1,0 +1,6 @@
+{
+    "name": "from-package",
+    "imports": {
+        "#mypkg": "my-pkg"
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/imports/from-package/input/index.js"],"sourcesContent":["import greet from \"#mypkg\";\nimport { name } from \"#mypkg\";\n\nconsole.log(greet(name));\n"],"names":["console","log","greet","name"],"mappings":";;;;;;;AAGAA,QAAQC,GAAG,CAACC,MAAMC"}}]
+}

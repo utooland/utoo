@@ -1,0 +1,17 @@
+error - [resolve] /imports/from-package/input/index.js:1:0  Module not found: Can't resolve '#mypkg'
+  
+         + v-------------------------v
+       1 + import greet from "#mypkg";
+         + ^-------------------------^
+       2 | import { name } from "#mypkg";
+       3 | 
+       4 | console.log(greet(name));
+       5 | 
+  
+  
+  
+  | It was not possible to find the requested file.
+  | Parsed request as written in source code: package internal '#mypkg'
+  | Path where resolving has started: [project]/imports/from-package/input/index.js
+  | Type of request: EcmaScript Modules (part) request
+  |
