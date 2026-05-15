@@ -1,5 +1,6 @@
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::{Context as _, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
@@ -82,7 +83,7 @@ async fn install_packages(
     depths.sort_unstable();
 
     for depth in depths.iter() {
-        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        let mut clone_tasks = FuturesUnordered::new();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
@@ -145,7 +146,7 @@ async fn install_packages(
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
-                    let task = tokio::spawn(async move {
+                    clone_tasks.push(async move {
                         if let Err(e) = scheduler
                             .ensure_clone(name.clone(), version, resolved, target_path.clone())
                             .await
@@ -163,15 +164,14 @@ async fn install_packages(
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
-                    clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
                 }
             }
         }
 
-        for task in clone_tasks {
-            task.await??;
+        while let Some(result) = clone_tasks.next().await {
+            result?;
         }
     }
 
