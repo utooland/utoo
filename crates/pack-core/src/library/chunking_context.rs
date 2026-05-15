@@ -490,7 +490,9 @@ impl ChunkingContext for LibraryChunkingContext {
         // Check if the name already ends with the extension
         if !filename.ends_with(&*extension) {
             // If doesn't end with extension, add the provided extension
-            filename = if extension.as_str() == ".css.map" && filename.ends_with(".css") {
+            filename = if let Some(base_ext) = extension.strip_suffix(".map")
+                && filename.ends_with(base_ext)
+            {
                 format!("{filename}.map")
             } else {
                 format!("{filename}{extension}")
