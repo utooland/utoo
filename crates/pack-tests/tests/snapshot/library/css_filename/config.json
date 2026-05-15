@@ -1,0 +1,30 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "index.server",
+        "library": {
+          "name": "index.server"
+        }
+      },
+      {
+        "import": "input/ai.js",
+        "name": "ai.server",
+        "library": {
+          "name": "ai.server"
+        }
+      }
+    ],
+    "target": "node",
+    "output": {
+      "filename": "[name].js",
+      "cssFilename": "[name].css"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false
+  }
+}

@@ -284,6 +284,7 @@ impl LibraryEndpoint {
 
         Ok(get_library_chunking_context(
             LibraryChunkingContextOptions {
+                name: Vc::cell(Some(self.await?.name.clone())),
                 mode: project.mode(),
                 root_path: project.project_path().owned().await?,
                 output_root: project.dist_root().owned().await?,

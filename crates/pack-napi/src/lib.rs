@@ -42,6 +42,7 @@ extern crate napi_derive;
 pub mod lockfile;
 pub mod pack_api;
 pub mod util;
+pub mod worker_pool;
 
 #[cfg(not(any(feature = "__internal_dhat-heap", feature = "__internal_dhat-ad-hoc")))]
 #[global_allocator]
