@@ -566,7 +566,7 @@ fn clone_concurrency_limit() -> usize {
 
 fn extract_concurrency_limit() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get().clamp(2, 8))
+        .map(|n| n.get().clamp(2, 16))
         .unwrap_or(4)
 }
 
