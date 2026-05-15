@@ -1,6 +1,6 @@
 //! Manifest provider boundary for resolver drivers.
 //!
-//! The demand BFS loop owns per-run cache, waiters, and inflight de-duplication.
+//! The demand BFS loop owns per-run cache and inflight de-duplication.
 //! A provider only executes one manifest job and hides whether it satisfied the
 //! job from memory, disk/OPFS, or the network.
 
@@ -69,8 +69,8 @@ pub enum ManifestJobDone {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ManifestProvider: RegistryClient + Clone + Send + Sync + 'static {
     /// Execute one manifest job. The provider owns I/O, persistence, and
-    /// parse/extract offloading; scheduling, waiters, and inflight
-    /// de-duplication stay in the BFS loop.
+    /// parse/extract offloading; scheduling and inflight de-duplication stay
+    /// in the BFS loop.
     async fn execute_manifest_job(&self, job: ManifestJob) -> Result<ManifestJobDone, Self::Error>;
 }
 

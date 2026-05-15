@@ -335,7 +335,8 @@ impl DependencyGraph {
 
     /// Get all dependency edges from a node.
     pub fn get_dependency_edges(&self, node: NodeIndex) -> Vec<(EdgeIndex, &DependencyEdge)> {
-        self.graph
+        let mut edges: Vec<_> = self
+            .graph
             .edges_directed(node, Outgoing)
             .filter_map(|edge| {
                 if let GraphEdge::Dependency(dep) = edge.weight() {
@@ -344,7 +345,9 @@ impl DependencyGraph {
                     None
                 }
             })
-            .collect()
+            .collect();
+        edges.sort_by_key(|(edge_id, _)| edge_id.index());
+        edges
     }
 
     /// Check if a dependency edge resolves to a workspace node.

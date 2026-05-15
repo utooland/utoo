@@ -11,9 +11,9 @@
 //!
 //! # Demand BFS Resolution
 //!
-//! The builder owns breadth-first traversal, per-run manifest cache, waiters,
-//! and inflight de-duplication. Provider tasks only execute concrete manifest
-//! jobs such as fetch, parse, extract, and persistence.
+//! The builder owns breadth-first traversal, per-run manifest cache, and
+//! inflight de-duplication. Provider tasks only execute concrete manifest jobs
+//! such as fetch, parse, extract, and persistence.
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
@@ -901,8 +901,6 @@ struct ManifestState {
     full_cache: HashMap<String, Arc<FullManifest>>,
     versions_cache: HashMap<String, Arc<crate::service::VersionsInfo>>,
     version_cache: HashMap<VersionKey, Arc<CoreVersionManifest>>,
-    full_waiters: HashMap<String, Vec<WaitingEdge>>,
-    version_waiters: HashMap<VersionKey, Vec<WaitingEdge>>,
     full_failures: HashMap<String, String>,
     version_failures: HashMap<VersionKey, String>,
     fetch_queues: FetchQueues,
@@ -1011,33 +1009,22 @@ impl ManifestState {
         }
     }
 
-    fn apply_fetch_result(
-        &mut self,
-        done: FetchDone,
-        supports_semver: bool,
-        peer_deps: PeerDeps,
-        level_pending: &mut VecDeque<WaitingEdge>,
-    ) {
+    fn apply_fetch_result(&mut self, done: FetchDone, supports_semver: bool, peer_deps: PeerDeps) {
         let done_key = done.key();
         self.fetch_queues.complete(&done_key);
 
         match done {
-            FetchDone::Full { name, result } => {
-                match result {
-                    Ok(ManifestFullData::Full(full)) => {
-                        self.full_cache.insert(name.clone(), full);
-                    }
-                    Ok(ManifestFullData::Versions(versions)) => {
-                        self.versions_cache.insert(name.clone(), versions);
-                    }
-                    Err(e) => {
-                        self.full_failures.insert(name.clone(), e);
-                    }
+            FetchDone::Full { name, result } => match result {
+                Ok(ManifestFullData::Full(full)) => {
+                    self.full_cache.insert(name.clone(), full);
                 }
-                if let Some(waiters) = self.full_waiters.remove(&name) {
-                    level_pending.extend(waiters);
+                Ok(ManifestFullData::Versions(versions)) => {
+                    self.versions_cache.insert(name.clone(), versions);
                 }
-            }
+                Err(e) => {
+                    self.full_failures.insert(name.clone(), e);
+                }
+            },
             FetchDone::Version { name, spec, result } => {
                 let key = (name, spec);
                 match result {
@@ -1052,9 +1039,6 @@ impl ManifestState {
                     Err(e) => {
                         self.version_failures.insert(key.clone(), e);
                     }
-                }
-                if let Some(waiters) = self.version_waiters.remove(&key) {
-                    level_pending.extend(waiters);
                 }
             }
         }
@@ -1144,6 +1128,103 @@ fn pump_fetches<R>(
         };
         fetches.push(fetch_registry_manifest(registry.clone(), request));
     }
+}
+
+async fn drain_ready_fetches<RE>(
+    fetches: &mut FuturesUnordered<FetchFuture>,
+    state: &mut ManifestState,
+    supports_semver: bool,
+    peer_deps: PeerDeps,
+) -> Result<(), ResolveError<RE>>
+where
+    RE: From<RegistryError>,
+{
+    loop {
+        let ready = std::future::poll_fn(|cx| match fetches.poll_next_unpin(cx) {
+            std::task::Poll::Ready(done) => std::task::Poll::Ready(done),
+            std::task::Poll::Pending => std::task::Poll::Ready(None),
+        })
+        .await;
+        let Some(done) = ready else {
+            break;
+        };
+        let done =
+            done.map_err(|e| registry_error::<RE>(format!("manifest fetch task failed: {e}")))?;
+        state.apply_fetch_result(done, supports_semver, peer_deps);
+    }
+
+    Ok(())
+}
+
+async fn wait_for_next_fetch<RE>(
+    fetches: &mut FuturesUnordered<FetchFuture>,
+    state: &mut ManifestState,
+    supports_semver: bool,
+    peer_deps: PeerDeps,
+) -> Result<bool, ResolveError<RE>>
+where
+    RE: From<RegistryError>,
+{
+    let Some(done) = fetches.next().await else {
+        return Ok(false);
+    };
+    let done =
+        done.map_err(|e| registry_error::<RE>(format!("manifest fetch task failed: {e}")))?;
+    state.apply_fetch_result(done, supports_semver, peer_deps);
+    Ok(true)
+}
+
+fn schedule_pending_registry_fetches(
+    state: &mut ManifestState,
+    level_pending: &VecDeque<WaitingEdge>,
+    supports_semver: bool,
+) {
+    for (_, edge) in level_pending {
+        if edge.spec.is_registry_spec() {
+            let (name, spec) = normalize_spec(&edge.name, &edge.spec);
+            state.schedule_registry_fetch(name, spec, supports_semver, FetchPriority::Demand);
+        }
+    }
+}
+
+async fn wait_for_blocked_manifest<R>(
+    fetches: &mut FuturesUnordered<FetchFuture>,
+    state: &mut ManifestState,
+    level_pending: &VecDeque<WaitingEdge>,
+    registry: &R,
+    concurrency: usize,
+    supports_semver: bool,
+    peer_deps: PeerDeps,
+) -> Result<bool, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    schedule_pending_registry_fetches(state, level_pending, supports_semver);
+    pump_fetches(fetches, &mut state.fetch_queues, registry, concurrency);
+    wait_for_next_fetch::<R::Error>(fetches, state, supports_semver, peer_deps).await
+}
+
+async fn process_front_dependency<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    receiver: &E,
+    config: &BuildDepsConfig,
+    level_pending: &mut VecDeque<WaitingEdge>,
+    next_level: &mut Vec<NodeIndex>,
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    E: EventReceiver,
+{
+    let (parent, edge) = level_pending
+        .pop_front()
+        .expect("blocked edge must remain queued");
+    let processed = process_dependency(graph, registry, parent, &edge, config)
+        .await
+        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+    handle_processed(graph, receiver, parent, &edge, &processed, next_level);
+    Ok(())
 }
 
 fn try_reuse_dependency(
@@ -1382,6 +1463,13 @@ where
             pump_fetches(&mut fetches, &mut state.fetch_queues, registry, concurrency);
 
             while let Some((parent, edge)) = level_pending.pop_front() {
+                drain_ready_fetches::<R::Error>(
+                    &mut fetches,
+                    &mut state,
+                    supports_semver,
+                    config.peer_deps,
+                )
+                .await?;
                 receiver.on_event(BuildEvent::Resolving { name: &edge.name });
 
                 if !edge.spec.is_registry_spec() {
@@ -1432,17 +1520,35 @@ where
                         continue;
                     }
 
-                    state
-                        .version_waiters
-                        .entry(key.clone())
-                        .or_default()
-                        .push((parent, edge));
                     state.schedule_registry_fetch(
                         key.0,
                         key.1,
                         supports_semver,
                         FetchPriority::Demand,
                     );
+                    level_pending.push_front((parent, edge));
+                    if wait_for_blocked_manifest(
+                        &mut fetches,
+                        &mut state,
+                        &level_pending,
+                        registry,
+                        concurrency,
+                        supports_semver,
+                        config.peer_deps,
+                    )
+                    .await?
+                    {
+                        continue;
+                    }
+                    process_front_dependency(
+                        graph,
+                        registry,
+                        receiver,
+                        config,
+                        &mut level_pending,
+                        &mut next_level,
+                    )
+                    .await?;
                 } else {
                     if let Some(error) = state.full_failures.get(&real_name) {
                         if edge.edge_type == EdgeType::Optional {
@@ -1543,12 +1649,30 @@ where
                             continue;
                         }
 
-                        state
-                            .version_waiters
-                            .entry(exact_key)
-                            .or_default()
-                            .push((parent, edge));
                         state.enqueue_version_extract(real_name, resolved_version, full);
+                        level_pending.push_front((parent, edge));
+                        if wait_for_blocked_manifest(
+                            &mut fetches,
+                            &mut state,
+                            &level_pending,
+                            registry,
+                            concurrency,
+                            supports_semver,
+                            config.peer_deps,
+                        )
+                        .await?
+                        {
+                            continue;
+                        }
+                        process_front_dependency(
+                            graph,
+                            registry,
+                            receiver,
+                            config,
+                            &mut level_pending,
+                            &mut next_level,
+                        )
+                        .await?;
                         continue;
                     }
 
@@ -1604,85 +1728,80 @@ where
                             continue;
                         }
 
-                        state
-                            .version_waiters
-                            .entry(exact_key)
-                            .or_default()
-                            .push((parent, edge));
                         state.enqueue_version_fetch(real_name, resolved_version, supports_semver);
+                        level_pending.push_front((parent, edge));
+                        if wait_for_blocked_manifest(
+                            &mut fetches,
+                            &mut state,
+                            &level_pending,
+                            registry,
+                            concurrency,
+                            supports_semver,
+                            config.peer_deps,
+                        )
+                        .await?
+                        {
+                            continue;
+                        }
+                        process_front_dependency(
+                            graph,
+                            registry,
+                            receiver,
+                            config,
+                            &mut level_pending,
+                            &mut next_level,
+                        )
+                        .await?;
                         continue;
                     }
 
-                    state
-                        .full_waiters
-                        .entry(real_name.clone())
-                        .or_default()
-                        .push((parent, edge));
                     state.schedule_registry_fetch(
                         real_name,
                         real_spec,
                         supports_semver,
                         FetchPriority::Demand,
                     );
+                    level_pending.push_front((parent, edge));
+                    if wait_for_blocked_manifest(
+                        &mut fetches,
+                        &mut state,
+                        &level_pending,
+                        registry,
+                        concurrency,
+                        supports_semver,
+                        config.peer_deps,
+                    )
+                    .await?
+                    {
+                        continue;
+                    }
+                    process_front_dependency(
+                        graph,
+                        registry,
+                        receiver,
+                        config,
+                        &mut level_pending,
+                        &mut next_level,
+                    )
+                    .await?;
                 }
 
                 pump_fetches(&mut fetches, &mut state.fetch_queues, registry, concurrency);
             }
 
-            loop {
-                let ready = std::future::poll_fn(|cx| match fetches.poll_next_unpin(cx) {
-                    std::task::Poll::Ready(done) => std::task::Poll::Ready(done),
-                    std::task::Poll::Pending => std::task::Poll::Ready(None),
-                })
-                .await;
-                let Some(done) = ready else {
-                    break;
-                };
-                let done = done.map_err(|e| {
-                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
-                })?;
-
-                state.apply_fetch_result(
-                    done,
-                    supports_semver,
-                    config.peer_deps,
-                    &mut level_pending,
-                );
-            }
+            drain_ready_fetches::<R::Error>(
+                &mut fetches,
+                &mut state,
+                supports_semver,
+                config.peer_deps,
+            )
+            .await?;
 
             if !level_pending.is_empty() {
                 continue;
             }
 
-            if !state.full_waiters.is_empty() || !state.version_waiters.is_empty() {
-                pump_fetches(&mut fetches, &mut state.fetch_queues, registry, concurrency);
-            }
-
-            if state.full_waiters.is_empty() && state.version_waiters.is_empty() {
-                break;
-            }
-
-            let Some(done) = fetches.next().await else {
-                let mut fallback = Vec::new();
-                for (_, waiters) in state.full_waiters.drain() {
-                    fallback.extend(waiters);
-                }
-                for (_, waiters) in state.version_waiters.drain() {
-                    fallback.extend(waiters);
-                }
-                for (parent, edge) in fallback {
-                    let processed = process_dependency(graph, registry, parent, &edge, config)
-                        .await
-                        .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
-                    handle_processed(graph, receiver, parent, &edge, &processed, &mut next_level);
-                }
-                break;
-            };
-            let done = done.map_err(|e| {
-                registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
-            })?;
-
-            state.apply_fetch_result(done, supports_semver, config.peer_deps, &mut level_pending);
+            break;
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
@@ -1778,9 +1897,11 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use super::*;
     use crate::model::manifest::CoreVersionManifest;
+    use crate::traits::progress::BuildEvent;
     use crate::traits::registry::mock::{MockError, MockRegistryClient};
 
     fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
@@ -1986,6 +2107,88 @@ mod tests {
         assert_eq!(shared_version_jobs.load(Ordering::Relaxed), 1);
     }
 
+    #[derive(Clone)]
+    struct DelayedSemverRegistry {
+        inner: MockRegistryClient,
+    }
+
+    impl crate::traits::registry::RegistryClient for DelayedSemverRegistry {
+        type Error = MockError;
+
+        fn supports_semver_resolution(&self) -> bool {
+            true
+        }
+
+        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
+            self.inner.fetch_full_manifest(name).await
+        }
+
+        async fn fetch_version_manifest(
+            &self,
+            name: &str,
+            spec: &str,
+        ) -> Result<Arc<CoreVersionManifest>, Self::Error> {
+            self.inner.fetch_version_manifest(name, spec).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestProvider for DelayedSemverRegistry {
+        async fn execute_manifest_job(
+            &self,
+            job: ManifestJob,
+        ) -> Result<ManifestJobDone, Self::Error> {
+            if matches!(&job, ManifestJob::Version { name, .. } if name == "a") {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+            }
+            self.inner.execute_manifest_job(job).await
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingReceiver {
+        resolved: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl EventReceiver for RecordingReceiver {
+        fn on_event(&self, event: BuildEvent<'_>) {
+            if let BuildEvent::Resolved { name, .. } = event {
+                self.resolved.lock().unwrap().push(name.to_string());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bfs_order_survives_out_of_order_fetch_completion() {
+        let mut inner = MockRegistryClient::new();
+        inner.add_package("a", "1.0.0", create_version_manifest("a", "1.0.0"));
+        inner.add_package("b", "1.0.0", create_version_manifest("b", "1.0.0"));
+        let registry = DelayedSemverRegistry { inner };
+
+        let root_pkg = PackageJson::new("test-project", "1.0.0");
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
+        let root = graph.root_index;
+        graph.add_dependency_edge(root, "a", "^1.0.0", EdgeType::Prod);
+        graph.add_dependency_edge(root, "b", "^1.0.0", EdgeType::Prod);
+
+        // Delay the first BFS edge so b's fetch completes first; graph
+        // mutation must still follow the original edge order.
+        let receiver = RecordingReceiver::default();
+        build_deps_with_config(
+            &mut graph,
+            &registry,
+            BuildDepsConfig::default().with_concurrency(2),
+            &receiver,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            &*receiver.resolved.lock().unwrap(),
+            &["a".to_string(), "b".to_string()]
+        );
+    }
+
     #[test]
     fn test_schedule_registry_fetch_dedupes_semver_request() {
         let mut state = ManifestState::default();
@@ -2108,27 +2311,12 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_fetch_result_caches_exact_version_and_wakes_waiters() {
-        let mut state = ManifestState {
-            version_waiters: HashMap::from([(
-                ("pkg".to_string(), "^1.0.0".to_string()),
-                vec![(
-                    NodeIndex::new(0),
-                    DependencyEdgeInfo {
-                        edge_id: petgraph::graph::EdgeIndex::new(0),
-                        name: "pkg".to_string(),
-                        spec: "^1.0.0".to_string(),
-                        edge_type: EdgeType::Prod,
-                    },
-                )],
-            )]),
-            ..Default::default()
-        };
+    fn test_apply_fetch_result_caches_exact_version() {
+        let mut state = ManifestState::default();
         state.fetch_queues.active.insert(
             FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()),
             FetchPriority::Demand,
         );
-        let mut level_pending = std::collections::VecDeque::new();
         let manifest = Arc::new(create_version_manifest("pkg", "1.2.3"));
 
         state.apply_fetch_result(
@@ -2139,7 +2327,6 @@ mod tests {
             },
             true,
             PeerDeps::Skip,
-            &mut level_pending,
         );
 
         assert!(
@@ -2152,10 +2339,8 @@ mod tests {
                 .version_cache
                 .contains_key(&("pkg".to_string(), "1.2.3".to_string()))
         );
-        assert!(state.version_waiters.is_empty());
         assert!(state.fetch_queues.queued.is_empty());
         assert!(state.fetch_queues.active.is_empty());
-        assert_eq!(level_pending.len(), 1);
     }
 
     #[test]
@@ -2165,7 +2350,6 @@ mod tests {
             FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()),
             FetchPriority::Demand,
         );
-        let mut level_pending = std::collections::VecDeque::new();
         let manifest = Arc::new(create_version_manifest_with_deps(
             "pkg",
             "1.2.3",
@@ -2180,7 +2364,6 @@ mod tests {
             },
             true,
             PeerDeps::Skip,
-            &mut level_pending,
         );
 
         assert!(
@@ -2214,27 +2397,12 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_fetch_result_caches_versions_and_wakes_waiters() {
-        let mut state = ManifestState {
-            full_waiters: HashMap::from([(
-                "pkg".to_string(),
-                vec![(
-                    NodeIndex::new(0),
-                    DependencyEdgeInfo {
-                        edge_id: petgraph::graph::EdgeIndex::new(0),
-                        name: "pkg".to_string(),
-                        spec: "^1.0.0".to_string(),
-                        edge_type: EdgeType::Prod,
-                    },
-                )],
-            )]),
-            ..Default::default()
-        };
+    fn test_apply_fetch_result_caches_versions() {
+        let mut state = ManifestState::default();
         state
             .fetch_queues
             .active
             .insert(FetchKey::Full("pkg".to_string()), FetchPriority::Demand);
-        let mut level_pending = std::collections::VecDeque::new();
         let versions = Arc::new(crate::service::VersionsInfo {
             versions: crate::service::Versions {
                 version_list: vec!["1.2.3".to_string()],
@@ -2251,15 +2419,12 @@ mod tests {
             },
             false,
             PeerDeps::Skip,
-            &mut level_pending,
         );
 
         assert!(state.full_cache.is_empty());
         assert!(state.versions_cache.contains_key("pkg"));
-        assert!(state.full_waiters.is_empty());
         assert!(state.fetch_queues.queued.is_empty());
         assert!(state.fetch_queues.active.is_empty());
-        assert_eq!(level_pending.len(), 1);
     }
 
     #[test]
