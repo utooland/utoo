@@ -394,7 +394,7 @@ impl SchedulerState {
 
     fn pump_downloads(&mut self) {
         while self.download_active.len() < self.download_limit
-            && self.extract_backlog() < self.download_limit
+            && self.extract_backlog() < self.extract_limit * 4
         {
             let Some(package) = self.download_queue.pop_front() else {
                 break;
@@ -560,13 +560,13 @@ impl SchedulerState {
 
 fn clone_concurrency_limit() -> usize {
     std::thread::available_parallelism()
-        .map(|n| (n.get() * 4).clamp(4, 32))
+        .map(|n| (n.get() * 2).clamp(4, 16))
         .unwrap_or(8)
 }
 
 fn extract_concurrency_limit() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get().clamp(2, 8))
+        .map(|n| n.get().clamp(2, 16))
         .unwrap_or(4)
 }
 
