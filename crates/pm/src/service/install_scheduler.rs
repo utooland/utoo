@@ -560,7 +560,7 @@ impl SchedulerState {
 
 fn clone_concurrency_limit() -> usize {
     std::thread::available_parallelism()
-        .map(|n| (n.get() * 4).clamp(4, 32))
+        .map(|n| (n.get() * 2).clamp(4, 16))
         .unwrap_or(8)
 }
 
