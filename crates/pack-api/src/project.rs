@@ -1261,6 +1261,7 @@ impl Project {
 
         Ok(get_library_chunking_context(
             LibraryChunkingContextOptions {
+                name: Vc::cell(Some(rcstr!("index"))),
                 mode,
                 root_path: server_root.clone(),
                 output_root: server_root,

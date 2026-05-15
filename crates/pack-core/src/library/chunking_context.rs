@@ -445,7 +445,10 @@ impl ChunkingContext for LibraryChunkingContext {
                             Some(filename_template) => {
                                 let query = QString::from(ident.await?.query.as_str());
 
-                                let name = query.get("name").unwrap_or(output_name.as_str());
+                                let name = query
+                                    .get("name")
+                                    .or_else(|| self.name.as_ref().map(|name| name.as_str()))
+                                    .unwrap_or(output_name.as_str());
                                 let name = escape_file_path(name);
 
                                 let mut filename = filename_template.to_string();
@@ -487,7 +490,13 @@ impl ChunkingContext for LibraryChunkingContext {
         // Check if the name already ends with the extension
         if !filename.ends_with(&*extension) {
             // If doesn't end with extension, add the provided extension
-            filename = format!("{filename}{extension}");
+            filename = if let Some(base_ext) = extension.strip_suffix(".map")
+                && filename.ends_with(base_ext)
+            {
+                format!("{filename}.map")
+            } else {
+                format!("{filename}{extension}")
+            };
         }
 
         Ok(output_root.join(&filename)?.cell())
