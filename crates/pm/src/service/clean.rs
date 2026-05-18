@@ -98,6 +98,10 @@ async fn remove_unused_packages(
     cwd: &Path,
     valid_packages: &HashSet<String>,
 ) -> Result<()> {
+    if !crate::fs::try_exists(node_modules).await? {
+        return Ok(());
+    }
+
     let mut stack = vec![node_modules.to_path_buf()];
 
     while let Some(current_nm) = stack.pop() {
@@ -224,5 +228,20 @@ mod tests {
         assert!(is_legacy_npminstall("_utoo-cli@1.0.0@2.0.0"));
         assert!(!is_legacy_npminstall("lodash"));
         assert!(!is_legacy_npminstall("_lodash@1.0.0"));
+    }
+
+    #[tokio::test]
+    async fn test_remove_unused_packages_missing_node_modules() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let valid_packages = HashSet::new();
+
+        remove_unused_packages(
+            &temp_dir.path().join("node_modules"),
+            temp_dir.path(),
+            &valid_packages,
+        )
+        .await?;
+
+        Ok(())
     }
 }
