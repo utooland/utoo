@@ -7,6 +7,7 @@ use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
 
 use super::downloader::is_git_url;
+use super::extractor::ExtractedPackageIndex;
 use super::json::load_package_json;
 use super::retry::create_retry_strategy;
 use crate::fs;
@@ -20,18 +21,20 @@ pub fn clone_count() -> usize {
     CLONE_COUNT.load(Ordering::Relaxed)
 }
 
-/// Clone a package from an already-resolved cache path without touching the
-/// global clone/download single-flight maps. Schedulers that own deduplication
-/// use this sync primitive from their worker pool.
-pub fn clone_package_from_cache_sync(
+pub(crate) fn clone_package_from_cache_indexed_sync(
     name: &str,
     version: &str,
     tarball_url: &str,
     cache_path: &Path,
     target_path: &Path,
+    index: Option<&ExtractedPackageIndex>,
 ) -> Result<()> {
     let is_git = is_git_url(tarball_url);
-    let fresh = clone_package_sync(cache_path, target_path, name, version, !is_git)?;
+    let fresh = if let Some(index) = index.filter(|_| !is_git) {
+        clone_package_indexed_sync(cache_path, target_path, name, version, index)?
+    } else {
+        clone_package_sync(cache_path, target_path, name, version, !is_git)?
+    };
     if fresh {
         CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
     }
@@ -53,6 +56,8 @@ mod hardlink_clone {
     use std::{fs, io};
 
     use anyhow::{Context, Result};
+
+    use super::ExtractedPackageIndex;
 
     struct CloneEntry {
         src: PathBuf,
@@ -173,6 +178,71 @@ mod hardlink_clone {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn clone_dir_from_index_sync(
+        real_src: &Path,
+        dst: &Path,
+        index: &ExtractedPackageIndex,
+    ) -> Result<()> {
+        let err_msg = format!(
+            "Failed to clone {} to {}",
+            real_src.display(),
+            dst.display()
+        );
+        (|| -> Result<()> {
+            let mut force_copy = has_install_script_sync(real_src);
+
+            fs::create_dir(dst).or_else(|e| {
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })?;
+
+            for dir in index.dirs.iter() {
+                let target = dst.join(dir);
+                fs::create_dir(&target).or_else(|e| {
+                    if e.kind() == io::ErrorKind::AlreadyExists {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                })?;
+            }
+
+            let mut warned_per_file = false;
+            for rel in index.files.iter() {
+                let src = real_src.join(rel);
+                let dst = dst.join(rel);
+                if force_copy {
+                    copy_file_sync(&src, &dst)?;
+                } else if let Err(e) = fs::hard_link(&src, &dst) {
+                    if e.kind() == io::ErrorKind::CrossesDevices {
+                        tracing::warn!(
+                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                            real_src.display(),
+                            dst.display(),
+                            e
+                        );
+                        force_copy = true;
+                    } else if !warned_per_file {
+                        tracing::warn!(
+                            "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
+                            src.display(),
+                            dst.display(),
+                            e
+                        );
+                        warned_per_file = true;
+                    }
+                    copy_file_sync(&src, &dst)?;
+                }
+            }
+
+            Ok(())
+        })()
+        .with_context(|| err_msg)
     }
 
     /// Clone directory using spawn_blocking for callers that are still async.
@@ -491,6 +561,58 @@ fn clone_package_sync(
     }
     clone_sync(src, dst, find_real)?;
     Ok(true)
+}
+
+fn clone_package_indexed_sync(
+    cache_path: &Path,
+    dst: &Path,
+    name: &str,
+    version: &str,
+    index: &ExtractedPackageIndex,
+) -> Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        if dst.try_exists()? {
+            if validate_name_version_sync(dst, name, version) {
+                return Ok(false);
+            }
+            if let Err(e) = std::fs::remove_dir_all(dst) {
+                tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+            }
+        }
+
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // clonefile only needs the root directory. Keep the full index in the
+        // shared type so Linux can use it for per-file hardlinks.
+        let _ = (&index.dirs, &index.files);
+        let real_src = cache_path.join(&index.root);
+        clone_sync(&real_src, dst, false)?;
+        Ok(true)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        if dst.try_exists()? {
+            if validate_name_version_sync(dst, name, version) {
+                return Ok(false);
+            }
+            if let Err(e) = std::fs::remove_dir_all(dst) {
+                tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+            }
+        }
+
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let real_src = cache_path.join(&index.root);
+        hardlink_clone::clone_dir_from_index_sync(&real_src, dst, index)
+            .with_context(|| format!("clone_dir {} -> {}", real_src.display(), dst.display()))?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -1190,6 +1312,51 @@ mod tests {
             assert_ne!(
                 src_ino, dst_ino,
                 "install-script packages must be copied, not hardlinked"
+            );
+            Ok(())
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        #[test]
+        fn test_clone_package_from_cache_indexed_hardlinks_files() -> Result<()> {
+            use std::os::unix::fs::MetadataExt;
+            use std::sync::Arc;
+
+            use crate::util::extractor::ExtractedPackageIndex;
+
+            let temp = TempDir::new()?;
+            let cache_version = temp.path().join("pkg/1.0.0");
+            let real_src = cache_version.join("package");
+            let dst_dir = temp.path().join("node_modules/pkg");
+
+            std::fs::create_dir_all(real_src.join("dist"))?;
+            std::fs::write(
+                real_src.join("package.json"),
+                br#"{"name":"pkg","version":"1.0.0"}"#,
+            )?;
+            std::fs::write(real_src.join("dist/index.js"), b"module.exports = 1")?;
+
+            let index = ExtractedPackageIndex {
+                root: PathBuf::from("package"),
+                dirs: Arc::from([PathBuf::from("dist")]),
+                files: Arc::from([
+                    PathBuf::from("package.json"),
+                    PathBuf::from("dist/index.js"),
+                ]),
+            };
+
+            clone_package_from_cache_indexed_sync(
+                "pkg",
+                "1.0.0",
+                "https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz",
+                &cache_version,
+                &dst_dir,
+                Some(&index),
+            )?;
+
+            assert_eq!(
+                std::fs::metadata(real_src.join("dist/index.js"))?.ino(),
+                std::fs::metadata(dst_dir.join("dist/index.js"))?.ino()
             );
             Ok(())
         }

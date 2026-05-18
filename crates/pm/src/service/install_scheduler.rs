@@ -7,10 +7,10 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
-use crate::util::cloner::{clone_count, clone_package_from_cache_sync};
+use crate::util::cloner::{clone_count, clone_package_from_cache_indexed_sync};
 use crate::util::downloader::{
-    download_bytes, download_stats, extract_to_cache_sync, is_registry_tarball_url,
-    registry_cache_lookup_sync, resolve_seeded_cache_path,
+    RegistryCacheEntry, download_bytes, download_stats, extract_to_cache_indexed_sync,
+    is_registry_tarball_url, registry_cache_lookup_sync, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 
@@ -97,7 +97,7 @@ struct CloneSpec {
 
 struct ReadyClone {
     spec: CloneSpec,
-    cache_path: PathBuf,
+    cache: RegistryCacheEntry,
 }
 
 struct DownloadedPackage {
@@ -117,7 +117,7 @@ enum Command {
 enum OpDone {
     SeededCache {
         spec: CloneSpec,
-        result: Result<Option<PathBuf>, String>,
+        result: Result<Option<RegistryCacheEntry>, String>,
     },
     Download {
         package: PackageFetch,
@@ -125,7 +125,7 @@ enum OpDone {
     },
     Extract {
         key: String,
-        result: Result<PathBuf, String>,
+        result: Result<RegistryCacheEntry, String>,
     },
     Clone {
         target: PathBuf,
@@ -238,7 +238,7 @@ struct SchedulerState {
     download_limit: usize,
     extract_limit: usize,
     clone_limit: usize,
-    download_done: HashMap<String, PathBuf>,
+    download_done: HashMap<String, RegistryCacheEntry>,
     download_active: HashSet<String>,
     download_waiters: HashMap<String, Vec<CloneSpec>>,
     download_queue: VecDeque<PackageFetch>,
@@ -385,6 +385,7 @@ impl SchedulerState {
                 &task_spec.package.tarball_url,
             )
             .await
+            .map(|maybe_path| maybe_path.map(|path| RegistryCacheEntry { path, index: None }))
             .map_err(|e| format!("{e:#}"));
             OpDone::SeededCache { spec, result }
         }));
@@ -392,9 +393,9 @@ impl SchedulerState {
 
     fn ensure_download(&mut self, package: PackageFetch, waiter: Option<CloneSpec>) {
         let key = package.key();
-        if let Some(cache_path) = self.download_done.get(&key).cloned() {
+        if let Some(cache) = self.download_done.get(&key).cloned() {
             if let Some(spec) = waiter {
-                self.clone_queue.push_back(ReadyClone { spec, cache_path });
+                self.clone_queue.push_back(ReadyClone { spec, cache });
             }
             return;
         }
@@ -430,7 +431,13 @@ impl SchedulerState {
             }
 
             if let Some(cache_path) = cache_lookup(&package) {
-                self.complete_download(key, Ok(cache_path));
+                self.complete_download(
+                    key,
+                    Ok(RegistryCacheEntry {
+                        path: cache_path,
+                        index: None,
+                    }),
+                );
                 continue;
             }
 
@@ -461,7 +468,7 @@ impl SchedulerState {
 
             let done_tx = self.done_tx.clone();
             rayon::spawn(move || {
-                let result = extract_to_cache_sync(
+                let result = extract_to_cache_indexed_sync(
                     &downloaded.package.name,
                     &downloaded.package.version,
                     downloaded.bytes,
@@ -484,12 +491,13 @@ impl SchedulerState {
 
             let done_tx = self.done_tx.clone();
             rayon::spawn(move || {
-                let result = clone_package_from_cache_sync(
+                let result = clone_package_from_cache_indexed_sync(
                     &job.spec.package.name,
                     &job.spec.package.version,
                     &job.spec.package.tarball_url,
-                    &job.cache_path,
+                    &job.cache.path,
                     &job.spec.target,
+                    job.cache.index.as_ref(),
                 )
                 .map_err(|e| format!("{e:#}"));
                 let _ = done_tx.send(OpDone::Clone { target, result });
@@ -500,7 +508,7 @@ impl SchedulerState {
     fn handle_done(&mut self, done: OpDone) {
         match done {
             OpDone::SeededCache { spec, result } => match result {
-                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone { spec, cache_path }),
+                Ok(Some(cache)) => self.clone_queue.push_back(ReadyClone { spec, cache }),
                 Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
                 Err(error) => self.complete_clone(spec.target, Err(error)),
             },
@@ -528,15 +536,15 @@ impl SchedulerState {
         }
     }
 
-    fn complete_download(&mut self, key: String, result: Result<PathBuf, String>) {
+    fn complete_download(&mut self, key: String, result: Result<RegistryCacheEntry, String>) {
         let waiters = self.download_waiters.remove(&key).unwrap_or_default();
         match result {
-            Ok(cache_path) => {
-                self.download_done.insert(key, cache_path.clone());
+            Ok(cache) => {
+                self.download_done.insert(key, cache.clone());
                 for spec in waiters {
                     self.clone_queue.push_back(ReadyClone {
                         spec,
-                        cache_path: cache_path.clone(),
+                        cache: cache.clone(),
                     });
                 }
             }
@@ -619,6 +627,10 @@ mod tests {
         SchedulerState::new(rx)
     }
 
+    fn cache_entry(path: PathBuf) -> RegistryCacheEntry {
+        RegistryCacheEntry { path, index: None }
+    }
+
     #[test]
     fn ensure_download_dedupes_inflight_package() {
         let mut state = state();
@@ -670,7 +682,7 @@ mod tests {
         assert!(state.download_queue.is_empty());
         assert!(state.download_active.is_empty());
         assert!(state.ops.is_empty());
-        assert_eq!(state.download_done[&key], cache_path);
+        assert_eq!(state.download_done[&key].path, cache_path);
         assert_eq!(state.clone_queue.len(), 1);
     }
 
@@ -686,11 +698,11 @@ mod tests {
 
         state.handle_done(OpDone::Extract {
             key: key.clone(),
-            result: Ok(cache_path.clone()),
+            result: Ok(cache_entry(cache_path.clone())),
         });
 
         assert!(!state.extract_active.contains(&key));
-        assert_eq!(state.download_done[&key], cache_path);
+        assert_eq!(state.download_done[&key].path, cache_path);
         assert_eq!(state.clone_queue.len(), 1);
     }
 
@@ -733,11 +745,11 @@ mod tests {
 
         state
             .download_done
-            .insert("react@18.2.0".to_string(), cache_path.clone());
+            .insert("react@18.2.0".to_string(), cache_entry(cache_path.clone()));
         state.queue_clone(spec, None);
 
         assert_eq!(state.clone_queue.len(), 1);
-        assert_eq!(state.clone_queue[0].cache_path, cache_path);
+        assert_eq!(state.clone_queue[0].cache.path, cache_path);
         assert!(state.ops.is_empty());
     }
 }

@@ -10,7 +10,7 @@ use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
-use super::extractor::{extract_and_write, extract_and_write_sync};
+use super::extractor::{ExtractedPackageIndex, extract_and_write, extract_and_write_indexed_sync};
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
 // Global downloader client. Concurrency and duplicate work are controlled by
@@ -19,6 +19,12 @@ static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Clone, Debug)]
+pub(crate) struct RegistryCacheEntry {
+    pub(crate) path: PathBuf,
+    pub(crate) index: Option<ExtractedPackageIndex>,
+}
 
 /// Process-global counters for tarball outcomes, matching pnpm's
 /// vocabulary. Scheduler-level dedupe keeps each unique `(name, version)` pair
@@ -209,21 +215,31 @@ pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result
     Ok(cache_path)
 }
 
-/// Synchronous form of [`extract_to_cache`] for schedulers that already run
-/// extraction on a CPU/disk worker.
-pub fn extract_to_cache_sync(name: &str, version: &str, bytes: Bytes) -> Result<PathBuf> {
+/// Synchronous form of [`extract_to_cache`] that also returns the file index
+/// for freshly extracted registry tarballs.
+pub(crate) fn extract_to_cache_indexed_sync(
+    name: &str,
+    version: &str,
+    bytes: Bytes,
+) -> Result<RegistryCacheEntry> {
     let cache_path = registry_cache_path(name, version);
 
     if cache_path.join("_resolved").try_exists().unwrap_or(false) {
         REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
-        return Ok(cache_path);
+        return Ok(RegistryCacheEntry {
+            path: cache_path,
+            index: None,
+        });
     }
 
-    extract_and_write_sync(bytes, &cache_path)
+    let index = extract_and_write_indexed_sync(bytes, &cache_path)
         .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
 
     DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-    Ok(cache_path)
+    Ok(RegistryCacheEntry {
+        path: cache_path,
+        index,
+    })
 }
 
 /// Download tarball bytes with retries (network phase only).
@@ -314,7 +330,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let dest = temp_dir.path().join("pkg");
 
-        extract_and_write_sync(Bytes::from(tar_gz), &dest).unwrap();
+        extract_and_write_indexed_sync(Bytes::from(tar_gz), &dest).unwrap();
 
         assert!(dest.join("_resolved").exists());
         assert!(dest.join("file.txt").exists());
