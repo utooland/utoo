@@ -74,6 +74,12 @@ fn is_prefetchable_registry_tarball(resolved: &str, registry: &str) -> bool {
         })
 }
 
+fn sorted_depths(groups: &HashMap<usize, Vec<(String, Package)>>) -> Vec<usize> {
+    let mut depths: Vec<_> = groups.keys().copied().collect();
+    depths.sort_unstable();
+    depths
+}
+
 fn prefetch_lock_downloads(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     omit: &HashSet<OmitType>,
@@ -81,7 +87,11 @@ fn prefetch_lock_downloads(
 ) {
     let registry = get_registry();
 
-    for packages in groups.values() {
+    for depth in sorted_depths(groups) {
+        let Some(packages) = groups.get(&depth) else {
+            continue;
+        };
+
         for (path, package) in packages {
             if should_omit_package(package, omit) || package.link.is_some() {
                 continue;
@@ -132,8 +142,7 @@ async fn install_packages(
     // children. Within each level, tasks run concurrently. The install
     // scheduler owns clone/download dedupe, so package tasks only request the
     // concrete target they need.
-    let mut depths: Vec<_> = groups.keys().cloned().collect();
-    depths.sort_unstable();
+    let depths = sorted_depths(groups);
 
     for depth in depths.iter() {
         let mut clone_tasks = FuturesUnordered::new();
@@ -510,6 +519,16 @@ mod tests {
             "file:../pkg.tgz",
             REGISTRY_NPMMIRROR
         ));
+    }
+
+    #[test]
+    fn test_sorted_depths() {
+        let mut groups = HashMap::new();
+        groups.insert(3, Vec::new());
+        groups.insert(1, Vec::new());
+        groups.insert(2, Vec::new());
+
+        assert_eq!(sorted_depths(&groups), vec![1, 2, 3]);
     }
 
     #[test]
