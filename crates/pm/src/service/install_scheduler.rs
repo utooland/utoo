@@ -364,7 +364,17 @@ impl SchedulerState {
             return;
         }
 
+        if self.has_registry_download_state(&spec.package) {
+            self.ensure_download(spec.package.clone(), Some(spec));
+            return;
+        }
+
         self.resolve_cache_for_clone(spec);
+    }
+
+    fn has_registry_download_state(&self, package: &PackageFetch) -> bool {
+        let key = package.key();
+        self.download_done.contains_key(&key) || self.download_waiters.contains_key(&key)
     }
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
@@ -675,5 +685,37 @@ mod tests {
 
         assert_eq!(state.clone_waiters[&target].len(), 2);
         assert_eq!(state.ops.len(), 1);
+    }
+
+    #[test]
+    fn queue_clone_attaches_to_known_registry_download() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let target = PathBuf::from("/tmp/project/node_modules/react");
+        let spec = clone_spec("react", "18.2.0", target.to_string_lossy().as_ref());
+
+        state.ensure_download(package, None);
+        state.queue_clone(spec, None);
+
+        assert_eq!(state.download_queue.len(), 1);
+        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+        assert!(state.ops.is_empty());
+    }
+
+    #[test]
+    fn queue_clone_reuses_completed_registry_download() {
+        let mut state = state();
+        let target = PathBuf::from("/tmp/project/node_modules/react");
+        let spec = clone_spec("react", "18.2.0", target.to_string_lossy().as_ref());
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+
+        state
+            .download_done
+            .insert("react@18.2.0".to_string(), cache_path.clone());
+        state.queue_clone(spec, None);
+
+        assert_eq!(state.clone_queue.len(), 1);
+        assert_eq!(state.clone_queue[0].cache_path, cache_path);
+        assert!(state.ops.is_empty());
     }
 }
