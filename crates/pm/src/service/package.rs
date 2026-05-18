@@ -377,7 +377,7 @@ impl PackageService {
                 }
 
                 let target_path = package.path.join(relative_path);
-                if !crate::fs::try_exists(&target_path).await? {
+                if !target_path.try_exists()? {
                     tracing::debug!(
                         "Binary file {} does not exist, skipping",
                         target_path.display()
@@ -385,15 +385,13 @@ impl PackageService {
                     continue;
                 }
 
-                ScriptService::ensure_executable(&target_path)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "Failed to ensure binary is executable for {} (path: {})",
-                            package.name,
-                            target_path.display()
-                        )
-                    })?;
+                ScriptService::ensure_executable_sync(&target_path).with_context(|| {
+                    format!(
+                        "Failed to ensure binary is executable for {} (path: {})",
+                        package.name,
+                        target_path.display()
+                    )
+                })?;
 
                 crate::util::linker::link_bin(&target_path, &link_path).with_context(|| {
                     format!(

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -283,6 +284,60 @@ impl ScriptService {
         Ok(())
     }
 
+    pub fn ensure_executable_sync(target_path: &Path) -> Result<()> {
+        let metadata = std::fs::metadata(target_path)
+            .with_context(|| format!("Failed to access file {}", target_path.display()))?;
+
+        if !metadata.is_file() {
+            anyhow::bail!("Path is not a file: {}", target_path.display());
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let permissions = metadata.permissions();
+            let mode = permissions.mode() & 0o777;
+            let is_executable = mode & 0o111 != 0;
+
+            if !is_executable {
+                match Self::check_and_add_shebang_sync(target_path) {
+                    Ok(added) => {
+                        if added {
+                            tracing::debug!("Added shebang to {}", target_path.display());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
+                    }
+                }
+            }
+
+            if mode != 0o755 {
+                let mut perms = permissions;
+                perms.set_mode(0o755);
+                std::fs::set_permissions(target_path, perms)
+                    .context("Failed to set executable permissions")?;
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            match Self::check_and_add_shebang_sync(target_path) {
+                Ok(added) => {
+                    if added {
+                        tracing::debug!("Added shebang to {}", target_path.display());
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check if file needs shebang and add it if needed
     /// Returns Ok(true) if shebang was added, Ok(false) if not needed, Err if binary/non-UTF8
     async fn check_and_add_shebang(target_path: &Path) -> Result<bool> {
@@ -318,6 +373,32 @@ impl ScriptService {
             file.write_all(new_content.as_bytes()).await?;
             file.flush().await?;
         }
+
+        Ok(true)
+    }
+
+    fn check_and_add_shebang_sync(target_path: &Path) -> Result<bool> {
+        let header = {
+            let mut file = std::fs::File::open(target_path)?;
+            let mut buffer = vec![0u8; 512];
+            let n = file.read(&mut buffer)?;
+            buffer.truncate(n);
+
+            std::str::from_utf8(&buffer)
+                .map_err(|_| anyhow::anyhow!("File is not valid UTF-8, likely a binary file"))?
+                .to_string()
+        };
+
+        if header.starts_with("#!") {
+            return Ok(false);
+        }
+
+        let content = std::fs::read_to_string(target_path)?;
+        let new_content = format!("#!/usr/bin/env node\n{}", content);
+
+        let mut file = std::fs::File::create(target_path)?;
+        file.write_all(new_content.as_bytes())?;
+        file.flush()?;
 
         Ok(true)
     }
@@ -751,6 +832,23 @@ mod tests {
 
         // Test ensure_executable
         let result = ScriptService::ensure_executable(&test_file).await;
+        assert!(result.is_ok(), "Failed to ensure file is executable");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = fs::metadata(&test_file).unwrap().permissions();
+            assert!(permissions.mode() & 0o111 != 0, "File not made executable");
+        }
+    }
+
+    #[test]
+    fn test_ensure_executable_sync() {
+        let temp_dir = TempDir::new().unwrap();
+        let test_file = temp_dir.path().join("test.sh");
+        fs::write(&test_file, "#!/bin/sh\necho test").unwrap();
+
+        let result = ScriptService::ensure_executable_sync(&test_file);
         assert!(result.is_ok(), "Failed to ensure file is executable");
 
         #[cfg(unix)]
