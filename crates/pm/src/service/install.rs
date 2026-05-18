@@ -18,13 +18,14 @@ use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::cloner::clone_count;
-use crate::util::downloader::download_stats;
+use crate::util::downloader::{download_stats, is_registry_tarball_url};
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
+use utoo_ruborist::spec::SpecStr;
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
@@ -61,6 +62,107 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     }
 
     false
+}
+
+fn is_package_platform_compatible(package: &Package) -> bool {
+    if let Some(ref cpu) = package.cpu
+        && !is_cpu_compatible(cpu)
+    {
+        return false;
+    }
+
+    if let Some(ref os) = package.os
+        && !is_os_compatible(os)
+    {
+        return false;
+    }
+
+    true
+}
+
+fn dependency_spec<'a>(package: &'a Package, name: &str) -> Option<&'a str> {
+    package
+        .dependencies
+        .as_ref()
+        .and_then(|deps| deps.get(name))
+        .or_else(|| {
+            package
+                .optional_dependencies
+                .as_ref()
+                .and_then(|deps| deps.get(name))
+        })
+        .or_else(|| {
+            package
+                .dev_dependencies
+                .as_ref()
+                .and_then(|deps| deps.get(name))
+        })
+        .or_else(|| {
+            package
+                .peer_dependencies
+                .as_ref()
+                .and_then(|deps| deps.get(name))
+        })
+        .map(String::as_str)
+}
+
+fn lock_parent_path(path: &str) -> Option<&str> {
+    let index = path.rfind("node_modules/")?;
+    if index == 0 {
+        Some("")
+    } else {
+        path[..index].strip_suffix('/')
+    }
+}
+
+fn has_registry_incoming_spec(packages: &HashMap<String, Package>, path: &str, name: &str) -> bool {
+    let Some(parent_path) = lock_parent_path(path) else {
+        return false;
+    };
+    let Some(parent) = packages.get(parent_path) else {
+        return false;
+    };
+
+    dependency_spec(parent, name).is_some_and(|spec| spec.is_registry_spec())
+}
+
+fn collect_fresh_lock_download_prefetches(
+    packages: &HashMap<String, Package>,
+) -> Vec<(String, String, String)> {
+    let mut prefetches = Vec::new();
+
+    for (path, package) in packages {
+        if path.is_empty() || package.link.is_some() || !is_package_platform_compatible(package) {
+            continue;
+        }
+
+        let (Some(version), Some(resolved)) = (&package.version, &package.resolved) else {
+            continue;
+        };
+
+        if !is_registry_tarball_url(resolved) {
+            continue;
+        }
+
+        let name = package.get_name(path);
+        if name == "unknown" || !has_registry_incoming_spec(packages, path, &name) {
+            continue;
+        }
+
+        prefetches.push((name, version.clone(), resolved.clone()));
+    }
+
+    prefetches
+}
+
+fn prefetch_fresh_lock_downloads(
+    package_lock: &utoo_ruborist::lock::PackageLock,
+    scheduler: &super::install_scheduler::InstallScheduler,
+) {
+    for (name, version, resolved) in collect_fresh_lock_download_prefetches(&package_lock.packages)
+    {
+        scheduler.prefetch_download(name, version, resolved);
+    }
 }
 
 async fn install_packages(
@@ -118,17 +220,7 @@ async fn install_packages(
                         continue;
                     }
 
-                    // skip when cpu or os is not compatible
-                    if let Some(ref cpu) = package.cpu
-                        && !is_cpu_compatible(cpu)
-                    {
-                        PROGRESS_BAR.inc(1);
-                        continue;
-                    }
-
-                    if let Some(ref os) = package.os
-                        && !is_os_compatible(os)
-                    {
+                    if !is_package_platform_compatible(&package) {
                         PROGRESS_BAR.inc(1);
                         continue;
                     }
@@ -269,7 +361,8 @@ impl InstallService {
                     return Err(e);
                 }
             };
-            (lock, false)
+            prefetch_fresh_lock_downloads(&lock, &scheduler);
+            (lock, true)
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
@@ -477,5 +570,90 @@ mod tests {
             !is_optional,
             "Package with optional=false should not be optional"
         );
+    }
+
+    fn lock_pkg(name: &str, version: &str, resolved: &str) -> Package {
+        Package {
+            name: Some(name.to_string()),
+            version: Some(version.to_string()),
+            resolved: Some(resolved.to_string()),
+            ..Package::default()
+        }
+    }
+
+    #[test]
+    fn fresh_lock_prefetches_only_proven_registry_specs() {
+        let mut packages = HashMap::new();
+        packages.insert(
+            String::new(),
+            Package {
+                dependencies: Some(HashMap::from([
+                    ("react".to_string(), "^18.2.0".to_string()),
+                    (
+                        "remote-tarball".to_string(),
+                        "https://example.com/remote-tarball.tgz".to_string(),
+                    ),
+                    (
+                        "file-tarball".to_string(),
+                        "file:./file-tarball.tgz".to_string(),
+                    ),
+                ])),
+                ..Package::default()
+            },
+        );
+        packages.insert(
+            "node_modules/react".to_string(),
+            lock_pkg(
+                "react",
+                "18.2.0",
+                "https://registry.npmjs.org/react/-/react-18.2.0.tgz",
+            ),
+        );
+        packages.insert(
+            "node_modules/remote-tarball".to_string(),
+            lock_pkg(
+                "remote-tarball",
+                "1.0.0",
+                "https://example.com/remote-tarball.tgz",
+            ),
+        );
+        packages.insert(
+            "node_modules/file-tarball".to_string(),
+            lock_pkg("file-tarball", "1.0.0", "file:./file-tarball.tgz"),
+        );
+
+        let prefetches = collect_fresh_lock_download_prefetches(&packages);
+
+        assert_eq!(prefetches.len(), 1);
+        assert_eq!(prefetches[0].0, "react");
+        assert_eq!(prefetches[0].1, "18.2.0");
+    }
+
+    #[test]
+    fn fresh_lock_prefetch_uses_physical_parent_for_nested_paths() {
+        let mut packages = HashMap::new();
+        packages.insert(String::new(), Package::default());
+        packages.insert(
+            "node_modules/@scope/parent".to_string(),
+            Package {
+                name: Some("@scope/parent".to_string()),
+                version: Some("1.0.0".to_string()),
+                dependencies: Some(HashMap::from([("child".to_string(), "~1.0.0".to_string())])),
+                ..Package::default()
+            },
+        );
+        packages.insert(
+            "node_modules/@scope/parent/node_modules/child".to_string(),
+            lock_pkg(
+                "child",
+                "1.0.1",
+                "https://registry.npmjs.org/child/-/child-1.0.1.tgz",
+            ),
+        );
+
+        let prefetches = collect_fresh_lock_download_prefetches(&packages);
+
+        assert_eq!(prefetches.len(), 1);
+        assert_eq!(prefetches[0].0, "child");
     }
 }
