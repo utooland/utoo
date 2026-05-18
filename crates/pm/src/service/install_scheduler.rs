@@ -484,17 +484,14 @@ impl SchedulerState {
 
             let done_tx = self.done_tx.clone();
             rayon::spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    clone_package_from_cache_sync(
-                        &job.spec.package.name,
-                        &job.spec.package.version,
-                        &job.spec.package.tarball_url,
-                        &job.cache_path,
-                        &job.spec.target,
-                    )
-                    .map_err(|e| format!("{e:#}"))
-                }))
-                .unwrap_or_else(|_| Err("install clone worker panicked".to_string()));
+                let result = clone_package_from_cache_sync(
+                    &job.spec.package.name,
+                    &job.spec.package.version,
+                    &job.spec.package.tarball_url,
+                    &job.cache_path,
+                    &job.spec.target,
+                )
+                .map_err(|e| format!("{e:#}"));
                 let _ = done_tx.send(OpDone::Clone { target, result });
             });
         }
