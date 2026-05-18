@@ -26,6 +26,22 @@ pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     extract_tarball(gzip_bytes, dest).await
 }
 
+/// Synchronous extraction entry point for callers that already execute on a
+/// worker thread.
+pub fn extract_and_write_sync(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    let resolved_path = dest.join("_resolved");
+    if resolved_path.try_exists()? {
+        tracing::debug!("Extract skipped, already resolved: {}", dest.display());
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(dest)
+        .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
+
+    let estimated_size = estimate_uncompressed_size(&gzip_bytes);
+    extract_tarball_sync(gzip_bytes, estimated_size, dest)
+}
+
 /// Estimate uncompressed size from gzip footer (last 4 bytes store original size mod 2^32).
 fn estimate_uncompressed_size(gzip_data: &[u8]) -> usize {
     if gzip_data.len() < 4 {
