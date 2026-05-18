@@ -147,7 +147,7 @@ impl PackageService {
             }
 
             // Read lifecycle scripts from package.json only if needed
-            let lifecycle_scripts = if has_scripts || scripts == ScriptPolicy::Run {
+            let lifecycle_scripts = if scripts == ScriptPolicy::Run && has_scripts {
                 Self::read_lifecycle_scripts(&package_path)
                     .await
                     .with_context(|| format!("Failed to read scripts for package: {path}"))?
@@ -896,6 +896,14 @@ mod tests {
             assert!(
                 !package_info.bin_files.is_empty(),
                 "Package {} should have bin_files in scripts mode",
+                package_info.name
+            );
+            assert!(
+                package_info
+                    .lifecycle_scripts
+                    .get_script(LifecycleHook::Postinstall)
+                    .is_none(),
+                "ignored scripts should not be read for {}",
                 package_info.name
             );
         }
