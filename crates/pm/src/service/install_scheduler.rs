@@ -10,7 +10,7 @@ use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 use crate::util::cloner::{clone_count, clone_package_from_cache};
 use crate::util::downloader::{
     download_bytes, download_stats, extract_to_cache, is_registry_tarball_url,
-    registry_cache_lookup, resolve_seeded_cache_path,
+    registry_cache_lookup, resolve_seeded_cache_path_sync,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 
@@ -358,17 +358,13 @@ impl SchedulerState {
     }
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
-        let task_spec = spec.clone();
-        self.ops.push(tokio::spawn(async move {
-            let result = resolve_seeded_cache_path(
-                &task_spec.package.name,
-                &task_spec.package.version,
-                &task_spec.package.tarball_url,
-            )
-            .await
-            .map_err(|e| format!("{e:#}"));
-            OpDone::SeededCache { spec, result }
-        }));
+        let result = resolve_seeded_cache_path_sync(
+            &spec.package.name,
+            &spec.package.version,
+            &spec.package.tarball_url,
+        )
+        .map_err(|e| format!("{e:#}"));
+        self.handle_done(OpDone::SeededCache { spec, result });
     }
 
     fn ensure_download(&mut self, package: PackageFetch, waiter: Option<CloneSpec>) {
@@ -598,22 +594,33 @@ mod tests {
     #[test]
     fn ensure_download_dedupes_inflight_package() {
         let mut state = state();
-        let package = package("react", "18.2.0");
-        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let package = package("utoo-scheduler-test-react", "18.2.0");
+        let waiter = clone_spec(
+            "utoo-scheduler-test-react",
+            "18.2.0",
+            "/tmp/project/node_modules/utoo-scheduler-test-react",
+        );
 
         state.ensure_download(package.clone(), Some(waiter));
         state.ensure_download(package, None);
 
         assert_eq!(state.download_queue.len(), 1);
-        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+        assert_eq!(
+            state.download_waiters["utoo-scheduler-test-react@18.2.0"].len(),
+            1
+        );
     }
 
     #[test]
     fn download_completion_releases_slot_and_queues_extract() {
         let mut state = state();
-        let package = package("react", "18.2.0");
+        let package = package("utoo-scheduler-test-react", "18.2.0");
         let key = package.key();
-        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let waiter = clone_spec(
+            "utoo-scheduler-test-react",
+            "18.2.0",
+            "/tmp/project/node_modules/utoo-scheduler-test-react",
+        );
 
         state.download_active.insert(key.clone());
         state.download_waiters.insert(key.clone(), vec![waiter]);
@@ -632,9 +639,13 @@ mod tests {
     #[test]
     fn extract_completion_wakes_clone_waiters() {
         let mut state = state();
-        let key = "react@18.2.0".to_string();
-        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
-        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+        let key = "utoo-scheduler-test-react@18.2.0".to_string();
+        let waiter = clone_spec(
+            "utoo-scheduler-test-react",
+            "18.2.0",
+            "/tmp/project/node_modules/utoo-scheduler-test-react",
+        );
+        let cache_path = PathBuf::from("/tmp/cache/utoo-scheduler-test-react/18.2.0");
 
         state.extract_active.insert(key.clone());
         state.download_waiters.insert(key.clone(), vec![waiter]);
@@ -652,8 +663,12 @@ mod tests {
     #[tokio::test]
     async fn queue_clone_dedupes_inflight_target() {
         let mut state = state();
-        let target = PathBuf::from("/tmp/project/node_modules/react");
-        let spec = clone_spec("react", "18.2.0", target.to_string_lossy().as_ref());
+        let target = PathBuf::from("/tmp/project/node_modules/utoo-scheduler-test-react");
+        let spec = clone_spec(
+            "utoo-scheduler-test-react",
+            "18.2.0",
+            target.to_string_lossy().as_ref(),
+        );
         let (first, _first_rx) = oneshot::channel();
         let (second, _second_rx) = oneshot::channel();
 
@@ -661,6 +676,7 @@ mod tests {
         state.queue_clone(spec, Some(second));
 
         assert_eq!(state.clone_waiters[&target].len(), 2);
-        assert_eq!(state.ops.len(), 1);
+        assert!(state.ops.is_empty());
+        assert_eq!(state.download_queue.len(), 1);
     }
 }

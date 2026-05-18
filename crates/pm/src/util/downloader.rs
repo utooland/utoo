@@ -60,22 +60,14 @@ pub fn is_registry_tarball_url(url: &str) -> bool {
     matches!(url.parse::<Protocol>(), Ok(Protocol::Http))
 }
 
-/// Look up the cache path for a git-resolved package.
-///
-/// Git packages are cloned during BFS resolution (inside ruborist) and
-/// stored at `<cache_dir>/<name>/<commit_sha>/`.
-pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+pub fn git_cache_lookup_sync(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
     let commit_sha = tarball_url.split_once('#').map(|(_, frag)| frag)?;
     if commit_sha.contains("..") || commit_sha.contains('/') || commit_sha.contains('\\') {
         tracing::warn!("Suspicious commit SHA fragment in URL: {}", tarball_url);
         return None;
     }
-    let cache_dir = get_cache_dir();
-    let cache_path = cache_dir.join(name).join(commit_sha);
-    if crate::fs::try_exists(&cache_path.join("_resolved"))
-        .await
-        .unwrap_or(false)
-    {
+    let cache_path = get_cache_dir().join(name).join(commit_sha);
+    if cache_path.join("_resolved").try_exists().unwrap_or(false) {
         return Some(cache_path);
     }
     tracing::warn!(
@@ -86,17 +78,9 @@ pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> O
     None
 }
 
-/// Look up a ruborist-seeded cache slot at `<cache_dir>/<name>/<slot>/`.
-///
-/// Returns `Some(path)` only if the slot's `_resolved` marker exists —
-/// otherwise returns `None` so the caller can fall through to the next
-/// routing step (typically the registry download path).
-async fn slot_cache_lookup(name: &str, slot: String) -> Option<PathBuf> {
+fn slot_cache_lookup_sync(name: &str, slot: String) -> Option<PathBuf> {
     let cache_path = get_cache_dir().join(name).join(slot);
-    if crate::fs::try_exists(&cache_path.join("_resolved"))
-        .await
-        .unwrap_or(false)
-    {
+    if cache_path.join("_resolved").try_exists().unwrap_or(false) {
         Some(cache_path)
     } else {
         None
@@ -108,34 +92,32 @@ async fn slot_cache_lookup(name: &str, slot: String) -> Option<PathBuf> {
 /// The URL must already be absolute; call sites that read relative URLs
 /// from the lockfile are responsible for re-absolutizing against the
 /// project root before reaching the cloner.
-pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
+pub fn file_cache_lookup_sync(name: &str, tarball_url: &str) -> Option<PathBuf> {
     let abs_path = tarball_url.strip_prefix("file:")?;
-    slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await
+    slot_cache_lookup_sync(name, file_cache_slot(std::path::Path::new(abs_path)))
 }
 
 /// Look up the cache path for an HTTP(S) tarball dep.
-pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
-    slot_cache_lookup(name, http_cache_slot(tarball_url)).await
+pub fn http_tarball_cache_lookup_sync(name: &str, tarball_url: &str) -> Option<PathBuf> {
+    slot_cache_lookup_sync(name, http_cache_slot(tarball_url))
 }
 
 /// Resolve cache slots that may have been seeded during dependency resolution
 /// without falling through to registry download. `Ok(None)` means this is a
 /// registry-style HTTP tarball that should be downloaded into `<name>/<version>`.
-pub async fn resolve_seeded_cache_path(
+pub fn resolve_seeded_cache_path_sync(
     name: &str,
     version: &str,
     tarball_url: &str,
 ) -> Result<Option<PathBuf>> {
     match tarball_url.parse::<Protocol>() {
-        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url)
-            .await
+        Ok(Protocol::Git) => git_cache_lookup_sync(name, version, tarball_url)
             .map(Some)
             .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}")),
-        Ok(Protocol::File) => file_cache_lookup(name, tarball_url)
-            .await
+        Ok(Protocol::File) => file_cache_lookup_sync(name, tarball_url)
             .map(Some)
             .ok_or_else(|| anyhow::anyhow!("file tarball cache not found for {name}@{version}")),
-        _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
+        _ => Ok(http_tarball_cache_lookup_sync(name, tarball_url)),
     }
 }
 
