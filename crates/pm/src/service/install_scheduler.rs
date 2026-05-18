@@ -583,9 +583,16 @@ impl SchedulerState {
 }
 
 fn clone_concurrency_limit() -> usize {
+    // Clone workers are filesystem-heavy and already run on rayon. Keep them
+    // near CPU parallelism instead of oversubscribing the worker pool; the
+    // benchmark tracks whether this lowers warm-link ctx/sys time.
     std::thread::available_parallelism()
-        .map(|n| (n.get() * 2).clamp(4, 16))
-        .unwrap_or(8)
+        .map(|n| clone_concurrency_limit_for(n.get()))
+        .unwrap_or(4)
+}
+
+fn clone_concurrency_limit_for(parallelism: usize) -> usize {
+    parallelism.clamp(2, 8)
 }
 
 fn extract_concurrency_limit() -> usize {
@@ -739,5 +746,12 @@ mod tests {
         assert_eq!(state.clone_queue.len(), 1);
         assert_eq!(state.clone_queue[0].cache_path, cache_path);
         assert!(state.ops.is_empty());
+    }
+
+    #[test]
+    fn clone_concurrency_tracks_cpu_parallelism() {
+        assert_eq!(clone_concurrency_limit_for(1), 2);
+        assert_eq!(clone_concurrency_limit_for(4), 4);
+        assert_eq!(clone_concurrency_limit_for(16), 8);
     }
 }
