@@ -133,7 +133,7 @@ pub async fn get_server_module_options_context(
         .await?;
 
     let mut loader_conditions = BTreeSet::new();
-    loader_conditions.insert(WebpackLoaderBuiltinCondition::Browser);
+    loader_conditions.insert(WebpackLoaderBuiltinCondition::Node);
     loader_conditions.extend(mode.await?.webpack_loader_conditions());
 
     // A separate webpack rules will be applied to codes matching foreign_code_context_condition.
