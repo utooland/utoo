@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
@@ -106,6 +108,7 @@ struct DownloadedPackage {
 }
 
 type CloneResponder = oneshot::Sender<Result<(), String>>;
+type SchedulerOp = Pin<Box<dyn Future<Output = OpDone> + Send>>;
 
 enum Command {
     PrefetchDownload(PackageFetch),
@@ -249,7 +252,7 @@ struct SchedulerState {
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
     blocked_by_parent: HashMap<PathBuf, Vec<CloneSpec>>,
     clone_queue: VecDeque<ReadyClone>,
-    ops: FuturesUnordered<tokio::task::JoinHandle<OpDone>>,
+    ops: FuturesUnordered<SchedulerOp>,
 }
 
 impl SchedulerState {
@@ -306,10 +309,8 @@ impl SchedulerState {
                     }
                 }
                 done = self.ops.next(), if !self.ops.is_empty() => {
-                    match done {
-                        Some(Ok(done)) => self.handle_done(done),
-                        Some(Err(e)) => tracing::warn!("Install scheduler worker failed: {e}"),
-                        None => {}
+                    if let Some(done) = done {
+                        self.handle_done(done);
                     }
                 }
                 done = self.done_rx.recv() => {
@@ -378,7 +379,7 @@ impl SchedulerState {
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
         let task_spec = spec.clone();
-        self.ops.push(tokio::spawn(async move {
+        self.ops.push(Box::pin(async move {
             let result = resolve_seeded_cache_path(
                 &task_spec.package.name,
                 &task_spec.package.version,
@@ -442,7 +443,7 @@ impl SchedulerState {
             }
 
             self.download_active.insert(key.clone());
-            self.ops.push(tokio::spawn(async move {
+            self.ops.push(Box::pin(async move {
                 let result = download_bytes(&package.tarball_url)
                     .await
                     .map(DownloadOutcome::Bytes)
