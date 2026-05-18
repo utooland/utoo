@@ -354,7 +354,23 @@ impl SchedulerState {
             return;
         }
 
-        self.resolve_cache_for_clone(spec);
+        if self.has_download_state(&spec.package) {
+            self.ensure_download(spec.package.clone(), Some(spec));
+        } else {
+            self.resolve_cache_for_clone(spec);
+        }
+    }
+
+    fn has_download_state(&self, package: &PackageFetch) -> bool {
+        let key = package.key();
+        self.download_done.contains_key(&key)
+            || self.download_waiters.contains_key(&key)
+            || self.download_active.contains(&key)
+            || self.download_queue.iter().any(|queued| {
+                queued.name == package.name
+                    && queued.version == package.version
+                    && queued.tarball_url == package.tarball_url
+            })
     }
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
@@ -606,6 +622,24 @@ mod tests {
 
         assert_eq!(state.download_queue.len(), 1);
         assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+    }
+
+    #[test]
+    fn queue_clone_joins_existing_download_state_without_cache_probe() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let key = package.key();
+        let spec = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let target = spec.target.clone();
+        let (waiter, _rx) = oneshot::channel();
+
+        state.ensure_download(package, None);
+        state.queue_clone(spec, Some(waiter));
+
+        assert_eq!(state.download_queue.len(), 1);
+        assert_eq!(state.download_waiters[&key].len(), 1);
+        assert_eq!(state.clone_waiters[&target].len(), 1);
+        assert!(state.ops.is_empty());
     }
 
     #[test]
