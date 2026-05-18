@@ -260,7 +260,7 @@ impl SchedulerState {
             done_tx,
             done_rx,
             shutdown: false,
-            download_limit: get_manifests_concurrency_limit_sync().max(1),
+            download_limit: download_concurrency_limit(),
             extract_limit: extract_concurrency_limit(),
             clone_limit: clone_concurrency_limit(),
             download_done: HashMap::new(),
@@ -594,6 +594,10 @@ fn clone_concurrency_limit() -> usize {
     std::thread::available_parallelism()
         .map(|n| (n.get() * 2).clamp(4, 16))
         .unwrap_or(8)
+}
+
+fn download_concurrency_limit() -> usize {
+    get_manifests_concurrency_limit_sync().clamp(1, 64)
 }
 
 fn extract_concurrency_limit() -> usize {
