@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
@@ -118,18 +119,22 @@ enum OpDone {
     SeededCache {
         spec: CloneSpec,
         result: Result<Option<PathBuf>, String>,
+        elapsed: Option<Duration>,
     },
     Download {
         package: PackageFetch,
         result: Result<DownloadOutcome, String>,
+        elapsed: Option<Duration>,
     },
     Extract {
         key: String,
         result: Result<PathBuf, String>,
+        elapsed: Option<Duration>,
     },
     Clone {
         target: PathBuf,
         result: Result<(), String>,
+        elapsed: Option<Duration>,
     },
 }
 
@@ -234,6 +239,7 @@ impl InstallScheduler {
 struct SchedulerState {
     rx: mpsc::UnboundedReceiver<Command>,
     shutdown: bool,
+    stats_enabled: bool,
     download_limit: usize,
     extract_limit: usize,
     clone_limit: usize,
@@ -249,6 +255,7 @@ struct SchedulerState {
     blocked_by_parent: HashMap<PathBuf, Vec<CloneSpec>>,
     clone_queue: VecDeque<ReadyClone>,
     ops: FuturesUnordered<tokio::task::JoinHandle<OpDone>>,
+    stats: SchedulerStats,
 }
 
 impl SchedulerState {
@@ -256,6 +263,7 @@ impl SchedulerState {
         Self {
             rx,
             shutdown: false,
+            stats_enabled: std::env::var_os("UTOO_INSTALL_SCHEDULER_STATS").is_some(),
             download_limit: get_manifests_concurrency_limit_sync().max(1),
             extract_limit: extract_concurrency_limit(),
             clone_limit: clone_concurrency_limit(),
@@ -271,6 +279,7 @@ impl SchedulerState {
             blocked_by_parent: HashMap::new(),
             clone_queue: VecDeque::new(),
             ops: FuturesUnordered::new(),
+            stats: SchedulerStats::default(),
         }
     }
 
@@ -311,7 +320,14 @@ impl SchedulerState {
             }
         }
 
+        if self.stats_enabled {
+            self.stats.log();
+        }
         self.fail_pending("install scheduler stopped before work completed");
+    }
+
+    fn timer(&self) -> Option<Instant> {
+        self.stats_enabled.then(Instant::now)
     }
 
     fn is_idle(&self) -> bool {
@@ -359,6 +375,7 @@ impl SchedulerState {
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
         let task_spec = spec.clone();
+        let timer = self.timer();
         self.ops.push(tokio::spawn(async move {
             let result = resolve_seeded_cache_path(
                 &task_spec.package.name,
@@ -367,7 +384,11 @@ impl SchedulerState {
             )
             .await
             .map_err(|e| format!("{e:#}"));
-            OpDone::SeededCache { spec, result }
+            OpDone::SeededCache {
+                spec,
+                result,
+                elapsed: timer.map(|started| started.elapsed()),
+            }
         }));
     }
 
@@ -404,6 +425,7 @@ impl SchedulerState {
                 continue;
             }
 
+            let timer = self.timer();
             self.ops.push(tokio::spawn(async move {
                 let result = match registry_cache_lookup(&package.name, &package.version).await {
                     Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
@@ -413,7 +435,11 @@ impl SchedulerState {
                         .map_err(|e| format!("{e:#}")),
                     Err(e) => Err(format!("{e:#}")),
                 };
-                OpDone::Download { package, result }
+                OpDone::Download {
+                    package,
+                    result,
+                    elapsed: timer.map(|started| started.elapsed()),
+                }
             }));
         }
     }
@@ -432,6 +458,7 @@ impl SchedulerState {
                 continue;
             }
 
+            let timer = self.timer();
             self.ops.push(tokio::spawn(async move {
                 let result = extract_to_cache(
                     &downloaded.package.name,
@@ -440,7 +467,11 @@ impl SchedulerState {
                 )
                 .await
                 .map_err(|e| format!("{e:#}"));
-                OpDone::Extract { key, result }
+                OpDone::Extract {
+                    key,
+                    result,
+                    elapsed: timer.map(|started| started.elapsed()),
+                }
             }));
         }
     }
@@ -455,6 +486,7 @@ impl SchedulerState {
                 continue;
             }
 
+            let timer = self.timer();
             self.ops.push(tokio::spawn(async move {
                 let result = clone_package_from_cache(
                     &job.spec.package.name,
@@ -465,26 +497,51 @@ impl SchedulerState {
                 )
                 .await
                 .map_err(|e| format!("{e:#}"));
-                OpDone::Clone { target, result }
+                OpDone::Clone {
+                    target,
+                    result,
+                    elapsed: timer.map(|started| started.elapsed()),
+                }
             }));
         }
     }
 
     fn handle_done(&mut self, done: OpDone) {
         match done {
-            OpDone::SeededCache { spec, result } => match result {
-                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone { spec, cache_path }),
-                Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
-                Err(error) => self.complete_clone(spec.target, Err(error)),
-            },
-            OpDone::Download { package, result } => {
+            OpDone::SeededCache {
+                spec,
+                result,
+                elapsed,
+            } => {
+                self.stats.seeded_cache.record(elapsed);
+                match result {
+                    Ok(Some(cache_path)) => {
+                        self.stats.seeded_cache_hits += 1;
+                        self.clone_queue.push_back(ReadyClone { spec, cache_path });
+                    }
+                    Ok(None) => {
+                        self.stats.seeded_cache_misses += 1;
+                        self.ensure_download(spec.package.clone(), Some(spec));
+                    }
+                    Err(error) => self.complete_clone(spec.target, Err(error)),
+                }
+            }
+            OpDone::Download {
+                package,
+                result,
+                elapsed,
+            } => {
+                self.stats.download.record(elapsed);
                 let key = package.key();
                 self.download_active.remove(&key);
                 match result {
                     Ok(DownloadOutcome::Cached(cache_path)) => {
+                        self.stats.download_cache_hits += 1;
                         self.complete_download(key, Ok(cache_path));
                     }
                     Ok(DownloadOutcome::Bytes(bytes)) => {
+                        self.stats.download_network += 1;
+                        self.stats.downloaded_bytes += bytes.len() as u64;
                         self.extract_queue
                             .push_back(DownloadedPackage { package, bytes });
                     }
@@ -493,11 +550,21 @@ impl SchedulerState {
                     }
                 }
             }
-            OpDone::Extract { key, result } => {
+            OpDone::Extract {
+                key,
+                result,
+                elapsed,
+            } => {
+                self.stats.extract.record(elapsed);
                 self.extract_active.remove(&key);
                 self.complete_download(key, result);
             }
-            OpDone::Clone { target, result } => {
+            OpDone::Clone {
+                target,
+                result,
+                elapsed,
+            } => {
+                self.stats.clone.record(elapsed);
                 self.clone_active.remove(&target);
                 self.complete_clone(target, result);
             }
@@ -554,6 +621,56 @@ impl SchedulerState {
             for waiter in waiters {
                 let _ = waiter.send(Err(message.to_string()));
             }
+        }
+    }
+}
+
+#[derive(Default)]
+struct SchedulerStats {
+    seeded_cache: StageStats,
+    download: StageStats,
+    extract: StageStats,
+    clone: StageStats,
+    seeded_cache_hits: usize,
+    seeded_cache_misses: usize,
+    download_cache_hits: usize,
+    download_network: usize,
+    downloaded_bytes: u64,
+}
+
+impl SchedulerStats {
+    fn log(&self) {
+        tracing::info!(
+            target: "utoo::install_scheduler",
+            seeded_cache_count = self.seeded_cache.count,
+            seeded_cache_ms = self.seeded_cache.total.as_millis(),
+            seeded_cache_hits = self.seeded_cache_hits,
+            seeded_cache_misses = self.seeded_cache_misses,
+            download_count = self.download.count,
+            download_ms = self.download.total.as_millis(),
+            download_cache_hits = self.download_cache_hits,
+            download_network = self.download_network,
+            downloaded_mb = self.downloaded_bytes / 1024 / 1024,
+            extract_count = self.extract.count,
+            extract_ms = self.extract.total.as_millis(),
+            clone_count = self.clone.count,
+            clone_ms = self.clone.total.as_millis(),
+            "install scheduler stats"
+        );
+    }
+}
+
+#[derive(Default)]
+struct StageStats {
+    count: usize,
+    total: Duration,
+}
+
+impl StageStats {
+    fn record(&mut self, elapsed: Option<Duration>) {
+        if let Some(elapsed) = elapsed {
+            self.count += 1;
+            self.total += elapsed;
         }
     }
 }
@@ -621,6 +738,7 @@ mod tests {
         state.handle_done(OpDone::Download {
             package: package.clone(),
             result: Ok(DownloadOutcome::Bytes(Bytes::from_static(b"tgz"))),
+            elapsed: None,
         });
 
         assert!(!state.download_active.contains(&key));
@@ -642,6 +760,7 @@ mod tests {
         state.handle_done(OpDone::Extract {
             key: key.clone(),
             result: Ok(cache_path.clone()),
+            elapsed: None,
         });
 
         assert!(!state.extract_active.contains(&key));
