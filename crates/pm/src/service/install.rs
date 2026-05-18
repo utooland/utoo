@@ -116,6 +116,66 @@ fn prefetch_lock_downloads(
     }
 }
 
+fn parent_package_path(path: &str) -> Option<&str> {
+    let index = path.rfind("/node_modules/")?;
+    Some(&path[..index])
+}
+
+fn prefetch_lock_clones(
+    groups: &HashMap<usize, Vec<(String, Package)>>,
+    cwd: &Path,
+    omit: &HashSet<OmitType>,
+    scheduler: &super::install_scheduler::InstallScheduler,
+) {
+    let registry = get_registry();
+    let mut depths: Vec<_> = groups.keys().copied().collect();
+    depths.sort_unstable();
+
+    for depth in depths {
+        let Some(packages) = groups.get(&depth) else {
+            continue;
+        };
+
+        for (path, package) in packages {
+            if should_omit_package(package, omit) || package.link.is_some() {
+                continue;
+            }
+
+            let Some(resolved) = package.resolved.as_deref() else {
+                continue;
+            };
+            if !is_prefetchable_registry_tarball(resolved, &registry) {
+                continue;
+            }
+
+            if package
+                .cpu
+                .as_ref()
+                .is_some_and(|cpu| !is_cpu_compatible(cpu))
+                || package.os.as_ref().is_some_and(|os| !is_os_compatible(os))
+            {
+                continue;
+            }
+
+            let Some(version) = package.version.as_deref() else {
+                continue;
+            };
+            let name = package.get_name(path);
+            if name.is_empty() || name == "root" || name == "unknown" {
+                continue;
+            }
+
+            scheduler.prefetch_clone(
+                name,
+                version.to_string(),
+                resolved.to_string(),
+                cwd.join(path),
+                parent_package_path(path).map(|parent| cwd.join(parent)),
+            );
+        }
+    }
+}
+
 async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
@@ -126,6 +186,7 @@ async fn install_packages(
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
+    prefetch_lock_clones(groups, cwd, omit, scheduler);
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
@@ -510,6 +571,24 @@ mod tests {
             "file:../pkg.tgz",
             REGISTRY_NPMMIRROR
         ));
+    }
+
+    #[test]
+    fn test_parent_package_path() {
+        assert_eq!(parent_package_path("node_modules/lodash"), None);
+        assert_eq!(parent_package_path("node_modules/@scope/pkg"), None);
+        assert_eq!(
+            parent_package_path("node_modules/parent/node_modules/child"),
+            Some("node_modules/parent")
+        );
+        assert_eq!(
+            parent_package_path("node_modules/@scope/parent/node_modules/@scope/child"),
+            Some("node_modules/@scope/parent")
+        );
+        assert_eq!(
+            parent_package_path("packages/app/node_modules/parent/node_modules/child"),
+            Some("packages/app/node_modules/parent")
+        );
     }
 
     #[test]
