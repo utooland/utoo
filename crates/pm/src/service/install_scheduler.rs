@@ -9,7 +9,7 @@ use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
 use crate::util::cloner::{clone_count, clone_package_from_cache};
 use crate::util::downloader::{
-    download_bytes, download_stats, extract_to_cache, is_registry_tarball_url,
+    download_bytes, download_stats, extract_to_cache_sync, is_registry_tarball_url,
     registry_cache_lookup, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
@@ -233,6 +233,8 @@ impl InstallScheduler {
 
 struct SchedulerState {
     rx: mpsc::UnboundedReceiver<Command>,
+    done_tx: mpsc::UnboundedSender<OpDone>,
+    done_rx: mpsc::UnboundedReceiver<OpDone>,
     shutdown: bool,
     download_limit: usize,
     extract_limit: usize,
@@ -253,8 +255,11 @@ struct SchedulerState {
 
 impl SchedulerState {
     fn new(rx: mpsc::UnboundedReceiver<Command>) -> Self {
+        let (done_tx, done_rx) = mpsc::unbounded_channel();
         Self {
             rx,
+            done_tx,
+            done_rx,
             shutdown: false,
             download_limit: get_manifests_concurrency_limit_sync().max(1),
             extract_limit: extract_concurrency_limit(),
@@ -306,6 +311,11 @@ impl SchedulerState {
                         Some(Ok(done)) => self.handle_done(done),
                         Some(Err(e)) => tracing::warn!("Install scheduler worker failed: {e}"),
                         None => {}
+                    }
+                }
+                done = self.done_rx.recv(), if !self.extract_active.is_empty() => {
+                    if let Some(done) = done {
+                        self.handle_done(done);
                     }
                 }
             }
@@ -432,16 +442,16 @@ impl SchedulerState {
                 continue;
             }
 
-            self.ops.push(tokio::spawn(async move {
-                let result = extract_to_cache(
+            let done_tx = self.done_tx.clone();
+            rayon::spawn(move || {
+                let result = extract_to_cache_sync(
                     &downloaded.package.name,
                     &downloaded.package.version,
                     downloaded.bytes,
                 )
-                .await
                 .map_err(|e| format!("{e:#}"));
-                OpDone::Extract { key, result }
-            }));
+                let _ = done_tx.send(OpDone::Extract { key, result });
+            });
         }
     }
 
