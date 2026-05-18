@@ -24,6 +24,8 @@ use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
+use crate::util::registry::{REGISTRY_NPMJS, REGISTRY_NPMMIRROR};
+use crate::util::user_config::get_registry;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
@@ -61,6 +63,57 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     }
 
     false
+}
+
+fn is_prefetchable_registry_tarball(resolved: &str, registry: &str) -> bool {
+    [registry, REGISTRY_NPMJS, REGISTRY_NPMMIRROR]
+        .into_iter()
+        .map(|registry| registry.trim_end_matches('/'))
+        .any(|registry| {
+            resolved.starts_with(registry) && resolved[registry.len()..].starts_with('/')
+        })
+}
+
+fn prefetch_lock_downloads(
+    groups: &HashMap<usize, Vec<(String, Package)>>,
+    omit: &HashSet<OmitType>,
+    scheduler: &super::install_scheduler::InstallScheduler,
+) {
+    let registry = get_registry();
+
+    for packages in groups.values() {
+        for (path, package) in packages {
+            if should_omit_package(package, omit) || package.link.is_some() {
+                continue;
+            }
+
+            let Some(resolved) = package.resolved.as_deref() else {
+                continue;
+            };
+            if !is_prefetchable_registry_tarball(resolved, &registry) {
+                continue;
+            }
+
+            if package
+                .cpu
+                .as_ref()
+                .is_some_and(|cpu| !is_cpu_compatible(cpu))
+                || package.os.as_ref().is_some_and(|os| !is_os_compatible(os))
+            {
+                continue;
+            }
+
+            let Some(version) = package.version.as_deref() else {
+                continue;
+            };
+            let name = package.get_name(path);
+            if name.is_empty() || name == "root" || name == "unknown" {
+                continue;
+            }
+
+            scheduler.prefetch_download(name, version.to_string(), resolved.to_string());
+        }
+    }
 }
 
 async fn install_packages(
@@ -286,6 +339,7 @@ impl InstallService {
         };
 
         let groups = group_by_depth(&package_lock.packages);
+        prefetch_lock_downloads(&groups, omit, &scheduler);
 
         if !package_lock.packages.is_empty() {
             start_progress_bar();
@@ -432,6 +486,30 @@ mod tests {
         omit_dev_optional.insert(OmitType::Dev);
         omit_dev_optional.insert(OmitType::Optional);
         assert!(should_omit_package(&dev_optional_pkg, &omit_dev_optional));
+    }
+
+    #[test]
+    fn test_is_prefetchable_registry_tarball() {
+        assert!(is_prefetchable_registry_tarball(
+            "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            REGISTRY_NPMMIRROR
+        ));
+        assert!(is_prefetchable_registry_tarball(
+            "https://registry.example.com/@scope/pkg/-/pkg-1.0.0.tgz",
+            "https://registry.example.com"
+        ));
+        assert!(!is_prefetchable_registry_tarball(
+            "https://registry.example.com.evil/pkg/-/pkg-1.0.0.tgz",
+            "https://registry.example.com"
+        ));
+        assert!(!is_prefetchable_registry_tarball(
+            "https://example.com/pkg.tgz",
+            REGISTRY_NPMMIRROR
+        ));
+        assert!(!is_prefetchable_registry_tarball(
+            "file:../pkg.tgz",
+            REGISTRY_NPMMIRROR
+        ));
     }
 
     #[test]
