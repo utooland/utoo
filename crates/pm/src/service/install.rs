@@ -30,6 +30,13 @@ use utoo_ruborist::spec::SpecStr;
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
 
+struct FreshLockRegistryPackage {
+    path: String,
+    name: String,
+    version: String,
+    resolved: String,
+}
+
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     if omit.is_empty() {
@@ -126,9 +133,9 @@ fn has_registry_incoming_spec(packages: &HashMap<String, Package>, path: &str, n
     dependency_spec(parent, name).is_some_and(|spec| spec.is_registry_spec())
 }
 
-fn collect_fresh_lock_download_prefetches(
+fn collect_fresh_lock_registry_packages(
     packages: &HashMap<String, Package>,
-) -> Vec<(String, String, String)> {
+) -> Vec<FreshLockRegistryPackage> {
     let mut prefetches = Vec::new();
 
     for (path, package) in packages {
@@ -149,7 +156,12 @@ fn collect_fresh_lock_download_prefetches(
             continue;
         }
 
-        prefetches.push((name, version.clone(), resolved.clone()));
+        prefetches.push(FreshLockRegistryPackage {
+            path: path.clone(),
+            name,
+            version: version.clone(),
+            resolved: resolved.clone(),
+        });
     }
 
     prefetches
@@ -158,11 +170,16 @@ fn collect_fresh_lock_download_prefetches(
 fn prefetch_fresh_lock_downloads(
     package_lock: &utoo_ruborist::lock::PackageLock,
     scheduler: &super::install_scheduler::InstallScheduler,
-) {
-    for (name, version, resolved) in collect_fresh_lock_download_prefetches(&package_lock.packages)
-    {
-        scheduler.prefetch_download(name, version, resolved);
+) -> HashSet<String> {
+    let packages = collect_fresh_lock_registry_packages(&package_lock.packages);
+    let mut registry_paths = HashSet::with_capacity(packages.len());
+
+    for package in packages {
+        registry_paths.insert(package.path);
+        scheduler.prefetch_download(package.name, package.version, package.resolved);
     }
+
+    registry_paths
 }
 
 async fn install_packages(
@@ -170,6 +187,7 @@ async fn install_packages(
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    registry_clone_paths: &HashSet<String>,
 ) -> Result<()> {
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
@@ -233,16 +251,29 @@ async fn install_packages(
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
                     let scheduler = scheduler.clone();
+                    let is_registry_clone = registry_clone_paths.contains(&path);
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     clone_tasks.push(async move {
-                        if let Err(e) = scheduler
-                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
-                            .await
-                        {
+                        let clone_result = if is_registry_clone {
+                            scheduler
+                                .ensure_registry_clone(
+                                    name.clone(),
+                                    version,
+                                    resolved,
+                                    target_path.clone(),
+                                )
+                                .await
+                        } else {
+                            scheduler
+                                .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                                .await
+                        };
+
+                        if let Err(e) = clone_result {
                             if is_optional {
                                 tracing::warn!(
                                     "Optional dependency {name} failed (ignored): {e:#}"
@@ -353,7 +384,7 @@ impl InstallService {
         let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, used_scheduler_prefetch) = if use_fresh_lock {
+        let (package_lock, used_scheduler_prefetch, registry_clone_paths) = if use_fresh_lock {
             let lock = match load_package_lock_json_from_path(root_path).await {
                 Ok(lock) => lock,
                 Err(e) => {
@@ -361,8 +392,8 @@ impl InstallService {
                     return Err(e);
                 }
             };
-            prefetch_fresh_lock_downloads(&lock, &scheduler);
-            (lock, true)
+            let registry_clone_paths = prefetch_fresh_lock_downloads(&lock, &scheduler);
+            (lock, true, registry_clone_paths)
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
@@ -375,7 +406,7 @@ impl InstallService {
                 }
             };
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-            (lock, true)
+            (lock, true, HashSet::new())
         };
 
         let groups = group_by_depth(&package_lock.packages);
@@ -386,9 +417,10 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let install_result = install_packages(&groups, root_path, omit, &scheduler)
-            .await
-            .context("Failed to install packages");
+        let install_result =
+            install_packages(&groups, root_path, omit, &scheduler, &registry_clone_paths)
+                .await
+                .context("Failed to install packages");
 
         scheduler_handle.shutdown().await;
         if used_scheduler_prefetch {
@@ -622,11 +654,12 @@ mod tests {
             lock_pkg("file-tarball", "1.0.0", "file:./file-tarball.tgz"),
         );
 
-        let prefetches = collect_fresh_lock_download_prefetches(&packages);
+        let prefetches = collect_fresh_lock_registry_packages(&packages);
 
         assert_eq!(prefetches.len(), 1);
-        assert_eq!(prefetches[0].0, "react");
-        assert_eq!(prefetches[0].1, "18.2.0");
+        assert_eq!(prefetches[0].path, "node_modules/react");
+        assert_eq!(prefetches[0].name, "react");
+        assert_eq!(prefetches[0].version, "18.2.0");
     }
 
     #[test]
@@ -651,9 +684,13 @@ mod tests {
             ),
         );
 
-        let prefetches = collect_fresh_lock_download_prefetches(&packages);
+        let prefetches = collect_fresh_lock_registry_packages(&packages);
 
         assert_eq!(prefetches.len(), 1);
-        assert_eq!(prefetches[0].0, "child");
+        assert_eq!(
+            prefetches[0].path,
+            "node_modules/@scope/parent/node_modules/child"
+        );
+        assert_eq!(prefetches[0].name, "child");
     }
 }

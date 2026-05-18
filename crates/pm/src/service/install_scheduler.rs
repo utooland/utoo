@@ -93,6 +93,33 @@ struct CloneSpec {
     package: PackageFetch,
     target: PathBuf,
     parent: Option<PathBuf>,
+    cache_mode: CloneCacheMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloneCacheMode {
+    Seeded,
+    Registry,
+}
+
+impl CloneSpec {
+    fn new(package: PackageFetch, target: PathBuf, parent: Option<PathBuf>) -> Self {
+        Self {
+            package,
+            target,
+            parent,
+            cache_mode: CloneCacheMode::Seeded,
+        }
+    }
+
+    fn registry(package: PackageFetch, target: PathBuf) -> Self {
+        Self {
+            package,
+            target,
+            parent: None,
+            cache_mode: CloneCacheMode::Registry,
+        }
+    }
 }
 
 struct ReadyClone {
@@ -200,6 +227,7 @@ impl InstallScheduler {
             },
             target,
             parent,
+            cache_mode: CloneCacheMode::Seeded,
         }));
     }
 
@@ -213,15 +241,41 @@ impl InstallScheduler {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(Command::EnsureClone(
-                CloneSpec {
-                    package: PackageFetch {
+                CloneSpec::new(
+                    PackageFetch {
                         name,
                         version,
                         tarball_url,
                     },
                     target,
-                    parent: None,
-                },
+                    None,
+                ),
+                tx,
+            ))
+            .map_err(|_| anyhow!("install scheduler stopped"))?;
+        rx.await
+            .context("install scheduler stopped before clone completed")?
+            .map_err(anyhow::Error::msg)
+    }
+
+    pub(crate) async fn ensure_registry_clone(
+        &self,
+        name: String,
+        version: String,
+        tarball_url: String,
+        target: PathBuf,
+    ) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(Command::EnsureClone(
+                CloneSpec::registry(
+                    PackageFetch {
+                        name,
+                        version,
+                        tarball_url,
+                    },
+                    target,
+                ),
                 tx,
             ))
             .map_err(|_| anyhow!("install scheduler stopped"))?;
@@ -354,7 +408,14 @@ impl SchedulerState {
             return;
         }
 
-        self.resolve_cache_for_clone(spec);
+        self.prepare_clone(spec);
+    }
+
+    fn prepare_clone(&mut self, spec: CloneSpec) {
+        match spec.cache_mode {
+            CloneCacheMode::Seeded => self.resolve_cache_for_clone(spec),
+            CloneCacheMode::Registry => self.ensure_download(spec.package.clone(), Some(spec)),
+        }
     }
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
@@ -538,7 +599,7 @@ impl SchedulerState {
         if result.is_ok() {
             if let Some(children) = self.blocked_by_parent.remove(&target) {
                 for child in children {
-                    self.resolve_cache_for_clone(child);
+                    self.prepare_clone(child);
                 }
             }
         } else if let Some(children) = self.blocked_by_parent.remove(&target) {
@@ -583,11 +644,7 @@ mod tests {
     }
 
     fn clone_spec(name: &str, version: &str, target: &str) -> CloneSpec {
-        CloneSpec {
-            package: package(name, version),
-            target: PathBuf::from(target),
-            parent: None,
-        }
+        CloneSpec::new(package(name, version), PathBuf::from(target), None)
     }
 
     fn state() -> SchedulerState {
@@ -662,5 +719,18 @@ mod tests {
 
         assert_eq!(state.clone_waiters[&target].len(), 2);
         assert_eq!(state.ops.len(), 1);
+    }
+
+    #[test]
+    fn registry_clone_mode_skips_seeded_cache_probe() {
+        let mut state = state();
+        let target = PathBuf::from("/tmp/project/node_modules/react");
+        let spec = CloneSpec::registry(package("react", "18.2.0"), target);
+
+        state.queue_clone(spec, None);
+
+        assert!(state.ops.is_empty());
+        assert_eq!(state.download_queue.len(), 1);
+        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
     }
 }
