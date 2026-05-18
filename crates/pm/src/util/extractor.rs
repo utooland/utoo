@@ -39,7 +39,11 @@ pub fn extract_and_write_sync(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
 
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
-    extract_tarball_sync(gzip_bytes, estimated_size, dest)
+    // The install scheduler already parallelizes at the package level.
+    // Keeping each tarball's file writes serial avoids nested rayon fan-out
+    // where many package extract workers all enqueue per-file write chunks at
+    // the same time.
+    extract_tarball_sync(gzip_bytes, estimated_size, dest, FileWriteMode::Serial)
 }
 
 /// Estimate uncompressed size from gzip footer (last 4 bytes store original size mod 2^32).
@@ -69,6 +73,12 @@ struct ExtractedEntry {
     mode: u32,
 }
 
+#[derive(Clone, Copy)]
+enum FileWriteMode {
+    ParallelChunks,
+    Serial,
+}
+
 /// Extract tarball using libdeflate for decompression + rayon for parallel writes.
 ///
 /// Uses rayon::spawn (not tokio blocking pool) to avoid thread storms.
@@ -80,7 +90,12 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     rayon::spawn(move || {
-        let result = extract_tarball_sync(gzip_bytes, estimated_size, &dest_owned);
+        let result = extract_tarball_sync(
+            gzip_bytes,
+            estimated_size,
+            &dest_owned,
+            FileWriteMode::ParallelChunks,
+        );
         let _ = tx.send(result);
     });
 
@@ -88,7 +103,12 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 }
 
 /// Synchronous extraction: decompress + parse + parallel write, all on rayon.
-fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
+fn extract_tarball_sync(
+    gzip_bytes: Bytes,
+    estimated_size: usize,
+    dest: &Path,
+    file_write_mode: FileWriteMode,
+) -> Result<()> {
     use rayon::prelude::*;
     use std::collections::HashSet;
     use std::fs;
@@ -153,24 +173,38 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
     // 92% → 81%, with no observable wall-time loss vs par_iter (20s vs
     // 18s, within run-to-run noise).
     const WRITE_CHUNK_SIZE: usize = 64;
-    entries
-        .par_chunks(WRITE_CHUNK_SIZE)
-        .try_for_each(|chunk| -> Result<()> {
-            for entry in chunk {
-                let mut file = fs::File::create(&entry.path)
-                    .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
-                file.write_all(&entry.data)
-                    .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
+    let write_entry = |entry: &ExtractedEntry| -> Result<()> {
+        let mut file = fs::File::create(&entry.path)
+            .with_context(|| format!("Failed to create: {}", entry.path.display()))?;
+        file.write_all(&entry.data)
+            .with_context(|| format!("Failed to write: {}", entry.path.display()))?;
 
-                // Skip chmod for 0o644 (most files) — File::create() already produces
-                // this via umask (0o666 & ~0o022 = 0o644).
-                #[cfg(unix)]
-                if entry.mode != 0o644 {
-                    fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
-                }
+        // Skip chmod for 0o644 (most files) — File::create() already produces
+        // this via umask (0o666 & ~0o022 = 0o644).
+        #[cfg(unix)]
+        if entry.mode != 0o644 {
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode)).ok();
+        }
+        Ok(())
+    };
+
+    match file_write_mode {
+        FileWriteMode::ParallelChunks => {
+            entries
+                .par_chunks(WRITE_CHUNK_SIZE)
+                .try_for_each(|chunk| -> Result<()> {
+                    for entry in chunk {
+                        write_entry(entry)?;
+                    }
+                    Ok(())
+                })?;
+        }
+        FileWriteMode::Serial => {
+            for entry in &entries {
+                write_entry(entry)?;
             }
-            Ok(())
-        })?;
+        }
+    }
 
     // Set directory permissions
     #[cfg(unix)]
