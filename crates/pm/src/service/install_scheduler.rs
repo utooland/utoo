@@ -107,6 +107,11 @@ struct DownloadedPackage {
     bytes: Bytes,
 }
 
+struct CompletedClone {
+    target: PathBuf,
+    result: Result<(), String>,
+}
+
 type CloneResponder = oneshot::Sender<Result<(), String>>;
 type SchedulerOp = Pin<Box<dyn Future<Output = OpDone> + Send>>;
 
@@ -129,6 +134,7 @@ enum OpDone {
     Extract {
         key: String,
         result: Result<RegistryCacheEntry, String>,
+        completed_clones: Vec<CompletedClone>,
     },
     Clone {
         target: PathBuf,
@@ -374,7 +380,10 @@ impl SchedulerState {
 
     fn has_registry_download_state(&self, package: &PackageFetch) -> bool {
         let key = package.key();
-        self.download_done.contains_key(&key) || self.download_waiters.contains_key(&key)
+        self.download_done.contains_key(&key)
+            || self.download_waiters.contains_key(&key)
+            || self.download_active.contains(&key)
+            || self.extract_active.contains(&key)
     }
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
@@ -405,6 +414,12 @@ impl SchedulerState {
             if let Some(spec) = waiter {
                 waiters.push(spec);
             }
+            return;
+        }
+
+        if self.download_active.contains(&key) || self.extract_active.contains(&key) {
+            self.download_waiters
+                .insert(key, waiter.into_iter().collect());
             return;
         }
 
@@ -468,6 +483,7 @@ impl SchedulerState {
             }
 
             let done_tx = self.done_tx.clone();
+            let waiters = self.download_waiters.remove(&key).unwrap_or_default();
             rayon::spawn(move || {
                 let result = extract_to_cache_indexed_sync(
                     &downloaded.package.name,
@@ -475,7 +491,42 @@ impl SchedulerState {
                     downloaded.bytes,
                 )
                 .map_err(|e| format!("{e:#}"));
-                let _ = done_tx.send(OpDone::Extract { key, result });
+                let (result, completed_clones) = match result {
+                    Ok(cache) => {
+                        let completed_clones = waiters
+                            .into_iter()
+                            .map(|spec| {
+                                let target = spec.target.clone();
+                                let result = clone_package_from_cache_indexed_sync(
+                                    &spec.package.name,
+                                    &spec.package.version,
+                                    &spec.package.tarball_url,
+                                    &cache.path,
+                                    &spec.target,
+                                    cache.index.as_ref(),
+                                )
+                                .map_err(|e| format!("{e:#}"));
+                                CompletedClone { target, result }
+                            })
+                            .collect();
+                        (Ok(cache), completed_clones)
+                    }
+                    Err(error) => {
+                        let completed_clones = waiters
+                            .into_iter()
+                            .map(|spec| CompletedClone {
+                                target: spec.target,
+                                result: Err(error.clone()),
+                            })
+                            .collect();
+                        (Err(error), completed_clones)
+                    }
+                };
+                let _ = done_tx.send(OpDone::Extract {
+                    key,
+                    result,
+                    completed_clones,
+                });
             });
         }
     }
@@ -526,9 +577,32 @@ impl SchedulerState {
                     }
                 }
             }
-            OpDone::Extract { key, result } => {
+            OpDone::Extract {
+                key,
+                result,
+                completed_clones,
+            } => {
                 self.extract_active.remove(&key);
-                self.complete_download(key, result);
+                let late_waiters = self.download_waiters.remove(&key).unwrap_or_default();
+                match result {
+                    Ok(cache) => {
+                        self.download_done.insert(key, cache.clone());
+                        for spec in late_waiters {
+                            self.clone_queue.push_back(ReadyClone {
+                                spec,
+                                cache: cache.clone(),
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        for spec in late_waiters {
+                            self.complete_clone(spec.target, Err(error.clone()));
+                        }
+                    }
+                }
+                for completed in completed_clones {
+                    self.complete_clone(completed.target, completed.result);
+                }
             }
             OpDone::Clone { target, result } => {
                 self.clone_active.remove(&target);
@@ -700,11 +774,51 @@ mod tests {
         state.handle_done(OpDone::Extract {
             key: key.clone(),
             result: Ok(cache_entry(cache_path.clone())),
+            completed_clones: Vec::new(),
         });
 
         assert!(!state.extract_active.contains(&key));
         assert_eq!(state.download_done[&key].path, cache_path);
         assert_eq!(state.clone_queue.len(), 1);
+    }
+
+    #[test]
+    fn ensure_download_attaches_late_waiter_during_extract() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let key = package.key();
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+
+        state.extract_active.insert(key.clone());
+        state.ensure_download(package, Some(waiter));
+
+        assert!(state.download_queue.is_empty());
+        assert_eq!(state.download_waiters[&key].len(), 1);
+    }
+
+    #[test]
+    fn extract_completion_records_inline_clone_results() {
+        let mut state = state();
+        let key = "react@18.2.0".to_string();
+        let target = PathBuf::from("/tmp/project/node_modules/react");
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+
+        state.extract_active.insert(key.clone());
+        state.clone_waiters.insert(target.clone(), Vec::new());
+
+        state.handle_done(OpDone::Extract {
+            key: key.clone(),
+            result: Ok(cache_entry(cache_path.clone())),
+            completed_clones: vec![CompletedClone {
+                target: target.clone(),
+                result: Ok(()),
+            }],
+        });
+
+        assert!(!state.extract_active.contains(&key));
+        assert_eq!(state.download_done[&key].path, cache_path);
+        assert!(state.clone_done.contains(&target));
+        assert!(!state.clone_waiters.contains_key(&target));
     }
 
     #[tokio::test]
