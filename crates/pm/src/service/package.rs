@@ -1,7 +1,9 @@
 use crate::helper::workspace::find_workspaces;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
-use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
+use crate::util::logger::{
+    finish_progress_bar, inc_progress, log_progress, set_progress_length, start_progress_bar,
+};
 use anyhow::{Context, Result};
 use futures;
 use std::collections::HashMap;
@@ -242,7 +244,7 @@ impl PackageService {
             let scripts_start = std::time::Instant::now();
             if total_scripts > 0 {
                 start_progress_bar();
-                PROGRESS_BAR.set_length(total_scripts as u64);
+                set_progress_length(total_scripts as u64);
             }
 
             // Execute preinstall scripts in parallel
@@ -301,7 +303,7 @@ impl PackageService {
                             package.path.display(),
                             script
                         );
-                        PROGRESS_BAR.inc(1);
+                        inc_progress(1);
                         (is_optional, result)
                     }
                 })

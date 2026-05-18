@@ -105,6 +105,9 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
 
 /// Finish the progress bar, optionally appending a dimmed `[2.6s]` suffix.
 pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
+    if !*IS_TTY {
+        return;
+    }
     if PROGRESS_BAR.length().unwrap_or(0) == 0 {
         return;
     }
@@ -152,6 +155,20 @@ pub fn start_progress_bar() {
     );
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::stderr());
     PROGRESS_BAR.enable_steady_tick(Duration::from_millis(100));
+}
+
+pub fn set_progress_length(length: u64) {
+    if !*IS_TTY {
+        return;
+    }
+    PROGRESS_BAR.set_length(length);
+}
+
+pub fn inc_progress(delta: u64) {
+    if !*IS_TTY {
+        return;
+    }
+    PROGRESS_BAR.inc(delta);
 }
 
 pub fn log_progress(text: &str) {
