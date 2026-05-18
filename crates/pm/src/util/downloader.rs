@@ -177,6 +177,18 @@ pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<P
     }
 }
 
+/// Synchronous registry cache lookup for schedulers that need a cheap warm-cache
+/// fast path before deciding whether to spawn async network work.
+pub fn registry_cache_lookup_sync(name: &str, version: &str) -> Option<PathBuf> {
+    let cache_path = registry_cache_path(name, version);
+    if cache_path.join("_resolved").try_exists().unwrap_or(false) {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        Some(cache_path)
+    } else {
+        None
+    }
+}
+
 /// Extract already downloaded registry tarball bytes into the package cache.
 pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result<PathBuf> {
     let cache_path = registry_cache_path(name, version);

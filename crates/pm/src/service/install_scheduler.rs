@@ -10,7 +10,7 @@ use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 use crate::util::cloner::{clone_count, clone_package_from_cache_sync};
 use crate::util::downloader::{
     download_bytes, download_stats, extract_to_cache_sync, is_registry_tarball_url,
-    registry_cache_lookup, resolve_seeded_cache_path,
+    registry_cache_lookup_sync, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 
@@ -134,7 +134,6 @@ enum OpDone {
 }
 
 enum DownloadOutcome {
-    Cached(PathBuf),
     Bytes(Bytes),
 }
 
@@ -413,6 +412,12 @@ impl SchedulerState {
     }
 
     fn pump_downloads(&mut self) {
+        self.pump_downloads_with(|package| {
+            registry_cache_lookup_sync(&package.name, &package.version)
+        });
+    }
+
+    fn pump_downloads_with(&mut self, cache_lookup: impl Fn(&PackageFetch) -> Option<PathBuf>) {
         while self.download_active.len() < self.download_limit
             && self.extract_backlog() < self.download_limit
         {
@@ -420,19 +425,21 @@ impl SchedulerState {
                 break;
             };
             let key = package.key();
-            if self.download_done.contains_key(&key) || !self.download_active.insert(key.clone()) {
+            if self.download_done.contains_key(&key) || self.download_active.contains(&key) {
                 continue;
             }
 
+            if let Some(cache_path) = cache_lookup(&package) {
+                self.complete_download(key, Ok(cache_path));
+                continue;
+            }
+
+            self.download_active.insert(key.clone());
             self.ops.push(tokio::spawn(async move {
-                let result = match registry_cache_lookup(&package.name, &package.version).await {
-                    Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
-                    Ok(None) => download_bytes(&package.tarball_url)
-                        .await
-                        .map(DownloadOutcome::Bytes)
-                        .map_err(|e| format!("{e:#}")),
-                    Err(e) => Err(format!("{e:#}")),
-                };
+                let result = download_bytes(&package.tarball_url)
+                    .await
+                    .map(DownloadOutcome::Bytes)
+                    .map_err(|e| format!("{e:#}"));
                 OpDone::Download { package, result }
             }));
         }
@@ -504,9 +511,6 @@ impl SchedulerState {
                 let key = package.key();
                 self.download_active.remove(&key);
                 match result {
-                    Ok(DownloadOutcome::Cached(cache_path)) => {
-                        self.complete_download(key, Ok(cache_path));
-                    }
                     Ok(DownloadOutcome::Bytes(bytes)) => {
                         self.extract_queue
                             .push_back(DownloadedPackage { package, bytes });
@@ -650,6 +654,27 @@ mod tests {
         assert!(state.download_waiters.contains_key(&key));
         assert_eq!(state.extract_queue.len(), 1);
         assert_eq!(state.extract_queue[0].package.key(), key);
+    }
+
+    #[test]
+    fn download_cache_hit_completes_inline_without_worker() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let key = package.key();
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+
+        state.ensure_download(package.clone(), Some(waiter));
+        state.pump_downloads_with(|queued| {
+            assert_eq!(queued.key(), key);
+            Some(cache_path.clone())
+        });
+
+        assert!(state.download_queue.is_empty());
+        assert!(state.download_active.is_empty());
+        assert!(state.ops.is_empty());
+        assert_eq!(state.download_done[&key], cache_path);
+        assert_eq!(state.clone_queue.len(), 1);
     }
 
     #[test]
