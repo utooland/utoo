@@ -10,7 +10,7 @@ use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
-use super::extractor::extract_and_write;
+use super::extractor::{extract_and_write, extract_and_write_sync};
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
 
 // Global downloader client. Concurrency and duplicate work are controlled by
@@ -197,6 +197,23 @@ pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result
     Ok(cache_path)
 }
 
+/// Synchronous form of [`extract_to_cache`] for schedulers that already run
+/// extraction on a CPU/disk worker.
+pub fn extract_to_cache_sync(name: &str, version: &str, bytes: Bytes) -> Result<PathBuf> {
+    let cache_path = registry_cache_path(name, version);
+
+    if cache_path.join("_resolved").try_exists().unwrap_or(false) {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        return Ok(cache_path);
+    }
+
+    extract_and_write_sync(bytes, &cache_path)
+        .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
+
+    DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
+    Ok(cache_path)
+}
+
 /// Download tarball bytes with retries (network phase only).
 pub async fn download_bytes(url: &str) -> Result<Bytes> {
     let retry_count = AtomicU32::new(0);
@@ -276,6 +293,20 @@ mod tests {
         let content = crate::fs::read_to_string(dest.join("file.txt"))
             .await
             .unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_extract_and_write_sync() {
+        let tar_gz = create_tar_gz();
+        let temp_dir = TempDir::new().unwrap();
+        let dest = temp_dir.path().join("pkg");
+
+        extract_and_write_sync(Bytes::from(tar_gz), &dest).unwrap();
+
+        assert!(dest.join("_resolved").exists());
+        assert!(dest.join("file.txt").exists());
+        let content = std::fs::read_to_string(dest.join("file.txt")).unwrap();
         assert_eq!(content, "hello world");
     }
 
