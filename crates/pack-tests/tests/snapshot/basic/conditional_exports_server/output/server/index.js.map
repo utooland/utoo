@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/conditional_exports_server/node_modules/conditional-env/node.js"],"sourcesContent":["export const target = \"node\";\n"],"names":["target"],"mappings":";;;;AAAO,MAAMA,SAAS","ignoreList":[0]}},
+    {"offset": {"line": 17, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/conditional_exports_server/input/server.ts"],"sourcesContent":["import { target } from \"conditional-env/is-server\";\n\nconsole.log(`server:${target}`);\n"],"names":["console","log"],"mappings":";AAAA;;AAEAA,QAAQC,GAAG,CAAC,CAAC,OAAO,EAAE,uLAAM,EAAE"}}]
+}
