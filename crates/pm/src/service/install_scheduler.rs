@@ -241,7 +241,8 @@ struct SchedulerState {
     download_done: HashMap<String, PathBuf>,
     download_active: HashSet<String>,
     download_waiters: HashMap<String, Vec<CloneSpec>>,
-    download_queue: VecDeque<PackageFetch>,
+    download_demand_queue: VecDeque<PackageFetch>,
+    download_preload_queue: VecDeque<PackageFetch>,
     extract_active: HashSet<String>,
     extract_queue: VecDeque<DownloadedPackage>,
     clone_done: HashSet<PathBuf>,
@@ -266,7 +267,8 @@ impl SchedulerState {
             download_done: HashMap::new(),
             download_active: HashSet::new(),
             download_waiters: HashMap::new(),
-            download_queue: VecDeque::new(),
+            download_demand_queue: VecDeque::new(),
+            download_preload_queue: VecDeque::new(),
             extract_active: HashSet::new(),
             extract_queue: VecDeque::new(),
             clone_done: HashSet::new(),
@@ -324,7 +326,8 @@ impl SchedulerState {
     }
 
     fn is_idle(&self) -> bool {
-        self.download_queue.is_empty()
+        self.download_demand_queue.is_empty()
+            && self.download_preload_queue.is_empty()
             && self.extract_queue.is_empty()
             && self.clone_queue.is_empty()
             && self.download_active.is_empty()
@@ -400,15 +403,24 @@ impl SchedulerState {
         }
 
         if let Some(waiters) = self.download_waiters.get_mut(&key) {
+            let promote_to_demand = waiter.is_some() && !self.download_active.contains(&key);
             if let Some(spec) = waiter {
                 waiters.push(spec);
+            }
+            if promote_to_demand {
+                self.download_demand_queue.push_back(package);
             }
             return;
         }
 
+        let is_demand = waiter.is_some();
         self.download_waiters
             .insert(key, waiter.into_iter().collect());
-        self.download_queue.push_back(package);
+        if is_demand {
+            self.download_demand_queue.push_back(package);
+        } else {
+            self.download_preload_queue.push_back(package);
+        }
     }
 
     fn pump_downloads(&mut self) {
@@ -417,11 +429,18 @@ impl SchedulerState {
         });
     }
 
-    fn pump_downloads_with(&mut self, cache_lookup: impl Fn(&PackageFetch) -> Option<PathBuf>) {
+    fn pump_downloads_with(
+        &mut self,
+        mut cache_lookup: impl FnMut(&PackageFetch) -> Option<PathBuf>,
+    ) {
         while self.download_active.len() < self.download_limit
             && self.extract_backlog() < self.download_limit
         {
-            let Some(package) = self.download_queue.pop_front() else {
+            let Some(package) = self
+                .download_demand_queue
+                .pop_front()
+                .or_else(|| self.download_preload_queue.pop_front())
+            else {
                 break;
             };
             let key = package.key();
@@ -628,7 +647,8 @@ mod tests {
         state.ensure_download(package.clone(), Some(waiter));
         state.ensure_download(package, None);
 
-        assert_eq!(state.download_queue.len(), 1);
+        assert_eq!(state.download_demand_queue.len(), 1);
+        assert!(state.download_preload_queue.is_empty());
         assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
     }
 
@@ -667,11 +687,56 @@ mod tests {
             Some(cache_path.clone())
         });
 
-        assert!(state.download_queue.is_empty());
+        assert!(state.download_demand_queue.is_empty());
+        assert!(state.download_preload_queue.is_empty());
         assert!(state.download_active.is_empty());
         assert!(state.ops.is_empty());
         assert_eq!(state.download_done[&key], cache_path);
         assert_eq!(state.clone_queue.len(), 1);
+    }
+
+    #[test]
+    fn prefetch_download_uses_preload_queue() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+
+        state.ensure_download(package, None);
+
+        assert!(state.download_demand_queue.is_empty());
+        assert_eq!(state.download_preload_queue.len(), 1);
+        assert!(state.download_waiters["react@18.2.0"].is_empty());
+    }
+
+    #[test]
+    fn waiter_promotes_pending_preload_to_demand() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+
+        state.ensure_download(package.clone(), None);
+        state.ensure_download(package, Some(waiter));
+
+        assert_eq!(state.download_demand_queue.len(), 1);
+        assert_eq!(state.download_preload_queue.len(), 1);
+        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+    }
+
+    #[test]
+    fn pump_downloads_prefers_demand_over_preload() {
+        let mut state = state();
+        let preload = package("preload", "1.0.0");
+        let demand = package("demand", "1.0.0");
+        let waiter = clone_spec("demand", "1.0.0", "/tmp/project/node_modules/demand");
+        let mut seen = Vec::new();
+
+        state.ensure_download(preload, None);
+        state.ensure_download(demand, Some(waiter));
+        state.pump_downloads_with(|queued| {
+            seen.push(queued.key());
+            Some(PathBuf::from(format!("/tmp/cache/{}", queued.name)))
+        });
+
+        assert_eq!(seen.first().map(String::as_str), Some("demand@1.0.0"));
     }
 
     #[test]
@@ -719,7 +784,8 @@ mod tests {
         state.ensure_download(package, None);
         state.queue_clone(spec, None);
 
-        assert_eq!(state.download_queue.len(), 1);
+        assert_eq!(state.download_demand_queue.len(), 1);
+        assert_eq!(state.download_preload_queue.len(), 1);
         assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
         assert!(state.ops.is_empty());
     }
