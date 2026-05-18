@@ -10,7 +10,7 @@ use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 use crate::util::cloner::{clone_count, clone_package_from_cache};
 use crate::util::downloader::{
     download_bytes, download_stats, extract_to_cache, is_registry_tarball_url,
-    registry_cache_lookup, resolve_seeded_cache_path,
+    registry_cache_lookup, registry_cache_lookup_sync, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 
@@ -387,6 +387,14 @@ impl SchedulerState {
             return;
         }
 
+        if let Some(cache_path) = registry_cache_lookup_sync(&package.name, &package.version) {
+            self.download_done.insert(key, cache_path.clone());
+            if let Some(spec) = waiter {
+                self.clone_queue.push_back(ReadyClone { spec, cache_path });
+            }
+            return;
+        }
+
         self.download_waiters
             .insert(key, waiter.into_iter().collect());
         self.download_queue.push_back(package);
@@ -598,14 +606,21 @@ mod tests {
     #[test]
     fn ensure_download_dedupes_inflight_package() {
         let mut state = state();
-        let package = package("react", "18.2.0");
-        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let package = package("utoo-scheduler-test-react", "18.2.0");
+        let waiter = clone_spec(
+            "utoo-scheduler-test-react",
+            "18.2.0",
+            "/tmp/project/node_modules/utoo-scheduler-test-react",
+        );
 
         state.ensure_download(package.clone(), Some(waiter));
         state.ensure_download(package, None);
 
         assert_eq!(state.download_queue.len(), 1);
-        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+        assert_eq!(
+            state.download_waiters["utoo-scheduler-test-react@18.2.0"].len(),
+            1
+        );
     }
 
     #[test]
