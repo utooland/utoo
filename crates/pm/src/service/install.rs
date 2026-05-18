@@ -22,7 +22,8 @@ use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
-    PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
+    finish_progress_bar, inc_progress, log_progress, print_install_counts, set_progress_length,
+    start_progress_bar,
 };
 use crate::util::registry::{REGISTRY_NPMJS, REGISTRY_NPMMIRROR};
 use crate::util::user_config::get_registry;
@@ -142,7 +143,7 @@ async fn install_packages(
             for (path, package) in packages.iter() {
                 // Skip packages based on omit config
                 if should_omit_package(package, omit) {
-                    PROGRESS_BAR.inc(1);
+                    inc_progress(1);
                     continue;
                 }
                 let path = path.clone();
@@ -161,13 +162,13 @@ async fn install_packages(
                     if package.link.is_some() {
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
-                            PROGRESS_BAR.inc(1);
+                            inc_progress(1);
                             continue;
                         }
                         link(Path::new(&resolved), Path::new(&path))
                             .await
                             .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
-                        PROGRESS_BAR.inc(1);
+                        inc_progress(1);
                         continue;
                     }
 
@@ -175,14 +176,14 @@ async fn install_packages(
                     if let Some(ref cpu) = package.cpu
                         && !is_cpu_compatible(cpu)
                     {
-                        PROGRESS_BAR.inc(1);
+                        inc_progress(1);
                         continue;
                     }
 
                     if let Some(ref os) = package.os
                         && !is_os_compatible(os)
                     {
-                        PROGRESS_BAR.inc(1);
+                        inc_progress(1);
                         continue;
                     }
 
@@ -208,17 +209,17 @@ async fn install_packages(
                                 tracing::warn!(
                                     "Optional dependency {name} failed (ignored): {e:#}"
                                 );
-                                PROGRESS_BAR.inc(1);
+                                inc_progress(1);
                                 return Ok(());
                             }
                             return Err(e);
                         }
-                        PROGRESS_BAR.inc(1);
+                        inc_progress(1);
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
                 } else {
-                    PROGRESS_BAR.inc(1);
+                    inc_progress(1);
                 }
             }
         }
@@ -343,7 +344,7 @@ impl InstallService {
 
         if !package_lock.packages.is_empty() {
             start_progress_bar();
-            PROGRESS_BAR.set_length(package_lock.packages.len() as u64);
+            set_progress_length(package_lock.packages.len() as u64);
         }
 
         let link_start = Instant::now();
