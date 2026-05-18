@@ -31,7 +31,37 @@ pub fn clone_package_from_cache_sync(
     target_path: &Path,
 ) -> Result<()> {
     let is_git = is_git_url(tarball_url);
-    let fresh = clone_package_sync(cache_path, target_path, name, version, !is_git)?;
+    clone_package_from_source_sync(name, version, cache_path, target_path, !is_git)
+}
+
+/// Clone a registry package from `<cache>/<name>/<version>/`.
+///
+/// Registry tarballs normally extract into a fixed `package/` wrapper, so the
+/// scheduler can skip the generic `read_dir` source-discovery path on warm
+/// installs. Falls back to discovery if a cache entry was created by older or
+/// non-standard extraction logic.
+pub fn clone_registry_package_from_cache_sync(
+    name: &str,
+    version: &str,
+    cache_path: &Path,
+    target_path: &Path,
+) -> Result<()> {
+    let package_src = cache_path.join("package");
+    if package_src.is_dir() {
+        clone_package_from_source_sync(name, version, &package_src, target_path, false)
+    } else {
+        clone_package_from_source_sync(name, version, cache_path, target_path, true)
+    }
+}
+
+fn clone_package_from_source_sync(
+    name: &str,
+    version: &str,
+    source_path: &Path,
+    target_path: &Path,
+    find_real: bool,
+) -> Result<()> {
+    let fresh = clone_package_sync(source_path, target_path, name, version, find_real)?;
     if fresh {
         CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
     }
@@ -705,6 +735,37 @@ mod tests {
 
     fn create_package_json(name: &str, version: &str) -> String {
         format!(r#"{{"name": "{}", "version": "{}"}}"#, name, version)
+    }
+
+    #[test]
+    fn test_clone_registry_package_from_cache_sync_uses_package_dir() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache_dir = temp.path().join("cache/lodash/4.17.21");
+        let package_dir = cache_dir.join("package");
+        let other_dir = cache_dir.join("not-package");
+        let dst_dir = temp.path().join("node_modules/lodash");
+
+        std::fs::create_dir_all(&package_dir)?;
+        std::fs::write(
+            package_dir.join("package.json"),
+            create_package_json("lodash", "4.17.21"),
+        )?;
+        std::fs::write(package_dir.join("index.js"), "module.exports = 1")?;
+
+        std::fs::create_dir_all(&other_dir)?;
+        std::fs::write(
+            other_dir.join("package.json"),
+            create_package_json("wrong", "0.0.0"),
+        )?;
+        std::fs::write(other_dir.join("index.js"), "module.exports = 2")?;
+
+        clone_registry_package_from_cache_sync("lodash", "4.17.21", &cache_dir, &dst_dir)?;
+
+        assert_eq!(
+            std::fs::read_to_string(dst_dir.join("index.js"))?,
+            "module.exports = 1"
+        );
+        Ok(())
     }
 
     #[tokio::test]

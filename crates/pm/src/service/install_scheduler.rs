@@ -7,7 +7,9 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
-use crate::util::cloner::{clone_count, clone_package_from_cache_sync};
+use crate::util::cloner::{
+    clone_count, clone_package_from_cache_sync, clone_registry_package_from_cache_sync,
+};
 use crate::util::downloader::{
     download_bytes, download_stats, extract_to_cache_sync, is_registry_tarball_url,
     registry_cache_lookup_sync, resolve_seeded_cache_path,
@@ -95,9 +97,16 @@ struct CloneSpec {
     parent: Option<PathBuf>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CacheLayout {
+    Auto,
+    RegistryPackage,
+}
+
 struct ReadyClone {
     spec: CloneSpec,
     cache_path: PathBuf,
+    cache_layout: CacheLayout,
 }
 
 struct DownloadedPackage {
@@ -394,7 +403,11 @@ impl SchedulerState {
         let key = package.key();
         if let Some(cache_path) = self.download_done.get(&key).cloned() {
             if let Some(spec) = waiter {
-                self.clone_queue.push_back(ReadyClone { spec, cache_path });
+                self.clone_queue.push_back(ReadyClone {
+                    spec,
+                    cache_path,
+                    cache_layout: CacheLayout::RegistryPackage,
+                });
             }
             return;
         }
@@ -484,13 +497,21 @@ impl SchedulerState {
 
             let done_tx = self.done_tx.clone();
             rayon::spawn(move || {
-                let result = clone_package_from_cache_sync(
-                    &job.spec.package.name,
-                    &job.spec.package.version,
-                    &job.spec.package.tarball_url,
-                    &job.cache_path,
-                    &job.spec.target,
-                )
+                let result = match job.cache_layout {
+                    CacheLayout::Auto => clone_package_from_cache_sync(
+                        &job.spec.package.name,
+                        &job.spec.package.version,
+                        &job.spec.package.tarball_url,
+                        &job.cache_path,
+                        &job.spec.target,
+                    ),
+                    CacheLayout::RegistryPackage => clone_registry_package_from_cache_sync(
+                        &job.spec.package.name,
+                        &job.spec.package.version,
+                        &job.cache_path,
+                        &job.spec.target,
+                    ),
+                }
                 .map_err(|e| format!("{e:#}"));
                 let _ = done_tx.send(OpDone::Clone { target, result });
             });
@@ -500,7 +521,11 @@ impl SchedulerState {
     fn handle_done(&mut self, done: OpDone) {
         match done {
             OpDone::SeededCache { spec, result } => match result {
-                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone { spec, cache_path }),
+                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone {
+                    spec,
+                    cache_path,
+                    cache_layout: CacheLayout::Auto,
+                }),
                 Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
                 Err(error) => self.complete_clone(spec.target, Err(error)),
             },
@@ -537,6 +562,7 @@ impl SchedulerState {
                     self.clone_queue.push_back(ReadyClone {
                         spec,
                         cache_path: cache_path.clone(),
+                        cache_layout: CacheLayout::RegistryPackage,
                     });
                 }
             }
@@ -672,6 +698,10 @@ mod tests {
         assert!(state.ops.is_empty());
         assert_eq!(state.download_done[&key], cache_path);
         assert_eq!(state.clone_queue.len(), 1);
+        assert_eq!(
+            state.clone_queue[0].cache_layout,
+            CacheLayout::RegistryPackage
+        );
     }
 
     #[test]
@@ -692,6 +722,26 @@ mod tests {
         assert!(!state.extract_active.contains(&key));
         assert_eq!(state.download_done[&key], cache_path);
         assert_eq!(state.clone_queue.len(), 1);
+        assert_eq!(
+            state.clone_queue[0].cache_layout,
+            CacheLayout::RegistryPackage
+        );
+    }
+
+    #[test]
+    fn seeded_cache_hit_keeps_auto_layout() {
+        let mut state = state();
+        let spec = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+
+        state.handle_done(OpDone::SeededCache {
+            spec,
+            result: Ok(Some(cache_path.clone())),
+        });
+
+        assert_eq!(state.clone_queue.len(), 1);
+        assert_eq!(state.clone_queue[0].cache_path, cache_path);
+        assert_eq!(state.clone_queue[0].cache_layout, CacheLayout::Auto);
     }
 
     #[tokio::test]
@@ -738,6 +788,10 @@ mod tests {
 
         assert_eq!(state.clone_queue.len(), 1);
         assert_eq!(state.clone_queue[0].cache_path, cache_path);
+        assert_eq!(
+            state.clone_queue[0].cache_layout,
+            CacheLayout::RegistryPackage
+        );
         assert!(state.ops.is_empty());
     }
 }
