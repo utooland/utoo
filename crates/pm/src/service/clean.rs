@@ -160,6 +160,10 @@ pub async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &P
     }
 
     for nm_dir in &nm_dirs {
+        if !crate::fs::try_exists(nm_dir).await? {
+            tracing::debug!("Skipping missing node_modules: {}", nm_dir.display());
+            continue;
+        }
         remove_stale_entries(nm_dir).await?;
         remove_unused_packages(nm_dir, cwd, &valid_packages).await?;
     }
@@ -224,5 +228,17 @@ mod tests {
         assert!(is_legacy_npminstall("_utoo-cli@1.0.0@2.0.0"));
         assert!(!is_legacy_npminstall("lodash"));
         assert!(!is_legacy_npminstall("_lodash@1.0.0"));
+    }
+
+    #[tokio::test]
+    async fn test_clean_deps_skips_missing_node_modules() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        fs::write(temp_dir.path().join("package.json"), r#"{"name":"root"}"#).await?;
+
+        let groups = HashMap::new();
+        clean_deps(&groups, temp_dir.path()).await?;
+
+        assert!(!temp_dir.path().join("node_modules").exists());
+        Ok(())
     }
 }
