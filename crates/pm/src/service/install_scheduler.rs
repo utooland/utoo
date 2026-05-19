@@ -16,6 +16,10 @@ use crate::util::downloader::{
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 
+// Keep clone completions batched enough to reduce scheduler wakeups, while
+// avoiding long serial hardlink runs inside one rayon worker.
+const CLONE_BATCH_LIMIT: usize = 3;
+
 /// Build event receiver that forwards install prefetch work to the scheduler.
 pub(crate) struct InstallEventReceiver<R: EventReceiver> {
     scheduler: InstallScheduler,
@@ -130,9 +134,8 @@ enum OpDone {
         key: String,
         result: Result<RegistryCacheEntry, String>,
     },
-    Clone {
-        target: PathBuf,
-        result: Result<(), String>,
+    CloneBatch {
+        results: Vec<(PathBuf, Result<(), String>)>,
     },
 }
 
@@ -240,7 +243,7 @@ struct SchedulerState {
     shutdown: bool,
     download_limit: usize,
     extract_limit: usize,
-    clone_limit: usize,
+    clone_worker_limit: usize,
     download_done: HashMap<String, RegistryCacheEntry>,
     download_active: HashSet<String>,
     download_waiters: HashMap<String, Vec<CloneSpec>>,
@@ -249,6 +252,7 @@ struct SchedulerState {
     extract_queue: VecDeque<DownloadedPackage>,
     clone_done: HashSet<PathBuf>,
     clone_active: HashSet<PathBuf>,
+    clone_workers_active: usize,
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
     blocked_by_parent: HashMap<PathBuf, Vec<CloneSpec>>,
     clone_queue: VecDeque<ReadyClone>,
@@ -258,6 +262,7 @@ struct SchedulerState {
 impl SchedulerState {
     fn new(rx: mpsc::UnboundedReceiver<Command>) -> Self {
         let (done_tx, done_rx) = mpsc::unbounded_channel();
+        let clone_limit = clone_concurrency_limit();
         Self {
             rx,
             done_tx,
@@ -265,7 +270,7 @@ impl SchedulerState {
             shutdown: false,
             download_limit: get_manifests_concurrency_limit_sync().max(1),
             extract_limit: extract_concurrency_limit(),
-            clone_limit: clone_concurrency_limit(),
+            clone_worker_limit: clone_worker_limit(clone_limit),
             download_done: HashMap::new(),
             download_active: HashSet::new(),
             download_waiters: HashMap::new(),
@@ -274,6 +279,7 @@ impl SchedulerState {
             extract_queue: VecDeque::new(),
             clone_done: HashSet::new(),
             clone_active: HashSet::new(),
+            clone_workers_active: 0,
             clone_waiters: HashMap::new(),
             blocked_by_parent: HashMap::new(),
             clone_queue: VecDeque::new(),
@@ -331,6 +337,7 @@ impl SchedulerState {
             && self.download_active.is_empty()
             && self.extract_active.is_empty()
             && self.clone_active.is_empty()
+            && self.clone_workers_active == 0
             && self.ops.is_empty()
     }
 
@@ -481,7 +488,16 @@ impl SchedulerState {
     }
 
     fn pump_clones(&mut self) {
-        while self.clone_active.len() < self.clone_limit {
+        while self.clone_workers_active < self.clone_worker_limit {
+            if !self.spawn_clone_batch() {
+                break;
+            }
+        }
+    }
+
+    fn spawn_clone_batch(&mut self) -> bool {
+        let mut batch = Vec::new();
+        while batch.len() < CLONE_BATCH_LIMIT {
             let Some(job) = self.clone_queue.pop_front() else {
                 break;
             };
@@ -490,20 +506,35 @@ impl SchedulerState {
                 continue;
             }
 
-            let done_tx = self.done_tx.clone();
-            rayon::spawn(move || {
-                let result = clone_package_from_cache_indexed_sync(
-                    &job.spec.package.name,
-                    &job.spec.package.version,
-                    &job.spec.package.tarball_url,
-                    &job.cache.path,
-                    &job.spec.target,
-                    job.cache.index.as_ref(),
-                )
-                .map_err(|e| format!("{e:#}"));
-                let _ = done_tx.send(OpDone::Clone { target, result });
-            });
+            batch.push((target, job));
         }
+
+        if batch.is_empty() {
+            return false;
+        }
+
+        self.clone_workers_active += 1;
+        let done_tx = self.done_tx.clone();
+        rayon::spawn(move || {
+            let results = batch
+                .into_iter()
+                .map(|(target, job)| {
+                    let result = clone_package_from_cache_indexed_sync(
+                        &job.spec.package.name,
+                        &job.spec.package.version,
+                        &job.spec.package.tarball_url,
+                        &job.cache.path,
+                        &job.spec.target,
+                        job.cache.index.as_ref(),
+                    )
+                    .map_err(|e| format!("{e:#}"));
+                    (target, result)
+                })
+                .collect();
+            let _ = done_tx.send(OpDone::CloneBatch { results });
+        });
+
+        true
     }
 
     fn handle_done(&mut self, done: OpDone) {
@@ -530,9 +561,12 @@ impl SchedulerState {
                 self.extract_active.remove(&key);
                 self.complete_download(key, result);
             }
-            OpDone::Clone { target, result } => {
-                self.clone_active.remove(&target);
-                self.complete_clone(target, result);
+            OpDone::CloneBatch { results } => {
+                self.clone_workers_active = self.clone_workers_active.saturating_sub(1);
+                for (target, result) in results {
+                    self.clone_active.remove(&target);
+                    self.complete_clone(target, result);
+                }
             }
         }
     }
@@ -595,6 +629,13 @@ fn clone_concurrency_limit() -> usize {
     std::thread::available_parallelism()
         .map(|n| (n.get() * 2).clamp(4, 16))
         .unwrap_or(8)
+}
+
+fn clone_worker_limit(clone_limit: usize) -> usize {
+    clone_limit
+        .saturating_div(2)
+        .saturating_add(2)
+        .clamp(1, clone_limit.max(1))
 }
 
 fn extract_concurrency_limit() -> usize {
@@ -752,5 +793,13 @@ mod tests {
         assert_eq!(state.clone_queue.len(), 1);
         assert_eq!(state.clone_queue[0].cache.path, cache_path);
         assert!(state.ops.is_empty());
+    }
+
+    #[test]
+    fn clone_worker_limit_batches_clone_completion_without_serializing_all_clones() {
+        assert_eq!(clone_worker_limit(1), 1);
+        assert_eq!(clone_worker_limit(4), 4);
+        assert_eq!(clone_worker_limit(8), 6);
+        assert_eq!(clone_worker_limit(16), 10);
     }
 }
