@@ -109,6 +109,12 @@ struct ReadyClone {
 struct DownloadedPackage {
     package: PackageFetch,
     bytes: Bytes,
+    primary_clone: Option<CloneSpec>,
+}
+
+struct ExtractOutcome {
+    cache: RegistryCacheEntry,
+    primary_clone: Option<(PathBuf, Result<(), String>)>,
 }
 
 type CloneResponder = oneshot::Sender<Result<(), String>>;
@@ -132,7 +138,8 @@ enum OpDone {
     },
     Extract {
         key: String,
-        result: Result<RegistryCacheEntry, String>,
+        primary_target: Option<PathBuf>,
+        result: Result<ExtractOutcome, String>,
     },
     CloneBatch {
         results: Vec<(PathBuf, Result<(), String>)>,
@@ -476,13 +483,40 @@ impl SchedulerState {
 
             let done_tx = self.done_tx.clone();
             rayon::spawn(move || {
-                let result = extract_to_cache_indexed_sync(
-                    &downloaded.package.name,
-                    &downloaded.package.version,
-                    downloaded.bytes,
-                )
-                .map_err(|e| format!("{e:#}"));
-                let _ = done_tx.send(OpDone::Extract { key, result });
+                let primary_target = downloaded
+                    .primary_clone
+                    .as_ref()
+                    .map(|spec| spec.target.clone());
+                let result = (|| -> Result<ExtractOutcome, String> {
+                    let cache = extract_to_cache_indexed_sync(
+                        &downloaded.package.name,
+                        &downloaded.package.version,
+                        downloaded.bytes,
+                    )
+                    .map_err(|e| format!("{e:#}"))?;
+                    let primary_clone = downloaded.primary_clone.map(|spec| {
+                        let target = spec.target.clone();
+                        let result = clone_package_from_cache_indexed_sync(
+                            &spec.package.name,
+                            &spec.package.version,
+                            &spec.package.tarball_url,
+                            &cache.path,
+                            &spec.target,
+                            cache.index.as_ref(),
+                        )
+                        .map_err(|e| format!("{e:#}"));
+                        (target, result)
+                    });
+                    Ok(ExtractOutcome {
+                        cache,
+                        primary_clone,
+                    })
+                })();
+                let _ = done_tx.send(OpDone::Extract {
+                    key,
+                    primary_target,
+                    result,
+                });
             });
         }
     }
@@ -574,17 +608,38 @@ impl SchedulerState {
                 self.download_active.remove(&key);
                 match result {
                     Ok(DownloadOutcome::Bytes(bytes)) => {
-                        self.extract_queue
-                            .push_back(DownloadedPackage { package, bytes });
+                        let primary_clone = self.take_primary_extract_clone(&key);
+                        self.extract_queue.push_back(DownloadedPackage {
+                            package,
+                            bytes,
+                            primary_clone,
+                        });
                     }
                     Err(error) => {
                         self.complete_download(key, Err(error));
                     }
                 }
             }
-            OpDone::Extract { key, result } => {
+            OpDone::Extract {
+                key,
+                primary_target,
+                result,
+            } => {
                 self.extract_active.remove(&key);
-                self.complete_download(key, result);
+                match result {
+                    Ok(outcome) => {
+                        self.complete_download(key, Ok(outcome.cache));
+                        if let Some((target, result)) = outcome.primary_clone {
+                            self.complete_clone(target, result);
+                        }
+                    }
+                    Err(error) => {
+                        self.complete_download(key, Err(error.clone()));
+                        if let Some(target) = primary_target {
+                            self.complete_clone(target, Err(error));
+                        }
+                    }
+                }
             }
             OpDone::CloneBatch { results } => {
                 self.clone_workers_active = self.clone_workers_active.saturating_sub(1);
@@ -614,6 +669,18 @@ impl SchedulerState {
                 }
             }
         }
+    }
+
+    fn take_primary_extract_clone(&mut self, key: &str) -> Option<CloneSpec> {
+        let waiters = self.download_waiters.get_mut(key)?;
+        if waiters.is_empty() {
+            return None;
+        }
+        let index = waiters
+            .iter()
+            .position(|spec| self.blocked_by_parent.contains_key(&spec.target))
+            .unwrap_or(0);
+        Some(waiters.remove(index))
     }
 
     fn complete_clone(&mut self, target: PathBuf, result: Result<(), String>) {
@@ -735,8 +802,10 @@ mod tests {
 
         assert!(!state.download_active.contains(&key));
         assert!(state.download_waiters.contains_key(&key));
+        assert!(state.download_waiters[&key].is_empty());
         assert_eq!(state.extract_queue.len(), 1);
         assert_eq!(state.extract_queue[0].package.key(), key);
+        assert!(state.extract_queue[0].primary_clone.is_some());
     }
 
     #[test]
@@ -772,11 +841,45 @@ mod tests {
 
         state.handle_done(OpDone::Extract {
             key: key.clone(),
-            result: Ok(cache_entry(cache_path.clone())),
+            primary_target: None,
+            result: Ok(ExtractOutcome {
+                cache: cache_entry(cache_path.clone()),
+                primary_clone: None,
+            }),
         });
 
         assert!(!state.extract_active.contains(&key));
         assert_eq!(state.download_done[&key].path, cache_path);
+        assert_eq!(state.clone_queue.len(), 1);
+    }
+
+    #[test]
+    fn extract_completion_finishes_primary_clone_and_queues_remaining_waiters() {
+        let mut state = state();
+        let key = "react@18.2.0".to_string();
+        let primary_target = PathBuf::from("/tmp/project/node_modules/react");
+        let remaining = clone_spec(
+            "react",
+            "18.2.0",
+            "/tmp/project/node_modules/other/node_modules/react",
+        );
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+
+        state.extract_active.insert(key.clone());
+        state.download_waiters.insert(key.clone(), vec![remaining]);
+
+        state.handle_done(OpDone::Extract {
+            key: key.clone(),
+            primary_target: Some(primary_target.clone()),
+            result: Ok(ExtractOutcome {
+                cache: cache_entry(cache_path.clone()),
+                primary_clone: Some((primary_target.clone(), Ok(()))),
+            }),
+        });
+
+        assert!(!state.extract_active.contains(&key));
+        assert_eq!(state.download_done[&key].path, cache_path);
+        assert!(state.clone_done.contains(&primary_target));
         assert_eq!(state.clone_queue.len(), 1);
     }
 
