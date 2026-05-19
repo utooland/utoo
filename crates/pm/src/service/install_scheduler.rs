@@ -106,6 +106,12 @@ struct ReadyClone {
     cache: RegistryCacheEntry,
 }
 
+struct CloneBatchJob {
+    target: PathBuf,
+    ready: ReadyClone,
+    flush_on_complete: bool,
+}
+
 struct DownloadedPackage {
     package: PackageFetch,
     bytes: Bytes,
@@ -133,6 +139,10 @@ enum OpDone {
     Extract {
         key: String,
         result: Result<RegistryCacheEntry, String>,
+    },
+    CloneProgress {
+        target: PathBuf,
+        result: Result<(), String>,
     },
     CloneBatch {
         results: Vec<(PathBuf, Result<(), String>)>,
@@ -506,17 +516,25 @@ impl SchedulerState {
         rayon::spawn(move || {
             let results = batch
                 .into_iter()
-                .map(|(target, job)| {
+                .filter_map(|batch_job| {
                     let result = clone_package_from_cache_indexed_sync(
-                        &job.spec.package.name,
-                        &job.spec.package.version,
-                        &job.spec.package.tarball_url,
-                        &job.cache.path,
-                        &job.spec.target,
-                        job.cache.index.as_ref(),
+                        &batch_job.ready.spec.package.name,
+                        &batch_job.ready.spec.package.version,
+                        &batch_job.ready.spec.package.tarball_url,
+                        &batch_job.ready.cache.path,
+                        &batch_job.ready.spec.target,
+                        batch_job.ready.cache.index.as_ref(),
                     )
                     .map_err(|e| format!("{e:#}"));
-                    (target, result)
+                    if batch_job.flush_on_complete {
+                        let _ = done_tx.send(OpDone::CloneProgress {
+                            target: batch_job.target,
+                            result,
+                        });
+                        None
+                    } else {
+                        Some((batch_job.target, result))
+                    }
                 })
                 .collect();
             let _ = done_tx.send(OpDone::CloneBatch { results });
@@ -525,7 +543,7 @@ impl SchedulerState {
         true
     }
 
-    fn take_clone_batch(&mut self) -> Vec<(PathBuf, ReadyClone)> {
+    fn take_clone_batch(&mut self) -> Vec<CloneBatchJob> {
         let mut batch = Vec::new();
         while batch.len() < CLONE_BATCH_LIMIT {
             let Some(job) = self.pop_next_clone_job() else {
@@ -536,14 +554,15 @@ impl SchedulerState {
                 continue;
             }
 
-            // Parent clones unblock nested dependency placement. Keep them out
-            // of multi-package batches so their children can enter the queue as
-            // soon as the parent materializes.
-            let unblocks_children = self.blocked_by_parent.contains_key(&target);
-            batch.push((target, job));
-            if unblocks_children {
-                break;
-            }
+            // Parent clones unblock nested dependency placement. Flush their
+            // completion immediately from the worker, while keeping leaf clones
+            // batched to preserve the lower scheduler wakeup count.
+            let flush_on_complete = self.blocked_by_parent.contains_key(&target);
+            batch.push(CloneBatchJob {
+                target,
+                ready: job,
+                flush_on_complete,
+            });
         }
         batch
     }
@@ -585,6 +604,10 @@ impl SchedulerState {
             OpDone::Extract { key, result } => {
                 self.extract_active.remove(&key);
                 self.complete_download(key, result);
+            }
+            OpDone::CloneProgress { target, result } => {
+                self.clone_active.remove(&target);
+                self.complete_clone(target, result);
             }
             OpDone::CloneBatch { results } => {
                 self.clone_workers_active = self.clone_workers_active.saturating_sub(1);
@@ -836,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn clone_batch_prioritizes_parent_unblockers() {
+    fn clone_batch_prioritizes_and_flushes_parent_unblockers() {
         let mut state = state();
         let leaf = ready_clone("leaf", "1.0.0", "/tmp/project/node_modules/leaf");
         let parent = ready_clone("parent", "1.0.0", "/tmp/project/node_modules/parent");
@@ -855,14 +878,16 @@ mod tests {
 
         let batch = state.take_clone_batch();
 
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].0, parent_target);
-        assert!(state.clone_active.contains(&parent_target));
-        assert_eq!(state.clone_queue.len(), 1);
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].target, parent_target);
+        assert!(batch[0].flush_on_complete);
         assert_eq!(
-            state.clone_queue[0].spec.target,
+            batch[1].target,
             PathBuf::from("/tmp/project/node_modules/leaf")
         );
+        assert!(!batch[1].flush_on_complete);
+        assert!(state.clone_active.contains(&parent_target));
+        assert!(state.clone_queue.is_empty());
     }
 
     #[test]
@@ -885,5 +910,22 @@ mod tests {
 
         assert_eq!(batch.len(), CLONE_BATCH_LIMIT);
         assert_eq!(state.clone_queue.len(), 1);
+    }
+
+    #[test]
+    fn clone_progress_completion_keeps_worker_slot_active() {
+        let mut state = state();
+        let target = PathBuf::from("/tmp/project/node_modules/parent");
+        state.clone_workers_active = 1;
+        state.clone_active.insert(target.clone());
+
+        state.handle_done(OpDone::CloneProgress {
+            target: target.clone(),
+            result: Ok(()),
+        });
+
+        assert_eq!(state.clone_workers_active, 1);
+        assert!(!state.clone_active.contains(&target));
+        assert!(state.clone_done.contains(&target));
     }
 }
