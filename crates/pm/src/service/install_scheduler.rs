@@ -243,6 +243,7 @@ struct SchedulerState {
     shutdown: bool,
     download_limit: usize,
     extract_limit: usize,
+    extract_backlog_limit: usize,
     clone_worker_limit: usize,
     download_done: HashMap<String, RegistryCacheEntry>,
     download_active: HashSet<String>,
@@ -263,13 +264,15 @@ impl SchedulerState {
     fn new(rx: mpsc::UnboundedReceiver<Command>) -> Self {
         let (done_tx, done_rx) = mpsc::unbounded_channel();
         let clone_limit = clone_concurrency_limit();
+        let extract_limit = extract_concurrency_limit();
         Self {
             rx,
             done_tx,
             done_rx,
             shutdown: false,
             download_limit: get_manifests_concurrency_limit_sync().max(1),
-            extract_limit: extract_concurrency_limit(),
+            extract_limit,
+            extract_backlog_limit: extract_backlog_limit(extract_limit),
             clone_worker_limit: clone_worker_limit(clone_limit),
             download_done: HashMap::new(),
             download_active: HashSet::new(),
@@ -428,7 +431,7 @@ impl SchedulerState {
 
     fn pump_downloads_with(&mut self, cache_lookup: impl Fn(&PackageFetch) -> Option<PathBuf>) {
         while self.download_active.len() < self.download_limit
-            && self.extract_backlog() < self.download_limit
+            && self.extract_backlog() < self.extract_backlog_limit
         {
             let Some(package) = self.download_queue.pop_front() else {
                 break;
@@ -669,6 +672,10 @@ fn extract_concurrency_limit() -> usize {
         .unwrap_or(4)
 }
 
+fn extract_backlog_limit(extract_limit: usize) -> usize {
+    extract_limit.saturating_mul(4).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -833,6 +840,13 @@ mod tests {
         assert_eq!(clone_worker_limit(4), 4);
         assert_eq!(clone_worker_limit(8), 6);
         assert_eq!(clone_worker_limit(16), 10);
+    }
+
+    #[test]
+    fn extract_backlog_limit_keeps_downloaded_bytes_bounded() {
+        assert_eq!(extract_backlog_limit(0), 1);
+        assert_eq!(extract_backlog_limit(2), 8);
+        assert_eq!(extract_backlog_limit(8), 32);
     }
 
     #[test]
