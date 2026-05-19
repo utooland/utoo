@@ -450,13 +450,14 @@ impl SchedulerState {
             }
 
             self.download_active.insert(key.clone());
-            self.ops.push(Box::pin(async move {
+            let done_tx = self.done_tx.clone();
+            tokio::spawn(async move {
                 let result = download_bytes(&package.tarball_url)
                     .await
                     .map(DownloadOutcome::Bytes)
                     .map_err(|e| format!("{e:#}"));
-                OpDone::Download { package, result }
-            }));
+                let _ = done_tx.send(OpDone::Download { package, result });
+            });
         }
     }
 
