@@ -51,11 +51,10 @@ pub(crate) fn extract_and_write_indexed_sync(
         .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
 
     let estimated_size = estimate_uncompressed_size(&gzip_bytes);
-    // The install scheduler already parallelizes at the package level.
-    // Keeping each tarball's file writes serial avoids nested rayon fan-out
-    // where many package extract workers all enqueue per-file write chunks at
-    // the same time.
-    extract_tarball_sync(gzip_bytes, estimated_size, dest, FileWriteMode::Serial)
+    // The install scheduler already bounds package-level extract concurrency.
+    // Reuse the bounded chunk writer so large tarballs do not monopolize one
+    // extract worker while still avoiding per-file fan-out.
+    extract_tarball_sync(gzip_bytes, estimated_size, dest)
 }
 
 /// Estimate uncompressed size from gzip footer (last 4 bytes store original size mod 2^32).
@@ -86,12 +85,6 @@ struct ExtractedEntry {
     mode: u32,
 }
 
-#[derive(Clone, Copy)]
-enum FileWriteMode {
-    ParallelChunks,
-    Serial,
-}
-
 /// Extract tarball using libdeflate for decompression + rayon for parallel writes.
 ///
 /// Uses rayon::spawn (not tokio blocking pool) to avoid thread storms.
@@ -103,12 +96,7 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     rayon::spawn(move || {
-        let result = extract_tarball_sync(
-            gzip_bytes,
-            estimated_size,
-            &dest_owned,
-            FileWriteMode::ParallelChunks,
-        );
+        let result = extract_tarball_sync(gzip_bytes, estimated_size, &dest_owned);
         let _ = tx.send(result);
     });
 
@@ -122,7 +110,6 @@ fn extract_tarball_sync(
     gzip_bytes: Bytes,
     estimated_size: usize,
     dest: &Path,
-    file_write_mode: FileWriteMode,
 ) -> Result<Option<ExtractedPackageIndex>> {
     use rayon::prelude::*;
     use std::collections::HashSet;
@@ -203,23 +190,14 @@ fn extract_tarball_sync(
         Ok(())
     };
 
-    match file_write_mode {
-        FileWriteMode::ParallelChunks => {
-            entries
-                .par_chunks(WRITE_CHUNK_SIZE)
-                .try_for_each(|chunk| -> Result<()> {
-                    for entry in chunk {
-                        write_entry(entry)?;
-                    }
-                    Ok(())
-                })?;
-        }
-        FileWriteMode::Serial => {
-            for entry in &entries {
+    entries
+        .par_chunks(WRITE_CHUNK_SIZE)
+        .try_for_each(|chunk| -> Result<()> {
+            for entry in chunk {
                 write_entry(entry)?;
             }
-        }
-    }
+            Ok(())
+        })?;
 
     // Set directory permissions
     #[cfg(unix)]
