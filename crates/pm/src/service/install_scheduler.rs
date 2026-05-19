@@ -464,8 +464,19 @@ impl SchedulerState {
         self.extract_queue.len() + self.extract_active.len()
     }
 
+    fn effective_extract_limit(&self) -> usize {
+        if self.clone_queue.is_empty() && self.clone_workers_active == 0 {
+            self.extract_limit
+        } else {
+            // Extract and clone both run blocking filesystem work on rayon.
+            // Once materialize has ready work, keep new cache writes from
+            // filling every extract slot and delaying clone progress.
+            self.extract_limit.saturating_div(2).max(1)
+        }
+    }
+
     fn pump_extracts(&mut self) {
-        while self.extract_active.len() < self.extract_limit {
+        while self.extract_active.len() < self.effective_extract_limit() {
             let Some(downloaded) = self.extract_queue.pop_front() else {
                 break;
             };
@@ -673,6 +684,13 @@ mod tests {
         RegistryCacheEntry { path, index: None }
     }
 
+    fn ready_clone(name: &str, version: &str, target: &str) -> ReadyClone {
+        ReadyClone {
+            spec: clone_spec(name, version, target),
+            cache: cache_entry(PathBuf::from(format!("/tmp/cache/{name}/{version}"))),
+        }
+    }
+
     #[test]
     fn ensure_download_dedupes_inflight_package() {
         let mut state = state();
@@ -801,5 +819,31 @@ mod tests {
         assert_eq!(clone_worker_limit(4), 4);
         assert_eq!(clone_worker_limit(8), 6);
         assert_eq!(clone_worker_limit(16), 10);
+    }
+
+    #[test]
+    fn extract_limit_uses_full_capacity_without_clone_work() {
+        let mut state = state();
+        state.extract_limit = 8;
+
+        assert_eq!(state.effective_extract_limit(), 8);
+    }
+
+    #[test]
+    fn extract_limit_reserves_capacity_when_clone_work_is_ready_or_active() {
+        let mut state = state();
+        state.extract_limit = 8;
+        state.clone_queue.push_back(ready_clone(
+            "react",
+            "18.2.0",
+            "/tmp/project/node_modules/react",
+        ));
+
+        assert_eq!(state.effective_extract_limit(), 4);
+
+        state.clone_queue.clear();
+        state.clone_workers_active = 1;
+
+        assert_eq!(state.effective_extract_limit(), 4);
     }
 }
