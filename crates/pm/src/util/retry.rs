@@ -27,6 +27,10 @@ impl std::error::Error for RetryableError {}
 pub fn build_dns_cached_client() -> reqwest::Client {
     client_builder()
         .connect_timeout(std::time::Duration::from_secs(5)) // TLS + TCP handshake
+        // Match the resolver HTTP client: tarball installs issue many
+        // independent large responses, so avoiding HTTP/2 multiplexing keeps
+        // one slow body read from stalling unrelated downloads.
+        .http1_only()
         .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
         // No total timeout - large files (e.g. node binary ~100MB) need longer download time
         // No pool_max_idle_per_host - let reqwest manage connections freely
