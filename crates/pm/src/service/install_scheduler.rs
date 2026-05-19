@@ -14,7 +14,7 @@ use crate::util::downloader::{
     RegistryCacheEntry, download_bytes, download_stats, extract_to_cache_indexed_sync,
     is_registry_tarball_url, registry_cache_lookup_sync, resolve_seeded_cache_path,
 };
-use crate::util::user_config::get_manifests_concurrency_limit_sync;
+use crate::util::user_config::get_install_tarball_concurrency_limit_sync;
 
 // Keep clone completions batched enough to reduce scheduler wakeups, while
 // avoiding long serial hardlink runs inside one rayon worker.
@@ -268,7 +268,7 @@ impl SchedulerState {
             done_tx,
             done_rx,
             shutdown: false,
-            download_limit: get_manifests_concurrency_limit_sync().max(1),
+            download_limit: get_install_tarball_concurrency_limit_sync().max(1),
             extract_limit: extract_concurrency_limit(),
             clone_worker_limit: clone_worker_limit(clone_limit),
             download_done: HashMap::new(),

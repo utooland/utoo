@@ -134,12 +134,12 @@ pub fn get_install_scope() -> InstallScope {
 
 // Manifest fetch concurrency configuration.
 //
-// Keep the user-visible/default tarball download limit at 64. Registry
-// resolution can opt into a higher default for non-semver registries via
-// `get_resolver_manifests_concurrency_limit`; tarball download/extract still
-// uses `get_manifests_concurrency_limit_sync` so install IO is not inflated.
+// Keep the user-visible default at 64. Non-semver registries use higher
+// internal defaults for dependency resolution and tarball downloads unless the
+// user explicitly sets a limit.
 const DEFAULT_MANIFESTS_CONCURRENCY_LIMIT: usize = 64;
 const NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT: usize = 256;
+const NON_SEMVER_INSTALL_TARBALL_CONCURRENCY_LIMIT: usize = 512;
 
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> = LazyLock::new(|| {
     ConfigValue::new(
@@ -175,9 +175,33 @@ fn resolver_manifest_concurrency_limit(
     }
 }
 
+fn install_tarball_concurrency_limit(
+    configured_limit: usize,
+    cli_set: bool,
+    supports_semver: Option<bool>,
+) -> usize {
+    if !cli_set
+        && configured_limit == DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
+        && supports_semver == Some(false)
+    {
+        NON_SEMVER_INSTALL_TARBALL_CONCURRENCY_LIMIT
+    } else {
+        configured_limit
+    }
+}
+
 pub async fn get_resolver_manifests_concurrency_limit() -> usize {
     let limit = get_manifests_concurrency_limit().await;
     resolver_manifest_concurrency_limit(
+        limit,
+        MANIFESTS_CONCURRENCY_CLI_SET.get().is_some(),
+        get_supports_semver(),
+    )
+}
+
+pub fn get_install_tarball_concurrency_limit_sync() -> usize {
+    let limit = get_manifests_concurrency_limit_sync();
+    install_tarball_concurrency_limit(
         limit,
         MANIFESTS_CONCURRENCY_CLI_SET.get().is_some(),
         get_supports_semver(),
@@ -438,6 +462,50 @@ mod tests {
         );
         assert_eq!(
             resolver_manifest_concurrency_limit(DEFAULT_MANIFESTS_CONCURRENCY_LIMIT, false, None),
+            DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
+        );
+    }
+
+    #[test]
+    fn test_install_tarball_concurrency_raises_non_semver_default() {
+        assert_eq!(
+            install_tarball_concurrency_limit(
+                DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
+                false,
+                Some(false),
+            ),
+            NON_SEMVER_INSTALL_TARBALL_CONCURRENCY_LIMIT
+        );
+    }
+
+    #[test]
+    fn test_install_tarball_concurrency_preserves_explicit_limit() {
+        assert_eq!(
+            install_tarball_concurrency_limit(128, true, Some(false)),
+            128
+        );
+        assert_eq!(
+            install_tarball_concurrency_limit(
+                DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
+                true,
+                Some(false),
+            ),
+            DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
+        );
+    }
+
+    #[test]
+    fn test_install_tarball_concurrency_preserves_semver_default() {
+        assert_eq!(
+            install_tarball_concurrency_limit(
+                DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
+                false,
+                Some(true),
+            ),
+            DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
+        );
+        assert_eq!(
+            install_tarball_concurrency_limit(DEFAULT_MANIFESTS_CONCURRENCY_LIMIT, false, None),
             DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
         );
     }
