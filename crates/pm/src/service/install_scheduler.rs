@@ -496,19 +496,7 @@ impl SchedulerState {
     }
 
     fn spawn_clone_batch(&mut self) -> bool {
-        let mut batch = Vec::new();
-        while batch.len() < CLONE_BATCH_LIMIT {
-            let Some(job) = self.clone_queue.pop_front() else {
-                break;
-            };
-            let target = job.spec.target.clone();
-            if self.clone_done.contains(&target) || !self.clone_active.insert(target.clone()) {
-                continue;
-            }
-
-            batch.push((target, job));
-        }
-
+        let batch = self.take_clone_batch();
         if batch.is_empty() {
             return false;
         }
@@ -535,6 +523,43 @@ impl SchedulerState {
         });
 
         true
+    }
+
+    fn take_clone_batch(&mut self) -> Vec<(PathBuf, ReadyClone)> {
+        let mut batch = Vec::new();
+        while batch.len() < CLONE_BATCH_LIMIT {
+            let Some(job) = self.pop_next_clone_job() else {
+                break;
+            };
+            let target = job.spec.target.clone();
+            if self.clone_done.contains(&target) || !self.clone_active.insert(target.clone()) {
+                continue;
+            }
+
+            // Parent clones unblock nested dependency placement. Keep them out
+            // of multi-package batches so their children can enter the queue as
+            // soon as the parent materializes.
+            let unblocks_children = self.blocked_by_parent.contains_key(&target);
+            batch.push((target, job));
+            if unblocks_children {
+                break;
+            }
+        }
+        batch
+    }
+
+    fn pop_next_clone_job(&mut self) -> Option<ReadyClone> {
+        let unblocker_index = if self.blocked_by_parent.is_empty() {
+            None
+        } else {
+            self.clone_queue
+                .iter()
+                .position(|job| self.blocked_by_parent.contains_key(&job.spec.target))
+        };
+        match unblocker_index {
+            Some(index) => self.clone_queue.remove(index),
+            None => self.clone_queue.pop_front(),
+        }
     }
 
     fn handle_done(&mut self, done: OpDone) {
@@ -673,6 +698,13 @@ mod tests {
         RegistryCacheEntry { path, index: None }
     }
 
+    fn ready_clone(name: &str, version: &str, target: &str) -> ReadyClone {
+        ReadyClone {
+            spec: clone_spec(name, version, target),
+            cache: cache_entry(PathBuf::from(format!("/tmp/cache/{name}/{version}"))),
+        }
+    }
+
     #[test]
     fn ensure_download_dedupes_inflight_package() {
         let mut state = state();
@@ -801,5 +833,57 @@ mod tests {
         assert_eq!(clone_worker_limit(4), 4);
         assert_eq!(clone_worker_limit(8), 6);
         assert_eq!(clone_worker_limit(16), 10);
+    }
+
+    #[test]
+    fn clone_batch_prioritizes_parent_unblockers() {
+        let mut state = state();
+        let leaf = ready_clone("leaf", "1.0.0", "/tmp/project/node_modules/leaf");
+        let parent = ready_clone("parent", "1.0.0", "/tmp/project/node_modules/parent");
+        let child = clone_spec(
+            "child",
+            "1.0.0",
+            "/tmp/project/node_modules/parent/node_modules/child",
+        );
+        let parent_target = parent.spec.target.clone();
+
+        state.clone_queue.push_back(leaf);
+        state.clone_queue.push_back(parent);
+        state
+            .blocked_by_parent
+            .insert(parent_target.clone(), vec![child]);
+
+        let batch = state.take_clone_batch();
+
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].0, parent_target);
+        assert!(state.clone_active.contains(&parent_target));
+        assert_eq!(state.clone_queue.len(), 1);
+        assert_eq!(
+            state.clone_queue[0].spec.target,
+            PathBuf::from("/tmp/project/node_modules/leaf")
+        );
+    }
+
+    #[test]
+    fn clone_batch_keeps_batched_leaf_clones() {
+        let mut state = state();
+        state
+            .clone_queue
+            .push_back(ready_clone("a", "1.0.0", "/tmp/project/node_modules/a"));
+        state
+            .clone_queue
+            .push_back(ready_clone("b", "1.0.0", "/tmp/project/node_modules/b"));
+        state
+            .clone_queue
+            .push_back(ready_clone("c", "1.0.0", "/tmp/project/node_modules/c"));
+        state
+            .clone_queue
+            .push_back(ready_clone("d", "1.0.0", "/tmp/project/node_modules/d"));
+
+        let batch = state.take_clone_batch();
+
+        assert_eq!(batch.len(), CLONE_BATCH_LIMIT);
+        assert_eq!(state.clone_queue.len(), 1);
     }
 }
