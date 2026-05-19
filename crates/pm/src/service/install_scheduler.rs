@@ -290,8 +290,10 @@ impl SchedulerState {
     async fn run(mut self) {
         loop {
             self.pump_downloads();
-            self.pump_extracts();
+            // Keep network prefetch moving first, then give ready materialize
+            // work a chance to enter rayon before starting more cache writes.
             self.pump_clones();
+            self.pump_extracts();
 
             if self.shutdown && self.is_idle() {
                 break;
