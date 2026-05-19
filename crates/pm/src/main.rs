@@ -50,6 +50,10 @@ use crate::helper::workspace::init_project_root;
 
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 
+// Keep async network polling compact on high-core machines; CPU-heavy extract
+// and clone work still scales through rayon's pool.
+const MAX_TOKIO_WORKER_THREADS: usize = 4;
+
 fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
     let shell_path = std::env::var("SHELL").ok()?;
@@ -344,13 +348,9 @@ enum Commands {
 fn main() {
     crate::util::sysconf::init();
 
-    let worker_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-
     let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(worker_threads)
+        .worker_threads(tokio_worker_threads())
         .build()
         .expect("failed to build tokio runtime")
         .block_on(async_main());
@@ -366,6 +366,12 @@ fn main() {
         }
         process::exit(1);
     }
+}
+
+fn tokio_worker_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(MAX_TOKIO_WORKER_THREADS))
+        .unwrap_or(MAX_TOKIO_WORKER_THREADS)
 }
 
 async fn async_main() -> Result<()> {
