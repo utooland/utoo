@@ -14,11 +14,13 @@ use crate::util::downloader::{
     RegistryCacheEntry, download_bytes, download_stats, extract_to_cache_indexed_sync,
     is_registry_tarball_url, registry_cache_lookup_sync, resolve_seeded_cache_path,
 };
-use crate::util::user_config::get_manifests_concurrency_limit_sync;
+use crate::util::registry::REGISTRY_NPMMIRROR;
+use crate::util::user_config::{get_manifests_concurrency_limit_sync, get_registry};
 
 // Keep clone completions batched enough to reduce scheduler wakeups, while
 // avoiding long serial hardlink runs inside one rayon worker.
 const CLONE_BATCH_LIMIT: usize = 3;
+const NPMMIRROR_INSTALL_DOWNLOAD_CONCURRENCY_LIMIT: usize = 128;
 
 /// Build event receiver that forwards install prefetch work to the scheduler.
 pub(crate) struct InstallEventReceiver<R: EventReceiver> {
@@ -268,7 +270,7 @@ impl SchedulerState {
             done_tx,
             done_rx,
             shutdown: false,
-            download_limit: get_manifests_concurrency_limit_sync().max(1),
+            download_limit: install_download_concurrency_limit(),
             extract_limit: extract_concurrency_limit(),
             clone_worker_limit: clone_worker_limit(clone_limit),
             download_done: HashMap::new(),
@@ -663,6 +665,19 @@ fn clone_worker_limit(clone_limit: usize) -> usize {
         .clamp(1, clone_limit.max(1))
 }
 
+fn install_download_concurrency_limit() -> usize {
+    let limit = get_manifests_concurrency_limit_sync().max(1);
+    if is_npmmirror_registry(&get_registry()) {
+        limit.max(NPMMIRROR_INSTALL_DOWNLOAD_CONCURRENCY_LIMIT)
+    } else {
+        limit
+    }
+}
+
+fn is_npmmirror_registry(registry: &str) -> bool {
+    registry.trim_end_matches('/') == REGISTRY_NPMMIRROR.trim_end_matches('/')
+}
+
 fn extract_concurrency_limit() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get().clamp(2, 8))
@@ -833,6 +848,13 @@ mod tests {
         assert_eq!(clone_worker_limit(4), 4);
         assert_eq!(clone_worker_limit(8), 6);
         assert_eq!(clone_worker_limit(16), 10);
+    }
+
+    #[test]
+    fn npmmirror_registry_uses_higher_install_download_floor() {
+        assert!(is_npmmirror_registry("https://registry.npmmirror.com"));
+        assert!(is_npmmirror_registry("https://registry.npmmirror.com/"));
+        assert!(!is_npmmirror_registry("https://registry.npmjs.org"));
     }
 
     #[test]
