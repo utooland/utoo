@@ -411,6 +411,7 @@ impl SchedulerState {
         if let Some(waiters) = self.download_waiters.get_mut(&key) {
             if let Some(spec) = waiter {
                 waiters.push(spec);
+                self.prioritize_download(&key);
             }
             return;
         }
@@ -420,13 +421,31 @@ impl SchedulerState {
         self.download_queue.push_back(package);
     }
 
+    fn prioritize_download(&mut self, key: &str) {
+        // A preloaded tarball may become the current BFS frontier's blocker
+        // later. Promote only pending work; active downloads keep running.
+        let Some(index) = self
+            .download_queue
+            .iter()
+            .position(|package| package.key() == key)
+        else {
+            return;
+        };
+        if let Some(package) = self.download_queue.remove(index) {
+            self.download_queue.push_front(package);
+        }
+    }
+
     fn pump_downloads(&mut self) {
         self.pump_downloads_with(|package| {
             registry_cache_lookup_sync(&package.name, &package.version)
         });
     }
 
-    fn pump_downloads_with(&mut self, cache_lookup: impl Fn(&PackageFetch) -> Option<PathBuf>) {
+    fn pump_downloads_with(
+        &mut self,
+        mut cache_lookup: impl FnMut(&PackageFetch) -> Option<PathBuf>,
+    ) {
         while self.download_active.len() < self.download_limit
             && self.extract_backlog() < self.download_limit
         {
@@ -716,6 +735,25 @@ mod tests {
 
         assert_eq!(state.download_queue.len(), 1);
         assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+    }
+
+    #[test]
+    fn demand_waiter_prioritizes_pending_preload_download() {
+        let mut state = state();
+        let preload = package("preload", "1.0.0");
+        let demand = package("demand", "1.0.0");
+        let waiter = clone_spec("demand", "1.0.0", "/tmp/project/node_modules/demand");
+        let mut seen = Vec::new();
+
+        state.ensure_download(preload, None);
+        state.ensure_download(demand.clone(), None);
+        state.ensure_download(demand, Some(waiter));
+        state.pump_downloads_with(|queued| {
+            seen.push(queued.key());
+            Some(PathBuf::from(format!("/tmp/cache/{}", queued.name)))
+        });
+
+        assert_eq!(seen.first().map(String::as_str), Some("demand@1.0.0"));
     }
 
     #[test]
