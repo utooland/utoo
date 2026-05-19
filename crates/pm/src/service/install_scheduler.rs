@@ -19,6 +19,7 @@ use crate::util::user_config::get_manifests_concurrency_limit_sync;
 // Keep clone completions batched enough to reduce scheduler wakeups, while
 // avoiding long serial hardlink runs inside one rayon worker.
 const CLONE_BATCH_LIMIT: usize = 3;
+const MIN_INSTALL_DOWNLOAD_CONCURRENCY_LIMIT: usize = 128;
 
 /// Build event receiver that forwards install prefetch work to the scheduler.
 pub(crate) struct InstallEventReceiver<R: EventReceiver> {
@@ -268,7 +269,7 @@ impl SchedulerState {
             done_tx,
             done_rx,
             shutdown: false,
-            download_limit: get_manifests_concurrency_limit_sync().max(1),
+            download_limit: install_download_concurrency_limit(),
             extract_limit: extract_concurrency_limit(),
             clone_worker_limit: clone_worker_limit(clone_limit),
             download_done: HashMap::new(),
@@ -663,6 +664,10 @@ fn clone_worker_limit(clone_limit: usize) -> usize {
         .clamp(1, clone_limit.max(1))
 }
 
+fn install_download_concurrency_limit() -> usize {
+    get_manifests_concurrency_limit_sync().max(MIN_INSTALL_DOWNLOAD_CONCURRENCY_LIMIT)
+}
+
 fn extract_concurrency_limit() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get().clamp(2, 8))
@@ -833,6 +838,11 @@ mod tests {
         assert_eq!(clone_worker_limit(4), 4);
         assert_eq!(clone_worker_limit(8), 6);
         assert_eq!(clone_worker_limit(16), 10);
+    }
+
+    #[test]
+    fn install_download_concurrency_has_experiment_floor() {
+        assert!(install_download_concurrency_limit() >= MIN_INSTALL_DOWNLOAD_CONCURRENCY_LIMIT);
     }
 
     #[test]
