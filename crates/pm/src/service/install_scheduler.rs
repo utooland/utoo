@@ -660,12 +660,12 @@ fn clone_worker_limit(clone_limit: usize) -> usize {
     clone_limit
         .saturating_div(2)
         .saturating_add(2)
-        .clamp(1, clone_limit.max(1))
+        .clamp(1, clone_limit.clamp(1, 4))
 }
 
 fn extract_concurrency_limit() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get().clamp(2, 8))
+        .map(|n| n.get().clamp(2, 4))
         .unwrap_or(4)
 }
 
@@ -831,8 +831,8 @@ mod tests {
     fn clone_worker_limit_batches_clone_completion_without_serializing_all_clones() {
         assert_eq!(clone_worker_limit(1), 1);
         assert_eq!(clone_worker_limit(4), 4);
-        assert_eq!(clone_worker_limit(8), 6);
-        assert_eq!(clone_worker_limit(16), 10);
+        assert_eq!(clone_worker_limit(8), 4);
+        assert_eq!(clone_worker_limit(16), 4);
     }
 
     #[test]
