@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use async_trait::async_trait;
 
 /// Get current timestamp in seconds since UNIX epoch.
 /// Works on both native and WASM targets.
@@ -43,6 +44,7 @@ use dashmap::DashSet;
 
 use super::cache::{PackageCache, Versions, VersionsInfo};
 use super::manifest;
+use super::provider::{ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider};
 use super::store::{ManifestStore, NoopStore};
 use crate::model::manifest::{CoreVersionManifest, FullManifest, extract_core_version_off_runtime};
 use crate::resolver::semver::normalize_spec;
@@ -186,6 +188,44 @@ impl Clone for UnifiedRegistry {
     }
 }
 
+enum ProviderFullManifestBytes {
+    Fresh {
+        bytes: bytes::Bytes,
+        etag: Option<String>,
+    },
+    NotModified {
+        versions: Arc<VersionsInfo>,
+    },
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl ManifestProvider for UnifiedRegistry {
+    async fn execute_manifest_job(&self, job: ManifestJob) -> Result<ManifestJobDone, Self::Error> {
+        match job {
+            ManifestJob::Full { name } => self.execute_provider_full_job(name).await,
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                self.execute_provider_version_job(name, spec, fetch_spec, format)
+                    .await
+            }
+            ManifestJob::ExtractVersion {
+                name,
+                spec,
+                version,
+                full,
+            } => {
+                self.execute_provider_extract_job(name, spec, version, full)
+                    .await
+            }
+        }
+    }
+}
+
 /// Result of `resolve_full_manifest`.
 ///
 /// Separates the 200 (full data) and 304 (use cache) cases at the type level,
@@ -218,6 +258,202 @@ impl UnifiedRegistry {
     /// Get the underlying in-memory cache.
     pub fn cache(&self) -> &PackageCache {
         &self.cache
+    }
+
+    async fn execute_provider_full_job(
+        &self,
+        name: String,
+    ) -> Result<ManifestJobDone, RegistryError> {
+        let data = self.fetch_provider_full_manifest_data(&name).await?;
+        Ok(ManifestJobDone::Full { name, data })
+    }
+
+    async fn execute_provider_version_job(
+        &self,
+        name: String,
+        spec: String,
+        fetch_spec: String,
+        format: manifest::MetadataFormat,
+    ) -> Result<ManifestJobDone, RegistryError> {
+        let manifest = self
+            .fetch_provider_version_manifest(&name, &fetch_spec, format)
+            .await?;
+        Ok(ManifestJobDone::Version {
+            name,
+            spec,
+            manifest,
+        })
+    }
+
+    async fn execute_provider_extract_job(
+        &self,
+        name: String,
+        spec: String,
+        version: String,
+        full: Arc<FullManifest>,
+    ) -> Result<ManifestJobDone, RegistryError> {
+        let manifest = self
+            .extract_provider_version_manifest(&name, version, full)
+            .await?;
+        Ok(ManifestJobDone::Version {
+            name,
+            spec,
+            manifest,
+        })
+    }
+
+    async fn fetch_provider_full_manifest_data(
+        &self,
+        name: &str,
+    ) -> Result<ManifestFullData, RegistryError> {
+        match self.fetch_provider_full_manifest_bytes(name).await? {
+            ProviderFullManifestBytes::Fresh { bytes, etag } => {
+                self.parse_provider_full_manifest(name, bytes, etag).await
+            }
+            ProviderFullManifestBytes::NotModified { versions } => {
+                Ok(ManifestFullData::Versions(versions))
+            }
+        }
+    }
+
+    async fn parse_provider_full_manifest(
+        &self,
+        name: &str,
+        bytes: bytes::Bytes,
+        etag: Option<String>,
+    ) -> Result<ManifestFullData, RegistryError> {
+        let manifest = Arc::new(
+            manifest::parse_full_manifest_off_runtime(bytes)
+                .await
+                .map_err(RegistryError)?,
+        );
+        let versions = Arc::new(VersionsInfo {
+            versions: Versions {
+                version_list: manifest.versions.clone(),
+                dist_tags: manifest.dist_tags.clone(),
+            },
+            etag,
+            last_updated: current_timestamp_secs(),
+        });
+        self.store.store_versions(name, versions);
+        Ok(ManifestFullData::Full(manifest))
+    }
+
+    async fn fetch_provider_version_manifest(
+        &self,
+        name: &str,
+        fetch_spec: &str,
+        format: manifest::MetadataFormat,
+    ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
+        if deno_semver::Version::parse_from_npm(fetch_spec).is_ok()
+            && let Some(manifest) = self.store.load_version_manifest(name, fetch_spec).await
+        {
+            return Ok(Arc::new(manifest));
+        }
+
+        let manifest = Arc::new(
+            manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
+                registry_url: &self.registry_url,
+                name,
+                spec: fetch_spec,
+                format,
+            })
+            .await
+            .map_err(RegistryError)?,
+        );
+        self.store_version_manifest(name, Arc::clone(&manifest));
+        Ok(manifest)
+    }
+
+    async fn extract_provider_version_manifest(
+        &self,
+        name: &str,
+        version: String,
+        full: Arc<FullManifest>,
+    ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
+        let (resolved_version, manifest) = extract_core_version_off_runtime(full, version).await;
+        let manifest = manifest.ok_or_else(|| {
+            RegistryError(anyhow!(
+                "Version {} not found in manifest for {}",
+                resolved_version,
+                name
+            ))
+        })?;
+        self.store_version_manifest(name, Arc::clone(&manifest));
+        Ok(manifest)
+    }
+
+    fn store_version_manifest(&self, name: &str, manifest: Arc<CoreVersionManifest>) {
+        let version = manifest.version.clone();
+        if self
+            .stored_version
+            .insert((name.to_string(), version.clone()))
+        {
+            self.store.store_version_manifest(name, &version, manifest);
+        }
+    }
+
+    async fn fetch_provider_full_manifest_bytes(
+        &self,
+        name: &str,
+    ) -> Result<ProviderFullManifestBytes, RegistryError> {
+        let store_versions = self.store.load_versions(name).await.map(Arc::new);
+        let etag = store_versions.as_ref().and_then(|v| v.etag.clone());
+
+        match manifest::fetch_full_manifest_bytes(manifest::FetchManifestOptions {
+            registry_url: &self.registry_url,
+            name,
+            format: manifest::MetadataFormat::Abbreviated,
+            etag: etag.as_deref(),
+        })
+        .await
+        .map_err(RegistryError)?
+        {
+            manifest::FetchManifestBytesResult::Ok(bytes, etag) => {
+                Ok(ProviderFullManifestBytes::Fresh { bytes, etag })
+            }
+            manifest::FetchManifestBytesResult::NotModified => {
+                self.provider_not_modified_or_fresh(name, store_versions)
+                    .await
+            }
+        }
+    }
+
+    async fn provider_not_modified_or_fresh(
+        &self,
+        name: &str,
+        versions: Option<Arc<VersionsInfo>>,
+    ) -> Result<ProviderFullManifestBytes, RegistryError> {
+        if let Some(versions) = versions {
+            return Ok(ProviderFullManifestBytes::NotModified { versions });
+        }
+
+        // Match `resolve_full_manifest`: if the registry says the ETag still
+        // matches but the local store cannot provide versions, recover by
+        // fetching a fresh manifest.
+        self.fetch_provider_fresh_full_manifest_bytes(name).await
+    }
+
+    async fn fetch_provider_fresh_full_manifest_bytes(
+        &self,
+        name: &str,
+    ) -> Result<ProviderFullManifestBytes, RegistryError> {
+        match manifest::fetch_full_manifest_bytes(manifest::FetchManifestOptions {
+            registry_url: &self.registry_url,
+            name,
+            format: manifest::MetadataFormat::Abbreviated,
+            etag: None,
+        })
+        .await
+        .map_err(RegistryError)?
+        {
+            manifest::FetchManifestBytesResult::Ok(bytes, etag) => {
+                Ok(ProviderFullManifestBytes::Fresh { bytes, etag })
+            }
+            manifest::FetchManifestBytesResult::NotModified => Err(RegistryError(anyhow!(
+                "unexpected 304 without If-None-Match for {name}"
+            ))),
+        }
     }
 
     /// Resolve full manifest through memory → store → network with ETag validation.
@@ -394,16 +630,7 @@ impl UnifiedRegistry {
                                 Arc::clone(&arc),
                             );
                         }
-                        if self
-                            .stored_version
-                            .insert((name.to_string(), resolved_version.clone()))
-                        {
-                            self.store.store_version_manifest(
-                                name,
-                                &resolved_version,
-                                Arc::clone(&arc),
-                            );
-                        }
+                        self.store_version_manifest(name, Arc::clone(&arc));
                         return Ok(());
                     }
 
@@ -572,7 +799,50 @@ impl RegistryClient for UnifiedRegistry {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+    use crate::service::{ManifestJob, ManifestJobDone, ManifestProvider, MetadataFormat};
+
+    #[derive(Default)]
+    struct TestManifestStore {
+        version_manifest: Mutex<Option<CoreVersionManifest>>,
+        stored_version_manifests: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestStore for TestManifestStore {
+        async fn load_versions(&self, _name: &str) -> Option<VersionsInfo> {
+            None
+        }
+
+        async fn load_version_manifest(
+            &self,
+            name: &str,
+            version: &str,
+        ) -> Option<CoreVersionManifest> {
+            self.version_manifest
+                .lock()
+                .unwrap()
+                .as_ref()
+                .filter(|manifest| manifest.name == name && manifest.version == version)
+                .cloned()
+        }
+
+        fn store_versions(&self, _name: &str, _info: Arc<VersionsInfo>) {}
+
+        fn store_version_manifest(
+            &self,
+            _name: &str,
+            version: &str,
+            _manifest: Arc<CoreVersionManifest>,
+        ) {
+            self.stored_version_manifests
+                .lock()
+                .unwrap()
+                .push(version.to_string());
+        }
+    }
 
     #[test]
     fn test_is_npm_registry() {
@@ -641,5 +911,85 @@ mod tests {
 
         // Both registries share the same cache
         assert!(Arc::ptr_eq(&registry1.cache, &registry2.cache));
+    }
+
+    #[tokio::test]
+    async fn provider_version_job_uses_exact_manifest_from_store() {
+        let store = Arc::new(TestManifestStore::default());
+        *store.version_manifest.lock().unwrap() = Some(CoreVersionManifest {
+            name: "pkg".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        });
+        let store_dyn: Arc<dyn ManifestStore> = store;
+        let registry = UnifiedRegistry::builder()
+            .registry("https://registry.npmjs.org")
+            .store(store_dyn)
+            .build();
+
+        let done = registry
+            .execute_manifest_job(ManifestJob::Version {
+                name: "pkg".to_string(),
+                spec: "1.0.0".to_string(),
+                fetch_spec: "1.0.0".to_string(),
+                format: MetadataFormat::Complete,
+            })
+            .await
+            .unwrap();
+
+        match done {
+            ManifestJobDone::Version {
+                name,
+                spec,
+                manifest,
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "1.0.0");
+                assert_eq!(manifest.version, "1.0.0");
+            }
+            ManifestJobDone::Full { .. } => panic!("expected version job result"),
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_extract_job_persists_extracted_manifest() {
+        let store = Arc::new(TestManifestStore::default());
+        let store_dyn: Arc<dyn ManifestStore> = store.clone();
+        let registry = UnifiedRegistry::builder().store(store_dyn).build();
+        let raw = bytes::Bytes::from_static(
+            br#"{
+                "name":"pkg",
+                "dist-tags":{"latest":"1.0.0"},
+                "versions":{"1.0.0":{"name":"pkg","version":"1.0.0"}}
+            }"#,
+        );
+        let full = Arc::new(FullManifest {
+            name: "pkg".to_string(),
+            raw,
+            ..Default::default()
+        });
+
+        let done = registry
+            .execute_manifest_job(ManifestJob::ExtractVersion {
+                name: "pkg".to_string(),
+                spec: "^1.0.0".to_string(),
+                version: "1.0.0".to_string(),
+                full,
+            })
+            .await
+            .unwrap();
+
+        match done {
+            ManifestJobDone::Version { spec, manifest, .. } => {
+                assert_eq!(spec, "^1.0.0");
+                assert_eq!(manifest.name, "pkg");
+                assert_eq!(manifest.version, "1.0.0");
+            }
+            ManifestJobDone::Full { .. } => panic!("expected version job result"),
+        }
+        assert_eq!(
+            *store.stored_version_manifests.lock().unwrap(),
+            ["1.0.0".to_string()]
+        );
     }
 }
