@@ -54,6 +54,25 @@ pub async fn wait_clone_if_pending(target_path: &str) {
         .await;
 }
 
+/// Clone a package from an already-resolved cache path without touching the
+/// global clone/download single-flight maps.
+pub async fn clone_package_from_cache(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+    cache_path: &Path,
+    target_path: &Path,
+) -> Result<()> {
+    // Git packages are extracted flat (no `package/` wrapper directory),
+    // so skip `find_real_src` which would incorrectly pick a subdirectory.
+    let is_git = is_git_url(tarball_url);
+    let fresh = clone_package(cache_path, target_path, name, version, !is_git).await?;
+    if fresh {
+        CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 /// Clone a package to target path, downloading to cache first if needed.
 ///
 /// Uses global `OnceMap` for deduplication: the same target path is only cloned once,
@@ -78,14 +97,10 @@ pub async fn clone_package_once(
     let tarball_url = tarball_url.to_string();
     let target_path = target_path.to_path_buf();
 
-    // Git packages are extracted flat (no `package/` wrapper directory),
-    // so skip `find_real_src` which would incorrectly pick a subdirectory.
-    let is_git = is_git_url(&tarball_url);
-
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
-            let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
+            clone_package_from_cache(&name, &version, &tarball_url, &cache_path, &target_path)
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
@@ -97,10 +112,6 @@ pub async fn clone_package_once(
                     )
                 })
                 .ok()?;
-
-            if fresh {
-                CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
-            }
             Some(())
         })
         .await
@@ -799,6 +810,31 @@ mod tests {
 
         // Should be cloned
         assert!(dst_dir.join("package.json").exists());
+        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
+        assert!(content.contains("lodash"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clone_package_from_cache_registry_layout() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache_dir = temp.path().join("cache/lodash/4.17.21");
+        let src_dir = cache_dir.join("package");
+        let dst_dir = temp.path().join("node_modules/lodash");
+
+        fs::create_dir_all(&src_dir).await?;
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(src_dir.join("package.json"), &pkg_json).await?;
+
+        clone_package_from_cache(
+            "lodash",
+            "4.17.21",
+            "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            &cache_dir,
+            &dst_dir,
+        )
+        .await?;
+
         let content = fs::read_to_string(dst_dir.join("package.json")).await?;
         assert!(content.contains("lodash"));
         Ok(())

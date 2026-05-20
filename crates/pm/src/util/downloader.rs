@@ -30,6 +30,10 @@ static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+fn registry_cache_path(name: &str, version: &str) -> PathBuf {
+    get_cache_dir().join(name).join(version)
+}
+
 /// Process-global counters for tarball outcomes, matching pnpm's
 /// vocabulary. Each unique `(name, version)` pair lands in exactly one
 /// bucket thanks to `DOWNLOAD_CACHE`'s `OnceMap` dedup; git/file/link
@@ -129,15 +133,35 @@ pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<
 /// path) — the install loop is responsible for any lockfile-format
 /// rewriting before we get here.
 pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
+    match resolve_seeded_cache_path(name, version, tarball_url).await {
+        Ok(Some(cache_path)) => Some(cache_path),
+        Ok(None) => download_to_cache(name, version, tarball_url).await,
+        Err(_) => None,
+    }
+}
+
+/// Resolve cache slots that may have been seeded before install materialization.
+///
+/// `Ok(None)` is reserved for registry tarballs that can fall through to the
+/// normal `<name>/<version>` download cache. Git and file dependencies must
+/// already have a concrete seeded cache path.
+pub async fn resolve_seeded_cache_path(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<Option<PathBuf>> {
     match tarball_url.parse::<Protocol>() {
-        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url).await,
-        Ok(Protocol::File) => file_cache_lookup(name, tarball_url).await,
+        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}")),
+        Ok(Protocol::File) => file_cache_lookup(name, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| anyhow::anyhow!("file cache not found for {name}@{version}")),
         // Otherwise try the URL-hashed http slot BFS may have seeded,
-        // then fall through to the registry `<name>/<version>/` path.
-        _ => match http_tarball_cache_lookup(name, tarball_url).await {
-            Some(p) => Some(p),
-            None => download_to_cache(name, version, tarball_url).await,
-        },
+        // then let the caller fall through to the registry path.
+        _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
     }
 }
 
@@ -155,14 +179,13 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
         return Some((*cache_path).clone());
     }
 
-    let cache_dir = get_cache_dir();
     let name = name.to_string();
     let version = version.to_string();
     let tarball_url = tarball_url.to_string();
 
     DOWNLOAD_CACHE
         .get_or_init(key, || async move {
-            let cache_path = cache_dir.join(&name).join(&version);
+            let cache_path = registry_cache_path(&name, &version);
 
             // Fast path: already extracted in cache
             if crate::fs::try_exists(&cache_path.join("_resolved"))
@@ -179,39 +202,52 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
             let semaphore = DOWNLOAD_SEMAPHORE
                 .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
             let _permit = semaphore.acquire().await.ok()?;
-            let bytes = download_bytes(&tarball_url)
+            download_and_extract_to_cache(&name, &version, &tarball_url)
                 .await
                 .inspect_err(|e| {
                     tracing::warn!(
-                        "Download {}@{} from {}: {:#}",
+                        "Install tarball {}@{} from {}: {:#}",
                         name,
                         version,
                         tarball_url,
                         e
                     )
                 })
-                .ok()?;
-
-            // Extract
-            extract_and_write(bytes, &cache_path)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Extract {}@{} into {}: {:#}",
-                        name,
-                        version,
-                        cache_path.display(),
-                        e
-                    )
-                })
-                .ok()?;
-
-            DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-            Some(cache_path)
+                .ok()
         })
         .await
         .as_deref()
         .cloned()
+}
+
+/// Download and extract a registry tarball without global single-flight state.
+///
+/// Callers that already own scheduling and deduplication should use this
+/// primitive directly.
+pub async fn download_and_extract_to_cache(
+    name: &str,
+    version: &str,
+    tarball_url: &str,
+) -> Result<PathBuf> {
+    let cache_path = registry_cache_path(name, version);
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        return Ok(cache_path);
+    }
+
+    let bytes = download_bytes(tarball_url)
+        .await
+        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
+
+    extract_and_write(bytes, &cache_path)
+        .await
+        .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
+
+    DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
+    Ok(cache_path)
 }
 
 /// Download tarball bytes with retries (network phase only).
@@ -312,5 +348,18 @@ mod tests {
 
         assert!(dest.join("_resolved").exists());
         assert!(dest.join("file.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_seeded_cache_path_http_falls_through() {
+        let cache_path = resolve_seeded_cache_path(
+            "__utoo_missing_http__",
+            "1.0.0",
+            "https://registry.npmjs.org/__utoo_missing_http__/-/__utoo_missing_http__-1.0.0.tgz",
+        )
+        .await
+        .unwrap();
+
+        assert!(cache_path.is_none());
     }
 }
