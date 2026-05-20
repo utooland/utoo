@@ -30,7 +30,7 @@ static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-fn registry_cache_path(name: &str, version: &str) -> PathBuf {
+pub fn registry_cache_path(name: &str, version: &str) -> PathBuf {
     get_cache_dir().join(name).join(version)
 }
 
@@ -234,7 +234,33 @@ pub async fn download_and_extract_to_cache(
     version: &str,
     tarball_url: &str,
 ) -> Result<PathBuf> {
+    if let Some(cache_path) = registry_cache_lookup(name, version).await? {
+        return Ok(cache_path);
+    }
+
+    let bytes = download_bytes(tarball_url)
+        .await
+        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
+
+    extract_to_cache(name, version, bytes).await
+}
+
+pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<PathBuf>> {
     let cache_path = registry_cache_path(name, version);
+    if crate::fs::try_exists(&cache_path.join("_resolved"))
+        .await
+        .unwrap_or(false)
+    {
+        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(cache_path))
+    } else {
+        Ok(None)
+    }
+}
+
+pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result<PathBuf> {
+    let cache_path = registry_cache_path(name, version);
+
     if crate::fs::try_exists(&cache_path.join("_resolved"))
         .await
         .unwrap_or(false)
@@ -242,10 +268,6 @@ pub async fn download_and_extract_to_cache(
         REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
         return Ok(cache_path);
     }
-
-    let bytes = download_bytes(tarball_url)
-        .await
-        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
 
     extract_and_write(bytes, &cache_path)
         .await
