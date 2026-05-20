@@ -17,7 +17,7 @@
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -489,6 +489,88 @@ impl FetchDone {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FetchPriority {
+    Demand,
+    Prefetch,
+}
+
+#[derive(Default)]
+struct FetchQueues {
+    demand: VecDeque<ManifestJob>,
+    prefetch: VecDeque<ManifestJob>,
+    queued: HashMap<FetchKey, FetchPriority>,
+    active: HashMap<FetchKey, FetchPriority>,
+}
+
+impl FetchQueues {
+    fn enqueue(&mut self, job: ManifestJob, priority: FetchPriority) {
+        let key = job.key();
+        if self.active.contains_key(&key) {
+            return;
+        }
+
+        match (self.queued.get(&key).copied(), priority) {
+            (Some(FetchPriority::Demand), _)
+            | (Some(FetchPriority::Prefetch), FetchPriority::Prefetch) => {}
+            (Some(FetchPriority::Prefetch), FetchPriority::Demand) => {
+                self.queued.insert(key, FetchPriority::Demand);
+                self.demand.push_back(job);
+            }
+            (None, FetchPriority::Demand) => {
+                self.queued.insert(key, FetchPriority::Demand);
+                self.demand.push_back(job);
+            }
+            (None, FetchPriority::Prefetch) => {
+                self.queued.insert(key, FetchPriority::Prefetch);
+                self.prefetch.push_back(job);
+            }
+        }
+    }
+
+    fn complete(&mut self, key: &FetchKey) {
+        self.queued.remove(key);
+        self.active.remove(key);
+    }
+
+    fn pop_next(&mut self, prefetch_concurrency: usize) -> Option<ManifestJob> {
+        if let Some(job) = self.pop_priority(FetchPriority::Demand) {
+            return Some(job);
+        }
+        if self.active_prefetches() >= prefetch_concurrency {
+            return None;
+        }
+        self.pop_priority(FetchPriority::Prefetch)
+    }
+
+    fn pop_priority(&mut self, priority: FetchPriority) -> Option<ManifestJob> {
+        loop {
+            let job = match priority {
+                FetchPriority::Demand => self.demand.pop_front(),
+                FetchPriority::Prefetch => self.prefetch.pop_front(),
+            }?;
+            let key = job.key();
+            if self.queued.get(&key).copied() != Some(priority) {
+                continue;
+            }
+            self.queued.remove(&key);
+            self.active.insert(key, priority);
+            return Some(job);
+        }
+    }
+
+    fn active_prefetches(&self) -> usize {
+        self.active
+            .values()
+            .filter(|priority| **priority == FetchPriority::Prefetch)
+            .count()
+    }
+}
+
+fn prefetch_concurrency_limit(concurrency: usize) -> usize {
+    (concurrency / 4).max(1)
+}
+
 #[derive(Default)]
 struct ManifestState {
     full_cache: HashMap<String, Arc<FullManifest>>,
@@ -498,8 +580,7 @@ struct ManifestState {
     version_waiters: HashMap<VersionKey, Vec<WaitingEdge>>,
     full_failures: HashMap<String, String>,
     version_failures: HashMap<VersionKey, String>,
-    queued_jobs: VecDeque<ManifestJob>,
-    in_flight: HashSet<FetchKey>,
+    fetch_queues: FetchQueues,
 }
 
 impl ManifestState {
@@ -540,38 +621,32 @@ impl ManifestState {
         }
     }
 
-    fn enqueue_job(&mut self, job: ManifestJob) {
-        let key = job.key();
-        if self.in_flight.insert(key) {
-            self.queued_jobs.push_back(job);
-        }
-    }
-
-    fn pop_job(&mut self) -> Option<ManifestJob> {
-        self.queued_jobs.pop_front()
-    }
-
-    fn complete(&mut self, key: &FetchKey) {
-        self.in_flight.remove(key);
-    }
-
     fn has_waiters(&self) -> bool {
         !self.full_waiters.is_empty() || !self.version_waiters.is_empty()
     }
 
-    fn schedule_registry_fetch(&mut self, name: String, spec: String, supports_semver: bool) {
+    fn schedule_registry_fetch(
+        &mut self,
+        name: String,
+        spec: String,
+        supports_semver: bool,
+        priority: FetchPriority,
+    ) {
         let (real_name, real_spec) = normalize_spec(&name, &spec);
         if supports_semver {
             let key = (real_name, real_spec);
             if self.version_cache.contains_key(&key) || self.version_failures.contains_key(&key) {
                 return;
             }
-            self.enqueue_job(ManifestJob::Version {
-                name: key.0.clone(),
-                spec: key.1.clone(),
-                fetch_spec: key.1,
-                format: version_metadata_format(supports_semver),
-            });
+            self.fetch_queues.enqueue(
+                ManifestJob::Version {
+                    name: key.0.clone(),
+                    spec: key.1.clone(),
+                    fetch_spec: key.1,
+                    format: version_metadata_format(supports_semver),
+                },
+                priority,
+            );
             return;
         }
 
@@ -581,30 +656,54 @@ impl ManifestState {
         {
             return;
         }
-        self.enqueue_job(ManifestJob::Full { name: real_name });
+        self.fetch_queues
+            .enqueue(ManifestJob::Full { name: real_name }, priority);
     }
 
     fn enqueue_version_extract(&mut self, name: String, version: String, full: Arc<FullManifest>) {
-        self.enqueue_job(ManifestJob::ExtractVersion {
-            name,
-            spec: version.clone(),
-            version,
-            full,
-        });
+        self.fetch_queues.enqueue(
+            ManifestJob::ExtractVersion {
+                name,
+                spec: version.clone(),
+                version,
+                full,
+            },
+            FetchPriority::Demand,
+        );
     }
 
     fn enqueue_version_fetch(&mut self, name: String, fetch_spec: String, supports_semver: bool) {
-        self.enqueue_job(ManifestJob::Version {
-            name,
-            spec: fetch_spec.clone(),
-            fetch_spec,
-            format: version_metadata_format(supports_semver),
-        });
+        self.fetch_queues.enqueue(
+            ManifestJob::Version {
+                name,
+                spec: fetch_spec.clone(),
+                fetch_spec,
+                format: version_metadata_format(supports_semver),
+            },
+            FetchPriority::Demand,
+        );
     }
 
-    fn apply_fetch_result(&mut self, done: FetchDone, level_pending: &mut VecDeque<WaitingEdge>) {
+    fn schedule_transitive_prefetches(
+        &mut self,
+        manifest: &CoreVersionManifest,
+        peer_deps: PeerDeps,
+        supports_semver: bool,
+    ) {
+        for (name, spec) in collect_registry_prefetches(manifest, peer_deps) {
+            self.schedule_registry_fetch(name, spec, supports_semver, FetchPriority::Prefetch);
+        }
+    }
+
+    fn apply_fetch_result(
+        &mut self,
+        done: FetchDone,
+        supports_semver: bool,
+        peer_deps: PeerDeps,
+        level_pending: &mut VecDeque<WaitingEdge>,
+    ) {
         let done_key = done.key();
-        self.complete(&done_key);
+        self.fetch_queues.complete(&done_key);
 
         match done {
             FetchDone::Full { name, result } => {
@@ -632,6 +731,7 @@ impl ManifestState {
                         self.version_cache
                             .entry((key.0.clone(), manifest.version.clone()))
                             .or_insert_with(|| Arc::clone(&manifest));
+                        self.schedule_transitive_prefetches(&manifest, peer_deps, supports_semver);
                     }
                     Err(error) => {
                         self.version_failures.insert(key.clone(), error);
@@ -719,8 +819,9 @@ fn pump_fetches<R>(
     R: ManifestProvider,
     R::Error: Send,
 {
+    let prefetch_concurrency = prefetch_concurrency_limit(concurrency);
     while fetches.len() < concurrency {
-        let Some(job) = state.pop_job() else {
+        let Some(job) = state.fetch_queues.pop_next(prefetch_concurrency) else {
             break;
         };
         fetches.push(fetch_registry_manifest(registry.clone(), job));
@@ -769,6 +870,19 @@ fn resolve_version_from_full_manifest<RE>(
     real_spec: &str,
 ) -> Result<Option<String>, ResolveError<RE>> {
     resolve_version_from_versions(edge, &full.name, full.into(), real_spec)
+}
+
+fn collect_registry_prefetches(
+    manifest: &CoreVersionManifest,
+    peer_deps: PeerDeps,
+) -> Vec<(String, String)> {
+    let mut deps = Vec::new();
+    manifest.for_each_dep(peer_deps, DevDeps::Exclude, |_, name, spec| {
+        if spec.is_registry_spec() {
+            deps.push((name.to_string(), spec.to_string()));
+        }
+    });
+    deps
 }
 
 async fn handle_resolved_registry_manifest<R, E>(
@@ -934,7 +1048,7 @@ where
         .entry(real_name.clone())
         .or_default()
         .push((parent, edge));
-    state.schedule_registry_fetch(real_name, real_spec, false);
+    state.schedule_registry_fetch(real_name, real_spec, false, FetchPriority::Demand);
     Ok(())
 }
 
@@ -1522,7 +1636,12 @@ where
                         .entry(key.clone())
                         .or_default()
                         .push((parent, edge));
-                    state.schedule_registry_fetch(key.0, key.1, supports_semver);
+                    state.schedule_registry_fetch(
+                        key.0,
+                        key.1,
+                        supports_semver,
+                        FetchPriority::Demand,
+                    );
                 } else {
                     process_non_semver_pending_edge(
                         graph,
@@ -1551,7 +1670,12 @@ where
                 let done = done.map_err(|error| {
                     registry_error::<R::Error>(format!("manifest fetch task failed: {error}"))
                 })?;
-                state.apply_fetch_result(done, &mut level_pending);
+                state.apply_fetch_result(
+                    done,
+                    supports_semver,
+                    config.peer_deps,
+                    &mut level_pending,
+                );
             }
 
             if !level_pending.is_empty() {
@@ -1569,7 +1693,7 @@ where
             let done = done.map_err(|error| {
                 registry_error::<R::Error>(format!("manifest fetch task failed: {error}"))
             })?;
-            state.apply_fetch_result(done, &mut level_pending);
+            state.apply_fetch_result(done, supports_semver, config.peer_deps, &mut level_pending);
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
@@ -1808,12 +1932,25 @@ mod tests {
     fn test_manifest_state_dedupes_semver_fetches() {
         let mut state = ManifestState::default();
 
-        state.schedule_registry_fetch("pkg".to_string(), "^1.0.0".to_string(), true);
-        state.schedule_registry_fetch("pkg".to_string(), "^1.0.0".to_string(), true);
+        state.schedule_registry_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            true,
+            FetchPriority::Demand,
+        );
+        state.schedule_registry_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            true,
+            FetchPriority::Demand,
+        );
 
-        assert_eq!(state.queued_jobs.len(), 1);
-        assert_eq!(state.in_flight.len(), 1);
-        match state.pop_job().expect("queued manifest job") {
+        assert_eq!(state.fetch_queues.queued.len(), 1);
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .expect("queued manifest job")
+        {
             ManifestJob::Version {
                 name,
                 spec,
@@ -1832,6 +1969,34 @@ mod tests {
                 panic!("expected version job")
             }
         }
+    }
+
+    #[test]
+    fn test_fetch_queues_prioritize_demand_over_prefetch() {
+        let mut queues = FetchQueues::default();
+        queues.enqueue(
+            ManifestJob::Full {
+                name: "prefetch".to_string(),
+            },
+            FetchPriority::Prefetch,
+        );
+        queues.enqueue(
+            ManifestJob::Version {
+                name: "demand".to_string(),
+                spec: "^1.0.0".to_string(),
+                fetch_spec: "^1.0.0".to_string(),
+                format: crate::service::MetadataFormat::Abbreviated,
+            },
+            FetchPriority::Demand,
+        );
+
+        assert_eq!(
+            queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .expect("demand job")
+                .key(),
+            FetchKey::Version("demand".to_string(), "^1.0.0".to_string())
+        );
     }
 
     #[test]
