@@ -2,27 +2,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
-use utoo_ruborist::util::OnceMap;
 
-use super::downloader::{is_git_url, resolve_cache_path};
+use super::downloader::is_git_url;
 use super::json::load_package_json;
 use super::retry::create_retry_strategy;
 use crate::fs;
-
-/// Global clone cache shared between pipeline and install phases.
-///
-/// Key: normalized target path. Install (`cwd.join("node_modules/foo")` →
-/// forward slashes) and pipeline (`Path::join` injects backslashes on
-/// Windows) produce the same logical target with different separators;
-/// without normalization OnceMap sees them as distinct keys, dedup fails,
-/// and concurrent tasks race on the same destination — manifesting as
-/// `ERROR_SHARING_VIOLATION` (os error 32) on Windows. `PathBuf` from
-/// `Path::components().collect()` parses both separators uniformly and
-/// rebuilds with the OS-preferred one, giving a stable key.
-static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
 
 /// Number of `node_modules/` directories freshly materialized this run.
 /// Mirrors pnpm's "added" semantic.
@@ -31,17 +17,6 @@ static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// Returns the number of fresh clones performed (pnpm "added" equivalent).
 pub fn clone_count() -> usize {
     CLONE_COUNT.load(Ordering::Relaxed)
-}
-
-/// Normalize a target path into the canonical key used by `CLONE_CACHE`.
-#[cfg(windows)]
-fn cache_key(target_path: &Path) -> PathBuf {
-    target_path.components().collect()
-}
-
-#[cfg(not(windows))]
-fn cache_key(target_path: &Path) -> PathBuf {
-    target_path.to_path_buf()
 }
 
 /// Clone a package from an already-resolved cache path without touching the
@@ -61,52 +36,6 @@ pub async fn clone_package_from_cache(
         CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
     }
     Ok(())
-}
-
-/// Clone a package to target path, downloading to cache first if needed.
-///
-/// Uses global `OnceMap` for deduplication: the same target path is only cloned once,
-/// even when called concurrently from pipeline workers and the install phase.
-pub async fn clone_package_once(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-    target_path: &Path,
-) -> Result<()> {
-    let key = cache_key(target_path);
-
-    // Skip the param clones + future construction when the pipeline
-    // (or a sibling task) already cloned this target.
-    if CLONE_CACHE.is_done(&key) {
-        return Ok(());
-    }
-
-    let err_label = format!("{name}@{version}");
-    let name = name.to_string();
-    let version = version.to_string();
-    let tarball_url = tarball_url.to_string();
-    let target_path = target_path.to_path_buf();
-
-    CLONE_CACHE
-        .get_or_init(key, || async move {
-            let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
-            clone_package_from_cache(&name, &version, &tarball_url, &cache_path, &target_path)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Clone failed: {}@{} to {}: {:#}",
-                        name,
-                        version,
-                        target_path.display(),
-                        e
-                    )
-                })
-                .ok()?;
-            Some(())
-        })
-        .await
-        .map(|_| ())
-        .ok_or_else(|| anyhow::anyhow!("clone {err_label} failed (see warning log for details)"))
 }
 
 #[cfg(target_os = "macos")]
@@ -452,20 +381,6 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
-
-    #[cfg(windows)]
-    #[test]
-    fn cache_key_normalizes_path_separators() {
-        // install.rs joins lockfile-derived strings (forward slashes) while
-        // pipeline workers go through `Path::join` (backslashes). Both must
-        // produce the same OnceMap key — otherwise concurrent clones race
-        // and Windows raises ERROR_SHARING_VIOLATION.
-        let forward = cache_key(Path::new("node_modules/@scope/pkg/node_modules/dep"));
-        let backward = cache_key(Path::new("node_modules\\@scope\\pkg\\node_modules\\dep"));
-        let mixed = cache_key(Path::new("node_modules/@scope/pkg\\node_modules\\dep"));
-        assert_eq!(forward, backward);
-        assert_eq!(forward, mixed);
-    }
 
     async fn create_test_file(dir: &Path, name: &str, content: &[u8]) -> Result<PathBuf> {
         let path = dir.join(name);

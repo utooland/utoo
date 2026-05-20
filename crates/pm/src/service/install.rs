@@ -68,10 +68,8 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
-    clone_scheduler: Option<&InstallScheduler>,
+    clone_scheduler: &InstallScheduler,
 ) -> Result<()> {
-    let clone_dispatcher = InstallCloneDispatcher::new(clone_scheduler);
-
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
@@ -79,9 +77,8 @@ pub async fn install_packages(
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
-    // children. Within each level, tasks run concurrently. When a scheduler is
-    // supplied, pipeline prefetch and install-phase clones share its in-flight
-    // state; otherwise the legacy cloner provides process-wide deduplication.
+    // children. Within each level, tasks run concurrently. Pipeline prefetch
+    // and install-phase clones share scheduler in-flight state.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
@@ -143,27 +140,25 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
-                    let clone_job = InstallCloneJob {
-                        request: InstallCloneRequest {
-                            name,
-                            version,
-                            tarball_url: resolved,
-                            target: target_path,
-                            parent: None,
-                        },
+                    let clone_request = InstallCloneRequest {
+                        name,
+                        version,
+                        tarball_url: resolved,
+                        target: target_path,
+                        parent: None,
                     };
-                    let clone_dispatcher = clone_dispatcher.clone();
+                    let clone_scheduler = clone_scheduler.clone();
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     let task = tokio::spawn(async move {
-                        if let Err(e) = clone_dispatcher.clone_package(&clone_job).await {
+                        if let Err(e) = clone_scheduler.ensure_clone(clone_request.clone()).await {
                             if is_optional {
                                 tracing::warn!(
                                     "Optional dependency {} failed (ignored): {e:#}",
-                                    clone_job.request.name
+                                    clone_request.name
                                 );
                                 PROGRESS_BAR.inc(1);
                                 return Ok(());
@@ -171,9 +166,8 @@ pub async fn install_packages(
                             return Err(e);
                         }
                         PROGRESS_BAR.inc(1);
-                        log_progress(&format!("{} resolved", clone_job.request.name));
-                        update_package_binary(&clone_job.request.target, &clone_job.request.name)
-                            .await
+                        log_progress(&format!("{} resolved", clone_request.name));
+                        update_package_binary(&clone_request.target, &clone_request.name).await
                     });
                     clone_tasks.push(task);
                 } else {
@@ -188,38 +182,6 @@ pub async fn install_packages(
     }
 
     Ok(())
-}
-
-#[derive(Clone)]
-struct InstallCloneDispatcher {
-    scheduler: Option<InstallScheduler>,
-}
-
-struct InstallCloneJob {
-    request: InstallCloneRequest,
-}
-
-impl InstallCloneDispatcher {
-    fn new(scheduler: Option<&InstallScheduler>) -> Self {
-        Self {
-            scheduler: scheduler.cloned(),
-        }
-    }
-
-    async fn clone_package(&self, job: &InstallCloneJob) -> Result<()> {
-        match &self.scheduler {
-            Some(scheduler) => scheduler.ensure_clone(job.request.clone()).await,
-            None => {
-                crate::util::cloner::clone_package_once(
-                    &job.request.name,
-                    &job.request.version,
-                    &job.request.tarball_url,
-                    &job.request.target,
-                )
-                .await
-            }
-        }
-    }
 }
 
 pub struct InstallService;
@@ -314,7 +276,7 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let install_result = install_packages(&groups, root_path, omit, Some(&clone_scheduler))
+        let install_result = install_packages(&groups, root_path, omit, &clone_scheduler)
             .await
             .context("Failed to install packages");
 

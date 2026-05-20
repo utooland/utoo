@@ -3,7 +3,7 @@
 //! This module implements a pipeline architecture similar to bun's approach:
 //! - Manifest fetching and tarball downloading happen concurrently
 //! - When a package is resolved, its tarball download starts immediately
-//! - Uses global OnceMap to deduplicate requests and share results across phases
+//! - Uses the install scheduler to deduplicate requests and share in-flight work
 
 mod receiver;
 mod worker;
