@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -26,14 +26,27 @@ impl PackageFetch {
 }
 
 #[derive(Clone, Debug)]
-struct CloneSpec {
-    package: PackageFetch,
-    target: PathBuf,
+pub(crate) struct InstallCloneRequest {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) tarball_url: String,
+    pub(crate) target: PathBuf,
+    pub(crate) parent: Option<PathBuf>,
+}
+
+impl InstallCloneRequest {
+    fn package(&self) -> PackageFetch {
+        PackageFetch {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            tarball_url: self.tarball_url.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
 struct ReadyClone {
-    spec: CloneSpec,
+    request: InstallCloneRequest,
     cache_path: PathBuf,
 }
 
@@ -44,14 +57,26 @@ const MIN_CLONE_CONCURRENCY: usize = 4;
 const MAX_CLONE_CONCURRENCY: usize = 32;
 const DEFAULT_CLONE_CONCURRENCY: usize = 8;
 
+#[cfg(windows)]
+fn clone_key(target: &Path) -> PathBuf {
+    target.components().collect()
+}
+
+#[cfg(not(windows))]
+fn clone_key(target: &Path) -> PathBuf {
+    target.to_path_buf()
+}
+
 enum Command {
-    EnsureClone(CloneSpec, CloneResponder),
+    EnsureClone(InstallCloneRequest, CloneResponder),
+    PrefetchClone(InstallCloneRequest),
+    PrefetchDownload(PackageFetch),
     Shutdown,
 }
 
 enum OpDone {
     SeededCache {
-        spec: CloneSpec,
+        request: InstallCloneRequest,
         result: Result<Option<PathBuf>, String>,
     },
     Download {
@@ -99,30 +124,35 @@ impl InstallSchedulerHandle {
 }
 
 impl InstallScheduler {
-    pub(crate) async fn ensure_clone(
-        &self,
-        name: String,
-        version: String,
-        tarball_url: String,
-        target: PathBuf,
-    ) -> Result<()> {
+    pub(crate) async fn ensure_clone(&self, request: InstallCloneRequest) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(Command::EnsureClone(
-                CloneSpec {
-                    package: PackageFetch {
-                        name,
-                        version,
-                        tarball_url,
-                    },
-                    target,
-                },
-                tx,
-            ))
+            .send(Command::EnsureClone(request, tx))
             .map_err(|_| anyhow!("install scheduler stopped"))?;
         rx.await
             .context("install scheduler stopped before clone completed")?
             .map_err(anyhow::Error::msg)
+    }
+
+    pub(crate) fn prefetch_clone(&self, request: InstallCloneRequest) -> Result<()> {
+        self.tx
+            .send(Command::PrefetchClone(request))
+            .map_err(|_| anyhow!("install scheduler stopped"))
+    }
+
+    pub(crate) fn prefetch_download(
+        &self,
+        name: String,
+        version: String,
+        tarball_url: String,
+    ) -> Result<()> {
+        self.tx
+            .send(Command::PrefetchDownload(PackageFetch {
+                name,
+                version,
+                tarball_url,
+            }))
+            .map_err(|_| anyhow!("install scheduler stopped"))
     }
 }
 
@@ -133,11 +163,12 @@ struct SchedulerState {
     clone_limit: usize,
     download_done: HashMap<PackageKey, PathBuf>,
     download_active: HashSet<PackageKey>,
-    download_waiters: HashMap<PackageKey, Vec<CloneSpec>>,
+    download_waiters: HashMap<PackageKey, Vec<InstallCloneRequest>>,
     download_queue: VecDeque<PackageFetch>,
     clone_done: HashSet<PathBuf>,
     clone_active: HashSet<PathBuf>,
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
+    blocked_by_parent: HashMap<PathBuf, Vec<InstallCloneRequest>>,
     clone_queue: VecDeque<ReadyClone>,
     ops: FuturesUnordered<tokio::task::JoinHandle<OpDone>>,
 }
@@ -156,6 +187,7 @@ impl SchedulerState {
             clone_done: HashSet::new(),
             clone_active: HashSet::new(),
             clone_waiters: HashMap::new(),
+            blocked_by_parent: HashMap::new(),
             clone_queue: VecDeque::new(),
             ops: FuturesUnordered::new(),
         }
@@ -173,8 +205,14 @@ impl SchedulerState {
             tokio::select! {
                 command = self.rx.recv(), if !self.shutdown => {
                     match command {
-                        Some(Command::EnsureClone(spec, responder)) => {
-                            self.queue_clone(spec, Some(responder));
+                        Some(Command::EnsureClone(request, responder)) => {
+                            self.queue_clone(request, Some(responder));
+                        }
+                        Some(Command::PrefetchClone(request)) => {
+                            self.queue_clone(request, None);
+                        }
+                        Some(Command::PrefetchDownload(package)) => {
+                            self.ensure_download(package, None);
                         }
                         Some(Command::Shutdown) | None => {
                             self.shutdown = true;
@@ -202,8 +240,8 @@ impl SchedulerState {
             && self.ops.is_empty()
     }
 
-    fn queue_clone(&mut self, spec: CloneSpec, responder: Option<CloneResponder>) {
-        let target = spec.target.clone();
+    fn queue_clone(&mut self, request: InstallCloneRequest, responder: Option<CloneResponder>) {
+        let target = clone_key(&request.target);
         if self.clone_done.contains(&target) {
             if let Some(responder) = responder {
                 let _ = responder.send(Ok(()));
@@ -221,35 +259,49 @@ impl SchedulerState {
         self.clone_waiters
             .insert(target.clone(), responder.into_iter().collect());
 
-        self.resolve_cache_for_clone(spec);
+        if let Some(parent) = &request.parent {
+            let parent = clone_key(parent);
+            if self.clone_waiters.contains_key(&parent) && !self.clone_done.contains(&parent) {
+                self.blocked_by_parent
+                    .entry(parent)
+                    .or_default()
+                    .push(request);
+                return;
+            }
+        }
+
+        self.resolve_cache_for_clone(request);
     }
 
-    fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
-        let task_spec = spec.clone();
+    fn resolve_cache_for_clone(&mut self, request: InstallCloneRequest) {
+        let task_request = request.clone();
         self.ops.push(tokio::spawn(async move {
             let result = resolve_seeded_cache_path(
-                &task_spec.package.name,
-                &task_spec.package.version,
-                &task_spec.package.tarball_url,
+                &task_request.name,
+                &task_request.version,
+                &task_request.tarball_url,
             )
             .await
             .map_err(|e| format!("{e:#}"));
-            OpDone::SeededCache { spec, result }
+            OpDone::SeededCache { request, result }
         }));
     }
 
-    fn ensure_download(&mut self, package: PackageFetch, waiter: Option<CloneSpec>) {
+    fn ensure_download(&mut self, package: PackageFetch, waiter: Option<InstallCloneRequest>) {
         let key = package.key();
         if let Some(cache_path) = self.download_done.get(&key).cloned() {
-            if let Some(spec) = waiter {
-                self.clone_queue.push_back(ReadyClone { spec, cache_path });
+            if let Some(request) = waiter {
+                self.clone_queue.push_back(ReadyClone {
+                    request,
+                    cache_path,
+                });
             }
             return;
         }
 
         if let Some(waiters) = self.download_waiters.get_mut(&key) {
-            if let Some(spec) = waiter {
-                waiters.push(spec);
+            if let Some(request) = waiter {
+                waiters.push(request);
             }
             return;
         }
@@ -287,18 +339,18 @@ impl SchedulerState {
             let Some(job) = self.clone_queue.pop_front() else {
                 break;
             };
-            let target = job.spec.target.clone();
+            let target = clone_key(&job.request.target);
             if self.clone_done.contains(&target) || !self.clone_active.insert(target.clone()) {
                 continue;
             }
 
             self.ops.push(tokio::spawn(async move {
                 let result = clone_package_from_cache(
-                    &job.spec.package.name,
-                    &job.spec.package.version,
-                    &job.spec.package.tarball_url,
+                    &job.request.name,
+                    &job.request.version,
+                    &job.request.tarball_url,
                     &job.cache_path,
-                    &job.spec.target,
+                    &job.request.target,
                 )
                 .await
                 .map_err(|e| format!("{e:#}"));
@@ -309,10 +361,13 @@ impl SchedulerState {
 
     fn handle_done(&mut self, done: OpDone) {
         match done {
-            OpDone::SeededCache { spec, result } => match result {
-                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone { spec, cache_path }),
-                Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
-                Err(error) => self.complete_clone(spec.target, Err(error)),
+            OpDone::SeededCache { request, result } => match result {
+                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone {
+                    request,
+                    cache_path,
+                }),
+                Ok(None) => self.ensure_download(request.package(), Some(request)),
+                Err(error) => self.complete_clone(clone_key(&request.target), Err(error)),
             },
             OpDone::Download { key, result } => {
                 self.download_active.remove(&key);
@@ -320,16 +375,16 @@ impl SchedulerState {
                 match result {
                     Ok(cache_path) => {
                         self.download_done.insert(key, cache_path.clone());
-                        for spec in waiters {
+                        for request in waiters {
                             self.clone_queue.push_back(ReadyClone {
-                                spec,
+                                request,
                                 cache_path: cache_path.clone(),
                             });
                         }
                     }
                     Err(error) => {
-                        for spec in waiters {
-                            self.complete_clone(spec.target, Err(error.clone()));
+                        for request in waiters {
+                            self.complete_clone(clone_key(&request.target), Err(error.clone()));
                         }
                     }
                 }
@@ -350,6 +405,21 @@ impl SchedulerState {
             for waiter in waiters {
                 let _ = waiter.send(result.clone());
             }
+        }
+
+        match (result.is_ok(), self.blocked_by_parent.remove(&target)) {
+            (true, Some(children)) => {
+                for child in children {
+                    self.resolve_cache_for_clone(child);
+                }
+            }
+            (false, Some(children)) => {
+                let error = format!("parent package {} failed to clone", target.display());
+                for child in children {
+                    self.complete_clone(clone_key(&child.target), Err(error.clone()));
+                }
+            }
+            (_, None) => {}
         }
     }
 
@@ -383,10 +453,13 @@ mod tests {
         }
     }
 
-    fn clone_spec(name: &str, version: &str, target: &str) -> CloneSpec {
-        CloneSpec {
-            package: package(name, version),
+    fn clone_request(name: &str, version: &str, target: &str) -> InstallCloneRequest {
+        InstallCloneRequest {
+            name: name.to_string(),
+            version: version.to_string(),
+            tarball_url: format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz"),
             target: PathBuf::from(target),
+            parent: None,
         }
     }
 
@@ -399,7 +472,7 @@ mod tests {
     fn ensure_download_dedupes_inflight_package() {
         let mut state = state();
         let package = package("react", "18.2.0");
-        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let waiter = clone_request("react", "18.2.0", "/tmp/project/node_modules/react");
 
         state.ensure_download(package.clone(), Some(waiter));
         state.ensure_download(package, None);
@@ -415,14 +488,51 @@ mod tests {
     async fn queue_clone_dedupes_inflight_target() {
         let mut state = state();
         let target = PathBuf::from("/tmp/project/node_modules/react");
-        let spec = clone_spec("react", "18.2.0", target.to_string_lossy().as_ref());
+        let request = clone_request("react", "18.2.0", target.to_string_lossy().as_ref());
         let (first, _first_rx) = oneshot::channel();
         let (second, _second_rx) = oneshot::channel();
 
-        state.queue_clone(spec.clone(), Some(first));
-        state.queue_clone(spec, Some(second));
+        state.queue_clone(request.clone(), Some(first));
+        state.queue_clone(request, Some(second));
 
-        assert_eq!(state.clone_waiters[&target].len(), 2);
+        assert_eq!(state.clone_waiters[&clone_key(&target)].len(), 2);
+        assert_eq!(state.ops.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn prefetch_clone_waits_for_pending_parent() {
+        let mut state = state();
+        let parent = PathBuf::from("/tmp/project/node_modules/parent");
+        let child = PathBuf::from("/tmp/project/node_modules/parent/node_modules/child");
+        let parent_request = clone_request("parent", "1.0.0", parent.to_string_lossy().as_ref());
+        let child_request = InstallCloneRequest {
+            parent: Some(parent.clone()),
+            ..clone_request("child", "1.0.0", child.to_string_lossy().as_ref())
+        };
+
+        state.queue_clone(parent_request, None);
+        state.queue_clone(child_request, None);
+
+        assert_eq!(state.blocked_by_parent[&clone_key(&parent)].len(), 1);
+        assert_eq!(state.ops.len(), 1);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn queue_clone_normalizes_windows_path_separators() {
+        let mut state = state();
+        let forward = PathBuf::from("node_modules/@scope/pkg/node_modules/dep");
+        let backward = PathBuf::from("node_modules\\@scope\\pkg\\node_modules\\dep");
+        let first = clone_request("dep", "1.0.0", forward.to_string_lossy().as_ref());
+        let second = clone_request("dep", "1.0.0", backward.to_string_lossy().as_ref());
+        let key = clone_key(&forward);
+        let (first_tx, _first_rx) = oneshot::channel();
+        let (second_tx, _second_rx) = oneshot::channel();
+
+        state.queue_clone(first, Some(first_tx));
+        state.queue_clone(second, Some(second_tx));
+
+        assert_eq!(state.clone_waiters[&key].len(), 2);
         assert_eq!(state.ops.len(), 1);
     }
 }

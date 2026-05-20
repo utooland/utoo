@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow::Result;
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
@@ -28,7 +28,7 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
-use super::install_scheduler::{InstallScheduler, InstallSchedulerHandle};
+use super::install_scheduler::{InstallCloneRequest, InstallScheduler, InstallSchedulerHandle};
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
@@ -79,9 +79,9 @@ pub async fn install_packages(
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
-    // children. Within each level, tasks run concurrently. The pipeline's
-    // clone_worker may have already cloned some packages — clone_package_once
-    // deduplicates via CLONE_CACHE so no double work occurs.
+    // children. Within each level, tasks run concurrently. When a scheduler is
+    // supplied, pipeline prefetch and install-phase clones share its in-flight
+    // state; otherwise the legacy cloner provides process-wide deduplication.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
@@ -144,10 +144,13 @@ pub async fn install_packages(
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
                     let clone_job = InstallCloneJob {
-                        name,
-                        version,
-                        resolved,
-                        target_path,
+                        request: InstallCloneRequest {
+                            name,
+                            version,
+                            tarball_url: resolved,
+                            target: target_path,
+                            parent: None,
+                        },
                     };
                     let clone_dispatcher = clone_dispatcher.clone();
 
@@ -160,7 +163,7 @@ pub async fn install_packages(
                             if is_optional {
                                 tracing::warn!(
                                     "Optional dependency {} failed (ignored): {e:#}",
-                                    clone_job.name
+                                    clone_job.request.name
                                 );
                                 PROGRESS_BAR.inc(1);
                                 return Ok(());
@@ -168,8 +171,9 @@ pub async fn install_packages(
                             return Err(e);
                         }
                         PROGRESS_BAR.inc(1);
-                        log_progress(&format!("{} resolved", clone_job.name));
-                        update_package_binary(&clone_job.target_path, &clone_job.name).await
+                        log_progress(&format!("{} resolved", clone_job.request.name));
+                        update_package_binary(&clone_job.request.target, &clone_job.request.name)
+                            .await
                     });
                     clone_tasks.push(task);
                 } else {
@@ -192,10 +196,7 @@ struct InstallCloneDispatcher {
 }
 
 struct InstallCloneJob {
-    name: String,
-    version: String,
-    resolved: String,
-    target_path: PathBuf,
+    request: InstallCloneRequest,
 }
 
 impl InstallCloneDispatcher {
@@ -207,22 +208,13 @@ impl InstallCloneDispatcher {
 
     async fn clone_package(&self, job: &InstallCloneJob) -> Result<()> {
         match &self.scheduler {
-            Some(scheduler) => {
-                scheduler
-                    .ensure_clone(
-                        job.name.clone(),
-                        job.version.clone(),
-                        job.resolved.clone(),
-                        job.target_path.clone(),
-                    )
-                    .await
-            }
+            Some(scheduler) => scheduler.ensure_clone(job.request.clone()).await,
             None => {
                 crate::util::cloner::clone_package_once(
-                    &job.name,
-                    &job.version,
-                    &job.resolved,
-                    &job.target_path,
+                    &job.request.name,
+                    &job.request.version,
+                    &job.request.tarball_url,
+                    &job.request.target,
                 )
                 .await
             }
@@ -298,24 +290,23 @@ impl InstallService {
         let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
             && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
 
-        let (package_lock, pipeline_handles) = if use_fresh_lock {
+        let (package_lock, pipeline_handles, scheduler_handle) = if use_fresh_lock {
             let lock = load_package_lock_json_from_path(root_path).await?;
-            (lock, None)
+            (lock, None, InstallSchedulerHandle::start())
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
             let result = super::pipeline::resolve_with_pipeline(root_path).await?;
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-            (result.package_lock, Some(result.handles))
+            (
+                result.package_lock,
+                Some(result.handles),
+                result.scheduler_handle,
+            )
         };
 
         let groups = group_by_depth(&package_lock.packages);
-        let scheduler_handle = pipeline_handles
-            .is_none()
-            .then(InstallSchedulerHandle::start);
-        let clone_scheduler = scheduler_handle
-            .as_ref()
-            .map(InstallSchedulerHandle::scheduler);
+        let clone_scheduler = scheduler_handle.scheduler();
 
         if !package_lock.packages.is_empty() {
             start_progress_bar();
@@ -323,21 +314,19 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let install_result = install_packages(&groups, root_path, omit, clone_scheduler.as_ref())
+        let install_result = install_packages(&groups, root_path, omit, Some(&clone_scheduler))
             .await
             .context("Failed to install packages");
-
-        if let Some(handle) = scheduler_handle {
-            handle.shutdown().await;
-        }
-
-        install_result?;
 
         // Wait for pipeline workers to complete (if any)
         if let Some(handles) = pipeline_handles {
             handles.await_completion().await;
             super::pipeline::print_pipeline_summary();
         }
+
+        scheduler_handle.shutdown().await;
+
+        install_result?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;

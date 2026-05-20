@@ -69,6 +69,11 @@ pub fn is_git_url(url: &str) -> bool {
     matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
 }
 
+/// Check whether a tarball URL should be fetched by the registry downloader.
+pub fn is_registry_tarball_url(url: &str) -> bool {
+    matches!(url.parse::<Protocol>(), Ok(Protocol::Http))
+}
+
 /// Look up the cache path for a git-resolved package.
 ///
 /// Git packages are cloned during BFS resolution (inside ruborist) and

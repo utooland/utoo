@@ -11,6 +11,7 @@ mod worker;
 pub use receiver::{PipelineChannels, PipelineReceiver};
 pub use worker::PipelineHandles;
 
+use super::install_scheduler::InstallSchedulerHandle;
 use crate::util::cloner::clone_count;
 use crate::util::downloader::download_stats;
 
@@ -27,6 +28,7 @@ pub fn print_pipeline_summary() {
 pub struct PipelineResult {
     pub package_lock: utoo_ruborist::lock::PackageLock,
     pub handles: PipelineHandles,
+    pub(crate) scheduler_handle: InstallSchedulerHandle,
 }
 
 /// Resolve dependencies with pipeline: concurrent download/clone during resolution.
@@ -39,7 +41,12 @@ pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Resul
     use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
 
     let (options, channels) = Context::pipeline_deps_options(root_path.to_path_buf()).await;
-    let handles = worker::start_workers(channels, root_path.to_path_buf());
+    let scheduler_handle = InstallSchedulerHandle::start();
+    let handles = worker::start_workers(
+        channels,
+        root_path.to_path_buf(),
+        scheduler_handle.scheduler(),
+    );
 
     let output = utoo_ruborist::service::build_deps(options).await?;
 
@@ -49,5 +56,6 @@ pub async fn resolve_with_pipeline(root_path: &std::path::Path) -> anyhow::Resul
     Ok(PipelineResult {
         package_lock: output.lock,
         handles,
+        scheduler_handle,
     })
 }

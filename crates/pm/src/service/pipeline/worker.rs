@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use super::receiver::PipelineChannels;
-use crate::util::cloner::{clone_package_once, wait_clone_if_pending};
-use crate::util::downloader::{download_to_cache, is_git_url};
+use crate::service::install_scheduler::{InstallCloneRequest, InstallScheduler};
+use crate::util::downloader::is_registry_tarball_url;
 
 /// Pipeline worker handles for awaiting completion.
 pub struct PipelineHandles {
@@ -19,32 +19,30 @@ impl PipelineHandles {
 }
 
 /// Start download and clone pipeline workers, returning handles to await completion.
-pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandles {
+pub fn start_workers(
+    channels: PipelineChannels,
+    cwd: PathBuf,
+    scheduler: InstallScheduler,
+) -> PipelineHandles {
+    let download_scheduler = scheduler.clone();
     let download_handle = tokio::spawn(async move {
         let mut rx = channels.download_rx;
         while let Some(info) = rx.recv().await {
             let Some(tarball_url) = info.tarball_url else {
                 continue;
             };
-            // Git packages are cloned & cached during BFS resolution (inside ruborist).
-            // Skip the download pipeline — the clone worker will pick up the
-            // pre-resolved cache path via resolve_cache_path.
-            if is_git_url(&tarball_url) {
-                tracing::debug!(
-                    "Skipping download for git package: {}@{}",
-                    info.name,
-                    info.version
-                );
+            if !is_registry_tarball_url(&tarball_url) {
                 continue;
             }
-            let name = info.name;
-            let version = info.version;
-            tokio::spawn(async move {
-                download_to_cache(&name, &version, &tarball_url).await;
-            });
+            if let Err(e) =
+                download_scheduler.prefetch_download(info.name, info.version, tarball_url)
+            {
+                tracing::debug!("Pipeline download prefetch failed: {e:#}");
+            }
         }
     });
 
+    let clone_scheduler = scheduler;
     let clone_handle = tokio::spawn(async move {
         let mut rx = channels.clone_rx;
         while let Some(msg) = rx.recv().await {
@@ -55,14 +53,16 @@ pub fn start_workers(channels: PipelineChannels, cwd: PathBuf) -> PipelineHandle
             let version = msg.info.version;
             let target = cwd.join(&msg.path);
             let parent_path = msg.parent_path.map(|p| cwd.join(&p));
-            tokio::spawn(async move {
-                if let Some(ref parent) = parent_path {
-                    wait_clone_if_pending(&parent.to_string_lossy()).await;
-                }
-                if let Err(e) = clone_package_once(&name, &version, &tarball_url, &target).await {
-                    tracing::debug!("Pipeline pre-clone failed for {name}@{version}: {e:#}");
-                }
-            });
+            let request = InstallCloneRequest {
+                name,
+                version,
+                tarball_url,
+                target,
+                parent: parent_path,
+            };
+            if let Err(e) = clone_scheduler.prefetch_clone(request) {
+                tracing::debug!("Pipeline clone prefetch failed: {e:#}");
+            }
         }
     });
 
