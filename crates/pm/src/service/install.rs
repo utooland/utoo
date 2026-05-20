@@ -3,7 +3,7 @@ use anyhow::Context;
 use anyhow::Result;
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
@@ -28,6 +28,7 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
+use super::install_scheduler::{InstallScheduler, InstallSchedulerHandle};
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
@@ -67,8 +68,9 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
+    clone_scheduler: Option<&InstallScheduler>,
 ) -> Result<()> {
-    use crate::util::cloner::clone_package_once;
+    let clone_dispatcher = InstallCloneDispatcher::new(clone_scheduler);
 
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
@@ -141,18 +143,24 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
+                    let clone_job = InstallCloneJob {
+                        name,
+                        version,
+                        resolved,
+                        target_path,
+                    };
+                    let clone_dispatcher = clone_dispatcher.clone();
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
                     let task = tokio::spawn(async move {
-                        if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
-                        {
+                        if let Err(e) = clone_dispatcher.clone_package(&clone_job).await {
                             if is_optional {
                                 tracing::warn!(
-                                    "Optional dependency {name} failed (ignored): {e:#}"
+                                    "Optional dependency {} failed (ignored): {e:#}",
+                                    clone_job.name
                                 );
                                 PROGRESS_BAR.inc(1);
                                 return Ok(());
@@ -160,8 +168,8 @@ pub async fn install_packages(
                             return Err(e);
                         }
                         PROGRESS_BAR.inc(1);
-                        log_progress(&format!("{name} resolved"));
-                        update_package_binary(&target_path, &name).await
+                        log_progress(&format!("{} resolved", clone_job.name));
+                        update_package_binary(&clone_job.target_path, &clone_job.name).await
                     });
                     clone_tasks.push(task);
                 } else {
@@ -176,6 +184,50 @@ pub async fn install_packages(
     }
 
     Ok(())
+}
+
+#[derive(Clone)]
+struct InstallCloneDispatcher {
+    scheduler: Option<InstallScheduler>,
+}
+
+struct InstallCloneJob {
+    name: String,
+    version: String,
+    resolved: String,
+    target_path: PathBuf,
+}
+
+impl InstallCloneDispatcher {
+    fn new(scheduler: Option<&InstallScheduler>) -> Self {
+        Self {
+            scheduler: scheduler.cloned(),
+        }
+    }
+
+    async fn clone_package(&self, job: &InstallCloneJob) -> Result<()> {
+        match &self.scheduler {
+            Some(scheduler) => {
+                scheduler
+                    .ensure_clone(
+                        job.name.clone(),
+                        job.version.clone(),
+                        job.resolved.clone(),
+                        job.target_path.clone(),
+                    )
+                    .await
+            }
+            None => {
+                crate::util::cloner::clone_package_once(
+                    &job.name,
+                    &job.version,
+                    &job.resolved,
+                    &job.target_path,
+                )
+                .await
+            }
+        }
+    }
 }
 
 pub struct InstallService;
@@ -258,6 +310,12 @@ impl InstallService {
         };
 
         let groups = group_by_depth(&package_lock.packages);
+        let scheduler_handle = pipeline_handles
+            .is_none()
+            .then(InstallSchedulerHandle::start);
+        let clone_scheduler = scheduler_handle
+            .as_ref()
+            .map(InstallSchedulerHandle::scheduler);
 
         if !package_lock.packages.is_empty() {
             start_progress_bar();
@@ -265,9 +323,15 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        install_packages(&groups, root_path, omit)
+        let install_result = install_packages(&groups, root_path, omit, clone_scheduler.as_ref())
             .await
-            .context("Failed to install packages")?;
+            .context("Failed to install packages");
+
+        if let Some(handle) = scheduler_handle {
+            handle.shutdown().await;
+        }
+
+        install_result?;
 
         // Wait for pipeline workers to complete (if any)
         if let Some(handles) = pipeline_handles {
