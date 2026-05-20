@@ -1,6 +1,9 @@
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 /// Read and parse a JSON file into the specified type.
@@ -10,6 +13,34 @@ pub async fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
         .with_context(|| format!("Failed to read file {path:?}"))?;
 
     serde_json::from_slice(&bytes).with_context(|| format!("Failed to parse JSON from {path:?}"))
+}
+
+/// Serialize `value` as compact JSON and stream it to `path` through a
+/// [`BufWriter`], skipping the intermediate `Vec<u8>` that
+/// `serde_json::to_vec` + `std::fs::write` would allocate.
+///
+/// Synchronous on purpose: the caller in [`crate::util::manifest_store`] runs
+/// it on a dedicated OS thread so manifest persistence never touches the
+/// async runtime's worker or blocking pool. Async callers should wrap this
+/// in `tokio::task::spawn_blocking` (or write the async-aware counterpart
+/// when one is needed).
+///
+/// The parent directory of `path` must already exist; this helper does *not*
+/// `mkdir -p`. The cost-benefit of "try the write first, recover on
+/// `NotFound`" is policy-level (warm-cache rewrites want to skip the extra
+/// syscall every time), so the recovery loop lives at the call site, not
+/// here. A missing parent surfaces as [`io::ErrorKind::NotFound`] for the
+/// caller to match on.
+///
+/// Serialization failures — rare for `derive(Serialize)` types, possible for
+/// hand-written impls or maps with non-string keys — are folded into
+/// [`io::Error`] via [`io::Error::other`] so the whole API speaks one error
+/// type and callers can keep matching on [`io::ErrorKind`].
+pub fn write_compact_sync<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, value).map_err(io::Error::other)?;
+    writer.flush()
 }
 
 /// Load package.json from a directory path and deserialize into the caller's
@@ -133,6 +164,35 @@ mod tests {
         // Last value wins, matching JSON.parse semantics
         assert_eq!(view.scripts.get("prepublish").unwrap(), "node build.js");
         assert_eq!(view.scripts.get("test").unwrap(), "node build/test.js");
+    }
+
+    #[tokio::test]
+    async fn write_compact_sync_round_trips_through_read_json_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("out.json");
+        let value = json!({
+            "name": "test",
+            "version": "1.0.0",
+            "deps": ["a", "b", "c"],
+        });
+
+        super::write_compact_sync(&path, &value).unwrap();
+
+        let read_back: Value = read_json_file(&path).await.unwrap();
+        assert_eq!(read_back, value);
+
+        // Compact form: no inter-token whitespace.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains(": "));
+        assert!(!raw.contains(", "));
+    }
+
+    #[test]
+    fn write_compact_sync_requires_existing_parent_directory() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("missing").join("out.json");
+        let err = super::write_compact_sync(&path, &json!({})).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[tokio::test]
