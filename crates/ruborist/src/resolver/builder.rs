@@ -336,6 +336,92 @@ pub enum ProcessResult {
     Skipped,
 }
 
+/// Place an already resolved dependency into the graph.
+///
+/// Registry resolution is intentionally outside this helper. The existing
+/// sequential BFS path and the follow-up main-loop resolver can share this
+/// graph mutation step without duplicating node placement logic.
+fn place_resolved_dependency(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    conflict_parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    let new_node = create_package_node(&edge.name, resolved, conflict_parent, graph);
+    let new_index = graph.add_node(new_node);
+    graph.add_physical_edge(conflict_parent, new_index);
+    graph.mark_dependency_resolved(edge.edge_id, new_index);
+    update_node_type_from_edge(graph, parent, new_index, &edge.edge_type);
+    add_edges_from(
+        graph,
+        new_index,
+        &*resolved.manifest,
+        &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+    );
+    ProcessResult::Created(new_index)
+}
+
+fn chain_resolve_error<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    source: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(source),
+    }
+}
+
+fn emit_process_result<E: EventReceiver>(
+    graph: &DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    result: &ProcessResult,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    match result {
+        ProcessResult::Created(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Resolved {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+
+                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                    let parent_path = graph.get_node(parent).map(|parent| parent.path.as_path());
+                    receiver.on_event(BuildEvent::PackagePlaced {
+                        package: manifest.as_ref().into(),
+                        path: &node.path,
+                        parent_path,
+                    });
+                }
+            }
+
+            next_level.push(*idx);
+        }
+        ProcessResult::Reused(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Reused {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+            }
+        }
+        ProcessResult::Skipped => {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+    }
+}
+
 /// Handle a `file:` dep: dir → Link node inline (returns
 /// `ControlFlow::Break`); tarball → stream bytes through the shared
 /// `commit_tarball_bytes` and hand the `ResolvedPackage` back to the
@@ -625,28 +711,14 @@ pub async fn process_dependency<R: RegistryClient>(
                 resolved
             };
 
-            // Create new node
-            let new_node = create_package_node(&edge_info.name, &resolved, conflict_parent, graph);
-            let new_index = graph.add_node(new_node);
-
-            // Add physical edge
-            graph.add_physical_edge(conflict_parent, new_index);
-
-            // Mark dependency as resolved
-            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-
-            // Update node type
-            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
-
-            // Add dependencies of the new node
-            add_edges_from(
+            Ok(place_resolved_dependency(
                 graph,
-                new_index,
-                &*resolved.manifest,
-                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-            );
-
-            Ok(ProcessResult::Created(new_index))
+                node_index,
+                conflict_parent,
+                edge_info,
+                &resolved,
+                config,
+            ))
         }
     }
 }
@@ -839,54 +911,15 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 });
                 let result = process_dependency(graph, registry, node_index, &edge_info, config)
                     .await
-                    .map_err(|inner| {
-                        let mut chain = graph.logical_ancestry(node_index);
-                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
-                        ResolveError::WithChain {
-                            chain,
-                            source: Box::new(inner),
-                        }
-                    });
-                match result? {
-                    ProcessResult::Created(idx) => {
-                        // Extract node info for events
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Resolved {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-
-                            // Send PackagePlaced for pipeline cloning
-                            if let NodeManifest::Registry(ref manifest) = node.manifest {
-                                // Get parent path for dependency ordering
-                                let parent_path = graph
-                                    .get_node(node_index)
-                                    .map(|parent| parent.path.as_path());
-                                receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.as_ref().into(),
-                                    path: &node.path,
-                                    parent_path,
-                                });
-                            }
-                        }
-
-                        next_level.push(idx);
-                    }
-                    ProcessResult::Reused(idx) => {
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Reused {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-                        }
-                    }
-                    ProcessResult::Skipped => {
-                        receiver.on_event(BuildEvent::Skipped {
-                            name: &edge_info.name,
-                            spec: &edge_info.spec,
-                        });
-                    }
-                }
+                    .map_err(|inner| chain_resolve_error(graph, node_index, &edge_info, inner))?;
+                emit_process_result(
+                    graph,
+                    receiver,
+                    node_index,
+                    &edge_info,
+                    &result,
+                    &mut next_level,
+                );
             }
         }
 
@@ -1136,6 +1169,71 @@ mod tests {
         let target_index = graph.add_node(target);
 
         (graph, source_index, target_index)
+    }
+
+    #[test]
+    fn test_place_resolved_dependency_adds_node_and_child_edges() {
+        let root_pkg = PackageJson::new("root", "1.0.0");
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([(
+                "parent".to_string(),
+                "^1.0.0".to_string(),
+            )])),
+            ..root_pkg
+        };
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
+
+        let edge = collect_unresolved_edges(&graph, root_index)
+            .pop()
+            .expect("root dependency edge");
+        let manifest = Arc::new(create_version_manifest_with_deps(
+            "parent",
+            "1.2.3",
+            vec![("child", "^1.0.0")],
+        ));
+        let resolved = ResolvedPackage {
+            name: "parent".to_string(),
+            version: "1.2.3".to_string(),
+            manifest,
+        };
+        let result = place_resolved_dependency(
+            &mut graph,
+            root_index,
+            root_index,
+            &edge,
+            &resolved,
+            &BuildDepsConfig::default(),
+        );
+        let ProcessResult::Created(parent_index) = result else {
+            panic!("expected new parent node");
+        };
+
+        let parent = graph.get_node(parent_index).expect("parent node");
+        assert_eq!(parent.name, "parent");
+        assert_eq!(parent.version, "1.2.3");
+        assert_eq!(graph.get_physical_children(root_index), vec![parent_index]);
+
+        let root_edges = graph.get_dependency_edges(root_index);
+        let resolved_edge = root_edges
+            .iter()
+            .find(|(_, dep)| dep.name == "parent")
+            .map(|(_, dep)| *dep)
+            .expect("resolved parent edge");
+        assert!(resolved_edge.valid);
+        assert_eq!(resolved_edge.to, Some(parent_index));
+
+        let child_edges = graph.get_dependency_edges(parent_index);
+        assert_eq!(child_edges.len(), 1);
+        assert_eq!(child_edges[0].1.name, "child");
+        assert_eq!(child_edges[0].1.spec, "^1.0.0");
+        assert!(!child_edges[0].1.valid);
     }
 
     #[test]
