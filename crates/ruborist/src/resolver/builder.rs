@@ -363,6 +363,32 @@ fn place_resolved_dependency(
     ProcessResult::Created(new_index)
 }
 
+fn reuse_existing_dependency(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    existing: NodeIndex,
+) -> ProcessResult {
+    graph.mark_dependency_resolved(edge.edge_id, existing);
+    update_node_type_from_edge(graph, parent, existing, &edge.edge_type);
+    ProcessResult::Reused(existing)
+}
+
+fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
+        FindResult::Reuse(existing) => reuse_existing_dependency(graph, parent, edge, existing),
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            place_resolved_dependency(graph, parent, conflict_parent, edge, resolved, config)
+        }
+    }
+}
+
 fn chain_resolve_error<E>(
     graph: &DependencyGraph,
     parent: NodeIndex,
@@ -545,16 +571,13 @@ pub async fn process_dependency<R: RegistryClient>(
 ) -> Result<ProcessResult, ResolveError<R::Error>> {
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
-        FindResult::Reuse(existing_index) => {
-            // Mark edge as resolved
-            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
-
-            // Update target node type
-            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
-
-            Ok(ProcessResult::Reused(existing_index))
-        }
-        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+        FindResult::Reuse(existing_index) => Ok(reuse_existing_dependency(
+            graph,
+            node_index,
+            edge_info,
+            existing_index,
+        )),
+        FindResult::Conflict(_conflict_parent) | FindResult::New(_conflict_parent) => {
             // Parse spec once and exhaustively route by variant.
             // The exhaustive match ensures the compiler forces a decision for any
             // new PackageSpec variant — no silent fall-through to the wrong resolver.
@@ -611,7 +634,7 @@ pub async fn process_dependency<R: RegistryClient>(
                         match process_file_dep(
                             graph,
                             node_index,
-                            conflict_parent,
+                            _conflict_parent,
                             edge_info,
                             path,
                             config.cache_dir.as_deref(),
@@ -711,13 +734,8 @@ pub async fn process_dependency<R: RegistryClient>(
                 resolved
             };
 
-            Ok(place_resolved_dependency(
-                graph,
-                node_index,
-                conflict_parent,
-                edge_info,
-                &resolved,
-                config,
+            Ok(process_dependency_with_resolved(
+                graph, node_index, edge_info, &resolved, config,
             ))
         }
     }
@@ -1169,6 +1187,60 @@ mod tests {
         let target_index = graph.add_node(target);
 
         (graph, source_index, target_index)
+    }
+
+    #[test]
+    fn test_process_dependency_with_resolved_reuses_existing_node() {
+        let root_pkg = PackageJson::new("root", "1.0.0");
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([(
+                "lodash".to_string(),
+                "^4.17.0".to_string(),
+            )])),
+            ..root_pkg
+        };
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
+        let existing = PackageNode::from_version_manifest(
+            "lodash".to_string(),
+            PathBuf::from("node_modules/lodash"),
+            Arc::new(create_version_manifest("lodash", "4.17.21")),
+        );
+        let existing_index = graph.add_node(existing);
+        graph.add_physical_edge(root_index, existing_index);
+
+        let edge = collect_unresolved_edges(&graph, root_index)
+            .pop()
+            .expect("root dependency edge");
+        let resolved = ResolvedPackage {
+            name: "lodash".to_string(),
+            version: "4.17.21".to_string(),
+            manifest: Arc::new(create_version_manifest("lodash", "4.17.21")),
+        };
+        let result = process_dependency_with_resolved(
+            &mut graph,
+            root_index,
+            &edge,
+            &resolved,
+            &BuildDepsConfig::default(),
+        );
+
+        assert!(matches!(result, ProcessResult::Reused(idx) if idx == existing_index));
+        assert_eq!(graph.graph.node_count(), 2);
+        let root_edges = graph.get_dependency_edges(root_index);
+        let resolved_edge = root_edges
+            .iter()
+            .find(|(_, dep)| dep.name == "lodash")
+            .map(|(_, dep)| *dep)
+            .expect("resolved lodash edge");
+        assert!(resolved_edge.valid);
+        assert_eq!(resolved_edge.to, Some(existing_index));
     }
 
     #[test]
