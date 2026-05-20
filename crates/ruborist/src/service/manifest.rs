@@ -13,6 +13,7 @@ use super::fetch::{
 };
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::traits::registry::is_npm_registry;
 
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
@@ -100,7 +101,7 @@ pub enum FetchManifestBytesResult {
 }
 
 /// Manifest metadata format.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataFormat {
     /// Only install-relevant fields (deps, dist, engines, bin).
     /// Uses `application/vnd.npm.install-v1+json`, 10-50x smaller than full.
@@ -232,7 +233,7 @@ pub struct FetchVersionManifestOptions<'a> {
 pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>) -> Result<Bytes> {
     let url = format!("{}/{}/{}", opts.registry_url, opts.name, opts.spec);
 
-    let accept = match opts.format {
+    let accept = match version_manifest_format(opts.registry_url, opts.format) {
         MetadataFormat::Abbreviated => "application/vnd.npm.install-v1+json",
         MetadataFormat::Complete => "application/json",
     };
@@ -273,4 +274,35 @@ pub async fn fetch_version_manifest(
 ) -> Result<CoreVersionManifest> {
     let bytes = fetch_version_manifest_bytes(opts).await?;
     parse_json_off_runtime::<CoreVersionManifest>(bytes).await
+}
+
+fn version_manifest_format(registry_url: &str, format: MetadataFormat) -> MetadataFormat {
+    if is_npm_registry(registry_url) {
+        // npmjs rejects single-version endpoints with install-v1 Accept (406).
+        // Keep abbreviated metadata for registries that explicitly support
+        // semver/range endpoints; exact npmjs fallback must use full JSON.
+        MetadataFormat::Complete
+    } else {
+        format
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MetadataFormat, version_manifest_format};
+
+    #[test]
+    fn npm_version_manifest_uses_complete_metadata() {
+        assert_eq!(
+            version_manifest_format("https://registry.npmjs.org", MetadataFormat::Abbreviated),
+            MetadataFormat::Complete
+        );
+        assert_eq!(
+            version_manifest_format(
+                "https://registry.npmmirror.com",
+                MetadataFormat::Abbreviated
+            ),
+            MetadataFormat::Abbreviated
+        );
+    }
 }

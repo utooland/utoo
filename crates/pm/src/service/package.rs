@@ -2,7 +2,7 @@ use crate::helper::workspace::find_workspaces;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{
-    finish_progress_bar, inc_progress, log_progress, set_progress_length, start_progress_bar,
+    finish_progress_bar, inc_progress, log_progress_lazy, set_progress_length, start_progress_bar,
 };
 use anyhow::{Context, Result};
 use futures;
@@ -283,7 +283,7 @@ impl PackageService {
                     let script = script.to_string();
                     let is_optional = *is_optional;
                     async move {
-                        log_progress(&format!("{} {}", package.name, hook));
+                        log_progress_lazy(|| format!("{} {}", package.name, hook));
                         let start = std::time::Instant::now();
                         let result =
                             ScriptService::execute_script(&package, hook, ScriptOutput::Silent)

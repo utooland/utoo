@@ -64,9 +64,11 @@ pub fn is_retryable(err: &FetchError) -> bool {
 /// - `is_body()`: stream read errors (e.g. connection reset mid-transfer)
 /// - `is_request()`: request-level errors — often caused by h2 connection
 ///   resets or pooled connection failures, so we retry these too
-/// - Everything else (e.g. `is_builder()`, `is_decode()`): permanent
+/// - `is_decode()`: transient response body decode failure, commonly caused
+///   by a truncated compressed response
+/// - Everything else (e.g. `is_builder()`): permanent
 pub fn classify_reqwest_error(e: reqwest::Error) -> FetchError {
-    let is_retryable = e.is_timeout() || e.is_body() || e.is_request() || {
+    let is_retryable = e.is_timeout() || e.is_body() || e.is_decode() || e.is_request() || {
         #[cfg(not(target_arch = "wasm32"))]
         {
             e.is_connect()

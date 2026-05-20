@@ -21,8 +21,8 @@ use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
-    finish_progress_bar, inc_progress, log_progress, print_install_counts, set_progress_length,
-    start_progress_bar,
+    finish_progress_bar, inc_progress, log_progress, log_progress_lazy, print_install_counts,
+    set_progress_length, start_progress_bar,
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 
@@ -160,7 +160,7 @@ pub async fn install_packages(
                             return Err(e);
                         }
                         inc_progress(1);
-                        log_progress(&format!("{name} resolved"));
+                        log_progress_lazy(|| format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
                     clone_tasks.push(task);

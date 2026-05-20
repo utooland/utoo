@@ -172,10 +172,17 @@ pub fn inc_progress(delta: u64) {
 }
 
 pub fn log_progress(text: &str) {
+    log_progress_lazy(|| text.to_string());
+}
+
+pub fn log_progress_lazy<F>(message: F)
+where
+    F: FnOnce() -> String,
+{
     if !*IS_TTY {
         return;
     }
-    PROGRESS_BAR.set_message(text.to_string());
+    PROGRESS_BAR.set_message(message());
 }
 
 // Global timer for log_time/log_time_end
@@ -270,6 +277,7 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::time::Duration;
 
     #[test]
@@ -296,5 +304,18 @@ mod tests {
         let d = Duration::from_millis(0); // 0.0s
         let s = format_elapsed_time(d).to_string();
         assert_eq!(s, "[0.0s]");
+    }
+
+    #[test]
+    fn test_log_progress_lazy_skips_message_when_not_tty() {
+        if *IS_TTY {
+            return;
+        }
+        let called = Cell::new(false);
+        log_progress_lazy(|| {
+            called.set(true);
+            "hidden".to_string()
+        });
+        assert!(!called.get());
     }
 }
