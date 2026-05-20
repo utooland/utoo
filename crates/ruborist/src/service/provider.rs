@@ -22,8 +22,13 @@ use crate::traits::registry::RegistryClient;
 /// Full-manifest data returned by a provider job.
 #[derive(Clone)]
 pub enum ManifestFullData {
-    /// Fresh full manifest bytes were fetched and parsed.
-    Full(Arc<FullManifest>),
+    /// Fresh full manifest bytes were fetched and parsed. When the full job
+    /// carried the triggering spec, the provider may also return the matching
+    /// version manifest extracted in the same parse worker.
+    Full {
+        manifest: Arc<FullManifest>,
+        speculative: Option<(String, Arc<CoreVersionManifest>)>,
+    },
     /// The registry returned 304 and the persisted version list is valid.
     Versions(Arc<VersionsInfo>),
 }
@@ -32,7 +37,13 @@ pub enum ManifestFullData {
 #[derive(Clone)]
 pub enum ManifestJob {
     /// Fetch or validate a package full manifest.
-    Full { name: String },
+    Full {
+        name: String,
+        /// Optional range/tag from the BFS edge that caused this full-manifest
+        /// fetch. Providers can use it to speculatively extract the current
+        /// version while full-manifest bytes are already on a CPU worker.
+        spec: Option<String>,
+    },
     /// Fetch a version manifest.
     Version {
         name: String,

@@ -460,7 +460,7 @@ enum FetchKey {
 impl ManifestJob {
     fn key(&self) -> FetchKey {
         match self {
-            Self::Full { name } => FetchKey::Full(name.clone()),
+            Self::Full { name, .. } => FetchKey::Full(name.clone()),
             Self::Version { name, spec, .. } | Self::ExtractVersion { name, spec, .. } => {
                 FetchKey::Version(name.clone(), spec.clone())
             }
@@ -656,8 +656,13 @@ impl ManifestState {
         {
             return;
         }
-        self.fetch_queues
-            .enqueue(ManifestJob::Full { name: real_name }, priority);
+        self.fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: real_name,
+                spec: Some(real_spec),
+            },
+            priority,
+        );
     }
 
     fn enqueue_version_extract(&mut self, name: String, version: String, full: Arc<FullManifest>) {
@@ -708,7 +713,22 @@ impl ManifestState {
         match done {
             FetchDone::Full { name, result } => {
                 match result {
-                    Ok(ManifestFullData::Full(full)) => {
+                    Ok(ManifestFullData::Full {
+                        manifest: full,
+                        speculative,
+                    }) => {
+                        if let Some((spec, manifest)) = speculative {
+                            self.version_cache
+                                .insert((name.clone(), spec), Arc::clone(&manifest));
+                            self.version_cache
+                                .entry((name.clone(), manifest.version.clone()))
+                                .or_insert_with(|| Arc::clone(&manifest));
+                            self.schedule_transitive_prefetches(
+                                &manifest,
+                                peer_deps,
+                                supports_semver,
+                            );
+                        }
                         self.full_cache.insert(name.clone(), full);
                     }
                     Ok(ManifestFullData::Versions(versions)) => {
@@ -1977,6 +1997,7 @@ mod tests {
         queues.enqueue(
             ManifestJob::Full {
                 name: "prefetch".to_string(),
+                spec: None,
             },
             FetchPriority::Prefetch,
         );
@@ -1996,6 +2017,45 @@ mod tests {
                 .expect("demand job")
                 .key(),
             FetchKey::Version("demand".to_string(), "^1.0.0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_full_fetch_result_stores_speculative_manifest() {
+        let mut state = ManifestState::default();
+        let full = Arc::new(FullManifest {
+            name: "pkg".to_string(),
+            versions: vec!["1.2.3".to_string()],
+            ..Default::default()
+        });
+        let manifest = Arc::new(create_version_manifest_with_deps(
+            "pkg",
+            "1.2.3",
+            vec![("dep", "^1.0.0")],
+        ));
+
+        state.apply_fetch_result(
+            FetchDone::Full {
+                name: "pkg".to_string(),
+                result: Ok(ManifestFullData::Full {
+                    manifest: full,
+                    speculative: Some(("^1.0.0".to_string(), manifest)),
+                }),
+            },
+            false,
+            PeerDeps::Skip,
+            &mut VecDeque::new(),
+        );
+
+        let requested_key = ("pkg".to_string(), "^1.0.0".to_string());
+        assert!(state.version_cache.contains_key(&requested_key));
+        let exact_key = ("pkg".to_string(), "1.2.3".to_string());
+        assert!(state.version_cache.contains_key(&exact_key));
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Full("dep".to_string()))
         );
     }
 

@@ -13,6 +13,7 @@ use super::fetch::{
 };
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::resolver::version::resolve_target_version;
 
 /// Parse JSON bytes on rayon's CPU thread pool (native) or inline
 /// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
@@ -49,21 +50,44 @@ where
 pub(crate) async fn parse_full_manifest_off_runtime(
     raw_bytes: Bytes,
 ) -> Result<FullManifest, anyhow::Error> {
+    parse_full_manifest_with_core_off_runtime(raw_bytes, None)
+        .await
+        .map(|(manifest, _)| manifest)
+}
+
+pub(crate) type FullManifestParseResult = (FullManifest, Option<(String, CoreVersionManifest)>);
+
+fn parse_full_manifest_with_core_sync(
+    raw_bytes: Bytes,
+    spec: Option<String>,
+) -> Result<FullManifestParseResult, anyhow::Error> {
+    // simd_json mutates the parse buffer; copy inside the worker so
+    // response-body bytes can stay immutable until parsing starts.
+    let mut parse_buf = raw_bytes.to_vec();
+    let mut manifest: FullManifest = simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
+        .map_err(|e| anyhow!("JSON parse error: {e}"))?;
+    manifest.raw = raw_bytes;
+
+    let speculative = spec.and_then(|spec| {
+        resolve_target_version((&manifest).into(), &spec)
+            .ok()
+            .and_then(|version| manifest.get_core_version(&version).map(|core| (spec, core)))
+    });
+
+    Ok((manifest, speculative))
+}
+
+/// Parse a full wire-fetched manifest and optionally extract the current BFS
+/// edge's version in the same off-runtime worker task.
+pub(crate) async fn parse_full_manifest_with_core_off_runtime(
+    raw_bytes: Bytes,
+    spec: Option<String>,
+) -> Result<FullManifestParseResult, anyhow::Error> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
-            let result = (|| -> Result<FullManifest, anyhow::Error> {
-                // simd_json mutates the parse buffer; copy inside the worker so
-                // response-body bytes can stay immutable until parsing starts.
-                let mut parse_buf = raw_bytes.to_vec();
-                let mut manifest: FullManifest =
-                    simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
-                        .map_err(|e| anyhow!("JSON parse error: {e}"))?;
-                manifest.raw = raw_bytes;
-
-                Ok(manifest)
-            })();
+            let result = parse_full_manifest_with_core_sync(raw_bytes, spec);
             let _ = tx.send(result);
         });
         rx.await
@@ -71,9 +95,7 @@ pub(crate) async fn parse_full_manifest_off_runtime(
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let mut manifest: FullManifest = parse_json_off_runtime(raw_bytes.clone()).await?;
-        manifest.raw = raw_bytes;
-        Ok(manifest)
+        parse_full_manifest_with_core_sync(raw_bytes, spec)
     }
 }
 

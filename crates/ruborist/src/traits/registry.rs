@@ -403,11 +403,14 @@ pub mod mock {
             job: crate::service::ManifestJob,
         ) -> Result<crate::service::ManifestJobDone, Self::Error> {
             match job {
-                crate::service::ManifestJob::Full { name } => {
+                crate::service::ManifestJob::Full { name, spec: _ } => {
                     let manifest = self.fetch_full_manifest(&name).await?;
                     Ok(crate::service::ManifestJobDone::Full {
                         name,
-                        data: crate::service::ManifestFullData::Full(manifest),
+                        data: crate::service::ManifestFullData::Full {
+                            manifest,
+                            speculative: None,
+                        },
                     })
                 }
                 crate::service::ManifestJob::Version {

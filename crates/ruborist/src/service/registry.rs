@@ -203,7 +203,7 @@ enum ProviderFullManifestBytes {
 impl ManifestProvider for UnifiedRegistry {
     async fn execute_manifest_job(&self, job: ManifestJob) -> Result<ManifestJobDone, Self::Error> {
         match job {
-            ManifestJob::Full { name } => self.execute_provider_full_job(name).await,
+            ManifestJob::Full { name, spec } => self.execute_provider_full_job(name, spec).await,
             ManifestJob::Version {
                 name,
                 spec,
@@ -263,8 +263,9 @@ impl UnifiedRegistry {
     async fn execute_provider_full_job(
         &self,
         name: String,
+        spec: Option<String>,
     ) -> Result<ManifestJobDone, RegistryError> {
-        let data = self.fetch_provider_full_manifest_data(&name).await?;
+        let data = self.fetch_provider_full_manifest_data(&name, spec).await?;
         Ok(ManifestJobDone::Full { name, data })
     }
 
@@ -305,10 +306,12 @@ impl UnifiedRegistry {
     async fn fetch_provider_full_manifest_data(
         &self,
         name: &str,
+        spec: Option<String>,
     ) -> Result<ManifestFullData, RegistryError> {
         match self.fetch_provider_full_manifest_bytes(name).await? {
             ProviderFullManifestBytes::Fresh { bytes, etag } => {
-                self.parse_provider_full_manifest(name, bytes, etag).await
+                self.parse_provider_full_manifest(name, bytes, etag, spec)
+                    .await
             }
             ProviderFullManifestBytes::NotModified { versions } => {
                 Ok(ManifestFullData::Versions(versions))
@@ -321,12 +324,18 @@ impl UnifiedRegistry {
         name: &str,
         bytes: bytes::Bytes,
         etag: Option<String>,
+        spec: Option<String>,
     ) -> Result<ManifestFullData, RegistryError> {
-        let manifest = Arc::new(
-            manifest::parse_full_manifest_off_runtime(bytes)
+        let (manifest, speculative) =
+            manifest::parse_full_manifest_with_core_off_runtime(bytes, spec)
                 .await
-                .map_err(RegistryError)?,
-        );
+                .map_err(RegistryError)?;
+        let manifest = Arc::new(manifest);
+        let speculative = speculative.map(|(spec, manifest)| {
+            let manifest = Arc::new(manifest);
+            self.store_version_manifest(name, Arc::clone(&manifest));
+            (spec, manifest)
+        });
         let versions = Arc::new(VersionsInfo {
             versions: Versions {
                 version_list: manifest.versions.clone(),
@@ -336,7 +345,10 @@ impl UnifiedRegistry {
             last_updated: current_timestamp_secs(),
         });
         self.store.store_versions(name, versions);
-        Ok(ManifestFullData::Full(manifest))
+        Ok(ManifestFullData::Full {
+            manifest,
+            speculative,
+        })
     }
 
     async fn fetch_provider_version_manifest(
