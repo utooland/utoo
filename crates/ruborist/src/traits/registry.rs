@@ -298,6 +298,7 @@ pub mod mock {
     use super::*;
 
     /// Internal package data for mock registry.
+    #[derive(Clone)]
     struct MockPackage {
         name: String,
         dist_tags: HashMap<String, String>,
@@ -305,6 +306,7 @@ pub mod mock {
     }
 
     /// Mock registry client that returns predefined packages.
+    #[derive(Clone)]
     pub struct MockRegistryClient {
         packages: HashMap<String, MockPackage>,
     }
@@ -391,6 +393,58 @@ pub mod mock {
                 raw: bytes::Bytes::from(raw),
                 ..Default::default()
             }))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::service::ManifestProvider for MockRegistryClient {
+        async fn execute_manifest_job(
+            &self,
+            job: crate::service::ManifestJob,
+        ) -> Result<crate::service::ManifestJobDone, Self::Error> {
+            match job {
+                crate::service::ManifestJob::Full { name } => {
+                    let manifest = self.fetch_full_manifest(&name).await?;
+                    Ok(crate::service::ManifestJobDone::Full {
+                        name,
+                        data: crate::service::ManifestFullData::Full(manifest),
+                    })
+                }
+                crate::service::ManifestJob::Version {
+                    name,
+                    spec,
+                    fetch_spec,
+                    ..
+                } => {
+                    let manifest = self.fetch_version_manifest(&name, &fetch_spec).await?;
+                    Ok(crate::service::ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    })
+                }
+                crate::service::ManifestJob::ExtractVersion {
+                    name,
+                    spec,
+                    version,
+                    full,
+                } => {
+                    let (resolved_version, manifest) =
+                        crate::model::manifest::extract_core_version_off_runtime(full, version)
+                            .await;
+                    let manifest = manifest.ok_or_else(|| {
+                        MockError(format!(
+                            "Version {} not found in manifest for {}",
+                            resolved_version, name
+                        ))
+                    })?;
+                    Ok(crate::service::ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    })
+                }
+            }
         }
     }
 }
