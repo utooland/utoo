@@ -11,7 +11,8 @@
 //! Serialization and file writes run on a dedicated writer thread so manifest
 //! persistence does not occupy async runtime workers or Tokio's blocking pool.
 
-use std::io::{BufWriter, Write};
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, SyncSender, TrySendError};
@@ -22,7 +23,7 @@ use serde::Serialize;
 use utoo_ruborist::model::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
-use crate::util::json::read_json_file;
+use crate::util::json::{read_json_file, write_compact_sync};
 
 /// Opportunistic writer backlog. If disk stalls beyond this, new cache writes
 /// are dropped instead of letting resolver memory grow without bound.
@@ -156,32 +157,28 @@ impl ManifestWriter {
     }
 }
 
-/// Serialize `value` and write to `path`. On `NotFound`, create the parent
-/// directory and retry once — saves the mkdir syscall on every warm-cache
-/// rewrite. Errors are logged at debug; disk cache is opportunistic.
+/// Apply the manifest-cache write policy on top of
+/// [`crate::util::json::write_compact_sync`]: on `NotFound`, create the
+/// parent directory once and retry — this is how the resolver hot path
+/// avoids the up-front `mkdir` syscall on every warm-cache rewrite. All
+/// errors are swallowed at the `debug` log level because the disk cache is
+/// opportunistic; a dropped write only costs a future cache miss.
 fn write_json_sync<T: Serialize>(path: &Path, value: &T) {
-    match write_json_file_sync(path, value) {
+    match write_compact_sync(path, value) {
         Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if e.kind() == ErrorKind::NotFound => {
             if let Some(parent) = path.parent()
-                && let Err(e) = std::fs::create_dir_all(parent)
+                && let Err(e) = fs::create_dir_all(parent)
             {
                 tracing::debug!("Failed to create {parent:?}: {e}");
                 return;
             }
-            if let Err(e) = write_json_file_sync(path, value) {
+            if let Err(e) = write_compact_sync(path, value) {
                 tracing::debug!("Failed to write {path:?}: {e}");
             }
         }
         Err(e) => tracing::debug!("Failed to write {path:?}: {e}"),
     }
-}
-
-fn write_json_file_sync<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-    let file = std::fs::File::create(path)?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer(&mut writer, value).map_err(std::io::Error::other)?;
-    writer.flush()
 }
 
 #[cfg(test)]
