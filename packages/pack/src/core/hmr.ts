@@ -1,6 +1,8 @@
 import {
   type CompilationError,
+  type EntryIssuesMap,
   type EntryOptions,
+  formatIssue,
   type HMR_ACTION_TYPES,
   HMR_ACTIONS_SENT_TO_BROWSER,
   type ReloadAction,
@@ -97,12 +99,57 @@ export type ClientState = {
   hmrPayloads: Map<string, HMR_ACTION_TYPES>;
   turbopackUpdates: TurbopackUpdate[];
   subscriptions: Map<string, AsyncIterator<any>>;
+  clientIssues: EntryIssuesMap;
 };
 
 export type SendHmr = (id: string, payload: HMR_ACTION_TYPES) => void;
 
 export const FAST_REFRESH_RUNTIME_RELOAD =
   "Fast Refresh had to perform a full reload due to a runtime error.";
+
+function hasBlockingIssues(issues: EntryIssuesMap) {
+  for (const issueMap of issues.values()) {
+    for (const issue of issueMap.values()) {
+      if (issue.severity !== "warning") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hasBlockingResultIssues(result: TurbopackResult) {
+  return result.issues.some(
+    (issue) => issue.severity === "error" || issue.severity === "fatal",
+  );
+}
+
+function addIssuesToErrors(
+  errors: Map<string, CompilationError>,
+  issues: EntryIssuesMap,
+) {
+  for (const issueMap of issues.values()) {
+    for (const [key, issue] of issueMap) {
+      if (issue.severity === "warning") {
+        continue;
+      }
+
+      errors.set(key, {
+        message: formatIssue(issue, false),
+      });
+    }
+  }
+}
+
+function getCompilationErrors(issues: EntryIssuesMap) {
+  const errors = new Map<string, CompilationError>();
+  addIssuesToErrors(errors, issues);
+  return [...errors.values()];
+}
+
+function getClientIssueKey(id: string) {
+  return `client:${id}`;
+}
 
 export async function createHotReloader(
   bundleOptions: BundleOptions,
@@ -188,6 +235,7 @@ export async function createHotReloader(
 
   const clients = new Set<WSLike>();
   const clientStates = new WeakMap<WSLike, ClientState>();
+  const currentEntryIssues: EntryIssuesMap = new Map();
   const backgroundWatchSubscriptions = new Set<
     AsyncIterableIterator<TurbopackResult>
   >();
@@ -205,10 +253,18 @@ export async function createHotReloader(
   }
 
   function sendEnqueuedMessages() {
+    if (hasBlockingIssues(currentEntryIssues)) {
+      return;
+    }
+
     for (const client of clients) {
       const state = clientStates.get(client);
       if (!state) {
         continue;
+      }
+
+      if (hasBlockingIssues(state.clientIssues)) {
+        return;
       }
 
       for (const payload of state.hmrPayloads.values()) {
@@ -277,6 +333,7 @@ export async function createHotReloader(
   async function disposeBackgroundWatchSubscriptions() {
     const subscriptions = [...backgroundWatchSubscriptions];
     backgroundWatchSubscriptions.clear();
+    currentEntryIssues.clear();
     backgroundEndpointWriteTasks.clear();
     backgroundProjectWriteTask = undefined;
     await Promise.all(
@@ -353,6 +410,7 @@ export async function createHotReloader(
 
         const watchChanges = async (
           subscription: AsyncIterableIterator<TurbopackResult>,
+          issueKey: string,
         ) => {
           try {
             for await (const data of subscription) {
@@ -360,7 +418,14 @@ export async function createHotReloader(
                 return;
               }
 
-              processIssues(data, true, true);
+              processIssues(currentEntryIssues, issueKey, data, false, true);
+
+              if (hasBlockingResultIssues(data)) {
+                hmrEventHappened = true;
+                sendEnqueuedMessagesDebounce();
+                continue;
+              }
+
               scheduleOutputWrite(entrypoint, generation);
             }
           } catch (error) {
@@ -370,11 +435,19 @@ export async function createHotReloader(
             }
           } finally {
             backgroundWatchSubscriptions.delete(subscription);
+            currentEntryIssues.delete(issueKey);
           }
         };
 
-        void watchChanges(clientChanges);
-        void watchChanges(serverChanges);
+        const entrypointIndex = currentWatchedEntrypoints.indexOf(entrypoint);
+        void watchChanges(
+          clientChanges,
+          `entrypoint:${entrypointIndex}:client`,
+        );
+        void watchChanges(
+          serverChanges,
+          `entrypoint:${entrypointIndex}:server`,
+        );
       }),
     );
   }
@@ -387,6 +460,7 @@ export async function createHotReloader(
 
     const subscription = project!.hmrEvents(id);
     state.subscriptions.set(id, subscription);
+    const issueKey = getClientIssueKey(id);
 
     // The subscription will always emit once, which is the initial
     // computation. This is not a change, so swallow it.
@@ -394,7 +468,7 @@ export async function createHotReloader(
       await subscription.next();
 
       for await (const data of subscription) {
-        processIssues(data, true, true);
+        processIssues(state.clientIssues, issueKey, data, false, true);
         if (data.type !== "issues") {
           sendTurbopackMessage(data);
         }
@@ -422,6 +496,7 @@ export async function createHotReloader(
 
     const subscription = state.subscriptions.get(id);
     subscription?.return!();
+    state.clientIssues.delete(getClientIssueKey(id));
   }
 
   async function handleEntrypointsSubscription() {
@@ -470,6 +545,7 @@ export async function createHotReloader(
           hmrPayloads: new Map(),
           turbopackUpdates: [],
           subscriptions,
+          clientIssues: new Map(),
         });
 
         client.on("close", () => {
@@ -539,7 +615,7 @@ export async function createHotReloader(
         };
         sendToClient(client, turbopackConnected);
 
-        const errors: CompilationError[] = [];
+        const errors = getCompilationErrors(currentEntryIssues);
 
         (async function () {
           const sync: SyncAction = {
@@ -561,6 +637,7 @@ export async function createHotReloader(
         hmrPayloads: new Map(),
         turbopackUpdates: [],
         subscriptions,
+        clientIssues: new Map(),
       });
 
       const turbopackConnected: TurbopackConnectedAction = {
@@ -569,7 +646,7 @@ export async function createHotReloader(
       };
       sendToClient(ws, turbopackConnected);
 
-      const errors: CompilationError[] = [];
+      const errors = getCompilationErrors(currentEntryIssues);
       const sync: SyncAction = {
         action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC,
         errors,
@@ -699,6 +776,7 @@ export async function createHotReloader(
           sendEnqueuedMessages();
 
           const errors = new Map<string, CompilationError>();
+          addIssuesToErrors(errors, currentEntryIssues);
 
           for (const client of clients) {
             const state = clientStates.get(client);
@@ -707,6 +785,7 @@ export async function createHotReloader(
             }
 
             const clientErrors = new Map(errors);
+            addIssuesToErrors(clientErrors, state.clientIssues);
 
             sendToClient(client, {
               action: HMR_ACTIONS_SENT_TO_BROWSER.BUILT,

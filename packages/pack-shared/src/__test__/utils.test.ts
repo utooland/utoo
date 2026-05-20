@@ -1,6 +1,68 @@
 import { describe, expect, it } from "vitest";
 import { DevServerProxy, ProxyOptions, ProxyRule } from "../config";
-import { proxyFromObject } from "../utils";
+import type { Issue } from "../issue";
+import {
+  type EntryIssuesMap,
+  ModuleBuildError,
+  processIssues,
+  proxyFromObject,
+} from "../utils";
+
+function createIssue(severity: Issue["severity"]): Issue {
+  return {
+    severity,
+    stage: "build",
+    filePath: "[project]/src/index.less",
+    title: {
+      type: "text",
+      value: "Unrecognised input",
+    },
+    description: {
+      type: "text",
+      value: "Less parser failed",
+    },
+    documentationLink: "",
+    importTraces: [],
+  };
+}
+
+describe("processIssues", () => {
+  it("keeps throwing module build errors for the legacy signature", () => {
+    expect(() =>
+      processIssues({ issues: [createIssue("error")] }, true, false),
+    ).toThrow(ModuleBuildError);
+  });
+
+  it("stores entry issues without throwing for the dev-server signature", () => {
+    const currentEntryIssues: EntryIssuesMap = new Map();
+
+    processIssues(
+      currentEntryIssues,
+      "entrypoint:0:client",
+      {
+        issues: [
+          createIssue("error"),
+          createIssue("warning"),
+          createIssue("info"),
+        ],
+      },
+      false,
+      false,
+    );
+
+    expect(currentEntryIssues.get("entrypoint:0:client")?.size).toBe(2);
+
+    processIssues(
+      currentEntryIssues,
+      "entrypoint:0:client",
+      { issues: [] },
+      false,
+      false,
+    );
+
+    expect(currentEntryIssues.get("entrypoint:0:client")?.size).toBe(0);
+  });
+});
 
 describe("proxyFromObject", () => {
   it("converts string targets to ProxyRule with default changeOrigin", () => {
