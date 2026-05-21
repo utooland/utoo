@@ -5,12 +5,75 @@ use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
+use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
-use crate::util::cloner::clone_package_from_cache_sync;
+use crate::util::cloner::{clone_count, clone_package_from_cache_sync};
 use crate::util::downloader::{
-    download_bytes, extract_to_cache, registry_cache_lookup, resolve_seeded_cache_path,
+    download_bytes, download_stats, extract_to_cache, is_registry_tarball_url,
+    registry_cache_lookup, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
+
+/// Build event receiver that forwards install prefetch work to the scheduler.
+pub(crate) struct InstallEventReceiver<R: EventReceiver> {
+    scheduler: InstallScheduler,
+    cwd: PathBuf,
+    inner: R,
+}
+
+impl<R: EventReceiver> InstallEventReceiver<R> {
+    pub(crate) fn new(inner: R, scheduler: InstallScheduler, cwd: PathBuf) -> Self {
+        Self {
+            scheduler,
+            cwd,
+            inner,
+        }
+    }
+}
+
+impl<R: EventReceiver> EventReceiver for InstallEventReceiver<R> {
+    fn on_event(&self, event: BuildEvent<'_>) {
+        self.inner.on_event(event);
+
+        match event {
+            BuildEvent::PackageResolved(info) if info.is_platform_compatible() => {
+                let Some(tarball_url) = info.tarball_url else {
+                    return;
+                };
+                self.scheduler.prefetch_download(
+                    info.name.to_string(),
+                    info.version.to_string(),
+                    tarball_url.to_string(),
+                );
+            }
+            BuildEvent::PackagePlaced {
+                package,
+                path,
+                parent_path,
+            } if package.is_platform_compatible() => {
+                let Some(tarball_url) = package.tarball_url else {
+                    return;
+                };
+                self.scheduler.prefetch_clone(
+                    package.name.to_string(),
+                    package.version.to_string(),
+                    tarball_url.to_string(),
+                    self.cwd.join(path),
+                    parent_path.map(|p| self.cwd.join(p)),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn print_summary() {
+    tracing::debug!(
+        "Install scheduler stats: downloaded={}, cloned={}",
+        download_stats().downloaded,
+        clone_count(),
+    );
+}
 
 #[derive(Clone, Debug)]
 struct PackageFetch {
@@ -29,6 +92,7 @@ impl PackageFetch {
 struct CloneSpec {
     package: PackageFetch,
     target: PathBuf,
+    parent: Option<PathBuf>,
 }
 
 struct ReadyClone {
@@ -44,6 +108,8 @@ struct DownloadedPackage {
 type CloneResponder = oneshot::Sender<Result<(), String>>;
 
 enum Command {
+    PrefetchDownload(PackageFetch),
+    PrefetchClone(CloneSpec),
     EnsureClone(CloneSpec, CloneResponder),
     Shutdown,
 }
@@ -107,6 +173,36 @@ impl InstallSchedulerHandle {
 }
 
 impl InstallScheduler {
+    pub(crate) fn prefetch_download(&self, name: String, version: String, tarball_url: String) {
+        if !is_registry_tarball_url(&tarball_url) {
+            return;
+        }
+        let _ = self.tx.send(Command::PrefetchDownload(PackageFetch {
+            name,
+            version,
+            tarball_url,
+        }));
+    }
+
+    pub(crate) fn prefetch_clone(
+        &self,
+        name: String,
+        version: String,
+        tarball_url: String,
+        target: PathBuf,
+        parent: Option<PathBuf>,
+    ) {
+        let _ = self.tx.send(Command::PrefetchClone(CloneSpec {
+            package: PackageFetch {
+                name,
+                version,
+                tarball_url,
+            },
+            target,
+            parent,
+        }));
+    }
+
     pub(crate) async fn ensure_clone(
         &self,
         name: String,
@@ -124,6 +220,7 @@ impl InstallScheduler {
                         tarball_url,
                     },
                     target,
+                    parent: None,
                 },
                 tx,
             ))
@@ -149,6 +246,7 @@ struct SchedulerState {
     clone_done: HashSet<PathBuf>,
     clone_active: HashSet<PathBuf>,
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
+    blocked_by_parent: HashMap<PathBuf, Vec<CloneSpec>>,
     clone_queue: VecDeque<ReadyClone>,
     done_tx: mpsc::UnboundedSender<OpDone>,
     done_rx: mpsc::UnboundedReceiver<OpDone>,
@@ -173,6 +271,7 @@ impl SchedulerState {
             clone_done: HashSet::new(),
             clone_active: HashSet::new(),
             clone_waiters: HashMap::new(),
+            blocked_by_parent: HashMap::new(),
             clone_queue: VecDeque::new(),
             done_tx,
             done_rx,
@@ -193,6 +292,12 @@ impl SchedulerState {
             tokio::select! {
                 command = self.rx.recv(), if !self.shutdown => {
                     match command {
+                        Some(Command::PrefetchDownload(package)) => {
+                            self.ensure_download(package, None);
+                        }
+                        Some(Command::PrefetchClone(spec)) => {
+                            self.queue_clone(spec, None);
+                        }
                         Some(Command::EnsureClone(spec, responder)) => {
                             self.queue_clone(spec, Some(responder));
                         }
@@ -247,6 +352,17 @@ impl SchedulerState {
 
         self.clone_waiters
             .insert(target.clone(), responder.into_iter().collect());
+
+        if let Some(parent) = &spec.parent
+            && self.clone_waiters.contains_key(parent)
+            && !self.clone_done.contains(parent)
+        {
+            self.blocked_by_parent
+                .entry(parent.clone())
+                .or_default()
+                .push(spec);
+            return;
+        }
 
         self.resolve_cache_for_clone(spec);
     }
@@ -431,6 +547,19 @@ impl SchedulerState {
                 let _ = waiter.send(result.clone());
             }
         }
+
+        if result.is_ok() {
+            if let Some(children) = self.blocked_by_parent.remove(&target) {
+                for child in children {
+                    self.resolve_cache_for_clone(child);
+                }
+            }
+        } else if let Some(children) = self.blocked_by_parent.remove(&target) {
+            let error = format!("parent package {} failed to clone", target.display());
+            for child in children {
+                self.complete_clone(child.target, Err(error.clone()));
+            }
+        }
     }
 
     fn fail_pending(&mut self, message: &str) {
@@ -470,6 +599,7 @@ mod tests {
         CloneSpec {
             package: package(name, version),
             target: PathBuf::from(target),
+            parent: None,
         }
     }
 
