@@ -651,6 +651,97 @@ pub async fn process_dependency<R: RegistryClient>(
     }
 }
 
+/// Place an already-resolved registry package into the graph.
+///
+/// The demand resolver uses this after a manifest job completes; the legacy
+/// resolver path also goes through it so placement semantics stay shared.
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
+            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
+            ProcessResult::Reused(existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
+fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+fn handle_processed<E: EventReceiver>(
+    graph: &DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    processed: &ProcessResult,
+    next_level: &mut Vec<NodeIndex>,
+) {
+    match processed {
+        ProcessResult::Created(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Resolved {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+                if let NodeManifest::Registry(ref manifest) = node.manifest {
+                    let parent_path = graph.get_node(parent).map(|p| p.path.as_path());
+                    receiver.on_event(BuildEvent::PackagePlaced {
+                        package: manifest.as_ref().into(),
+                        path: &node.path,
+                        parent_path,
+                    });
+                }
+            }
+            next_level.push(*idx);
+        }
+        ProcessResult::Reused(idx) => {
+            if let Some(node) = graph.get_node(*idx) {
+                receiver.on_event(BuildEvent::Reused {
+                    name: &edge.name,
+                    version: &node.version,
+                });
+            }
+        }
+        ProcessResult::Skipped => {
+            receiver.on_event(BuildEvent::Skipped {
+                name: &edge.name,
+                spec: &edge.spec,
+            });
+        }
+    }
+}
+
 /// Build the complete dependency tree using BFS traversal.
 ///
 /// This is the main entry point for dependency resolution. It starts from
@@ -837,56 +928,17 @@ async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
                 receiver.on_event(BuildEvent::Resolving {
                     name: &edge_info.name,
                 });
-                let result = process_dependency(graph, registry, node_index, &edge_info, config)
+                let processed = process_dependency(graph, registry, node_index, &edge_info, config)
                     .await
-                    .map_err(|inner| {
-                        let mut chain = graph.logical_ancestry(node_index);
-                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
-                        ResolveError::WithChain {
-                            chain,
-                            source: Box::new(inner),
-                        }
-                    });
-                match result? {
-                    ProcessResult::Created(idx) => {
-                        // Extract node info for events
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Resolved {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-
-                            // Send PackagePlaced for pipeline cloning
-                            if let NodeManifest::Registry(ref manifest) = node.manifest {
-                                // Get parent path for dependency ordering
-                                let parent_path = graph
-                                    .get_node(node_index)
-                                    .map(|parent| parent.path.as_path());
-                                receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.as_ref().into(),
-                                    path: &node.path,
-                                    parent_path,
-                                });
-                            }
-                        }
-
-                        next_level.push(idx);
-                    }
-                    ProcessResult::Reused(idx) => {
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Reused {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-                        }
-                    }
-                    ProcessResult::Skipped => {
-                        receiver.on_event(BuildEvent::Skipped {
-                            name: &edge_info.name,
-                            spec: &edge_info.spec,
-                        });
-                    }
-                }
+                    .map_err(|inner| chain_err(graph, node_index, &edge_info, inner))?;
+                handle_processed(
+                    graph,
+                    receiver,
+                    node_index,
+                    &edge_info,
+                    &processed,
+                    &mut next_level,
+                );
             }
         }
 
