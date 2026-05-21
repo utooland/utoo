@@ -254,7 +254,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Disable Windows Defender
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          } catch {
+            Write-Warning "Unable to disable Windows Defender real-time monitoring: $_"
+          }
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
       - name: Setup Rust toolchain
@@ -408,7 +413,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Disable Windows Defender
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          } catch {
+            Write-Warning "Unable to disable Windows Defender real-time monitoring: $_"
+          }
       - name: Setup node
         uses: actions/setup-node@v4
         with:
