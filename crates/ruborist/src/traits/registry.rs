@@ -133,6 +133,13 @@ pub trait RegistryClient {
         false
     }
 
+    /// Base registry URL used by schedulers that need to classify raw work.
+    ///
+    /// Implementations without a concrete URL can keep the default.
+    fn registry_url(&self) -> &str {
+        ""
+    }
+
     /// Fetch full package manifest from registry.
     ///
     /// Returns the complete package manifest with all versions, wrapped in
