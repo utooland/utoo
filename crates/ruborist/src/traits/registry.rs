@@ -133,9 +133,10 @@ pub trait RegistryClient {
         false
     }
 
-    /// Base registry URL used by schedulers that need to classify raw work.
+    /// The base registry URL used by raw-fetch dependency builders.
     ///
-    /// Implementations without a concrete URL can keep the default.
+    /// Implementations that cannot expose a concrete URL can keep the default;
+    /// callers should fall back to the regular trait methods when this is empty.
     fn registry_url(&self) -> &str {
         ""
     }
