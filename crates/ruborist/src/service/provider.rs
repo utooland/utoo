@@ -2,7 +2,7 @@
 //!
 //! The demand BFS loop owns per-run cache, waiters, and inflight de-duplication.
 //! A provider only executes one manifest job and hides whether it satisfied the
-//! job from memory, persistent storage, or the network.
+//! job from memory, disk/OPFS, or the network.
 
 use std::sync::Arc;
 
