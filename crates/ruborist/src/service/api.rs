@@ -19,13 +19,12 @@
 //! let json = serde_json::to_string_pretty(&output.lock)?;
 //! ```
 
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Result;
-
-use super::cache::{PackageCache, ProjectCacheData};
+use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use super::store::{ManifestStore, NoopStore};
@@ -33,9 +32,8 @@ use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
-use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
-    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
+    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config_output,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -55,7 +53,8 @@ pub struct BuildDepsOptions<G, R> {
     /// (everything is in-memory).
     pub manifest_store: Arc<dyn ManifestStore>,
     /// Project-level warm cache pre-loaded by the host. Pre-populates the
-    /// in-memory manifest cache to skip the preload phase on a warm install.
+    /// in-memory manifest cache so demand BFS can satisfy warm specs without
+    /// network requests.
     pub warm_project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
@@ -204,24 +203,11 @@ where
         add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
     }
 
-    // 7. Create in-memory package cache and pre-populate from the warm
-    // project cache (host-supplied; `None` for cold runs).
-    let package_cache = Arc::new(PackageCache::default());
-    let (cache_count, missing_count) =
-        prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
-    if missing_count > 0 {
-        tracing::warn!(
-            "Project cache has {missing_count} specs with missing manifests, will re-fetch from registry"
-        );
-    }
-    if cache_count > 0 {
-        tracing::debug!("Loaded {cache_count} manifests from project cache");
-    }
-
-    // 8. Create registry client with shared cache and persistence backend.
+    // 7. Create registry client with persistence backend. The resolver loop
+    // owns the in-memory manifest cache; the provider handles only I/O,
+    // parsing, and optional persistent store lookups/writes.
     let mut builder = UnifiedRegistry::builder()
         .registry(&registry_url)
-        .cache(package_cache)
         .store(Arc::clone(&manifest_store));
     if let Some(semver) = supports_semver {
         builder = builder.supports_semver(semver);
@@ -234,75 +220,30 @@ where
         registry.supports_semver(),
     );
 
-    let skip_preload = cache_count > 0;
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload)
         .with_catalogs(catalogs)
         .with_warm_project_cache(warm_project_cache);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
     }
 
-    if skip_preload {
-        tracing::debug!(
-            "Skipping preload phase (project cache has {} entries)",
-            cache_count
-        );
-    }
-
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
-    build_deps_with_config(&mut graph, &registry, config, &receiver)
+    let manifest_cache = build_deps_with_config_output(&mut graph, &registry, config, &receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
     let (packages, _total) = graph.serialize_to_packages(&root_path);
 
-    // Export project cache from memory cache for the host to persist.
-    let mut project_cache = ProjectCacheData::default();
-    for (key, manifest) in registry.cache().export_version_manifests() {
-        // `parse_package_spec` rather than `split_once('@')` so scoped names
-        // (`@babel/core@^7.0.0`) parse to (`@babel/core`, `^7.0.0`).
-        let (name, spec) = parse_package_spec(&key);
-        let version = manifest.version.clone();
-        let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();
-        pkg_cache.specs.insert(spec.to_string(), version.clone());
-        pkg_cache.manifests.insert(version, (*manifest).clone());
-    }
+    let project_cache = manifest_cache.into_project_cache();
 
     Ok(BuildDepsOutput {
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),
         project_cache,
     })
-}
-
-/// Pre-populate `cache` from a warm project cache. Returns
-/// `(loaded, missing)` — `loaded` is the count of usable spec→manifest
-/// entries; `missing` counts specs whose resolved version had no manifest
-/// (corrupted cache, will be re-fetched).
-fn prepopulate_warm_cache(cache: &PackageCache, warm: Option<&ProjectCacheData>) -> (usize, usize) {
-    let Some(warm) = warm else {
-        return (0, 0);
-    };
-    let mut loaded = 0;
-    let mut missing = 0;
-    for (name, pkg_cache) in &warm.cache {
-        for (spec, version) in &pkg_cache.specs {
-            let Some(manifest) = pkg_cache.manifests.get(version) else {
-                tracing::debug!(
-                    "Project cache missing manifest: {name}@{spec} (version {version})"
-                );
-                missing += 1;
-                continue;
-            };
-            cache.set_version_manifest(name.clone(), spec.clone(), Arc::new(manifest.clone()));
-            loaded += 1;
-        }
-    }
-    (loaded, missing)
 }
 
 #[cfg(test)]
