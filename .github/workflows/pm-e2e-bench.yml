@@ -133,6 +133,7 @@ jobs:
           targets: x86_64-unknown-linux-gnu
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-linux
           cache-bin: false
@@ -200,6 +201,7 @@ jobs:
           targets: aarch64-apple-darwin
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-mac-arm64
           cache-bin: false
@@ -232,6 +234,7 @@ jobs:
         run: rustup target add x86_64-apple-darwin
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-mac-x64
           cache-bin: false
@@ -269,6 +272,7 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-windows
           cache-bin: false
