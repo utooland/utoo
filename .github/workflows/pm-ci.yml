@@ -56,7 +56,12 @@ jobs:
       - name: Disable Windows Defender
         if: runner.os == 'Windows'
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          } catch {
+            Write-Warning "Unable to disable Windows Defender real-time monitoring: $_"
+          }
       
       # Add: Configure Git longpaths on Windows
       - name: Configure Git (Windows)
