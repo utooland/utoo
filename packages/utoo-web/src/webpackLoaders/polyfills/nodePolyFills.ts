@@ -3,15 +3,15 @@ import * as workerThreads from "./workerThreadsPolyfill";
 
 const buffer = require("buffer");
 self.Buffer = buffer.Buffer;
-const process = require("process");
-const originalCwd = process.cwd;
-process.cwd = () => {
+const nodeProcess = require("process");
+const originalCwd = nodeProcess.cwd;
+nodeProcess.cwd = () => {
   // @ts-ignore
   return workerThreads.workerData?.cwd || originalCwd?.() || "/";
 };
-if (!process.versions) process.versions = {};
-if (!process.versions.node) process.versions.node = "24.0.0";
-self.process = process;
+if (!nodeProcess.versions) nodeProcess.versions = {};
+if (!nodeProcess.versions.node) nodeProcess.versions.node = "24.0.0";
+self.process = nodeProcess;
 self.global = self;
 
 const path = require("path");
@@ -243,8 +243,8 @@ export default {
   path,
   "node:path": path,
 
-  process,
-  "node:process": process,
+  process: nodeProcess,
+  "node:process": nodeProcess,
 
   get url() {
     return require("url");
