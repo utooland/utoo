@@ -1,39 +1,29 @@
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
-use tokio::sync::Semaphore;
 use tokio_retry::RetryIf;
 use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
-use utoo_ruborist::util::OnceMap;
 
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
 use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
-use super::user_config::get_manifests_concurrency_limit_sync;
 
-// Global downloader client - no pool limit, concurrency controlled by OnceMap
+// Global downloader client. Concurrency and duplicate work are controlled by
+// the caller's scheduler.
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
-
-/// Global download cache shared between pipeline and install phases.
-/// Key: "name@version", Value: cache path.
-static DOWNLOAD_CACHE: Lazy<OnceMap<String, PathBuf>> = Lazy::new(OnceMap::new);
-
-/// Semaphore controlling concurrent download count.
-static DOWNLOAD_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Process-global counters for tarball outcomes, matching pnpm's
-/// vocabulary. Each unique `(name, version)` pair lands in exactly one
-/// bucket thanks to `DOWNLOAD_CACHE`'s `OnceMap` dedup; git/file/link
-/// packages bypass this path and are not counted in either bucket.
+/// vocabulary. Scheduler-level dedupe keeps each unique `(name, version)` pair
+/// in exactly one bucket; git/file/link packages bypass this path and are not
+/// counted in either bucket.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DownloadStats {
     /// Tarballs fetched from the registry this run.
@@ -63,6 +53,11 @@ pub fn download_stats() -> DownloadStats {
 /// Check whether a tarball URL refers to a git-resolved package.
 pub fn is_git_url(url: &str) -> bool {
     matches!(url.parse::<Protocol>(), Ok(Protocol::Git))
+}
+
+/// Check whether a tarball URL should be fetched by the registry downloader.
+pub fn is_registry_tarball_url(url: &str) -> bool {
+    matches!(url.parse::<Protocol>(), Ok(Protocol::Http))
 }
 
 /// Look up the cache path for a git-resolved package.
@@ -142,71 +137,6 @@ pub async fn resolve_seeded_cache_path(
             .ok_or_else(|| anyhow::anyhow!("file tarball cache not found for {name}@{version}")),
         _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
     }
-}
-
-/// Resolve the local cache path for a package, downloading if necessary.
-///
-/// The cloner calls this with a fully-qualified URL (never a relative
-/// path) — the install loop is responsible for any lockfile-format
-/// rewriting before we get here.
-pub async fn resolve_cache_path(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
-    match resolve_seeded_cache_path(name, version, tarball_url).await {
-        Ok(Some(path)) => Some(path),
-        Ok(None) => download_to_cache(name, version, tarball_url).await,
-        Err(e) => {
-            tracing::warn!("{e:#}");
-            None
-        }
-    }
-}
-
-/// Download a registry tarball to the global cache directory, returning the cache path.
-///
-/// Uses `OnceMap` to deduplicate: the same `name@version` is only downloaded once,
-/// even when called concurrently from multiple tasks (pipeline workers, install phase, etc.).
-///
-/// For git-resolved packages, use [`resolve_cache_path`] instead.
-pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
-    let key = format!("{}@{}", name, version);
-
-    // Skip the param clones + future construction on cache hit.
-    if let Some(cache_path) = DOWNLOAD_CACHE.get(&key) {
-        return Some((*cache_path).clone());
-    }
-
-    let name = name.to_string();
-    let version = version.to_string();
-    let tarball_url = tarball_url.to_string();
-
-    DOWNLOAD_CACHE
-        .get_or_init(key, || async move {
-            if let Ok(Some(cache_path)) = registry_cache_lookup(&name, &version).await {
-                return Some(cache_path);
-            }
-
-            // Download (semaphore controlled). Permit held through extract
-            // — A/B-revert experiment to test if early permit release is
-            // the source of utoo p0 σ being ~2× baseline.
-            let semaphore = DOWNLOAD_SEMAPHORE
-                .get_or_init(|| Semaphore::new(get_manifests_concurrency_limit_sync()));
-            let _permit = semaphore.acquire().await.ok()?;
-            download_and_extract_to_cache(&name, &version, &tarball_url)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Download/extract {}@{} from {} into {}: {:#}",
-                        name,
-                        version,
-                        tarball_url,
-                        registry_cache_path(&name, &version).display(),
-                        e
-                    )
-                })
-                .ok()
-        })
-        .await
-        .as_deref()
-        .cloned()
 }
 
 /// Download and extract a registry tarball without global single-flight or
