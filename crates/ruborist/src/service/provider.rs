@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 
 use super::cache::VersionsInfo;
 use super::manifest::MetadataFormat;
@@ -79,4 +80,10 @@ pub trait ManifestProvider: RegistryClient + Clone + Send + Sync + 'static {
     /// parse/extract offloading; scheduling, waiters, and inflight
     /// de-duplication stay in the BFS loop.
     async fn execute_manifest_job(&self, job: ManifestJob) -> Result<ManifestJobDone, Self::Error>;
+}
+
+/// Raw full-manifest bytes fetched by a provider before parsing.
+pub(crate) enum ProviderFullManifestBytes {
+    Fresh { bytes: Bytes, etag: Option<String> },
+    NotModified { versions: Arc<VersionsInfo> },
 }
