@@ -32,7 +32,7 @@ use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::service::ManifestProvider;
+use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -118,6 +118,8 @@ pub struct BuildDepsConfig {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
+    /// Host-provided project cache used to seed resolver manifest state.
+    pub warm_project_cache: Option<ProjectCacheData>,
 }
 
 impl Default for BuildDepsConfig {
@@ -130,6 +132,7 @@ impl Default for BuildDepsConfig {
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
             catalogs: HashMap::new(),
+            warm_project_cache: None,
         }
     }
 }
@@ -162,6 +165,12 @@ impl BuildDepsConfig {
     /// Set catalog definitions for `catalog:` protocol resolution.
     pub fn with_catalogs(mut self, catalogs: Catalogs) -> Self {
         self.catalogs = catalogs;
+        self
+    }
+
+    /// Set the host-provided warm project cache.
+    pub fn with_warm_project_cache(mut self, warm_project_cache: Option<ProjectCacheData>) -> Self {
+        self.warm_project_cache = warm_project_cache;
         self
     }
 }

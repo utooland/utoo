@@ -239,7 +239,8 @@ where
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
         .with_skip_preload(skip_preload)
-        .with_catalogs(catalogs);
+        .with_catalogs(catalogs)
+        .with_warm_project_cache(warm_project_cache);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
     }
