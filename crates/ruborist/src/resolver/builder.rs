@@ -1797,10 +1797,11 @@ fn graph_to_package_lock(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::model::manifest::CoreVersionManifest;
-    use crate::traits::registry::mock::MockRegistryClient;
+    use crate::traits::registry::mock::{MockError, MockRegistryClient};
 
     fn create_version_manifest(name: &str, version: &str) -> CoreVersionManifest {
         CoreVersionManifest {
@@ -1934,6 +1935,473 @@ mod tests {
         // Check lodash is in packages
         let lodash = lock.packages.get("node_modules/lodash").unwrap();
         assert_eq!(lodash.version, Some("4.17.21".to_string()));
+    }
+
+    #[derive(Clone)]
+    struct CountingRegistry {
+        inner: MockRegistryClient,
+        shared_version_jobs: Arc<AtomicUsize>,
+    }
+
+    impl crate::traits::registry::RegistryClient for CountingRegistry {
+        type Error = MockError;
+
+        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
+            self.inner.fetch_full_manifest(name).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestProvider for CountingRegistry {
+        async fn execute_manifest_job(
+            &self,
+            job: ManifestJob,
+        ) -> Result<ManifestJobDone, Self::Error> {
+            if matches!(
+                &job,
+                ManifestJob::Full { name, .. }
+                    | ManifestJob::Version { name, .. }
+                    | ManifestJob::ExtractVersion { name, .. }
+                    if name == "shared"
+            ) {
+                self.shared_version_jobs.fetch_add(1, Ordering::Relaxed);
+            }
+            self.inner.execute_manifest_job(job).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_non_semver_exact_version_extract_single_flight() {
+        let mut inner = MockRegistryClient::new();
+        inner.add_package(
+            "a",
+            "1.0.0",
+            create_version_manifest_with_deps("a", "1.0.0", vec![("shared", "^1.0.0")]),
+        );
+        inner.add_package(
+            "b",
+            "1.0.0",
+            create_version_manifest_with_deps("b", "1.0.0", vec![("shared", "~1.2.0")]),
+        );
+        inner.add_package(
+            "shared",
+            "1.2.3",
+            create_version_manifest("shared", "1.2.3"),
+        );
+
+        let shared_version_jobs = Arc::new(AtomicUsize::new(0));
+        let registry = CountingRegistry {
+            inner,
+            shared_version_jobs: Arc::clone(&shared_version_jobs),
+        };
+        let pkg = PackageJson {
+            dependencies: Some(HashMap::from([
+                ("a".to_string(), "1.0.0".to_string()),
+                ("b".to_string(), "1.0.0".to_string()),
+            ])),
+            ..PackageJson::new("test-project", "1.0.0")
+        };
+
+        let lock = resolve(&pkg, &registry).await.unwrap();
+
+        assert!(lock.packages.contains_key("node_modules/shared"));
+        assert_eq!(shared_version_jobs.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn test_schedule_registry_fetch_dedupes_semver_request() {
+        let mut state = ManifestState::default();
+
+        state.schedule_registry_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            true,
+            FetchPriority::Demand,
+        );
+        state.schedule_registry_fetch(
+            "pkg".to_string(),
+            "^1.0.0".to_string(),
+            true,
+            FetchPriority::Demand,
+        );
+
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "^1.0.0");
+                assert_eq!(fetch_spec, "^1.0.0");
+                assert!(matches!(format, MetadataFormat::Abbreviated));
+            }
+            _ => panic!("expected version fetch request"),
+        }
+    }
+
+    #[test]
+    fn test_fetch_queues_prioritize_demand_over_prefetch() {
+        let mut fetch_queues = FetchQueues::default();
+        fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: "prefetch".to_string(),
+                spec: None,
+            },
+            FetchPriority::Prefetch,
+        );
+        fetch_queues.enqueue(
+            ManifestJob::Version {
+                name: "demand".to_string(),
+                spec: "^1.0.0".to_string(),
+                fetch_spec: "^1.0.0".to_string(),
+                format: MetadataFormat::Abbreviated,
+            },
+            FetchPriority::Demand,
+        );
+
+        assert_eq!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .unwrap()
+                .key(),
+            FetchKey::Version("demand".to_string(), "^1.0.0".to_string())
+        );
+        assert_eq!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .unwrap()
+                .key(),
+            FetchKey::Full("prefetch".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fetch_queues_promotes_prefetch_to_demand() {
+        let mut fetch_queues = FetchQueues::default();
+        fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: "pkg".to_string(),
+                spec: None,
+            },
+            FetchPriority::Prefetch,
+        );
+        fetch_queues.enqueue(
+            ManifestJob::Full {
+                name: "pkg".to_string(),
+                spec: None,
+            },
+            FetchPriority::Demand,
+        );
+
+        let key = FetchKey::Full("pkg".to_string());
+        assert_eq!(fetch_queues.queued.get(&key), Some(&FetchPriority::Demand));
+        assert_eq!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .unwrap()
+                .key(),
+            key
+        );
+        assert_eq!(
+            fetch_queues.active.get(&FetchKey::Full("pkg".to_string())),
+            Some(&FetchPriority::Demand)
+        );
+        assert!(
+            fetch_queues
+                .pop_next(prefetch_concurrency_limit(64))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_prefetch_concurrency_limit_tracks_fetch_concurrency() {
+        assert_eq!(prefetch_concurrency_limit(1), 1);
+        assert_eq!(prefetch_concurrency_limit(3), 1);
+        assert_eq!(prefetch_concurrency_limit(8), 2);
+    }
+
+    #[test]
+    fn test_apply_fetch_result_caches_exact_version_and_wakes_waiters() {
+        let mut state = ManifestState {
+            version_waiters: HashMap::from([(
+                ("pkg".to_string(), "^1.0.0".to_string()),
+                vec![(
+                    NodeIndex::new(0),
+                    DependencyEdgeInfo {
+                        edge_id: petgraph::graph::EdgeIndex::new(0),
+                        name: "pkg".to_string(),
+                        spec: "^1.0.0".to_string(),
+                        edge_type: EdgeType::Prod,
+                    },
+                )],
+            )]),
+            ..Default::default()
+        };
+        state.fetch_queues.active.insert(
+            FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()),
+            FetchPriority::Demand,
+        );
+        let mut level_pending = std::collections::VecDeque::new();
+        let manifest = Arc::new(create_version_manifest("pkg", "1.2.3"));
+
+        state.apply_fetch_result(
+            FetchDone::Version {
+                name: "pkg".to_string(),
+                spec: "^1.0.0".to_string(),
+                result: Ok(manifest),
+            },
+            true,
+            PeerDeps::Skip,
+            &mut level_pending,
+        );
+
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "1.2.3".to_string()))
+        );
+        assert!(state.version_waiters.is_empty());
+        assert!(state.fetch_queues.queued.is_empty());
+        assert!(state.fetch_queues.active.is_empty());
+        assert_eq!(level_pending.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_fetch_result_prefetches_transitive_registry_deps() {
+        let mut state = ManifestState::default();
+        state.fetch_queues.active.insert(
+            FetchKey::Version("pkg".to_string(), "^1.0.0".to_string()),
+            FetchPriority::Demand,
+        );
+        let mut level_pending = std::collections::VecDeque::new();
+        let manifest = Arc::new(create_version_manifest_with_deps(
+            "pkg",
+            "1.2.3",
+            vec![("dep", "^1.0.0"), ("local", "file:../local")],
+        ));
+
+        state.apply_fetch_result(
+            FetchDone::Version {
+                name: "pkg".to_string(),
+                spec: "^1.0.0".to_string(),
+                result: Ok(manifest),
+            },
+            true,
+            PeerDeps::Skip,
+            &mut level_pending,
+        );
+
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("dep".to_string(), "^1.0.0".to_string()))
+        );
+        assert!(!state.fetch_queues.queued.contains_key(&FetchKey::Version(
+            "local".to_string(),
+            "file:../local".to_string()
+        )));
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                assert_eq!(name, "dep");
+                assert_eq!(spec, "^1.0.0");
+                assert_eq!(fetch_spec, "^1.0.0");
+                assert!(matches!(format, MetadataFormat::Abbreviated));
+            }
+            _ => panic!("expected version prefetch request"),
+        }
+    }
+
+    #[test]
+    fn test_apply_fetch_result_caches_versions_and_wakes_waiters() {
+        let mut state = ManifestState {
+            full_waiters: HashMap::from([(
+                "pkg".to_string(),
+                vec![(
+                    NodeIndex::new(0),
+                    DependencyEdgeInfo {
+                        edge_id: petgraph::graph::EdgeIndex::new(0),
+                        name: "pkg".to_string(),
+                        spec: "^1.0.0".to_string(),
+                        edge_type: EdgeType::Prod,
+                    },
+                )],
+            )]),
+            ..Default::default()
+        };
+        state
+            .fetch_queues
+            .active
+            .insert(FetchKey::Full("pkg".to_string()), FetchPriority::Demand);
+        let mut level_pending = std::collections::VecDeque::new();
+        let versions = Arc::new(crate::service::VersionsInfo {
+            versions: crate::service::Versions {
+                version_list: vec!["1.2.3".to_string()],
+                dist_tags: HashMap::from([("latest".to_string(), "1.2.3".to_string())]),
+            },
+            etag: Some("etag".to_string()),
+            last_updated: 1,
+        });
+
+        state.apply_fetch_result(
+            FetchDone::Full {
+                name: "pkg".to_string(),
+                result: Ok(ManifestFullData::Versions(versions)),
+            },
+            false,
+            PeerDeps::Skip,
+            &mut level_pending,
+        );
+
+        assert!(state.full_cache.is_empty());
+        assert!(state.versions_cache.contains_key("pkg"));
+        assert!(state.full_waiters.is_empty());
+        assert!(state.fetch_queues.queued.is_empty());
+        assert!(state.fetch_queues.active.is_empty());
+        assert_eq!(level_pending.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_fetch_result_caches_speculative_full_extract() {
+        let mut state = ManifestState::default();
+        state
+            .fetch_queues
+            .active
+            .insert(FetchKey::Full("pkg".to_string()), FetchPriority::Demand);
+        let mut level_pending = std::collections::VecDeque::new();
+        let full = Arc::new(FullManifest {
+            name: "pkg".to_string(),
+            versions: vec!["1.2.3".to_string()],
+            ..Default::default()
+        });
+        let manifest = Arc::new(create_version_manifest_with_deps(
+            "pkg",
+            "1.2.3",
+            vec![("dep", "^1.0.0")],
+        ));
+
+        state.apply_fetch_result(
+            FetchDone::Full {
+                name: "pkg".to_string(),
+                result: Ok(ManifestFullData::Full {
+                    manifest: full,
+                    speculative: Some(("^1.0.0".to_string(), manifest)),
+                }),
+            },
+            false,
+            PeerDeps::Skip,
+            &mut level_pending,
+        );
+
+        assert!(state.full_cache.contains_key("pkg"));
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "^1.0.0".to_string()))
+        );
+        assert!(
+            state
+                .version_cache
+                .contains_key(&("pkg".to_string(), "1.2.3".to_string()))
+        );
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Full("dep".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_enqueue_version_fetch_uses_exact_key() {
+        let mut state = ManifestState::default();
+
+        state.enqueue_version_fetch("pkg".to_string(), "1.2.3".to_string(), false);
+        state.enqueue_version_fetch("pkg".to_string(), "1.2.3".to_string(), false);
+
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("pkg".to_string(), "1.2.3".to_string()))
+        );
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
+            ManifestJob::Version {
+                name,
+                spec,
+                fetch_spec,
+                format,
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "1.2.3");
+                assert_eq!(fetch_spec, "1.2.3");
+                assert!(matches!(format, MetadataFormat::Complete));
+            }
+            _ => panic!("expected version fetch request"),
+        }
+    }
+
+    #[test]
+    fn test_enqueue_version_extract_uses_exact_key() {
+        let mut state = ManifestState::default();
+        let full = Arc::new(FullManifest::default());
+
+        state.enqueue_version_extract("pkg".to_string(), "1.2.3".to_string(), Arc::clone(&full));
+        state.enqueue_version_extract("pkg".to_string(), "1.2.3".to_string(), full);
+
+        assert!(
+            state
+                .fetch_queues
+                .queued
+                .contains_key(&FetchKey::Version("pkg".to_string(), "1.2.3".to_string()))
+        );
+        match state
+            .fetch_queues
+            .pop_next(prefetch_concurrency_limit(64))
+            .unwrap()
+        {
+            ManifestJob::ExtractVersion {
+                name,
+                spec,
+                version,
+                ..
+            } => {
+                assert_eq!(name, "pkg");
+                assert_eq!(spec, "1.2.3");
+                assert_eq!(version, "1.2.3");
+            }
+            _ => panic!("expected version extract request"),
+        }
     }
 
     // Helper to create a graph with source -> target for testing update_node_type_from_edge
