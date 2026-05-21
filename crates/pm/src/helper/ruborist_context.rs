@@ -12,7 +12,8 @@ use crate::util::logger::ProgressReceiver;
 use crate::util::manifest_store::DiskManifestStore;
 use crate::util::project_cache;
 use crate::util::user_config::{
-    get_catalogs, get_manifests_concurrency_limit, get_peer_deps, get_registry, get_supports_semver,
+    get_catalogs, get_peer_deps, get_registry, get_resolver_manifests_concurrency_limit,
+    get_supports_semver,
 };
 
 /// Tokio-based glob implementation.
@@ -57,7 +58,7 @@ impl Context {
             cache_dir: Some(get_cache_dir()),
             manifest_store: Self::manifest_store(),
             warm_project_cache,
-            concurrency: get_manifests_concurrency_limit().await,
+            concurrency: get_resolver_manifests_concurrency_limit().await,
             peer_deps: get_peer_deps().await,
             glob: TokioGlob,
             receiver,
