@@ -1,9 +1,9 @@
 //! Unified registry client implementation.
 //!
 //! Provides `UnifiedRegistry` that works on both native and WASM targets.
-//! Combines HTTP fetching with in-memory caching, optional persistent storage
-//! through a [`ManifestStore`], and automatic registry capability detection
-//! (semver support).
+//! Combines HTTP fetching, optional persistent storage through a
+//! [`ManifestStore`], and automatic registry capability detection (semver
+//! support).
 //!
 //! For non-semver registries (npmjs.org), the persistent store doubles as the
 //! ETag source: `versions.json` carries the etag for the next conditional
@@ -13,8 +13,7 @@
 //! # Architecture
 //!
 //! - `manifest` module: Manifest fetching with retry (`fetch_full_manifest`, `fetch_version_manifest`)
-//! - `UnifiedRegistry`: in-memory cache + injected `ManifestStore` (host-supplied persistence)
-//!   - Memory cache (fastest)
+//! - `UnifiedRegistry`: injected `ManifestStore` + network fetch/parse adapter
 //!   - `ManifestStore` (host: disk / KV / no-op)
 //!   - Network (authoritative source)
 
@@ -40,9 +39,7 @@ fn current_timestamp_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
-use dashmap::DashSet;
-
-use super::cache::{PackageCache, Versions, VersionsInfo};
+use super::cache::{Versions, VersionsInfo};
 use super::manifest;
 use super::provider::{
     ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider, ProviderFullManifestBytes,
@@ -52,12 +49,11 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest, extract_core_ver
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
-use crate::util::OnceMap;
 
 /// Unified registry client that works on both native and WASM.
 ///
 /// Cache lookup order:
-/// 1. In-memory `PackageCache` (fastest, lost on restart)
+/// 1. Resolver-owned in-memory cache in the demand BFS loop
 /// 2. Host-provided `ManifestStore` (persistent; disk on native, no-op on WASM by default)
 /// 3. Network (slowest, always authoritative)
 ///
@@ -76,33 +72,13 @@ use crate::util::OnceMap;
 /// ```
 pub struct UnifiedRegistry {
     registry_url: String,
-    cache: Arc<PackageCache>,
     store: Arc<dyn ManifestStore>,
     supports_semver: bool,
-    /// Single-flight gate for full-manifest fetches keyed by package name.
-    /// **Gate-only**: the entry value is `()`; the canonical
-    /// `Arc<FullManifest>` lives in `PackageCache`. Concurrent resolves for
-    /// the same name share one network + parse round-trip; the
-    /// 200/304 outcome is recovered by inspecting cache state after the
-    /// gate releases.
-    inflight_full: Arc<OnceMap<String, ()>>,
-    /// Single-flight gate for version-manifest fetches keyed by
-    /// `(name, spec)`. Same gate-only pattern: the canonical `Arc<…>`
-    /// lives in `PackageCache.version_manifests`; the gate stores `()`.
-    inflight_version: Arc<OnceMap<(String, String), ()>>,
-    /// Dedup set for `store_version_manifest` disk writes keyed by
-    /// `(name, resolved_version)`. `inflight_version` is keyed by
-    /// `(name, spec)`, so sibling specs (e.g. `^1.0.0` and `^1.2.0`)
-    /// resolving to the same version each fire the gate independently
-    /// and would otherwise issue duplicate writes for the same path.
-    /// First insert wins; subsequent specs skip the redundant write.
-    stored_version: Arc<DashSet<(String, String)>>,
 }
 
 /// Builder for `UnifiedRegistry`.
 pub struct UnifiedRegistryBuilder {
     registry_url: Option<String>,
-    cache: Option<Arc<PackageCache>>,
     store: Option<Arc<dyn ManifestStore>>,
     supports_semver: Option<bool>,
 }
@@ -112,7 +88,6 @@ impl UnifiedRegistryBuilder {
     pub fn new() -> Self {
         Self {
             registry_url: None,
-            cache: None,
             store: None,
             supports_semver: None,
         }
@@ -127,12 +102,6 @@ impl UnifiedRegistryBuilder {
     /// Set the persistence backend. Defaults to [`NoopStore`].
     pub fn store(mut self, store: Arc<dyn ManifestStore>) -> Self {
         self.store = Some(store);
-        self
-    }
-
-    /// Set a shared in-memory cache instance.
-    pub fn cache(mut self, cache: Arc<PackageCache>) -> Self {
-        self.cache = Some(cache);
         self
     }
 
@@ -153,19 +122,12 @@ impl UnifiedRegistryBuilder {
             .supports_semver
             .unwrap_or_else(|| !is_npm_registry(&registry_url));
 
-        let cache = self
-            .cache
-            .unwrap_or_else(|| Arc::new(PackageCache::default()));
         let store = self.store.unwrap_or_else(|| Arc::new(NoopStore));
 
         UnifiedRegistry {
             registry_url,
-            cache,
             store,
             supports_semver,
-            inflight_full: Arc::new(OnceMap::new()),
-            inflight_version: Arc::new(OnceMap::new()),
-            stored_version: Arc::new(DashSet::new()),
         }
     }
 }
@@ -180,27 +142,10 @@ impl Clone for UnifiedRegistry {
     fn clone(&self) -> Self {
         Self {
             registry_url: self.registry_url.clone(),
-            cache: Arc::clone(&self.cache),
             store: Arc::clone(&self.store),
             supports_semver: self.supports_semver,
-            inflight_full: Arc::clone(&self.inflight_full),
-            inflight_version: Arc::clone(&self.inflight_version),
-            stored_version: Arc::clone(&self.stored_version),
         }
     }
-}
-
-/// Result of `resolve_full_manifest`.
-///
-/// Separates the 200 (full data) and 304 (use cache) cases at the type level,
-/// so callers can pattern-match instead of string-matching error messages.
-enum FullManifestResult {
-    /// Fresh manifest fetched from the network (HTTP 200).
-    Full(Arc<FullManifest>),
-    /// ETag matched, versions cache is valid (HTTP 304).
-    /// Caller should resolve from the in-memory versions cache and
-    /// fetch individual version manifests as needed.
-    NotModified,
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -247,9 +192,31 @@ impl ManifestProvider for UnifiedRegistry {
                 fetch_spec,
                 format,
             } => {
-                let manifest = self
-                    .fetch_version_job_manifest(&name, &spec, &fetch_spec, format)
-                    .await?;
+                if deno_semver::Version::parse_from_npm(&fetch_spec).is_ok()
+                    && let Some(manifest) =
+                        self.store.load_version_manifest(&name, &fetch_spec).await
+                {
+                    let manifest = Arc::new(manifest);
+                    return Ok(ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    });
+                }
+
+                let bytes =
+                    manifest::fetch_version_manifest_vec(manifest::FetchVersionManifestOptions {
+                        registry_url: &self.registry_url,
+                        name: &name,
+                        spec: &fetch_spec,
+                        format,
+                    })
+                    .await
+                    .map_err(RegistryError)?;
+                let manifest = Arc::new(
+                    manifest::parse_json_vec_off_runtime::<CoreVersionManifest>(bytes).await?,
+                );
+                self.store_version_manifest(&name, Arc::clone(&manifest));
                 Ok(ManifestJobDone::Version {
                     name,
                     spec,
@@ -262,9 +229,16 @@ impl ManifestProvider for UnifiedRegistry {
                 version,
                 full,
             } => {
-                let manifest = self
-                    .extract_version_job_manifest(&name, &spec, version, full)
-                    .await?;
+                let (resolved_version, manifest) =
+                    extract_core_version_off_runtime(full, version).await;
+                let manifest = manifest.ok_or_else(|| {
+                    RegistryError(anyhow!(
+                        "Version {} not found in manifest for {}",
+                        resolved_version,
+                        name
+                    ))
+                })?;
+                self.store_version_manifest(&name, Arc::clone(&manifest));
                 Ok(ManifestJobDone::Version {
                     name,
                     spec,
@@ -291,14 +265,17 @@ impl UnifiedRegistry {
         self.supports_semver
     }
 
-    /// Get the underlying in-memory cache.
-    pub fn cache(&self) -> &PackageCache {
-        &self.cache
+    fn store_version_manifest(&self, name: &str, manifest: Arc<CoreVersionManifest>) {
+        self.store
+            .store_version_manifest(name, &manifest.version, Arc::clone(&manifest));
     }
 
-    fn store_version_manifest(&self, name: &str, manifest: Arc<CoreVersionManifest>) {
-        let version = manifest.version.clone();
-        self.store.store_version_manifest(name, &version, manifest);
+    fn version_metadata_format(&self) -> manifest::MetadataFormat {
+        if self.supports_semver {
+            manifest::MetadataFormat::Abbreviated
+        } else {
+            manifest::MetadataFormat::Complete
+        }
     }
 
     async fn fetch_full_manifest_job(
@@ -331,330 +308,104 @@ impl UnifiedRegistry {
         }
     }
 
-    async fn extract_version_job_manifest(
+    async fn execute_version_job(
         &self,
         name: &str,
-        _spec: &str,
+        spec: &str,
+        fetch_spec: &str,
+    ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
+        match self
+            .execute_manifest_job(ManifestJob::Version {
+                name: name.to_string(),
+                spec: spec.to_string(),
+                fetch_spec: fetch_spec.to_string(),
+                format: self.version_metadata_format(),
+            })
+            .await?
+        {
+            ManifestJobDone::Version { manifest, .. } => Ok(manifest),
+            ManifestJobDone::Full { .. } => Err(RegistryError(anyhow!(
+                "provider returned full manifest for version job {name}@{spec}"
+            ))),
+        }
+    }
+
+    async fn execute_extract_job(
+        &self,
+        name: &str,
+        spec: &str,
         version: String,
         full: Arc<FullManifest>,
     ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
-        let (resolved_version, manifest) = extract_core_version_off_runtime(full, version).await;
-        let manifest = manifest.ok_or_else(|| {
-            RegistryError(anyhow!(
-                "Version {} not found in manifest for {}",
-                resolved_version,
-                name
-            ))
-        })?;
-        self.store_version_manifest(name, Arc::clone(&manifest));
-        Ok(manifest)
-    }
-
-    async fn fetch_version_job_manifest(
-        &self,
-        name: &str,
-        _spec: &str,
-        fetch_spec: &str,
-        format: manifest::MetadataFormat,
-    ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
-        if deno_semver::Version::parse_from_npm(fetch_spec).is_ok()
-            && let Some(manifest) = self.store.load_version_manifest(name, fetch_spec).await
+        match self
+            .execute_manifest_job(ManifestJob::ExtractVersion {
+                name: name.to_string(),
+                spec: spec.to_string(),
+                version,
+                full,
+            })
+            .await?
         {
-            return Ok(Arc::new(manifest));
-        }
-
-        let manifest = Arc::new(
-            manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
-                registry_url: &self.registry_url,
-                name,
-                spec: fetch_spec,
-                format,
-            })
-            .await
-            .map_err(RegistryError)?,
-        );
-        self.store_version_manifest(name, Arc::clone(&manifest));
-        Ok(manifest)
-    }
-
-    /// Resolve full manifest through memory → store → network with ETag validation.
-    ///
-    /// Single-flight cache flow:
-    /// 1. Memory cache hit on `full_manifests` → return immediately (Arc bump).
-    /// 2. Otherwise, acquire the gate-only `inflight_full<name>`. The worker
-    ///    closure populates `PackageCache` as a side effect: writes
-    ///    `full_manifests` on 200, writes only `versions_info` on 304.
-    /// 3. After the gate releases, recover the outcome by inspecting cache
-    ///    state — `full_manifests` populated → 200, only `versions_info`
-    ///    populated → 304.
-    async fn resolve_full_manifest(&self, name: &str) -> Result<FullManifestResult, RegistryError> {
-        if let Some(manifest) = self.cache.get_full_manifest(name) {
-            return Ok(FullManifestResult::Full(manifest));
-        }
-
-        self.inflight_full
-            .get_or_try_init::<RegistryError, _, _>(name.to_string(), || async {
-                // Re-check inside the worker — a previous winner may have
-                // populated the cache while we queued on the OnceMap shard.
-                if self.cache.get_full_manifest(name).is_some() {
-                    return Ok(());
-                }
-
-                let store_versions = self.store.load_versions(name).await.map(Arc::new);
-                let etag = store_versions.as_ref().and_then(|v| v.etag.clone());
-
-                match manifest::fetch_full_manifest(manifest::FetchManifestOptions {
-                    registry_url: &self.registry_url,
-                    name,
-                    format: manifest::MetadataFormat::Abbreviated,
-                    etag: etag.as_deref(),
-                })
-                .await
-                .map_err(RegistryError)?
-                {
-                    manifest::FetchManifestResult::Ok(manifest, new_etag) => {
-                        // Build a `VersionsInfo` strictly for the disk-persist
-                        // task. We do NOT also fill the in-memory
-                        // `versions_info` cache slot on the 200 path: readers
-                        // (`resolve_via_full_manifest::Full`) now go through
-                        // `VersionsRef::from(&Arc<FullManifest>)` for this
-                        // case, so the `full_manifests` slot is the single
-                        // source of truth in memory. The `versions_info` slot
-                        // is reserved for the 304 path (or disk-loaded warm
-                        // cache from a previous run).
-                        let versions_info = Arc::new(VersionsInfo {
-                            versions: Versions {
-                                version_list: manifest.versions.clone(),
-                                dist_tags: manifest.dist_tags.clone(),
-                            },
-                            etag: new_etag,
-                            last_updated: current_timestamp_secs(),
-                        });
-                        self.cache
-                            .set_full_manifest(name.to_string(), Arc::new(manifest));
-                        // Fire-and-forget: store may spawn its own task.
-                        self.store.store_versions(name, versions_info);
-                    }
-                    manifest::FetchManifestResult::NotModified => {
-                        if let Some(versions_info) = store_versions {
-                            // Only populate `versions_info`; absence of
-                            // `full_manifests` after the gate is the 304
-                            // signal.
-                            self.cache.set_versions(name.to_string(), versions_info);
-                        } else {
-                            // Persistent store corrupted/missing, fetch fresh (without etag).
-                            let (manifest, new_etag) = manifest::fetch_full_manifest_fresh(
-                                &self.registry_url,
-                                name,
-                                manifest::MetadataFormat::Abbreviated,
-                            )
-                            .await
-                            .map_err(RegistryError)?;
-
-                            // Same shape as the 200 branch: only the
-                            // canonical `full_manifests` slot is filled in
-                            // memory; the disk-persist task gets its own
-                            // `Arc<VersionsInfo>`.
-                            let versions_info = Arc::new(VersionsInfo {
-                                versions: Versions {
-                                    version_list: manifest.versions.clone(),
-                                    dist_tags: manifest.dist_tags.clone(),
-                                },
-                                etag: new_etag,
-                                last_updated: current_timestamp_secs(),
-                            });
-                            self.cache
-                                .set_full_manifest(name.to_string(), Arc::new(manifest));
-                            self.store.store_versions(name, versions_info);
-                        }
-                    }
-                }
-                Ok(())
-            })
-            .await?;
-
-        // Cache state is the discriminator: `full_manifests` populated → 200;
-        // only `versions_info` populated → 304; neither → cache eviction race.
-        if let Some(manifest) = self.cache.get_full_manifest(name) {
-            Ok(FullManifestResult::Full(manifest))
-        } else if self.cache.get_versions(name).is_some() {
-            Ok(FullManifestResult::NotModified)
-        } else {
-            Err(RegistryError(anyhow!(
-                "manifest for {name} vanished from cache after fetch"
-            )))
+            ManifestJobDone::Version { manifest, .. } => Ok(manifest),
+            ManifestJobDone::Full { .. } => Err(RegistryError(anyhow!(
+                "provider returned full manifest for extract job {name}@{spec}"
+            ))),
         }
     }
 
-    /// Resolve version manifest through memory → store → network.
-    ///
-    /// Cache key is `name@spec` (e.g., `lodash@^4.17.0`), so the same spec
-    /// requested multiple times shares one fetch.
-    ///
-    /// Non-semver registries resolve the spec by extracting the matching
-    /// version from the full manifest (the latter is itself single-flight
-    /// gated by `inflight_full`). Semver registries query the version
-    /// manifest directly. Either way the work for one `(name, spec)` runs
-    /// once; concurrent callers for the same key share the result.
-    async fn resolve_version_manifest(
+    /// Compatibility wrapper for direct `RegistryClient` callers. The normal
+    /// install/deps path resolves in the BFS loop; this path executes the same
+    /// provider jobs without adding a second inflight layer.
+    async fn resolve_version_manifest_job(
         &self,
         name: &str,
         spec: &str,
     ) -> Result<Arc<CoreVersionManifest>, RegistryError> {
-        if let Some(manifest) = self.cache.get_version_manifest(name, spec) {
-            return Ok(manifest);
+        if self.supports_semver {
+            return self.execute_version_job(name, spec, spec).await;
         }
 
-        self.inflight_version
-            .get_or_try_init::<RegistryError, _, _>(
-                (name.to_string(), spec.to_string()),
-                || async {
-                    // Re-check inside the worker (covers the brief window
-                    // between fast-path miss and OnceMap shard-lock acquire).
-                    if self.cache.get_version_manifest(name, spec).is_some() {
-                        return Ok(());
-                    }
-
-                    // Store keys are *resolved* versions — only do this lookup
-                    // when the caller already has an exact version. Range/tag
-                    // specs would always miss (and on Windows, range chars
-                    // like `*` / `>` aren't even valid filenames).
-                    if !self.supports_semver
-                        && deno_semver::Version::parse_from_npm(spec).is_ok()
-                        && let Some(manifest) = self.store.load_version_manifest(name, spec).await
-                    {
-                        // Populate memory cache ourselves — store knows nothing about it.
-                        self.cache.set_version_manifest(
-                            name.to_string(),
-                            spec.to_string(),
-                            Arc::new(manifest),
-                        );
-                        return Ok(());
-                    }
-
-                    if !self.supports_semver {
-                        // Non-semver: resolve the spec by extracting the matching
-                        // version from the full manifest. `resolve_full_manifest`
-                        // is itself inflight-gated, so concurrent specs for the
-                        // same name share one full-manifest fetch.
-                        let (resolved_version, arc) =
-                            self.resolve_via_full_manifest(name, spec).await?;
-                        self.cache.set_version_manifest(
-                            name.to_string(),
-                            spec.to_string(),
-                            Arc::clone(&arc),
-                        );
-                        if resolved_version != spec {
-                            self.cache.set_version_manifest(
-                                name.to_string(),
-                                resolved_version.clone(),
-                                Arc::clone(&arc),
-                            );
-                        }
-                        if self
-                            .stored_version
-                            .insert((name.to_string(), resolved_version.clone()))
-                        {
-                            self.store.store_version_manifest(
-                                name,
-                                &resolved_version,
-                                Arc::clone(&arc),
-                            );
-                        }
-                        return Ok(());
-                    }
-
-                    let manifest =
-                        manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
-                            registry_url: &self.registry_url,
-                            name,
-                            spec,
-                            format: manifest::MetadataFormat::Abbreviated,
-                        })
-                        .await
-                        .map_err(RegistryError)?;
-
-                    self.cache.set_version_manifest(
-                        name.to_string(),
-                        spec.to_string(),
-                        Arc::new(manifest),
-                    );
-                    Ok(())
-                },
-            )
-            .await?;
-
-        // Gate released — populated either by us, a prior waiter, or a previous
-        // run that hit memory/disk cache. Missing only on cache eviction race.
-        self.cache.get_version_manifest(name, spec).ok_or_else(|| {
-            RegistryError(anyhow!(
-                "version manifest for {name}@{spec} vanished from cache after fetch"
-            ))
-        })
-    }
-
-    /// Resolve `(name, spec)` for non-semver registries by reading the full
-    /// manifest and extracting the matching version.
-    ///
-    /// Handles the 304 (NotModified) case by falling back to the in-memory
-    /// versions cache for resolution and a single-version network fetch for
-    /// the manifest itself. The caller is responsible for caching the
-    /// extracted manifest; this helper does not touch `PackageCache`.
-    async fn resolve_via_full_manifest(
-        &self,
-        name: &str,
-        spec: &str,
-    ) -> Result<(String, Arc<CoreVersionManifest>), RegistryError> {
-        match self.resolve_full_manifest(name).await? {
-            FullManifestResult::Full(full) => {
+        match self
+            .execute_manifest_job(ManifestJob::Full {
+                name: name.to_string(),
+                spec: Some(spec.to_string()),
+            })
+            .await?
+        {
+            ManifestJobDone::Full {
+                data:
+                    ManifestFullData::Full {
+                        manifest: full,
+                        speculative,
+                    },
+                ..
+            } => {
+                if let Some((_, manifest)) = speculative {
+                    return Ok(manifest);
+                }
                 if full.versions.is_empty() {
                     return Err(RegistryError(anyhow!("No versions available for {}", name)));
                 }
                 let resolved_version = resolve_target_version((&*full).into(), spec)
                     .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-                // Race window: while we awaited `resolve_full_manifest` (gated
-                // by `inflight_full<name>`), a sibling spec for the same
-                // package may have resolved to this same version and populated
-                // `version_manifests` cache (writer at line 373-387 stores
-                // both `(name, spec)` and `(name, resolved_version)` keys).
-                // Reuse the Arc instead of paying the off-runtime reparse.
-                if let Some(cached) = self.cache.get_version_manifest(name, &resolved_version) {
-                    return Ok((resolved_version, cached));
-                }
-                let (resolved_version, core) =
-                    extract_core_version_off_runtime(full, resolved_version).await;
-                let core = core.ok_or_else(|| {
-                    RegistryError(anyhow!(
-                        "Version {} not found in manifest for {}",
-                        resolved_version,
-                        name
-                    ))
-                })?;
-                Ok((resolved_version, core))
-            }
-            FullManifestResult::NotModified => {
-                // 304 fallback: ETag matched, full payload not refetched.
-                // Resolve via the lightweight versions cache, then hit the
-                // network for the single requested version. Direct call into
-                // `manifest::fetch_version_manifest` (not `self.resolve_version_manifest`)
-                // to avoid re-entering the inflight_version gate; the outer
-                // `inflight_version<(name, spec)>` already serializes us.
-                let versions_info = self.cache.get_versions(name).ok_or_else(|| {
-                    RegistryError(anyhow!("Versions cache not found for {}", name))
-                })?;
-                let resolved_version = resolve_target_version((&*versions_info).into(), spec)
-                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
-                let manifest =
-                    manifest::fetch_version_manifest(manifest::FetchVersionManifestOptions {
-                        registry_url: &self.registry_url,
-                        name,
-                        spec: &resolved_version,
-                        format: manifest::MetadataFormat::Complete,
-                    })
+                self.execute_extract_job(name, spec, resolved_version, full)
                     .await
-                    .map_err(RegistryError)?;
-                Ok((resolved_version, Arc::new(manifest)))
             }
+            ManifestJobDone::Full {
+                data: ManifestFullData::Versions(versions),
+                ..
+            } => {
+                if versions.versions.version_list.is_empty() {
+                    return Err(RegistryError(anyhow!("No versions available for {}", name)));
+                }
+                let resolved_version = resolve_target_version((&*versions).into(), spec)
+                    .map_err(|e| RegistryError(anyhow!("{}@{}: {}", name, spec, e)))?;
+                self.execute_version_job(name, spec, &resolved_version)
+                    .await
+            }
+            ManifestJobDone::Version { .. } => Err(RegistryError(anyhow!(
+                "provider returned version manifest for full job {name}"
+            ))),
         }
     }
 }
@@ -671,16 +422,31 @@ impl RegistryClient for UnifiedRegistry {
     }
 
     async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
-        match self.resolve_full_manifest(name).await? {
-            FullManifestResult::Full(manifest) => Ok(manifest),
-            FullManifestResult::NotModified => {
-                // 304 in trait context: caller doesn't have versions cache access,
-                // so we return an error indicating the manifest is unchanged.
-                Err(RegistryError(anyhow!(
-                    "No versions available for {} (304 Not Modified but no full manifest cached)",
-                    name
-                )))
-            }
+        match self
+            .execute_manifest_job(ManifestJob::Full {
+                name: name.to_string(),
+                spec: None,
+            })
+            .await?
+        {
+            ManifestJobDone::Full {
+                data:
+                    ManifestFullData::Full {
+                        manifest,
+                        speculative: _,
+                    },
+                ..
+            } => Ok(manifest),
+            ManifestJobDone::Full {
+                data: ManifestFullData::Versions(_),
+                ..
+            } => Err(RegistryError(anyhow!(
+                "No full manifest available for {} (304 Not Modified)",
+                name
+            ))),
+            ManifestJobDone::Version { .. } => Err(RegistryError(anyhow!(
+                "provider returned version manifest for full job {name}"
+            ))),
         }
     }
 
@@ -689,9 +455,7 @@ impl RegistryClient for UnifiedRegistry {
         name: &str,
         spec: &str,
     ) -> Result<Arc<CoreVersionManifest>, Self::Error> {
-        // Delegates to `resolve_version_manifest` so the inflight dedup +
-        // memory/store cache logic lives in one place.
-        self.resolve_version_manifest(name, spec).await
+        self.resolve_version_manifest_job(name, spec).await
     }
 
     async fn resolve_package(
@@ -711,12 +475,8 @@ impl RegistryClient for UnifiedRegistry {
             );
         }
 
-        // Single entry point: `resolve_version_manifest` covers both semver
-        // (direct version-manifest fetch) and non-semver (full-manifest +
-        // extract) paths, with `inflight_version<(name, spec)>` ensuring one
-        // fetch+extraction per `(name, spec)` regardless of registry type.
         let manifest = self
-            .resolve_version_manifest(&fetch_name, &fetch_spec)
+            .resolve_version_manifest_job(&fetch_name, &fetch_spec)
             .await?;
         Ok(ResolvedPackage {
             name: name.to_string(),
@@ -728,44 +488,7 @@ impl RegistryClient for UnifiedRegistry {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use super::*;
-    use crate::service::{ManifestJob, ManifestJobDone, ManifestProvider, ManifestStore};
-
-    #[derive(Default)]
-    struct RecordingStore {
-        stored_versions: Mutex<Vec<(String, String)>>,
-    }
-
-    #[async_trait]
-    impl ManifestStore for RecordingStore {
-        async fn load_versions(&self, _name: &str) -> Option<VersionsInfo> {
-            None
-        }
-
-        async fn load_version_manifest(
-            &self,
-            _name: &str,
-            _version: &str,
-        ) -> Option<CoreVersionManifest> {
-            None
-        }
-
-        fn store_versions(&self, _name: &str, _info: Arc<VersionsInfo>) {}
-
-        fn store_version_manifest(
-            &self,
-            name: &str,
-            version: &str,
-            _manifest: Arc<CoreVersionManifest>,
-        ) {
-            self.stored_versions
-                .lock()
-                .unwrap()
-                .push((name.to_string(), version.to_string()));
-        }
-    }
 
     #[test]
     fn test_is_npm_registry() {
@@ -819,77 +542,12 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_registry_with_shared_cache() {
-        let shared_cache = Arc::new(PackageCache::default());
-
-        let registry1 = UnifiedRegistry::builder()
-            .registry("https://registry.npmmirror.com")
-            .cache(Arc::clone(&shared_cache))
-            .build();
-
-        let registry2 = UnifiedRegistry::builder()
-            .registry("https://registry.npmmirror.com")
-            .cache(Arc::clone(&shared_cache))
-            .build();
-
-        // Both registries share the same cache
-        assert!(Arc::ptr_eq(&registry1.cache, &registry2.cache));
-    }
-
-    #[tokio::test]
-    async fn test_unified_registry_executes_extract_manifest_provider_job() {
-        let store = Arc::new(RecordingStore::default());
+    fn test_unified_registry_clone_shares_store() {
         let registry = UnifiedRegistry::builder()
             .registry("https://registry.npmmirror.com")
-            .store(store.clone())
             .build();
+        let cloned = registry.clone();
 
-        let (full, _) = manifest::parse_full_manifest_with_core_off_runtime(
-            bytes::Bytes::from_static(
-                br#"{
-                    "name":"provider-extract-demo",
-                    "dist-tags":{"latest":"1.0.0"},
-                    "versions":{
-                        "1.0.0":{
-                            "name":"provider-extract-demo",
-                            "version":"1.0.0",
-                            "dist":{"tarball":"https://registry.example/demo-1.0.0.tgz"}
-                        }
-                    }
-                }"#,
-            ),
-            None,
-        )
-        .await
-        .unwrap();
-
-        let done = ManifestProvider::execute_manifest_job(
-            &registry,
-            ManifestJob::ExtractVersion {
-                name: "provider-extract-demo".to_string(),
-                spec: "latest".to_string(),
-                version: "1.0.0".to_string(),
-                full: Arc::new(full),
-            },
-        )
-        .await
-        .unwrap();
-
-        let ManifestJobDone::Version {
-            spec,
-            manifest: returned,
-            ..
-        } = done
-        else {
-            panic!("expected version manifest job");
-        };
-
-        assert_eq!(spec, "latest");
-        assert_eq!(returned.name, "provider-extract-demo");
-        assert_eq!(returned.version, "1.0.0");
-        assert_eq!(
-            store.stored_versions.lock().unwrap().as_slice(),
-            &[("provider-extract-demo".to_string(), "1.0.0".to_string())]
-        );
+        assert!(Arc::ptr_eq(&registry.store, &cloned.store));
     }
 }
