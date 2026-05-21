@@ -670,11 +670,6 @@ impl RegistryClient for UnifiedRegistry {
         &self.registry_url
     }
 
-    fn cache_version_manifest(&self, name: &str, spec: &str, manifest: Arc<CoreVersionManifest>) {
-        self.cache
-            .set_version_manifest(name.to_string(), spec.to_string(), manifest);
-    }
-
     async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
         match self.resolve_full_manifest(name).await? {
             FullManifestResult::Full(manifest) => Ok(manifest),
