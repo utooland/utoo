@@ -54,10 +54,7 @@ mod registry;
 mod store;
 
 pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps};
-pub use cache::{
-    CacheStats, MemoryCache, PackageCache, ProjectCacheData, ProjectPackageCache, Versions,
-    VersionsInfo,
-};
+pub use cache::{ProjectCacheData, ProjectPackageCache, Versions, VersionsInfo};
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{

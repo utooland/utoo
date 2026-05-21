@@ -1,8 +1,8 @@
 //! Persistence backend for the registry's manifest cache.
 //!
-//! ruborist itself owns only the in-memory tier ([`super::cache::MemoryCache`]);
-//! any persistent storage (disk, remote KV, …) is supplied by the host through
-//! a [`ManifestStore`] implementation. This keeps the resolver free of file I/O
+//! The resolver main loop owns the per-run in-memory manifest maps. Persistent
+//! storage (disk, remote KV, …) is supplied by the host through a
+//! [`ManifestStore`] implementation. This keeps the resolver free of file I/O
 //! and lets hosts pick their own format, layout, and write strategy.
 //!
 //! Contract:
