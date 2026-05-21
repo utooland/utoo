@@ -453,3 +453,97 @@ fn extract_concurrency_limit() -> usize {
         .map(|n| n.get().clamp(2, 8))
         .unwrap_or(4)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn package(name: &str, version: &str) -> PackageFetch {
+        PackageFetch {
+            name: name.to_string(),
+            version: version.to_string(),
+            tarball_url: format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz"),
+        }
+    }
+
+    fn clone_spec(name: &str, version: &str, target: &str) -> CloneSpec {
+        CloneSpec {
+            package: package(name, version),
+            target: PathBuf::from(target),
+        }
+    }
+
+    fn state() -> SchedulerState {
+        let (_tx, rx) = mpsc::unbounded_channel();
+        SchedulerState::new(rx)
+    }
+
+    #[test]
+    fn ensure_download_dedupes_inflight_package() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+
+        state.ensure_download(package.clone(), Some(waiter));
+        state.ensure_download(package, None);
+
+        assert_eq!(state.download_queue.len(), 1);
+        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+    }
+
+    #[test]
+    fn download_completion_releases_slot_and_queues_extract() {
+        let mut state = state();
+        let package = package("react", "18.2.0");
+        let key = package.key();
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+
+        state.download_active.insert(key.clone());
+        state.download_waiters.insert(key.clone(), vec![waiter]);
+
+        state.handle_done(OpDone::Download {
+            package: package.clone(),
+            result: Ok(DownloadOutcome::Bytes(Bytes::from_static(b"tgz"))),
+        });
+
+        assert!(!state.download_active.contains(&key));
+        assert!(state.download_waiters.contains_key(&key));
+        assert_eq!(state.extract_queue.len(), 1);
+        assert_eq!(state.extract_queue[0].package.key(), key);
+    }
+
+    #[test]
+    fn extract_completion_wakes_clone_waiters() {
+        let mut state = state();
+        let key = "react@18.2.0".to_string();
+        let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
+        let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
+
+        state.extract_active.insert(key.clone());
+        state.download_waiters.insert(key.clone(), vec![waiter]);
+
+        state.handle_done(OpDone::Extract {
+            key: key.clone(),
+            result: Ok(cache_path.clone()),
+        });
+
+        assert!(!state.extract_active.contains(&key));
+        assert_eq!(state.download_done[&key], cache_path);
+        assert_eq!(state.clone_queue.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn queue_clone_dedupes_inflight_target() {
+        let mut state = state();
+        let target = PathBuf::from("/tmp/project/node_modules/react");
+        let spec = clone_spec("react", "18.2.0", target.to_string_lossy().as_ref());
+        let (first, _first_rx) = oneshot::channel();
+        let (second, _second_rx) = oneshot::channel();
+
+        state.queue_clone(spec.clone(), Some(first));
+        state.queue_clone(spec, Some(second));
+
+        assert_eq!(state.clone_waiters[&target].len(), 2);
+        assert_eq!(state.ops.len(), 1);
+    }
+}
