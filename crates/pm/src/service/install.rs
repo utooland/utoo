@@ -66,6 +66,7 @@ pub async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
+    scheduler: Option<&super::install_scheduler::InstallScheduler>,
 ) -> Result<()> {
     use crate::util::cloner::clone_package_once;
 
@@ -144,11 +145,26 @@ pub async fn install_packages(
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
+                    let scheduler = scheduler.cloned();
 
                     let task = tokio::spawn(async move {
-                        if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
-                        {
+                        let clone_result = match scheduler {
+                            Some(scheduler) => {
+                                scheduler
+                                    .ensure_clone(
+                                        name.clone(),
+                                        version,
+                                        resolved,
+                                        target_path.clone(),
+                                    )
+                                    .await
+                            }
+                            None => {
+                                clone_package_once(&name, &version, &resolved, &target_path).await
+                            }
+                        };
+
+                        if let Err(e) = clone_result {
                             if is_optional {
                                 tracing::warn!(
                                     "Optional dependency {name} failed (ignored): {e:#}"
@@ -264,9 +280,22 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        install_packages(&groups, root_path, omit)
+        let scheduler_handle = if use_fresh_lock {
+            Some(super::install_scheduler::InstallSchedulerHandle::start())
+        } else {
+            None
+        };
+        let scheduler = scheduler_handle.as_ref().map(|handle| handle.scheduler());
+
+        let install_result = install_packages(&groups, root_path, omit, scheduler.as_ref())
             .await
-            .context("Failed to install packages")?;
+            .context("Failed to install packages");
+
+        if let Some(handle) = scheduler_handle {
+            handle.shutdown().await;
+        }
+
+        install_result?;
 
         // Wait for pipeline workers to complete (if any)
         if let Some(handles) = pipeline_handles {
