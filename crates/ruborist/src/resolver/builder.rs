@@ -32,6 +32,7 @@ use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+use crate::service::ManifestProvider;
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -758,11 +759,15 @@ fn handle_processed<E: EventReceiver>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -780,12 +785,17 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
@@ -810,12 +820,17 @@ pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     tracing::debug!(
         "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
         config.peer_deps,
@@ -973,10 +988,14 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -987,12 +1006,17 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R, E>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 
