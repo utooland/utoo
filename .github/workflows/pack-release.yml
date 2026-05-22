@@ -81,7 +81,7 @@ jobs:
               git config --system core.longpaths true &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
-    name: utoopack-release-${{ matrix.settings.target }} - node@20
+    name: utoopack-release-${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 20
+          node-version: 22.14.0
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
