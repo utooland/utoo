@@ -209,6 +209,8 @@ jobs:
         run: npm install -g npm@11.6.2
       - name: NPM Publish
         run: |
+          set -euo pipefail
+
           echo "${VERSION}"
 
           TAG="latest"
