@@ -1,8 +1,15 @@
+//! NOTE: this PR stages the sync clone primitives (`CacheLayout`, `PackageClone`,
+//! `clone_package_sync`, …) for the install scheduler landing in the follow-up
+//! PR. Until then they have no in-tree consumer, hence the module-level
+//! `allow(dead_code)`, which the follow-up removes once the scheduler wires them in.
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
+use serde::de::DeserializeOwned;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
 use utoo_ruborist::util::OnceMap;
@@ -169,6 +176,64 @@ mod hardlink_clone {
             }
         }
 
+        Ok(())
+    }
+
+    /// Clone directory using sync I/O. Uses hardlink when possible, falls back
+    /// to copy. (Staged for the scheduler; the async `clone_dir` below remains
+    /// the current path until the scheduler PR consumes this.)
+    pub fn clone_dir_sync(src: &Path, dst: &Path) -> Result<()> {
+        let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
+
+        if !fs::metadata(src)?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "Source is not a directory",
+            ))
+            .with_context(|| err_msg);
+        }
+
+        let mut force_copy = has_install_script_sync(src);
+
+        let mut files = Vec::new();
+        let mut dirs = Vec::new();
+        collect_entries(src, dst, &mut files, &mut dirs)?;
+
+        let mut created_dirs = HashSet::new();
+        for dir in &dirs {
+            if created_dirs.insert(dir.clone())
+                && let Err(e) = fs::create_dir_all(dir)
+                && e.kind() != io::ErrorKind::AlreadyExists
+            {
+                return Err(e).with_context(|| err_msg.clone());
+            }
+        }
+
+        let mut warned_per_file = false;
+        for entry in &files {
+            if force_copy {
+                copy_file_sync(&entry.src, &entry.dst)?;
+            } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+                if e.kind() == io::ErrorKind::CrossesDevices {
+                    tracing::warn!(
+                        "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                        src.display(),
+                        dst.display(),
+                        e
+                    );
+                    force_copy = true;
+                } else if !warned_per_file {
+                    tracing::warn!(
+                        "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
+                        entry.src.display(),
+                        entry.dst.display(),
+                        e
+                    );
+                    warned_per_file = true;
+                }
+                copy_file_sync(&entry.src, &entry.dst)?;
+            }
+        }
         Ok(())
     }
 
@@ -442,6 +507,162 @@ pub async fn clone_package(
         }
     }
     clone(src, dst, find_real).await?;
+    Ok(true)
+}
+
+// ===== Sync clone primitives, staged for the install scheduler =====
+
+/// How a cached package's real contents are laid out under its cache dir.
+/// Derived from the resolved tarball URL so callers never pass a bare bool.
+#[derive(Clone, Copy)]
+enum CacheLayout {
+    /// Registry tarball: contents live under a `package/` subdir, so the clone
+    /// descends into the first real subdirectory.
+    Wrapped,
+    /// Git checkout: extracted flat at the cache root; clone the dir as-is.
+    Flat,
+}
+
+impl CacheLayout {
+    fn from_tarball_url(tarball_url: &str) -> Self {
+        if is_git_url(tarball_url) {
+            CacheLayout::Flat
+        } else {
+            CacheLayout::Wrapped
+        }
+    }
+}
+
+/// A request to materialize a cached package into a `node_modules` target.
+///
+/// Bundles the package identity, its resolved cache dir, and the destination so
+/// the clone entry point takes one coherent argument instead of five positional
+/// ones, and new fields stay additive.
+pub struct PackageClone<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub tarball_url: &'a str,
+    pub cache: &'a Path,
+    pub target: &'a Path,
+}
+
+fn load_package_json_sync<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let pkg_path = path.join("package.json");
+    let content = std::fs::read_to_string(&pkg_path)
+        .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
+
+    match serde_json::from_str(&content) {
+        Ok(v) => Ok(v),
+        Err(original_err) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(value) => serde_json::from_value(value)
+                .with_context(|| format!("Failed to deserialize {pkg_path:?}")),
+            Err(_) => {
+                Err(original_err).with_context(|| format!("Failed to parse JSON from {pkg_path:?}"))
+            }
+        },
+    }
+}
+
+fn validate_name_version_sync(dst: &Path, name: &str, version: &str) -> bool {
+    let Ok(pkg) = load_package_json_sync::<IdentityView>(dst) else {
+        return false;
+    };
+    pkg.name == name && pkg.version == version
+}
+
+fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(src).ok()? {
+        let entry = entry.ok()?;
+        if entry.file_type().ok()?.is_dir() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name != ".utoo_built") {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+    let src_c = CString::new(real_src.as_os_str().as_bytes())?;
+    let dst_c = CString::new(dst.as_os_str().as_bytes())?;
+    let mut last_error = None;
+
+    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+
+        match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+            0 => return Ok(()),
+            _ => {
+                let err = std::io::Error::last_os_error();
+                let _ = std::fs::remove_dir_all(dst);
+                last_error = Some(err);
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "clonefile {} -> {}: {}",
+        real_src.display(),
+        dst.display(),
+        last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "unknown error".to_string())
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+    hardlink_clone::clone_dir_sync(real_src, dst)
+        .with_context(|| format!("clone_dir {} -> {}", real_src.display(), dst.display()))
+}
+
+fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
+    let real_src = match layout {
+        CacheLayout::Wrapped => find_real_src_sync(src)
+            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?,
+        CacheLayout::Flat => src.to_path_buf(),
+    };
+
+    if dst.try_exists()?
+        && let Err(e) = std::fs::remove_dir_all(dst)
+    {
+        tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+    }
+
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    clone_dir_native_sync(&real_src, dst)?;
+    Ok(())
+}
+
+/// Sync counterpart of [`clone_package`] for the scheduler's worker pool.
+///
+/// Returns `Ok(true)` when freshly materialized, `Ok(false)` when an existing
+/// valid directory was reused. Stateless — callers own dedup and counting.
+pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
+    if req.target.try_exists()? {
+        if validate_name_version_sync(req.target, req.name, req.version) {
+            return Ok(false);
+        }
+        if let Err(e) = std::fs::remove_dir_all(req.target) {
+            tracing::warn!(
+                "Failed to clean target directory {}: {}",
+                req.target.display(),
+                e
+            );
+        }
+    }
+    clone_sync(
+        req.cache,
+        req.target,
+        CacheLayout::from_tarball_url(req.tarball_url),
+    )?;
     Ok(true)
 }
 
