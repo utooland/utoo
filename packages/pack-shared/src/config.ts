@@ -219,6 +219,7 @@ export interface ConfigComplete {
         }
       | string
     >;
+    /** URL prefix for chunks/assets. Use "runtime" for globalThis.publicPath or "auto" for current-script inference. */
     publicPath?: string;
     crossOriginLoading?: false | "anonymous" | "use-credentials";
     chunkLoadingGlobal?: string;
