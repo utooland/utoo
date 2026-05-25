@@ -5,11 +5,11 @@
 //! A naive "just parse the manifest in BFS, let pm re-download at install
 //! time" design looks simpler but has two problems:
 //!
-//! 1. **Cache-slot collision**. pm's `download_to_cache` keys on
-//!    `<name>/<version>/`. A URL-supplied tarball can self-declare any
-//!    `name@version`, so an attacker-controlled URL can poison the same
-//!    slot the npm registry uses for `lodash@4.17.21`. There is no
-//!    `dist.integrity` to verify against on cache hit.
+//! 1. **Cache-slot collision**. Registry tarballs use `<name>/<version>/`.
+//!    A URL-supplied tarball can self-declare any `name@version`, so an
+//!    attacker-controlled URL can poison the same slot the npm registry uses
+//!    for `lodash@4.17.21`. There is no `dist.integrity` to verify against on
+//!    cache hit.
 //!
 //! 2. **Double download**. BFS downloads the tarball to read its manifest,
 //!    then throws the bytes away; install downloads the same URL again to
@@ -19,9 +19,9 @@
 //! `<cache>/<name>/_http_<sha256(url)[:16]>/`. URL is the natural content
 //! address (there is no etag/integrity to rely on, but the URL is what the
 //! user committed to in package.json), so it plays the same role `<sha>`
-//! plays for git. Install's `resolve_cache_path` checks this slot *before*
-//! falling through to the registry cache path, so registry tarballs stay
-//! unchanged while HTTP tarballs never re-download.
+//! plays for git. Install's scheduler checks this slot *before* falling
+//! through to the registry cache path, so registry tarballs stay unchanged
+//! while HTTP tarballs never re-download.
 //!
 //! Same-URL content changes **are not detected** — npm-land convention is
 //! that tarball URLs are immutable. Users who break that rotate the URL or
@@ -54,11 +54,11 @@
 //!  │  ResolvedPackage { dist.tarball = url, … }    ── bytes dropped here      │
 //!  └───────│──────────────────────────────────────────────────────────────────┘
 //!          ▼  (lockfile)
-//!  ┌── Install phase (pm/util/downloader.rs) ─────────────────────────────────┐
-//!  │  resolve_cache_path(name, version, url)                                  │
+//!  ┌── Install phase (pm/service/install_scheduler.rs) ───────────────────────┐
+//!  │  resolve_seeded_cache_path(name, version, url)                           │
 //!  │       ├─ is_git_url?           → git_cache_lookup                        │
 //!  │       ├─ http_tarball_cache_lookup  → <name>/_http_<hash>/_resolved → ✓ │
-//!  │       └─ (fall through)        → download_to_cache  (registry path)     │
+//!  │       └─ (fall through)        → scheduler registry download/extract    │
 //!  │                                                                          │
 //!  │  cloner:  clonefile (mac) / hardlink (linux)                             │
 //!  │       ~/.cache/nm/<name>/_http_<hash>/package/  →  node_modules/<name>/  │
@@ -82,8 +82,6 @@
 //!      (FetchError, classify_reqwest_error, classify_status, retry_strategy)
 //! ```
 //!
-//! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
-
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
