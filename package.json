@@ -54,6 +54,6 @@
   ],
   "repository": "https://github.com/utooland/utoo",
   "engines": {
-    "install-node": "20"
+    "install-node": "22"
   }
 }

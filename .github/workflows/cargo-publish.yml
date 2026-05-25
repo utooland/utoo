@@ -108,9 +108,9 @@ jobs:
           RUB_VERSION: ${{ steps.rub.outputs.version }}
         run: |
           set -euo pipefail
-          sed -E -i.bak "s|^version[[:space:]]*=.*|version     = \"${RUB_VERSION}\"|" crates/ruborist/Cargo.toml
-          sed -E -i.bak "s|^version[[:space:]]*=.*|version     = \"${UTOO_VERSION}\"|" crates/pm/Cargo.toml
-          sed -E -i.bak "s|^utoo-ruborist[[:space:]]*=.*|utoo-ruborist      = { path = \"../ruborist\", version = \"${RUB_VERSION}\", features = [\"http-tarball\", \"native-git\"] }|" crates/pm/Cargo.toml
+          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${RUB_VERSION}\"|}" crates/ruborist/Cargo.toml
+          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${UTOO_VERSION}\"|}" crates/pm/Cargo.toml
+          sed -i.bak "s|^utoo-ruborist[[:space:]]*=.*|utoo-ruborist      = { path = \"../ruborist\", version = \"${RUB_VERSION}\", features = [\"http-tarball\", \"native-git\"] }|" crates/pm/Cargo.toml
           rm -f crates/pm/Cargo.toml.bak crates/ruborist/Cargo.toml.bak
 
           check_version() {

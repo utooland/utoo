@@ -1,13 +1,19 @@
-((__UTOOPACK__) => {
-            
-if (!Array.isArray(__UTOOPACK__)) {
+(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+    typeof document === "object" ? document.currentScript : undefined,
+    {"otherChunks":["input_6d9b1652.js"],"runtimeModuleIds":[44]}
+]);
+(() => {
+if (!Array.isArray(globalThis["TURBOPACK"])) {
     return;
 }
 
-const CHUNK_BASE_PATH = "";
-const CHUNK_SUFFIX_PATH = "";
-const RELATIVE_ROOT_PATH = "..";
-const RUNTIME_PUBLIC_PATH = "";
+var CHUNK_BASE_PATH = "__AUTO_PUBLIC_PATH__";
+var WORKER_BASE_PATH = null;
+var RELATIVE_ROOT_PATH = "/ROOT";
+var RUNTIME_PUBLIC_PATH = "__AUTO_PUBLIC_PATH__";
+var ASSET_SUFFIX = "";
+var CROSS_ORIGIN = null;
+var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -621,30 +627,304 @@ function applyModuleFactoryName(factory) {
 }
 /**
  * This file contains runtime types and functions that are shared between all
- * Turbopack UMD library runtimes (DOM and Node.js).
+ * Turbopack *browser* ECMAScript runtimes.
  *
  * It will be appended to the runtime code of each runtime right after the
  * shared runtime utils.
- */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
-/// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
-// Provided by build
-let BACKEND;
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../base/globals.d.ts" />
+/// <reference path="../../../shared/runtime/runtime-utils.ts" />
+// Used in WebWorkers to tell the runtime about the chunk suffix
+// Support runtime public path modes.
+function getRuntimeChunkBasePath(basePath = CHUNK_BASE_PATH) {
+    if (basePath === '__RUNTIME_PUBLIC_PATH__') {
+        return contextPrototype.p();
+    }
+    if (basePath === '__AUTO_PUBLIC_PATH__') {
+        return contextPrototype.p('auto');
+    }
+    return basePath;
+}
+const browserContextPrototype = Context.prototype;
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
-/**
- * Determine the chunk to register from a registration entry.
- * In library builds, chunks are always string paths or script objects.
- */ function getChunkFromRegistration(chunk) {
-    if (typeof chunk === "string") {
-        return chunk;
-    } else if (chunk) {
-        return {
-            src: chunk.getAttribute("src")
-        };
+const availableModules = new Map();
+const availableModuleChunks = new Map();
+function loadChunk(chunkData) {
+    return loadChunkInternal(SourceType.Parent, this.m.id, chunkData);
+}
+browserContextPrototype.l = loadChunk;
+function loadInitialChunk(chunkPath, chunkData) {
+    return loadChunkInternal(SourceType.Runtime, chunkPath, chunkData);
+}
+async function loadChunkInternal(sourceType, sourceData, chunkData) {
+    if (typeof chunkData === 'string') {
+        return loadChunkPath(sourceType, sourceData, chunkData);
+    }
+    const includedList = chunkData.included || [];
+    const modulesPromises = includedList.map((included)=>{
+        if (moduleFactories.has(included)) return true;
+        return availableModules.get(included);
+    });
+    if (modulesPromises.length > 0 && modulesPromises.every((p)=>p)) {
+        // When all included items are already loaded or loading, we can skip loading ourselves
+        await Promise.all(modulesPromises);
+        return;
+    }
+    const includedModuleChunksList = chunkData.moduleChunks || [];
+    const moduleChunksPromises = includedModuleChunksList.map((included)=>{
+        // TODO(alexkirsz) Do we need this check?
+        // if (moduleFactories[included]) return true;
+        return availableModuleChunks.get(included);
+    }).filter((p)=>p);
+    let promise;
+    if (moduleChunksPromises.length > 0) {
+        // Some module chunks are already loaded or loading.
+        if (moduleChunksPromises.length === includedModuleChunksList.length) {
+            // When all included module chunks are already loaded or loading, we can skip loading ourselves
+            await Promise.all(moduleChunksPromises);
+            return;
+        }
+        const moduleChunksToLoad = new Set();
+        for (const moduleChunk of includedModuleChunksList){
+            if (!availableModuleChunks.has(moduleChunk)) {
+                moduleChunksToLoad.add(moduleChunk);
+            }
+        }
+        for (const moduleChunkToLoad of moduleChunksToLoad){
+            const promise = loadChunkPath(sourceType, sourceData, moduleChunkToLoad);
+            availableModuleChunks.set(moduleChunkToLoad, promise);
+            moduleChunksPromises.push(promise);
+        }
+        promise = Promise.all(moduleChunksPromises);
     } else {
-        throw new Error("chunk path is empty");
+        promise = loadChunkPath(sourceType, sourceData, chunkData.path);
+        // Mark all included module chunks as loading if they are not already loaded or loading.
+        for (const includedModuleChunk of includedModuleChunksList){
+            if (!availableModuleChunks.has(includedModuleChunk)) {
+                availableModuleChunks.set(includedModuleChunk, promise);
+            }
+        }
+    }
+    for (const included of includedList){
+        if (!availableModules.has(included)) {
+            // It might be better to race old and new promises, but it's rare that the new promise will be faster than a request started earlier.
+            // In production it's even more rare, because the chunk optimization tries to deduplicate modules anyway.
+            availableModules.set(included, promise);
+        }
+    }
+    await promise;
+}
+const loadedChunk = Promise.resolve(undefined);
+const instrumentedBackendLoadChunks = new WeakMap();
+// Do not make this async. React relies on referential equality of the returned Promise.
+function loadChunkByUrl(chunkUrl) {
+    return loadChunkByUrlInternal(SourceType.Parent, this.m.id, chunkUrl);
+}
+browserContextPrototype.L = loadChunkByUrl;
+const loadedScripts = new Map();
+/**
+ * Load an external script by creating a <script> tag.
+ * This is used for script externals that need to be loaded from CDN or other external sources.
+ */ function loadScript(scriptUrl) {
+    // Return cached promise if script is already loading or loaded
+    let promise = loadedScripts.get(scriptUrl);
+    if (promise) {
+        return promise;
+    }
+    promise = new Promise((resolve, reject)=>{
+        const script = document.createElement('script');
+        script.crossOrigin = CROSS_ORIGIN;
+        script.src = scriptUrl;
+        script.onload = ()=>resolve();
+        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
+        document.head.appendChild(script);
+    });
+    loadedScripts.set(scriptUrl, promise);
+    return promise;
+}
+browserContextPrototype.S = loadScript;
+// Do not make this async. React relies on referential equality of the returned Promise.
+function loadChunkByUrlInternal(sourceType, sourceData, chunkUrl) {
+    const thenable = BACKEND.loadChunkCached(sourceType, chunkUrl);
+    let entry = instrumentedBackendLoadChunks.get(thenable);
+    if (entry === undefined) {
+        const resolve = instrumentedBackendLoadChunks.set.bind(instrumentedBackendLoadChunks, thenable, loadedChunk);
+        entry = thenable.then(resolve).catch((cause)=>{
+            let loadReason;
+            switch(sourceType){
+                case SourceType.Runtime:
+                    loadReason = `as a runtime dependency of chunk ${sourceData}`;
+                    break;
+                case SourceType.Parent:
+                    loadReason = `from module ${sourceData}`;
+                    break;
+                case SourceType.Update:
+                    loadReason = 'from an HMR update';
+                    break;
+                default:
+                    invariant(sourceType, (sourceType)=>`Unknown source type: ${sourceType}`);
+            }
+            let error = new Error(`Failed to load chunk ${chunkUrl} ${loadReason}${cause ? `: ${cause}` : ''}`, cause ? {
+                cause
+            } : undefined);
+            error.name = 'ChunkLoadError';
+            throw error;
+        });
+        instrumentedBackendLoadChunks.set(thenable, entry);
+    }
+    return entry;
+}
+// Do not make this async. React relies on referential equality of the returned Promise.
+function loadChunkPath(sourceType, sourceData, chunkPath) {
+    const url = getChunkRelativeUrl(chunkPath);
+    return loadChunkByUrlInternal(sourceType, sourceData, url);
+}
+/**
+ * Returns an absolute url to an asset.
+ */ function resolvePathFromModule(moduleId) {
+    const exported = this.r(moduleId);
+    return exported?.default ?? exported;
+}
+browserContextPrototype.R = resolvePathFromModule;
+/**
+ * no-op for browser
+ * @param modulePath
+ */ function resolveAbsolutePath(modulePath) {
+    return `/ROOT/${modulePath ?? ''}`;
+}
+browserContextPrototype.P = resolveAbsolutePath;
+/**
+ * Exports a URL with the static suffix appended.
+ */ function exportUrl(url, id) {
+    exportValue.call(this, `${url}${ASSET_SUFFIX}`, id);
+}
+browserContextPrototype.q = exportUrl;
+/**
+ * Creates a worker by instantiating the given WorkerConstructor with the
+ * appropriate URL and options.
+ *
+ * The entrypoint is a pre-compiled worker runtime file. The params configure
+ * which module chunks to load and which module to run as the entry point.
+ *
+ * The params are a JSON array of the following structure:
+ * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, ...WORKER_FORWARDED_GLOBALS values]`
+ *
+ * @param WorkerConstructor The Worker or SharedWorker constructor
+ * @param entrypoint URL path to the worker entrypoint chunk
+ * @param moduleChunks list of module chunk paths to load
+ * @param workerOptions options to pass to the Worker constructor (optional)
+ */ function createWorker(WorkerConstructor, entrypoint, moduleChunks, workerOptions) {
+    const isSharedWorker = WorkerConstructor.name === 'SharedWorker';
+    // `WORKER_BASE_PATH` overrides `CHUNK_BASE_PATH` for the entrypoint and the
+    // module chunks loaded inside the worker, keeping them same-origin to each
+    // other when `CHUNK_BASE_PATH` (= `assetPrefix`) is a cross-origin CDN.
+    // `null` falls back; an empty string is treated as a literal empty prefix.
+    const workerBasePath = WORKER_BASE_PATH ?? CHUNK_BASE_PATH;
+    const chunkUrls = moduleChunks.map((chunk)=>getChunkRelativeUrl(chunk, workerBasePath)).reverse();
+    const params = [
+        chunkUrls,
+        ASSET_SUFFIX
+    ];
+    for (const globalName of WORKER_FORWARDED_GLOBALS){
+        params.push(globalThis[globalName]);
+    }
+    const url = new URL(getChunkRelativeUrl(entrypoint, workerBasePath), location.origin);
+    const paramsJson = JSON.stringify(params);
+    if (isSharedWorker) {
+        url.searchParams.set('params', paramsJson);
+    } else {
+        url.hash = '#params=' + encodeURIComponent(paramsJson);
+    }
+    // Remove type: "module" from options since our worker entrypoint is not a module
+    const options = workerOptions ? {
+        ...workerOptions,
+        type: undefined
+    } : undefined;
+    return new WorkerConstructor(url, options);
+}
+browserContextPrototype.b = createWorker;
+/**
+ * Instantiates a runtime module.
+ */ function instantiateRuntimeModule(moduleId, chunkPath) {
+    return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
+}
+/**
+ * Returns the URL relative to the origin where a chunk can be fetched from.
+ */ function getChunkRelativeUrl(chunkPath, basePath = CHUNK_BASE_PATH) {
+    return `${getRuntimeChunkBasePath(basePath)}${chunkPath.split('/').map((p)=>encodeURIComponent(p)).join('/')}${ASSET_SUFFIX}`;
+}
+function getPathFromScript(chunkScript) {
+    if (typeof chunkScript === 'string') {
+        return chunkScript;
+    }
+    const chunkUrl = chunkScript.src;
+    const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
+    const runtimeBasePath = getRuntimeChunkBasePath();
+    let path = src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
+    if (path.startsWith('/')) {
+        path = path.slice(1);
+    }
+    return path;
+}
+/**
+ * Return the ChunkUrl from a ChunkScript.
+ */ function getUrlFromScript(chunk) {
+    if (typeof chunk === 'string') {
+        return getChunkRelativeUrl(chunk);
+    } else {
+        // This is already exactly what we want
+        return chunk.src;
     }
 }
+/**
+ * Determine the chunk to register. Note that this function has side-effects!
+ */ function getChunkFromRegistration(chunk) {
+    if (typeof chunk === 'string') {
+        return chunk;
+    } else if (!chunk) {
+        if (typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined') {
+            return {
+                src: TURBOPACK_NEXT_CHUNK_URLS.pop()
+            };
+        } else {
+            throw new Error('chunk path empty but not in a worker');
+        }
+    } else {
+        return {
+            src: chunk.getAttribute('src')
+        };
+    }
+}
+/**
+ * Checks if a given path/URL ends with the given extension,
+ * optionally followed by ?query or #fragment.
+ */ function endsWithExtension(chunkUrlOrPath, ext) {
+    // Find where the path ends (before query or fragment)
+    const q = chunkUrlOrPath.indexOf('?');
+    let end;
+    if (q !== -1) {
+        end = q;
+    } else {
+        const h = chunkUrlOrPath.indexOf('#');
+        end = h !== -1 ? h : chunkUrlOrPath.length;
+    }
+    // Check if the path portion ends with the extension
+    return end >= ext.length && chunkUrlOrPath.startsWith(ext, end - ext.length);
+}
+function isJs(chunkUrlOrPath) {
+    return endsWithExtension(chunkUrlOrPath, '.js');
+}
+function isCss(chunkUrl) {
+    return endsWithExtension(chunkUrl, '.css');
+}
+function loadWebAssembly(chunkPath, edgeModule, importsObj) {
+    return BACKEND.loadWebAssembly(SourceType.Parent, this.m.id, chunkPath, edgeModule, importsObj);
+}
+contextPrototype.w = loadWebAssembly;
+function loadWebAssemblyModule(chunkPath, edgeModule) {
+    return BACKEND.loadWebAssemblyModule(SourceType.Parent, this.m.id, chunkPath, edgeModule);
+}
+contextPrototype.u = loadWebAssemblyModule;
 /// <reference path="./runtime-base.ts" />
 /// <reference path="./dummy.ts" />
 const moduleCache = {};
@@ -717,91 +997,190 @@ function registerChunk(registration) {
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
 /**
- * This file contains the runtime code specific to the Turbopack
- * ECMAScript DOM runtime for library builds.
+ * This file contains the runtime code specific to the Turbopack ECMAScript DOM runtime.
  *
- * It will be appended to the base runtime code in place of
- * runtime-backend-node.ts when the target platform is browser/web.
- *
- * Since library builds produce a single, self-contained chunk,
- * no dynamic chunk loading is needed. The BACKEND simply registers
- * modules and instantiates runtime entries.
- *
- * The only DOM-specific addition is `loadScript` for script externals
- * that need to be loaded from CDN or other external sources.
- */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
-const loadedScripts = new Map();
-/**
- * Load an external script by creating a <script> tag.
- * This is used for script externals that need to be loaded from CDN or other external sources.
- */ function loadScript(scriptUrl) {
-    // Return cached promise if script is already loading or loaded
-    let promise = loadedScripts.get(scriptUrl);
-    if (promise) {
-        return promise;
-    }
-    promise = new Promise((resolve, reject)=>{
-        const script = document.createElement("script");
-        script.src = scriptUrl;
-        script.onload = ()=>resolve();
-        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
-        document.head.appendChild(script);
-    });
-    loadedScripts.set(scriptUrl, promise);
-    return promise;
+ * It will be appended to the base runtime code.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../browser/runtime/base/runtime-base.ts" />
+/// <reference path="../../../shared/runtime/runtime-types.d.ts" />
+function getAssetSuffixFromScriptSrc() {
+    // TURBOPACK_ASSET_SUFFIX is set in web workers
+    if (self.TURBOPACK_ASSET_SUFFIX != null) return self.TURBOPACK_ASSET_SUFFIX;
+    const src = document?.currentScript?.getAttribute?.('src') ?? '';
+    const qi = src.indexOf('?');
+    return qi >= 0 ? src.slice(qi) : '';
 }
-contextPrototype.S = loadScript;
+let BACKEND;
+/**
+ * Maps chunk paths to the corresponding resolver.
+ */ const chunkResolvers = new Map();
 (()=>{
     BACKEND = {
-        registerChunk (chunk, params) {
+        async registerChunk (chunk, params) {
+            let chunkPath = getPathFromScript(chunk);
+            let chunkUrl = getUrlFromScript(chunkPath);
+            const resolver = getOrCreateResolver(chunkUrl);
+            resolver.resolve();
             if (params == null) {
                 return;
             }
+            for (const otherChunkData of params.otherChunks){
+                const otherChunkPath = getChunkPath(otherChunkData);
+                const otherChunkUrl = getChunkRelativeUrl(otherChunkPath);
+                // Chunk might have started loading, so we want to avoid triggering another load.
+                getOrCreateResolver(otherChunkUrl);
+            }
+            // This waits for chunks to be loaded, but also marks included items as available.
+            await Promise.all(params.otherChunks.map((otherChunkData)=>loadInitialChunk(chunkPath, otherChunkData)));
             if (params.runtimeModuleIds.length > 0) {
                 for (const moduleId of params.runtimeModuleIds){
-                    getOrInstantiateRuntimeModule(chunk, moduleId);
+                    getOrInstantiateRuntimeModule(chunkPath, moduleId);
                 }
             }
+        },
+        /**
+     * Loads the given chunk, and returns a promise that resolves once the chunk
+     * has been loaded.
+     */ loadChunkCached (sourceType, chunkUrl) {
+            return doLoadChunk(sourceType, chunkUrl);
+        },
+        async loadWebAssembly (_sourceType, _sourceData, wasmChunkPath, _edgeModule, importsObj) {
+            const req = fetchWebAssembly(wasmChunkPath);
+            const { instance } = await WebAssembly.instantiateStreaming(req, importsObj);
+            return instance.exports;
+        },
+        async loadWebAssemblyModule (_sourceType, _sourceData, wasmChunkPath, _edgeModule) {
+            const req = fetchWebAssembly(wasmChunkPath);
+            return await WebAssembly.compileStreaming(req);
         }
     };
+    function getOrCreateResolver(chunkUrl) {
+        let resolver = chunkResolvers.get(chunkUrl);
+        if (!resolver) {
+            let resolve;
+            let reject;
+            const promise = new Promise((innerResolve, innerReject)=>{
+                resolve = innerResolve;
+                reject = innerReject;
+            });
+            resolver = {
+                resolved: false,
+                loadingStarted: false,
+                promise,
+                resolve: ()=>{
+                    resolver.resolved = true;
+                    resolve();
+                },
+                reject: reject
+            };
+            chunkResolvers.set(chunkUrl, resolver);
+        }
+        return resolver;
+    }
+    /**
+   * Loads the given chunk, and returns a promise that resolves once the chunk
+   * has been loaded.
+   */ function doLoadChunk(sourceType, chunkUrl) {
+        const resolver = getOrCreateResolver(chunkUrl);
+        if (resolver.loadingStarted) {
+            return resolver.promise;
+        }
+        if (sourceType === SourceType.Runtime) {
+            // CSS chunks do not register themselves, and as such must be marked as
+            // loaded instantly.
+            resolver.loadingStarted = true;
+            if (isCss(chunkUrl)) {
+                resolver.resolve();
+                return resolver.promise;
+            }
+            // Runtime JS chunks are expected to be present in the DOM already.
+            // Load it first
+            if (typeof importScripts !== 'function') {
+                const decodedChunkUrl = decodeURI(chunkUrl);
+                const previousScripts = document.querySelectorAll(`script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`);
+                if (previousScripts.length > 0) {
+                    for (const script of Array.from(previousScripts)){
+                        script.addEventListener('error', ()=>{
+                            resolver.reject();
+                        });
+                    }
+                    return resolver.promise;
+                }
+            }
+        // If it wasn't present in the DOM, fallback to loading logic.
+        }
+        if (typeof importScripts === 'function') {
+            // We're in a web worker
+            if (isCss(chunkUrl)) {
+            // ignore
+            } else if (isJs(chunkUrl)) {
+                self.TURBOPACK_NEXT_CHUNK_URLS.push(chunkUrl);
+                importScripts(chunkUrl);
+            } else {
+                throw new Error(`can't infer type of chunk from URL ${chunkUrl} in worker`);
+            }
+        } else {
+            // TODO(PACK-2140): remove this once all filenames are guaranteed to be escaped.
+            const decodedChunkUrl = decodeURI(chunkUrl);
+            if (isCss(chunkUrl)) {
+                const previousLinks = document.querySelectorAll(`link[rel=stylesheet][href="${chunkUrl}"],link[rel=stylesheet][href^="${chunkUrl}?"],link[rel=stylesheet][href="${decodedChunkUrl}"],link[rel=stylesheet][href^="${decodedChunkUrl}?"]`);
+                if (previousLinks.length > 0) {
+                    // CSS chunks do not register themselves, and as such must be marked as
+                    // loaded instantly.
+                    resolver.resolve();
+                } else {
+                    const link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.crossOrigin = CROSS_ORIGIN;
+                    link.href = chunkUrl;
+                    link.onerror = ()=>{
+                        resolver.reject();
+                    };
+                    link.onload = ()=>{
+                        // CSS chunks do not register themselves, and as such must be marked as
+                        // loaded instantly.
+                        resolver.resolve();
+                    };
+                    // Append to the `head` for webpack compatibility.
+                    document.head.appendChild(link);
+                }
+            } else if (isJs(chunkUrl)) {
+                const previousScripts = document.querySelectorAll(`script[src="${chunkUrl}"],script[src^="${chunkUrl}?"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}?"]`);
+                if (previousScripts.length > 0) {
+                    // There is this edge where the script already failed loading, but we
+                    // can't detect that. The Promise will never resolve in this case.
+                    for (const script of Array.from(previousScripts)){
+                        script.addEventListener('error', ()=>{
+                            resolver.reject();
+                        });
+                    }
+                } else {
+                    const script = document.createElement('script');
+                    script.crossOrigin = CROSS_ORIGIN;
+                    script.src = chunkUrl;
+                    // We'll only mark the chunk as loaded once the script has been executed,
+                    // which happens in `registerChunk`. Hence the absence of `resolve()` in
+                    // this branch.
+                    script.onerror = ()=>{
+                        resolver.reject();
+                    };
+                    // Append to the `head` for webpack compatibility.
+                    document.head.appendChild(script);
+                }
+            } else {
+                throw new Error(`can't infer type of chunk from URL ${chunkUrl}`);
+            }
+        }
+        resolver.loadingStarted = true;
+        return resolver.promise;
+    }
+    function fetchWebAssembly(wasmChunkPath) {
+        return fetch(getChunkRelativeUrl(wasmChunkPath));
+    }
 })();
-const chunksToRegister = __UTOOPACK__;
-__UTOOPACK__ = { push: registerChunk };
+var chunksToRegister = globalThis["TURBOPACK"];
+globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
-function factory () {
-    const runtimeModuleIds = ["[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)"];
-    let exports;
-    for (let i = 0; i < runtimeModuleIds.length; i++) {
-        const module = moduleCache[runtimeModuleIds[i]];
-        if (module.error) throw module.error;
-        exports = module;
-    }
-    if (exports) {
-        // any ES module has to have `module.namespaceObject` defined.
-        if (exports.namespaceObject) return exports.namespaceObject;
-        // only ESM can be an async module, so we don't need to worry about exports being a promise here.
-        const raw = exports.exports;
-        return exports.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
-    }
-}
-
-if (typeof exports === 'object' && typeof module === 'object') {
-    module.exports = factory();
-} else if (typeof exports === 'object') {
-    exports["MyLibrary"] = factory();
-} else {
-    globalThis["MyLibrary"] = factory();
-}
-})([
-["main.js",
-
-"[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-
-console.log('Hello, world!');
-}),
-],
-["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)"]}],
-]);
+})();
 
 
 //# sourceMappingURL=main.js.map
