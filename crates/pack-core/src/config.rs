@@ -445,7 +445,7 @@ pub struct OutputConfig {
     pub copy: Option<Vec<CopyItem>>,
     /// URL prefix that will be prepended to all chunk and asset URLs when loading them.
     /// This is used to configure CDN URLs or serve assets from a different path.
-    /// Examples: "/", "/assets/", "https://cdn.example.com/"
+    /// Examples: "/", "/assets/", "https://cdn.example.com/", "runtime", "auto"
     /// Note: This path will not appear in chunk paths or chunk data on disk,
     /// it only affects the URLs used by the browser to fetch resources.
     pub public_path: Option<RcStr>,
@@ -1667,10 +1667,12 @@ impl Config {
             .and_then(|o| o.public_path.clone())
             .unwrap_or("".into());
 
-        // Special handling for "runtime" value - return a marker that will be
-        // replaced at runtime with window.publicPath
-        if public_path.as_str() == "runtime" {
-            return Ok(Vc::cell("__RUNTIME_PUBLIC_PATH__".into()));
+        // Special publicPath modes are represented as markers and resolved by
+        // the browser runtime when chunk or asset URLs are constructed.
+        match public_path.as_str() {
+            "runtime" => return Ok(Vc::cell("__RUNTIME_PUBLIC_PATH__".into())),
+            "auto" => return Ok(Vc::cell("__AUTO_PUBLIC_PATH__".into())),
+            _ => {}
         }
 
         Ok(Vc::cell(

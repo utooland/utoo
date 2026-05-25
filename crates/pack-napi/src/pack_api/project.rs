@@ -477,8 +477,22 @@ impl NapiEntrypoints {
         let make_endpoint =
             |op| External::new(ExternalEndpoint(DetachedVc::new(turbopack_ctx.clone(), op)));
         Ok(NapiEntrypoints {
-            apps: Some(vec![make_endpoint(entrypoints.apps)]),
-            libraries: Some(vec![make_endpoint(entrypoints.libraries)]),
+            apps: Some(
+                entrypoints
+                    .apps
+                    .iter()
+                    .copied()
+                    .map(make_endpoint)
+                    .collect(),
+            ),
+            libraries: Some(
+                entrypoints
+                    .libraries
+                    .iter()
+                    .copied()
+                    .map(make_endpoint)
+                    .collect(),
+            ),
         })
     }
 }
