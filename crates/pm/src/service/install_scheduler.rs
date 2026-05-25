@@ -8,9 +8,9 @@ use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
 use crate::util::cloner::{PackageClone, clone_package_sync};
-use crate::util::downloader::{
-    ExtractOutcome, download_bytes, extract_to_cache, is_registry_tarball_url,
-    registry_cache_lookup, resolve_seeded_cache_path,
+use crate::util::downloader::{download_bytes, is_registry_tarball_url};
+use crate::util::package_cache::{
+    ExtractOutcome, extract_to_cache, registry_cache_lookup, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
 

@@ -17,9 +17,9 @@ use crate::fs;
 use crate::helper::workspace::find_workspaces;
 use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::cloner::{PackageClone, clone_package};
-use crate::util::downloader::download_and_extract_to_cache;
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
+use crate::util::package_cache::download_and_extract_to_cache;
 
 use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use crate::util::user_config::{
