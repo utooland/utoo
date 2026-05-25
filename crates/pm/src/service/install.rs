@@ -17,8 +17,6 @@ use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
-use crate::util::cloner::clone_count;
-use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
@@ -247,11 +245,6 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
-        // Snapshot counts so nested install() calls (e.g. global install)
-        // report only their own delta instead of the whole process total.
-        let clone_baseline = clone_count();
-        let download_baseline = download_stats();
-
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
         // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
@@ -261,7 +254,7 @@ impl InstallService {
         let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, used_scheduler_prefetch) = if use_fresh_lock {
+        let (package_lock, _) = if use_fresh_lock {
             let lock = match load_package_lock_json_from_path(root_path).await {
                 Ok(lock) => lock,
                 Err(e) => {
@@ -297,18 +290,13 @@ impl InstallService {
             .await
             .context("Failed to install packages");
 
-        scheduler_handle.shutdown().await;
-        if used_scheduler_prefetch {
-            super::install_scheduler::print_summary();
-        }
+        let counts = scheduler_handle.shutdown().await;
         install_result?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
 
-        let added = clone_count().saturating_sub(clone_baseline);
-        let download_delta = download_stats() - download_baseline;
-        print_install_counts(added, download_delta.reused, download_delta.downloaded);
+        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }
 

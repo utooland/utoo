@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
@@ -11,31 +10,38 @@ use super::json::load_package_json;
 use super::retry::create_retry_strategy;
 use crate::fs;
 
-/// Number of `node_modules/` directories freshly materialized this run.
-/// Mirrors pnpm's "added" semantic.
-static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Returns the number of fresh clones performed (pnpm "added" equivalent).
-pub fn clone_count() -> usize {
-    CLONE_COUNT.load(Ordering::Relaxed)
+/// How a cached package's real contents are laid out under its cache dir.
+/// Derived from the resolved tarball URL so callers never pass a bare bool.
+#[derive(Clone, Copy)]
+enum CacheLayout {
+    /// Registry tarball: contents live under a `package/` subdir, so the clone
+    /// descends into the first real subdirectory.
+    Wrapped,
+    /// Git checkout: extracted flat at the cache root; clone the dir as-is.
+    Flat,
 }
 
-/// Clone a package from an already-resolved cache path without touching the
-/// global clone/download single-flight maps. Schedulers that own deduplication
-/// use this sync primitive from their worker pool.
-pub fn clone_package_from_cache_sync(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-    cache_path: &Path,
-    target_path: &Path,
-) -> Result<()> {
-    let is_git = is_git_url(tarball_url);
-    let fresh = clone_package_sync(cache_path, target_path, name, version, !is_git)?;
-    if fresh {
-        CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
+impl CacheLayout {
+    fn from_tarball_url(tarball_url: &str) -> Self {
+        if is_git_url(tarball_url) {
+            CacheLayout::Flat
+        } else {
+            CacheLayout::Wrapped
+        }
     }
-    Ok(())
+}
+
+/// A request to materialize a cached package into a `node_modules` target.
+///
+/// Bundles the package identity, its resolved cache dir, and the destination so
+/// the clone entry points take one coherent argument instead of five positional
+/// ones, and new fields stay additive.
+pub struct PackageClone<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub tarball_url: &'a str,
+    pub cache: &'a Path,
+    pub target: &'a Path,
 }
 
 #[cfg(target_os = "macos")]
@@ -241,12 +247,11 @@ fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
         .with_context(|| format!("clone_dir {} -> {}", real_src.display(), dst.display()))
 }
 
-fn clone_sync(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
-    let real_src = if find_real {
-        find_real_src_sync(src)
-            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?
-    } else {
-        src.to_path_buf()
+fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
+    let real_src = match layout {
+        CacheLayout::Wrapped => find_real_src_sync(src)
+            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?,
+        CacheLayout::Flat => src.to_path_buf(),
     };
 
     if dst.try_exists()?
@@ -360,13 +365,12 @@ pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     None
 }
 
-async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
-    let real_src = if find_real {
-        find_real_src(src)
+async fn clone(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
+    let real_src = match layout {
+        CacheLayout::Wrapped => find_real_src(src)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?
-    } else {
-        src.to_path_buf()
+            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?,
+        CacheLayout::Flat => src.to_path_buf(),
     };
 
     if crate::fs::try_exists(dst).await? {
@@ -431,49 +435,59 @@ async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
     pkg.name == name && pkg.version == version
 }
 
-/// Clone a package from cache to destination with name/version validation.
+/// Clone a package from its cache dir to the target with name/version
+/// validation. The cache layout (registry `package/` wrapper vs flat git
+/// checkout) is derived from the tarball URL.
 ///
-/// `find_real`: if `true`, look for the first subdirectory in `src` (registry
-/// tarballs use a `package/` wrapper); if `false`, use `src` directly (git
-/// packages are extracted flat).
-/// Returns `Ok(true)` when the package was freshly materialized at `dst`,
-/// `Ok(false)` when a valid existing directory was reused.
-pub async fn clone_package(
-    src: &Path,
-    dst: &Path,
-    name: &str,
-    version: &str,
-    find_real: bool,
-) -> Result<bool> {
-    if crate::fs::try_exists(dst).await? {
-        if validate_name_version(dst, name, version).await {
+/// Returns `Ok(true)` when the package was freshly materialized, `Ok(false)`
+/// when a valid existing directory was reused.
+pub async fn clone_package(req: &PackageClone<'_>) -> Result<bool> {
+    if crate::fs::try_exists(req.target).await? {
+        if validate_name_version(req.target, req.name, req.version).await {
             return Ok(false);
         }
-        if let Err(e) = fs::remove_dir_all(dst).await {
-            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+        if let Err(e) = fs::remove_dir_all(req.target).await {
+            tracing::warn!(
+                "Failed to clean target directory {}: {}",
+                req.target.display(),
+                e
+            );
         }
     }
-    clone(src, dst, find_real).await?;
+    clone(
+        req.cache,
+        req.target,
+        CacheLayout::from_tarball_url(req.tarball_url),
+    )
+    .await?;
     Ok(true)
 }
 
-/// Sync clone path with the same name/version validation as [`clone_package`].
-fn clone_package_sync(
-    src: &Path,
-    dst: &Path,
-    name: &str,
-    version: &str,
-    find_real: bool,
-) -> Result<bool> {
-    if dst.try_exists()? {
-        if validate_name_version_sync(dst, name, version) {
+/// Sync clone from a resolved cache dir to `target_path`, with the same
+/// name/version validation as [`clone_package`]. The cache layout (registry
+/// `package/` wrapper vs flat git checkout) is derived from `tarball_url`.
+///
+/// Returns `Ok(true)` when freshly materialized, `Ok(false)` when an existing
+/// valid directory was reused. Stateless — callers (the install scheduler) own
+/// dedup and counting.
+pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
+    if req.target.try_exists()? {
+        if validate_name_version_sync(req.target, req.name, req.version) {
             return Ok(false);
         }
-        if let Err(e) = std::fs::remove_dir_all(dst) {
-            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+        if let Err(e) = std::fs::remove_dir_all(req.target) {
+            tracing::warn!(
+                "Failed to clean target directory {}: {}",
+                req.target.display(),
+                e
+            );
         }
     }
-    clone_sync(src, dst, find_real)?;
+    clone_sync(
+        req.cache,
+        req.target,
+        CacheLayout::from_tarball_url(req.tarball_url),
+    )?;
     Ok(true)
 }
 
@@ -644,7 +658,7 @@ mod tests {
         .await?;
 
         // Test cloning with find_real=false
-        clone(&src_dir, &dst_dir, false).await?;
+        clone(&src_dir, &dst_dir, CacheLayout::Flat).await?;
 
         // Verify everything was cloned
         assert!(dst_dir.join("real_dir").exists());
@@ -668,7 +682,7 @@ mod tests {
         create_test_structure(&dst_dir, &[("file.txt", Some(b"old content"))]).await?;
 
         // Clone should succeed and skip since content is identical
-        clone(&src_dir, &dst_dir, false).await?;
+        clone(&src_dir, &dst_dir, CacheLayout::Flat).await?;
         assert_eq!(
             fs::read_to_string(dst_dir.join("file.txt")).await?,
             "old content"
@@ -678,7 +692,7 @@ mod tests {
         create_test_structure(&src_dir, &[("file.txt", Some(b"content changed"))]).await?;
 
         // Clone should update the destination
-        clone(&src_dir, &dst_dir, false).await?;
+        clone(&src_dir, &dst_dir, CacheLayout::Flat).await?;
         assert_eq!(
             fs::read_to_string(dst_dir.join("file.txt")).await?,
             "content changed"
@@ -763,7 +777,14 @@ mod tests {
         // Add a marker file to verify it wasn't re-cloned
         fs::write(dst_dir.join("marker.txt"), "original").await?;
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
+        clone_package(&PackageClone {
+            name: "lodash",
+            version: "4.17.21",
+            tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            cache: &cache_dir,
+            target: &dst_dir,
+        })
+        .await?;
 
         // Marker file should still exist (wasn't deleted and re-cloned)
         assert!(dst_dir.join("marker.txt").exists());
@@ -788,7 +809,14 @@ mod tests {
         fs::write(dst_dir.join("package.json"), &old_pkg_json).await?;
         fs::write(dst_dir.join("marker.txt"), "should be deleted").await?;
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
+        clone_package(&PackageClone {
+            name: "lodash",
+            version: "4.17.21",
+            tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            cache: &cache_dir,
+            target: &dst_dir,
+        })
+        .await?;
 
         // Marker file should be gone (directory was deleted and re-cloned)
         assert!(!dst_dir.join("marker.txt").exists());
@@ -813,7 +841,14 @@ mod tests {
         // Destination doesn't exist
         assert!(!dst_dir.exists());
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
+        clone_package(&PackageClone {
+            name: "lodash",
+            version: "4.17.21",
+            tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            cache: &cache_dir,
+            target: &dst_dir,
+        })
+        .await?;
 
         // Should be cloned
         assert!(dst_dir.join("package.json").exists());
@@ -823,7 +858,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clone_package_from_cache_sync_fresh_install() -> Result<()> {
+    fn test_clone_package_sync_fresh_install() -> Result<()> {
         let temp = TempDir::new()?;
         let cache_dir = temp.path().join("cache/lodash/4.17.21");
         let src_dir = cache_dir.join("package");
@@ -833,13 +868,13 @@ mod tests {
         let pkg_json = create_package_json("lodash", "4.17.21");
         std::fs::write(src_dir.join("package.json"), &pkg_json)?;
 
-        clone_package_from_cache_sync(
-            "lodash",
-            "4.17.21",
-            "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
-            &cache_dir,
-            &dst_dir,
-        )?;
+        clone_package_sync(&PackageClone {
+            name: "lodash",
+            version: "4.17.21",
+            tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            cache: &cache_dir,
+            target: &dst_dir,
+        })?;
 
         assert!(dst_dir.join("package.json").exists());
         let content = std::fs::read_to_string(dst_dir.join("package.json"))?;
@@ -861,7 +896,14 @@ mod tests {
         fs::write(cache_dir.join("package.json"), &pkg_json).await?;
         fs::write(cache_dir.join("index.js"), "module.exports = {}").await?;
 
-        clone_package(&cache_dir, &dst_dir, "my-git-pkg", "1.0.0", false).await?;
+        clone_package(&PackageClone {
+            name: "my-git-pkg",
+            version: "1.0.0",
+            tarball_url: "git+https://github.com/u/my-git-pkg.git#abc123",
+            cache: &cache_dir,
+            target: &dst_dir,
+        })
+        .await?;
 
         // Should clone directly from cache root (not looking for package/ subdir)
         assert!(dst_dir.join("package.json").exists());

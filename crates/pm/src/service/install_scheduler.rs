@@ -7,9 +7,9 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver};
 
-use crate::util::cloner::{clone_count, clone_package_from_cache_sync};
+use crate::util::cloner::{PackageClone, clone_package_sync};
 use crate::util::downloader::{
-    download_bytes, download_stats, extract_to_cache, is_registry_tarball_url,
+    ExtractOutcome, download_bytes, extract_to_cache, is_registry_tarball_url,
     registry_cache_lookup, resolve_seeded_cache_path,
 };
 use crate::util::user_config::get_manifests_concurrency_limit_sync;
@@ -67,14 +67,6 @@ impl<R: EventReceiver> EventReceiver for InstallEventReceiver<R> {
     }
 }
 
-pub(crate) fn print_summary() {
-    tracing::debug!(
-        "Install scheduler stats: downloaded={}, cloned={}",
-        download_stats().downloaded,
-        clone_count(),
-    );
-}
-
 #[derive(Clone, Debug)]
 struct PackageFetch {
     name: String,
@@ -125,17 +117,26 @@ enum OpDone {
     },
     Extract {
         key: String,
-        result: Result<PathBuf, String>,
+        result: Result<ExtractOutcome, String>,
     },
     Clone {
         target: PathBuf,
-        result: Result<(), String>,
+        result: Result<bool, String>,
     },
 }
 
 enum DownloadOutcome {
     Cached(PathBuf),
     Bytes(Bytes),
+}
+
+/// pnpm-style install outcome counts, owned by the scheduler instead of global
+/// atomic counters in the util layer.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct InstallCounts {
+    pub downloaded: usize,
+    pub reused: usize,
+    pub cloned: usize,
 }
 
 #[derive(Clone)]
@@ -145,15 +146,13 @@ pub(crate) struct InstallScheduler {
 
 pub(crate) struct InstallSchedulerHandle {
     scheduler: InstallScheduler,
-    handle: tokio::task::JoinHandle<()>,
+    handle: tokio::task::JoinHandle<InstallCounts>,
 }
 
 impl InstallSchedulerHandle {
     pub(crate) fn start() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let handle = tokio::spawn(async move {
-            SchedulerState::new(rx).run().await;
-        });
+        let handle = tokio::spawn(async move { SchedulerState::new(rx).run().await });
         Self {
             scheduler: InstallScheduler { tx },
             handle,
@@ -164,10 +163,16 @@ impl InstallSchedulerHandle {
         self.scheduler.clone()
     }
 
-    pub(crate) async fn shutdown(self) {
+    /// Signal shutdown, wait for in-flight work to drain, and return the
+    /// scheduler's own install counts.
+    pub(crate) async fn shutdown(self) -> InstallCounts {
         let _ = self.scheduler.tx.send(Command::Shutdown);
-        if let Err(e) = self.handle.await {
-            tracing::warn!("Install scheduler task failed: {e}");
+        match self.handle.await {
+            Ok(counts) => counts,
+            Err(e) => {
+                tracing::warn!("Install scheduler task failed: {e}");
+                InstallCounts::default()
+            }
         }
     }
 }
@@ -251,6 +256,7 @@ struct SchedulerState {
     done_tx: mpsc::UnboundedSender<OpDone>,
     done_rx: mpsc::UnboundedReceiver<OpDone>,
     ops: FuturesUnordered<tokio::task::JoinHandle<OpDone>>,
+    counts: InstallCounts,
 }
 
 impl SchedulerState {
@@ -276,10 +282,11 @@ impl SchedulerState {
             done_tx,
             done_rx,
             ops: FuturesUnordered::new(),
+            counts: InstallCounts::default(),
         }
     }
 
-    async fn run(mut self) {
+    async fn run(mut self) -> InstallCounts {
         loop {
             self.pump_downloads();
             self.pump_extracts();
@@ -322,6 +329,7 @@ impl SchedulerState {
         }
 
         self.fail_pending("install scheduler stopped before work completed");
+        self.counts
     }
 
     fn is_idle(&self) -> bool {
@@ -469,13 +477,13 @@ impl SchedulerState {
             let done_tx = self.done_tx.clone();
             rayon::spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    clone_package_from_cache_sync(
-                        &job.spec.package.name,
-                        &job.spec.package.version,
-                        &job.spec.package.tarball_url,
-                        &job.cache_path,
-                        &job.spec.target,
-                    )
+                    clone_package_sync(&PackageClone {
+                        name: &job.spec.package.name,
+                        version: &job.spec.package.version,
+                        tarball_url: &job.spec.package.tarball_url,
+                        cache: &job.cache_path,
+                        target: &job.spec.target,
+                    })
                     .map_err(|e| format!("{e:#}"))
                 }))
                 .unwrap_or_else(|_| Err("install clone worker panicked".to_string()));
@@ -496,6 +504,7 @@ impl SchedulerState {
                 self.download_active.remove(&key);
                 match result {
                     Ok(DownloadOutcome::Cached(cache_path)) => {
+                        self.counts.reused += 1;
                         self.complete_download(key, Ok(cache_path));
                     }
                     Ok(DownloadOutcome::Bytes(bytes)) => {
@@ -509,11 +518,31 @@ impl SchedulerState {
             }
             OpDone::Extract { key, result } => {
                 self.extract_active.remove(&key);
-                self.complete_download(key, result);
+                let path_result = match result {
+                    Ok(ExtractOutcome::Extracted(path)) => {
+                        self.counts.downloaded += 1;
+                        Ok(path)
+                    }
+                    Ok(ExtractOutcome::Reused(path)) => {
+                        self.counts.reused += 1;
+                        Ok(path)
+                    }
+                    Err(e) => Err(e),
+                };
+                self.complete_download(key, path_result);
             }
             OpDone::Clone { target, result } => {
                 self.clone_active.remove(&target);
-                self.complete_clone(target, result);
+                let clone_result = match result {
+                    Ok(fresh) => {
+                        if fresh {
+                            self.counts.cloned += 1;
+                        }
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                };
+                self.complete_clone(target, clone_result);
             }
         }
     }
@@ -655,7 +684,7 @@ mod tests {
 
         state.handle_done(OpDone::Extract {
             key: key.clone(),
-            result: Ok(cache_path.clone()),
+            result: Ok(ExtractOutcome::Extracted(cache_path.clone())),
         });
 
         assert!(!state.extract_active.contains(&key));

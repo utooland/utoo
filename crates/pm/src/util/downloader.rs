@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
@@ -17,36 +17,21 @@ use super::retry::{RetryableError, build_dns_cached_client, create_retry_strateg
 // the caller's scheduler.
 static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
 
-static DOWNLOAD_COUNT: AtomicUsize = AtomicUsize::new(0);
-static REUSE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Process-global counters for tarball outcomes, matching pnpm's
-/// vocabulary. Scheduler-level dedupe keeps each unique `(name, version)` pair
-/// in exactly one bucket; git/file/link packages bypass this path and are not
-/// counted in either bucket.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DownloadStats {
-    /// Tarballs fetched from the registry this run.
-    pub downloaded: usize,
-    /// Tarballs served from the local cache (no network).
-    pub reused: usize,
+/// Outcome of materializing a registry tarball into the cache. Returned so the
+/// caller (the install scheduler) keeps its own download/reuse counts instead
+/// of the util layer owning global counters.
+pub enum ExtractOutcome {
+    /// Served from an already-extracted cache directory (no work done).
+    Reused(PathBuf),
+    /// Freshly extracted from downloaded bytes.
+    Extracted(PathBuf),
 }
 
-impl std::ops::Sub for DownloadStats {
-    type Output = DownloadStats;
-    fn sub(self, rhs: Self) -> Self {
-        DownloadStats {
-            downloaded: self.downloaded.saturating_sub(rhs.downloaded),
-            reused: self.reused.saturating_sub(rhs.reused),
+impl ExtractOutcome {
+    pub fn into_path(self) -> PathBuf {
+        match self {
+            ExtractOutcome::Reused(p) | ExtractOutcome::Extracted(p) => p,
         }
-    }
-}
-
-/// Snapshot the current download/reuse counters.
-pub fn download_stats() -> DownloadStats {
-    DownloadStats {
-        downloaded: DOWNLOAD_COUNT.load(Ordering::Relaxed),
-        reused: REUSE_COUNT.load(Ordering::Relaxed),
     }
 }
 
@@ -155,7 +140,7 @@ pub async fn download_and_extract_to_cache(
         .await
         .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
 
-    extract_to_cache(name, version, bytes).await
+    Ok(extract_to_cache(name, version, bytes).await?.into_path())
 }
 
 /// Return the registry cache path for a package version.
@@ -170,7 +155,6 @@ pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<P
         .await
         .unwrap_or(false)
     {
-        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
         Ok(Some(cache_path))
     } else {
         Ok(None)
@@ -178,23 +162,21 @@ pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<P
 }
 
 /// Extract already downloaded registry tarball bytes into the package cache.
-pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result<PathBuf> {
+pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result<ExtractOutcome> {
     let cache_path = registry_cache_path(name, version);
 
     if crate::fs::try_exists(&cache_path.join("_resolved"))
         .await
         .unwrap_or(false)
     {
-        REUSE_COUNT.fetch_add(1, Ordering::Relaxed);
-        return Ok(cache_path);
+        return Ok(ExtractOutcome::Reused(cache_path));
     }
 
     extract_and_write(bytes, &cache_path)
         .await
         .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
 
-    DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
-    Ok(cache_path)
+    Ok(ExtractOutcome::Extracted(cache_path))
 }
 
 /// Download tarball bytes with retries (network phase only).

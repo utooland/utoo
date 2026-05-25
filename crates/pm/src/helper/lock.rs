@@ -16,8 +16,8 @@ use super::workspace::find_workspace_path;
 use crate::fs;
 use crate::helper::workspace::find_workspaces;
 use crate::util::cli_enum::{PackageAction, SaveType};
-use crate::util::cloner::clone_package;
-use crate::util::downloader::{download_and_extract_to_cache, is_git_url};
+use crate::util::cloner::{PackageClone, clone_package};
+use crate::util::downloader::download_and_extract_to_cache;
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
 
@@ -290,13 +290,13 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
         cache_path.display(),
         package_path.display()
     );
-    clone_package(
-        &cache_path,
-        &package_path,
-        &name,
-        &resolved.version,
-        !is_git_url(tarball_url),
-    )
+    clone_package(&PackageClone {
+        name: &name,
+        version: &resolved.version,
+        tarball_url,
+        cache: &cache_path,
+        target: &package_path,
+    })
     .await
     .context("Failed to clone package")?;
 
