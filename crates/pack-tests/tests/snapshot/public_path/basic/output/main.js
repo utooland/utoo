@@ -584,10 +584,34 @@ contextPrototype.U = relativeURL;
 contextPrototype.z = requireStub;
 // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
 contextPrototype.g = globalThis;
+let cachedAutomaticPublicPath;
+function getAutomaticPublicPath() {
+    if (cachedAutomaticPublicPath !== undefined) {
+        return cachedAutomaticPublicPath;
+    }
+    let scriptUrl;
+    if (typeof document === 'object') {
+        const currentScript = document.currentScript;
+        scriptUrl = currentScript?.src;
+        if (!scriptUrl) {
+            const scripts = document.getElementsByTagName('script');
+            const script = scripts[scripts.length - 1];
+            scriptUrl = script?.src;
+        }
+    }
+    if (!scriptUrl && typeof globalThis.importScripts === 'function' && globalThis.location) {
+        scriptUrl = String(globalThis.location);
+    }
+    cachedAutomaticPublicPath = scriptUrl ? scriptUrl.replace(/^blob:/, '').replace(/#.*$/, '').replace(/\?.*$/, '').replace(/\/[^/]*$/, '/') : '';
+    return cachedAutomaticPublicPath;
+}
 /**
  * Gets the public path for runtime assets.
  * Checks globalThis.publicPath and falls back to empty string.
- */ function getPublicPath() {
+ */ function getPublicPath(mode) {
+    if (mode === 'auto') {
+        return getAutomaticPublicPath();
+    }
     if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === 'string') {
         const publicPath = globalThis.publicPath;
         return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
@@ -610,10 +634,13 @@ function applyModuleFactoryName(factory) {
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../base/globals.d.ts" />
 /// <reference path="../../../shared/runtime/runtime-utils.ts" />
 // Used in WebWorkers to tell the runtime about the chunk suffix
-// Support runtime public path from window.publicPath
+// Support runtime public path modes.
 function getRuntimeChunkBasePath(basePath = CHUNK_BASE_PATH) {
-    if (CHUNK_BASE_PATH === '__RUNTIME_PUBLIC_PATH__') {
+    if (basePath === '__RUNTIME_PUBLIC_PATH__') {
         return contextPrototype.p();
+    }
+    if (basePath === '__AUTO_PUBLIC_PATH__') {
+        return contextPrototype.p('auto');
     }
     return basePath;
 }
