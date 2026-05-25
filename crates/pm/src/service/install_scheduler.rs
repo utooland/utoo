@@ -142,7 +142,7 @@ struct SchedulerState {
     clone_limit: usize,
     download_done: HashMap<String, PathBuf>,
     download_active: HashSet<String>,
-    download_waiters: HashMap<String, Vec<CloneSpec>>,
+    fetch_waiters: HashMap<String, Vec<CloneSpec>>,
     download_queue: VecDeque<PackageFetch>,
     extract_active: HashSet<String>,
     extract_queue: VecDeque<DownloadedPackage>,
@@ -166,7 +166,7 @@ impl SchedulerState {
             clone_limit: clone_concurrency_limit(),
             download_done: HashMap::new(),
             download_active: HashSet::new(),
-            download_waiters: HashMap::new(),
+            fetch_waiters: HashMap::new(),
             download_queue: VecDeque::new(),
             extract_active: HashSet::new(),
             extract_queue: VecDeque::new(),
@@ -274,19 +274,20 @@ impl SchedulerState {
             return;
         }
 
-        if let Some(waiters) = self.download_waiters.get_mut(&key) {
+        if let Some(waiters) = self.fetch_waiters.get_mut(&key) {
             if let Some(spec) = waiter {
                 waiters.push(spec);
             }
             return;
         }
 
-        self.download_waiters
-            .insert(key, waiter.into_iter().collect());
+        self.fetch_waiters.insert(key, waiter.into_iter().collect());
         self.download_queue.push_back(package);
     }
 
     fn pump_downloads(&mut self) {
+        // Bound downloaded tarballs waiting for extraction so network prefetch
+        // cannot outrun CPU/disk extraction and pile up Bytes.
         while self.download_active.len() < self.download_limit
             && self.extract_backlog() < self.download_limit
         {
@@ -402,7 +403,7 @@ impl SchedulerState {
     }
 
     fn complete_download(&mut self, key: String, result: Result<PathBuf, String>) {
-        let waiters = self.download_waiters.remove(&key).unwrap_or_default();
+        let waiters = self.fetch_waiters.remove(&key).unwrap_or_default();
         match result {
             Ok(cache_path) => {
                 self.download_done.insert(key, cache_path.clone());
@@ -488,7 +489,7 @@ mod tests {
         state.ensure_download(package, None);
 
         assert_eq!(state.download_queue.len(), 1);
-        assert_eq!(state.download_waiters["react@18.2.0"].len(), 1);
+        assert_eq!(state.fetch_waiters["react@18.2.0"].len(), 1);
     }
 
     #[test]
@@ -499,7 +500,7 @@ mod tests {
         let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
 
         state.download_active.insert(key.clone());
-        state.download_waiters.insert(key.clone(), vec![waiter]);
+        state.fetch_waiters.insert(key.clone(), vec![waiter]);
 
         state.handle_done(OpDone::Download {
             package: package.clone(),
@@ -507,7 +508,7 @@ mod tests {
         });
 
         assert!(!state.download_active.contains(&key));
-        assert!(state.download_waiters.contains_key(&key));
+        assert!(state.fetch_waiters.contains_key(&key));
         assert_eq!(state.extract_queue.len(), 1);
         assert_eq!(state.extract_queue[0].package.key(), key);
     }
@@ -520,7 +521,7 @@ mod tests {
         let cache_path = PathBuf::from("/tmp/cache/react/18.2.0");
 
         state.extract_active.insert(key.clone());
-        state.download_waiters.insert(key.clone(), vec![waiter]);
+        state.fetch_waiters.insert(key.clone(), vec![waiter]);
 
         state.handle_done(OpDone::Extract {
             key: key.clone(),
@@ -545,5 +546,52 @@ mod tests {
 
         assert_eq!(state.clone_waiters[&target].len(), 2);
         assert_eq!(state.ops.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn queue_clone_blocks_child_until_parent_completes() {
+        let mut state = state();
+        let parent_target = PathBuf::from("/tmp/project/node_modules/@scope");
+        let child_target = parent_target.join("child");
+        let parent = clone_spec("scope", "1.0.0", parent_target.to_string_lossy().as_ref());
+        let mut child = clone_spec("child", "1.0.0", child_target.to_string_lossy().as_ref());
+        child.parent = Some(parent_target.clone());
+
+        state.queue_clone(parent, None);
+        let parent_ops = state.ops.len();
+        state.queue_clone(child, None);
+
+        assert_eq!(state.blocked_by_parent[&parent_target].len(), 1);
+        assert_eq!(state.ops.len(), parent_ops);
+
+        state.complete_clone(parent_target.clone(), Ok(()));
+
+        assert!(!state.blocked_by_parent.contains_key(&parent_target));
+        assert_eq!(state.ops.len(), parent_ops + 1);
+    }
+
+    #[tokio::test]
+    async fn parent_clone_failure_wakes_blocked_children() {
+        let mut state = state();
+        let parent_target = PathBuf::from("/tmp/project/node_modules/@scope");
+        let child_target = parent_target.join("child");
+        let parent = clone_spec("scope", "1.0.0", parent_target.to_string_lossy().as_ref());
+        let mut child = clone_spec("child", "1.0.0", child_target.to_string_lossy().as_ref());
+        child.parent = Some(parent_target.clone());
+        let (child_tx, child_rx) = oneshot::channel();
+
+        state.queue_clone(parent, None);
+        state.queue_clone(child, Some(child_tx));
+
+        assert_eq!(state.blocked_by_parent[&parent_target].len(), 1);
+
+        state.complete_clone(parent_target.clone(), Err("boom".to_string()));
+
+        let error = child_rx.await.unwrap().unwrap_err();
+        let parent_path = parent_target.to_string_lossy();
+        assert!(error.contains("parent package"));
+        assert!(error.contains(parent_path.as_ref()));
+        assert!(!state.clone_waiters.contains_key(&child_target));
+        assert!(!state.blocked_by_parent.contains_key(&parent_target));
     }
 }
