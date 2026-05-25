@@ -68,13 +68,13 @@ impl<R: EventReceiver> EventReceiver for InstallEventReceiver<R> {
 }
 
 #[derive(Clone, Debug)]
-struct PackageFetch {
+struct PackageRef {
     name: String,
     version: String,
     tarball_url: String,
 }
 
-impl PackageFetch {
+impl PackageRef {
     fn key(&self) -> String {
         format!("{}@{}", self.name, self.version)
     }
@@ -82,7 +82,7 @@ impl PackageFetch {
 
 #[derive(Clone, Debug)]
 struct CloneSpec {
-    package: PackageFetch,
+    package: PackageRef,
     target: PathBuf,
     parent: Option<PathBuf>,
 }
@@ -93,26 +93,30 @@ struct ReadyClone {
 }
 
 struct DownloadedPackage {
-    package: PackageFetch,
+    package: PackageRef,
     bytes: Bytes,
 }
 
 type CloneResponder = oneshot::Sender<Result<(), String>>;
 
 enum Command {
-    PrefetchDownload(PackageFetch),
+    PrefetchDownload(PackageRef),
     PrefetchClone(CloneSpec),
     EnsureClone(CloneSpec, CloneResponder),
     Shutdown,
 }
 
-enum OpDone {
-    SeededCache {
+/// Completion report for one pipeline stage (cache-resolve / download /
+/// extract / clone), fed back into the scheduler loop via `handle_report`.
+/// Async stages arrive on `async_ops`; the rayon clone stage arrives on
+/// `clone_done_rx`.
+enum StageReport {
+    CacheResolved {
         spec: CloneSpec,
         result: Result<Option<PathBuf>, String>,
     },
     Download {
-        package: PackageFetch,
+        package: PackageRef,
         result: Result<DownloadOutcome, String>,
     },
     Extract {
@@ -182,7 +186,7 @@ impl InstallScheduler {
         if !is_registry_tarball_url(&tarball_url) {
             return;
         }
-        let _ = self.tx.send(Command::PrefetchDownload(PackageFetch {
+        let _ = self.tx.send(Command::PrefetchDownload(PackageRef {
             name,
             version,
             tarball_url,
@@ -198,7 +202,7 @@ impl InstallScheduler {
         parent: Option<PathBuf>,
     ) {
         let _ = self.tx.send(Command::PrefetchClone(CloneSpec {
-            package: PackageFetch {
+            package: PackageRef {
                 name,
                 version,
                 tarball_url,
@@ -219,7 +223,7 @@ impl InstallScheduler {
         self.tx
             .send(Command::EnsureClone(
                 CloneSpec {
-                    package: PackageFetch {
+                    package: PackageRef {
                         name,
                         version,
                         tarball_url,
@@ -245,7 +249,7 @@ struct SchedulerState {
     download_done: HashMap<String, PathBuf>,
     download_active: HashSet<String>,
     fetch_waiters: HashMap<String, Vec<CloneSpec>>,
-    download_queue: VecDeque<PackageFetch>,
+    download_queue: VecDeque<PackageRef>,
     extract_active: HashSet<String>,
     extract_queue: VecDeque<DownloadedPackage>,
     clone_done: HashSet<PathBuf>,
@@ -253,15 +257,15 @@ struct SchedulerState {
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
     blocked_by_parent: HashMap<PathBuf, Vec<CloneSpec>>,
     clone_queue: VecDeque<ReadyClone>,
-    done_tx: mpsc::UnboundedSender<OpDone>,
-    done_rx: mpsc::UnboundedReceiver<OpDone>,
-    ops: FuturesUnordered<tokio::task::JoinHandle<OpDone>>,
+    clone_done_tx: mpsc::UnboundedSender<StageReport>,
+    clone_done_rx: mpsc::UnboundedReceiver<StageReport>,
+    async_ops: FuturesUnordered<tokio::task::JoinHandle<StageReport>>,
     counts: InstallCounts,
 }
 
 impl SchedulerState {
     fn new(rx: mpsc::UnboundedReceiver<Command>) -> Self {
-        let (done_tx, done_rx) = mpsc::unbounded_channel();
+        let (clone_done_tx, clone_done_rx) = mpsc::unbounded_channel();
         Self {
             rx,
             shutdown: false,
@@ -279,9 +283,9 @@ impl SchedulerState {
             clone_waiters: HashMap::new(),
             blocked_by_parent: HashMap::new(),
             clone_queue: VecDeque::new(),
-            done_tx,
-            done_rx,
-            ops: FuturesUnordered::new(),
+            clone_done_tx,
+            clone_done_rx,
+            async_ops: FuturesUnordered::new(),
             counts: InstallCounts::default(),
         }
     }
@@ -313,16 +317,16 @@ impl SchedulerState {
                         }
                     }
                 }
-                done = self.ops.next(), if !self.ops.is_empty() => {
+                done = self.async_ops.next(), if !self.async_ops.is_empty() => {
                     match done {
-                        Some(Ok(done)) => self.handle_done(done),
+                        Some(Ok(done)) => self.handle_report(done),
                         Some(Err(e)) => tracing::warn!("Install scheduler worker failed: {e}"),
                         None => {}
                     }
                 }
-                done = self.done_rx.recv() => {
+                done = self.clone_done_rx.recv() => {
                     if let Some(done) = done {
-                        self.handle_done(done);
+                        self.handle_report(done);
                     }
                 }
             }
@@ -339,7 +343,7 @@ impl SchedulerState {
             && self.download_active.is_empty()
             && self.extract_active.is_empty()
             && self.clone_active.is_empty()
-            && self.ops.is_empty()
+            && self.async_ops.is_empty()
     }
 
     fn queue_clone(&mut self, spec: CloneSpec, responder: Option<CloneResponder>) {
@@ -377,7 +381,7 @@ impl SchedulerState {
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
         let task_spec = spec.clone();
-        self.ops.push(tokio::spawn(async move {
+        self.async_ops.push(tokio::spawn(async move {
             let result = resolve_seeded_cache_path(
                 &task_spec.package.name,
                 &task_spec.package.version,
@@ -385,11 +389,11 @@ impl SchedulerState {
             )
             .await
             .map_err(|e| format!("{e:#}"));
-            OpDone::SeededCache { spec, result }
+            StageReport::CacheResolved { spec, result }
         }));
     }
 
-    fn ensure_download(&mut self, package: PackageFetch, waiter: Option<CloneSpec>) {
+    fn ensure_download(&mut self, package: PackageRef, waiter: Option<CloneSpec>) {
         let key = package.key();
         if let Some(cache_path) = self.download_done.get(&key).cloned() {
             if let Some(spec) = waiter {
@@ -423,7 +427,7 @@ impl SchedulerState {
                 continue;
             }
 
-            self.ops.push(tokio::spawn(async move {
+            self.async_ops.push(tokio::spawn(async move {
                 let result = match registry_cache_lookup(&package.name, &package.version).await {
                     Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
                     Ok(None) => download_bytes(&package.tarball_url)
@@ -432,7 +436,7 @@ impl SchedulerState {
                         .map_err(|e| format!("{e:#}")),
                     Err(e) => Err(format!("{e:#}")),
                 };
-                OpDone::Download { package, result }
+                StageReport::Download { package, result }
             }));
         }
     }
@@ -451,7 +455,7 @@ impl SchedulerState {
                 continue;
             }
 
-            self.ops.push(tokio::spawn(async move {
+            self.async_ops.push(tokio::spawn(async move {
                 let result = extract_to_cache(
                     &downloaded.package.name,
                     &downloaded.package.version,
@@ -459,7 +463,7 @@ impl SchedulerState {
                 )
                 .await
                 .map_err(|e| format!("{e:#}"));
-                OpDone::Extract { key, result }
+                StageReport::Extract { key, result }
             }));
         }
     }
@@ -474,7 +478,7 @@ impl SchedulerState {
                 continue;
             }
 
-            let done_tx = self.done_tx.clone();
+            let clone_done_tx = self.clone_done_tx.clone();
             rayon::spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     clone_package_sync(&PackageClone {
@@ -487,19 +491,19 @@ impl SchedulerState {
                     .map_err(|e| format!("{e:#}"))
                 }))
                 .unwrap_or_else(|_| Err("install clone worker panicked".to_string()));
-                let _ = done_tx.send(OpDone::Clone { target, result });
+                let _ = clone_done_tx.send(StageReport::Clone { target, result });
             });
         }
     }
 
-    fn handle_done(&mut self, done: OpDone) {
+    fn handle_report(&mut self, done: StageReport) {
         match done {
-            OpDone::SeededCache { spec, result } => match result {
+            StageReport::CacheResolved { spec, result } => match result {
                 Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone { spec, cache_path }),
                 Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
                 Err(error) => self.complete_clone(spec.target, Err(error)),
             },
-            OpDone::Download { package, result } => {
+            StageReport::Download { package, result } => {
                 let key = package.key();
                 self.download_active.remove(&key);
                 match result {
@@ -516,7 +520,7 @@ impl SchedulerState {
                     }
                 }
             }
-            OpDone::Extract { key, result } => {
+            StageReport::Extract { key, result } => {
                 self.extract_active.remove(&key);
                 let path_result = match result {
                     Ok(ExtractOutcome::Extracted(path)) => {
@@ -531,7 +535,7 @@ impl SchedulerState {
                 };
                 self.complete_download(key, path_result);
             }
-            OpDone::Clone { target, result } => {
+            StageReport::Clone { target, result } => {
                 self.clone_active.remove(&target);
                 let clone_result = match result {
                     Ok(fresh) => {
@@ -617,8 +621,8 @@ fn extract_concurrency_limit() -> usize {
 mod tests {
     use super::*;
 
-    fn package(name: &str, version: &str) -> PackageFetch {
-        PackageFetch {
+    fn package(name: &str, version: &str) -> PackageRef {
+        PackageRef {
             name: name.to_string(),
             version: version.to_string(),
             tarball_url: format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz"),
@@ -661,7 +665,7 @@ mod tests {
         state.download_active.insert(key.clone());
         state.fetch_waiters.insert(key.clone(), vec![waiter]);
 
-        state.handle_done(OpDone::Download {
+        state.handle_report(StageReport::Download {
             package: package.clone(),
             result: Ok(DownloadOutcome::Bytes(Bytes::from_static(b"tgz"))),
         });
@@ -682,7 +686,7 @@ mod tests {
         state.extract_active.insert(key.clone());
         state.fetch_waiters.insert(key.clone(), vec![waiter]);
 
-        state.handle_done(OpDone::Extract {
+        state.handle_report(StageReport::Extract {
             key: key.clone(),
             result: Ok(ExtractOutcome::Extracted(cache_path.clone())),
         });
@@ -704,7 +708,7 @@ mod tests {
         state.queue_clone(spec, Some(second));
 
         assert_eq!(state.clone_waiters[&target].len(), 2);
-        assert_eq!(state.ops.len(), 1);
+        assert_eq!(state.async_ops.len(), 1);
     }
 
     #[tokio::test]
@@ -717,16 +721,16 @@ mod tests {
         child.parent = Some(parent_target.clone());
 
         state.queue_clone(parent, None);
-        let parent_ops = state.ops.len();
+        let parent_ops = state.async_ops.len();
         state.queue_clone(child, None);
 
         assert_eq!(state.blocked_by_parent[&parent_target].len(), 1);
-        assert_eq!(state.ops.len(), parent_ops);
+        assert_eq!(state.async_ops.len(), parent_ops);
 
         state.complete_clone(parent_target.clone(), Ok(()));
 
         assert!(!state.blocked_by_parent.contains_key(&parent_target));
-        assert_eq!(state.ops.len(), parent_ops + 1);
+        assert_eq!(state.async_ops.len(), parent_ops + 1);
     }
 
     #[tokio::test]
