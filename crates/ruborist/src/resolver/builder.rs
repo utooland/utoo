@@ -1683,6 +1683,11 @@ where
             }
 
             let Some(done) = fetches.next().await else {
+                tracing::warn!(
+                    full_waiters = state.full_waiters.values().map(Vec::len).sum::<usize>(),
+                    version_waiters = state.version_waiters.values().map(Vec::len).sum::<usize>(),
+                    "manifest fetch stream ended with pending resolver waiters; falling back to sequential resolution"
+                );
                 let mut fallback = Vec::new();
                 for (_, waiters) in state.full_waiters.drain() {
                     fallback.extend(waiters);

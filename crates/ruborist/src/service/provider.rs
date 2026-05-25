@@ -73,6 +73,9 @@ pub enum ManifestJobDone {
 }
 
 /// Lower-level manifest provider used by the demand BFS loop.
+///
+/// Resolver workers clone the provider before spawning jobs, so implementors
+/// should keep `Clone` cheap (for example by storing shared state behind `Arc`).
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ManifestProvider: RegistryClient + Clone + Send + Sync + 'static {

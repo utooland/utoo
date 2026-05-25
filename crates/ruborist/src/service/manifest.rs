@@ -68,11 +68,32 @@ fn parse_full_manifest_with_core_sync(
         .map_err(|e| anyhow!("JSON parse error: {e}"))?;
     manifest.raw = raw_bytes;
 
-    let speculative = spec.and_then(|spec| {
-        resolve_target_version((&manifest).into(), &spec)
-            .ok()
-            .and_then(|version| manifest.get_core_version(&version).map(|core| (spec, core)))
-    });
+    let speculative = match spec {
+        Some(spec) => match resolve_target_version((&manifest).into(), &spec) {
+            Ok(version) => match manifest.get_core_version(&version) {
+                Some(core) => Some((spec, core)),
+                None => {
+                    tracing::trace!(
+                        package = %manifest.name,
+                        spec = %spec,
+                        version = %version,
+                        "speculative manifest extract missed resolved version"
+                    );
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::trace!(
+                    package = %manifest.name,
+                    spec = %spec,
+                    error = %error,
+                    "speculative manifest version resolution failed"
+                );
+                None
+            }
+        },
+        None => None,
+    };
 
     Ok((manifest, speculative))
 }
