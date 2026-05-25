@@ -115,7 +115,7 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           set -euo pipefail
-          sed -E -i.bak "s|^version[[:space:]]*=.*|version     = \"${VERSION}\"|" crates/pm/Cargo.toml
+          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${VERSION}\"|}" crates/pm/Cargo.toml
           rm crates/pm/Cargo.toml.bak
 
           ACTUAL=$(awk -F\" '/^version[[:space:]]*=/ { print $2; exit }' crates/pm/Cargo.toml)
