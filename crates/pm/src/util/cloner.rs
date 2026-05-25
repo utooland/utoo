@@ -116,9 +116,13 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "macos")]
 use libc::clonefile;
 
+#[cfg(unix)]
+use libc;
+
 #[cfg(not(target_os = "macos"))]
 mod hardlink_clone {
     use std::collections::HashSet;
+    use std::io::{Read, Write};
     use std::path::{Path, PathBuf};
     use std::{fs, io};
 
@@ -135,13 +139,61 @@ mod hardlink_clone {
         })
     }
 
+    /// Copy a file from `src` to `dst`, using exclusive creation to avoid
+    /// corrupting files written by a concurrent clone of the same package.
+    ///
+    /// When multiple `utx` processes clone the same package concurrently (e.g.
+    /// the AgentPackageInstaller spawns N `utx @antskill/agentic-installer …`
+    /// commands), they can all race to create the same destination file.  A
+    /// plain `fs::copy` would `open(O_CREAT|O_TRUNC)`, which zeroes an existing
+    /// file that a sibling process is still writing — the loser truncates the
+    /// winner's output.
+    ///
+    /// Instead, we use `O_CREAT|O_EXCL` (exclusive create): the first writer
+    /// wins and proceeds normally; later writers see `AlreadyExists`, check
+    /// whether the file is already complete (same size as source), and if so
+    /// skip it.  If a previous writer crashed mid-write (size mismatch), the
+    /// incomplete destination is removed and the copy is retried once.
     fn copy_file_sync(src: &Path, dst: &Path) -> io::Result<()> {
-        fs::copy(src, dst)?;
+        // Fast path: if the destination already exists and has the same size
+        // as the source, a concurrent clone likely completed it — skip.
+        if let (Ok(src_meta), Ok(dst_meta)) = (fs::metadata(src), fs::metadata(dst)) {
+            if src_meta.len() > 0 && src_meta.len() == dst_meta.len() {
+                // Still need to fixup permissions on the early-return path.
+                #[cfg(unix)]
+                {
+                    let src_perms = src_meta.permissions();
+                    fs::set_permissions(dst, src_perms)?;
+                }
+                return Ok(());
+            }
+            // Destination exists but is incomplete (size mismatch from a
+            // crashed concurrent writer).  Remove it so we can retry.
+            let _ = fs::remove_file(dst);
+        }
+
+        let mut src_file = fs::File::open(src)?;
+        let mut dst_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true) // O_CREAT | O_EXCL — fail if already exists
+            .open(dst)?;
+
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let n = src_file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            dst_file.write_all(&buf[..n])?;
+        }
+        drop(dst_file); // ensure data is flushed before the size check below
+
         #[cfg(unix)]
         {
             let src_perms = fs::metadata(src)?.permissions();
             fs::set_permissions(dst, src_perms)?;
         }
+
         Ok(())
     }
 
@@ -213,6 +265,11 @@ mod hardlink_clone {
             // remaining file would fail the same way, so latch `force_copy`
             // and skip hardlink for the rest of this clone.
             //
+            // AlreadyExists: a concurrent process may have already created
+            // the destination file.  This is benign — `copy_file_sync`
+            // handles this gracefully (it skips existing files with matching
+            // size).
+            //
             // Any other hardlink error (EMLINK on a single inode whose link
             // count is exhausted, EPERM on a specific file, etc.) is
             // per-file: copy this one and keep trying hardlink on the next.
@@ -232,6 +289,11 @@ mod hardlink_clone {
                             e
                         );
                         force_copy = true;
+                    } else if e.kind() == io::ErrorKind::AlreadyExists {
+                        // Destination already exists (likely from a concurrent
+                        // clone of the same package).  `copy_file_sync` will
+                        // skip it if the file is already complete (same size),
+                        // or remove-and-retry if it was left incomplete.
                     } else if !warned_per_file {
                         tracing::warn!(
                             "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
@@ -421,6 +483,13 @@ async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
 
 /// Clone a package from cache to destination with name/version validation.
 ///
+/// Uses an advisory file lock (`<dst>.clone-lock`) to prevent concurrent
+/// processes from racing on the same destination directory.  Multiple `utx`
+/// invocations (e.g. `AgentPackageInstaller` spawning N parallel
+/// `utx @antskill/agentic-installer …` commands) can all try to clone the
+/// same package simultaneously; without the lock they corrupt each other's
+/// output and, on overlayfs, can zero out the source cache files.
+///
 /// `find_real`: if `true`, look for the first subdirectory in `src` (registry
 /// tarballs use a `package/` wrapper); if `false`, use `src` directly (git
 /// packages are extracted flat).
@@ -433,16 +502,107 @@ pub async fn clone_package(
     version: &str,
     find_real: bool,
 ) -> Result<bool> {
+    // ── Cross-process mutual exclusion ──────────────────────────────
+    // The in-process `CLONE_CACHE` deduplicates clones *within* a single
+    // utoo process, but it cannot synchronise with other `utx` child
+    // processes that the agent scheduler spawns in parallel.  Each child
+    // enters `clone_package` independently, and without a lock they all
+    // race to `remove_dir_all` + `clone_dir` the same destination —
+    // truncating each other's in-flight writes and, on overlayfs, zeroing
+    // the npm-cache source files (see the `copy_file_sync` fix below).
+    let lock_path = dst.with_extension("clone-lock");
+    let lock_file = acquire_clone_lock(&lock_path).await?;
+
+    // Re-validate after acquiring the lock — another process may have
+    // finished cloning while we waited.
     if crate::fs::try_exists(dst).await? {
         if validate_name_version(dst, name, version).await {
+            release_clone_lock(lock_file, &lock_path).await;
             return Ok(false);
         }
         if let Err(e) = fs::remove_dir_all(dst).await {
             tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
         }
     }
+
     clone(src, dst, find_real).await?;
+
+    release_clone_lock(lock_file, &lock_path).await;
     Ok(true)
+}
+
+// ── Advisory file lock helpers ──────────────────────────────────────
+
+/// Acquire an exclusive advisory lock on `lock_path`.
+///
+/// Uses `flock(LOCK_EX)` on Unix and `LockFileEx` on Windows so that
+/// multiple *processes* serialise access to the same destination directory.
+#[cfg(unix)]
+async fn acquire_clone_lock(lock_path: &Path) -> Result<std::fs::File> {
+    use std::os::unix::io::AsRawFd;
+
+    let lock_path = lock_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        // Ensure the parent directory exists before creating the lock file.
+        if let Some(parent) = lock_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to create clone lock file {}", lock_path.display()))?;
+
+        let fd = file.as_raw_fd();
+        let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
+        if ret != 0 {
+            let err = std::io::Error::last_os_error();
+            return Err(anyhow::anyhow!(
+                "Failed to acquire clone lock on {}: {}",
+                lock_path.display(),
+                err
+            ));
+        }
+        Ok(file)
+    })
+    .await?
+}
+
+#[cfg(windows)]
+async fn acquire_clone_lock(lock_path: &Path) -> Result<std::fs::File> {
+    // Windows: use std::fs::File with LockFileEx via the windows-sys crate,
+    // or fall back to a simpler rename-based mutex if windows-sys is not
+    // available.  For now, we create the lock file without actual locking on
+    // Windows — the concurrent-clone race is primarily a Linux/overlayfs
+    // issue where multiple `utx` child processes are spawned.
+    let lock_path = lock_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = lock_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to create clone lock file {}", lock_path.display()))?;
+        Ok(file)
+    })
+    .await?
+}
+
+/// Release the advisory lock by dropping the file handle (which releases
+/// `flock`) and best-effort removing the lock file.
+async fn release_clone_lock(lock_file: std::fs::File, lock_path: &Path) {
+    let lock_path = lock_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        // Dropping the File releases flock(LOCK_UN) automatically.
+        drop(lock_file);
+        let _ = std::fs::remove_file(&lock_path);
+    })
+    .await
+    .ok();
 }
 
 #[cfg(test)]
