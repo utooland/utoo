@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use serde::de::DeserializeOwned;
+use tokio::task::spawn_blocking;
 use tokio_retry::Retry;
 use utoo_ruborist::manifest::IdentityView;
 use utoo_ruborist::util::OnceMap;
@@ -100,7 +101,7 @@ pub async fn clone_package_once(
     CLONE_CACHE
         .get_or_init(key, || async move {
             let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
-            tokio::task::spawn_blocking(move || {
+            spawn_blocking(move || {
                 clone_package_from_cache_sync(
                     &name,
                     &version,
@@ -275,8 +276,11 @@ fn validate_name_version_sync(dst: &Path, name: &str, version: &str) -> bool {
 
 fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
     for entry in std::fs::read_dir(src).ok()? {
-        let entry = entry.ok()?;
-        if entry.file_type().ok()?.is_dir() {
+        // Skip entries that error transiently (e.g. an entry removed by a
+        // concurrent extraction between readdir and lstat) instead of
+        // abandoning the whole search — mirrors the async `find_real_src`.
+        let Ok(entry) = entry else { continue };
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
             let path = entry.path();
             if path.file_name().is_some_and(|name| name != ".utoo_built") {
                 return Some(path);
@@ -290,54 +294,25 @@ fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
 fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
     let src_c = CString::new(real_src.as_os_str().as_bytes())?;
     let dst_c = CString::new(dst.as_os_str().as_bytes())?;
-    let mut last_error = None;
 
-    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
-        if !delay.is_zero() {
-            std::thread::sleep(delay);
-        }
-
-        match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-            0 => return Ok(()),
-            _ => {
-                let err = std::io::Error::last_os_error();
-                let _ = std::fs::remove_dir_all(dst);
-                last_error = Some(err);
-            }
-        }
+    // Single attempt: retry policy is the caller's decision, the util-layer
+    // clone primitive stays stateless.
+    match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+        0 => Ok(()),
+        _ => Err(anyhow::anyhow!(
+            "clonefile {} -> {}: {}",
+            real_src.display(),
+            dst.display(),
+            std::io::Error::last_os_error()
+        )),
     }
-
-    Err(anyhow::anyhow!(
-        "clonefile {} -> {}: {}",
-        real_src.display(),
-        dst.display(),
-        last_error
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "unknown error".to_string())
-    ))
 }
 
 #[cfg(not(target_os = "macos"))]
 fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
-    let mut last_error = None;
-
-    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
-        if !delay.is_zero() {
-            std::thread::sleep(delay);
-        }
-
-        match hardlink_clone::clone_dir_sync(real_src, dst) {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                if dst.try_exists()? {
-                    remove_target_dir_sync(dst)?;
-                }
-                last_error = Some(e);
-            }
-        }
-    }
-
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("unknown hardlink clone error")))
+    // Single attempt: retry policy is the caller's decision, the util-layer
+    // clone primitive stays stateless.
+    hardlink_clone::clone_dir_sync(real_src, dst)
         .with_context(|| format!("clone_dir {} -> {}", real_src.display(), dst.display()))
 }
 
