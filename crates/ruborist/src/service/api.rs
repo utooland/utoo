@@ -56,7 +56,7 @@ pub struct BuildDepsOptions<G, R> {
     pub manifest_store: Arc<dyn ManifestStore>,
     /// Project-level warm cache pre-loaded by the host. Pre-populates the
     /// in-memory manifest cache to skip the preload phase on a warm install.
-    pub warm_project_cache: Option<ProjectCacheData>,
+    pub project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
     /// How to handle peer dependencies.
@@ -84,7 +84,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
             manifest_store: Arc::new(NoopStore),
-            warm_project_cache: None,
+            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob,
@@ -125,7 +125,7 @@ where
         registry_url,
         cache_dir,
         manifest_store,
-        warm_project_cache,
+        project_cache,
         concurrency,
         peer_deps,
         glob,
@@ -208,7 +208,7 @@ where
     // project cache (host-supplied; `None` for cold runs).
     let package_cache = Arc::new(PackageCache::default());
     let (cache_count, missing_count) =
-        prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
+        prepopulate_warm_cache(&package_cache, project_cache.as_ref());
     if missing_count > 0 {
         tracing::warn!(
             "Project cache has {missing_count} specs with missing manifests, will re-fetch from registry"
@@ -317,7 +317,7 @@ mod tests {
             registry_url: "https://registry.npmmirror.com".to_string(),
             cache_dir: None,
             manifest_store: Arc::new(NoopStore),
-            warm_project_cache: None,
+            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
