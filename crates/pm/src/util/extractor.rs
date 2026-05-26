@@ -4,6 +4,8 @@ use bytes::Bytes;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use super::process_lock;
+
 const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
 const DECOMPRESSION_RETRY_FACTOR: usize = 4;
@@ -19,11 +21,78 @@ pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
         return Ok(());
     }
 
-    crate::fs::create_dir_all(dest)
-        .await
-        .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
+    let lock_path = process_lock::lock_path_for(dest, ".extract-lock");
+    let _lock = process_lock::lock_exclusive(&lock_path).await?;
 
-    extract_tarball(gzip_bytes, dest).await
+    if crate::fs::try_exists(&resolved_path).await? {
+        tracing::debug!("Extract skipped, already resolved: {}", dest.display());
+        return Ok(());
+    }
+
+    let parent = dest
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("cache destination has no parent: {}", dest.display()))?;
+    crate::fs::create_dir_all(parent).await.with_context(|| {
+        format!(
+            "Failed to create cache parent directory: {}",
+            parent.display()
+        )
+    })?;
+
+    let temp_dir = tempfile::Builder::new()
+        .prefix(".utoo-extract-")
+        .tempdir_in(parent)
+        .with_context(|| {
+            format!(
+                "Failed to create extraction staging dir in {}",
+                parent.display()
+            )
+        })?;
+    let stage = temp_dir.path().to_path_buf();
+
+    extract_tarball(gzip_bytes, &stage).await?;
+    let stage = temp_dir.keep();
+
+    publish_extracted_cache(&stage, dest).await
+}
+
+async fn publish_extracted_cache(stage: &Path, dest: &Path) -> Result<()> {
+    let resolved_path = dest.join("_resolved");
+    if crate::fs::try_exists(&resolved_path).await? {
+        let _ = crate::fs::remove_dir_all(stage).await;
+        return Ok(());
+    }
+
+    if crate::fs::try_exists(dest).await? {
+        crate::fs::remove_dir_all(dest)
+            .await
+            .with_context(|| format!("Failed to remove incomplete cache {}", dest.display()))?;
+    }
+
+    match crate::fs::rename(stage, dest).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if crate::fs::try_exists(&resolved_path).await? {
+                let _ = crate::fs::remove_dir_all(stage).await;
+                Ok(())
+            } else {
+                let _ = crate::fs::remove_dir_all(stage).await;
+                Err(anyhow::anyhow!(
+                    "Failed to publish extracted cache to {}: {}",
+                    dest.display(),
+                    e
+                ))
+            }
+        }
+        Err(e) => {
+            let _ = crate::fs::remove_dir_all(stage).await;
+            Err(anyhow::anyhow!(
+                "Failed to publish extracted cache to {}: {}",
+                dest.display(),
+                e
+            ))
+        }
+    }
 }
 
 /// Estimate uncompressed size from gzip footer (last 4 bytes store original size mod 2^32).

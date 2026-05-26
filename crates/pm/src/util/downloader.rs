@@ -313,4 +313,42 @@ mod tests {
         assert!(dest.join("_resolved").exists());
         assert!(dest.join("file.txt").exists());
     }
+
+    #[tokio::test]
+    async fn test_extract_and_write_concurrent_same_destination() {
+        let tar_gz = create_tar_gz();
+        let temp_dir = TempDir::new().unwrap();
+        let dest = temp_dir.path().join("pkg");
+
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let tar_gz = tar_gz.clone();
+            let dest = dest.clone();
+            tasks.push(tokio::spawn(async move {
+                extract_and_write(Bytes::from(tar_gz), &dest).await
+            }));
+        }
+
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+
+        assert!(dest.join("_resolved").exists());
+        assert_eq!(
+            crate::fs::read_to_string(dest.join("file.txt"))
+                .await
+                .unwrap(),
+            "hello world"
+        );
+
+        let mut read_dir = crate::fs::read_dir(temp_dir.path()).await.unwrap();
+        while let Some(entry) = read_dir.next_entry().await.unwrap() {
+            let name = entry.file_name();
+            assert!(
+                !name.to_string_lossy().starts_with(".utoo-extract-"),
+                "stale extraction staging directory left behind: {}",
+                entry.path().display()
+            );
+        }
+    }
 }

@@ -9,6 +9,7 @@ use utoo_ruborist::util::OnceMap;
 
 use super::downloader::{is_git_url, resolve_cache_path};
 use super::json::load_package_json;
+use super::process_lock;
 use super::retry::create_retry_strategy;
 use crate::fs;
 
@@ -116,9 +117,6 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "macos")]
 use libc::clonefile;
 
-#[cfg(unix)]
-use libc;
-
 #[cfg(not(target_os = "macos"))]
 mod hardlink_clone {
     use std::collections::HashSet;
@@ -142,12 +140,10 @@ mod hardlink_clone {
     /// Copy a file from `src` to `dst`, using exclusive creation to avoid
     /// corrupting files written by a concurrent clone of the same package.
     ///
-    /// When multiple `utx` processes clone the same package concurrently (e.g.
-    /// the AgentPackageInstaller spawns N `utx @antskill/agentic-installer …`
-    /// commands), they can all race to create the same destination file.  A
-    /// plain `fs::copy` would `open(O_CREAT|O_TRUNC)`, which zeroes an existing
-    /// file that a sibling process is still writing — the loser truncates the
-    /// winner's output.
+    /// When multiple processes clone the same package concurrently, they can
+    /// all race to create the same destination file. A plain `fs::copy` would
+    /// `open(O_CREAT|O_TRUNC)`, which zeroes an existing file that a sibling
+    /// process is still writing.
     ///
     /// Instead, we use `O_CREAT|O_EXCL` (exclusive create): the first writer
     /// wins and proceeds normally; later writers see `AlreadyExists`, check
@@ -410,27 +406,17 @@ pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
     None
 }
 
-async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
-    let real_src = if find_real {
+async fn real_source_path(src: &Path, find_real: bool) -> Result<PathBuf> {
+    if find_real {
         find_real_src(src)
             .await
-            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?
+            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))
     } else {
-        src.to_path_buf()
-    };
-
-    if crate::fs::try_exists(dst).await? {
-        let is_valid = validate_directory(&real_src, dst).await.unwrap_or(false);
-
-        if is_valid {
-            return Ok(());
-        }
-
-        if let Err(e) = fs::remove_dir_all(dst).await {
-            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
-        }
+        Ok(src.to_path_buf())
     }
+}
 
+async fn clone_materialized_dir(real_src: &Path, dst: &Path) -> Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).await?;
     }
@@ -441,6 +427,7 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
         let dst_c = CString::new(dst.as_os_str().as_bytes())?;
 
         Retry::spawn(create_retry_strategy(), || async {
+            let _ = fs::remove_dir_all(dst).await;
             match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
                 0 => Ok(()),
                 _ => {
@@ -460,7 +447,7 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     {
         Retry::spawn(create_retry_strategy(), || async {
-            hardlink_clone::clone_dir(&real_src, dst)
+            hardlink_clone::clone_dir(real_src, dst)
                 .await
                 .with_context(|| {
                     format!("clone_dir {} -> {}", real_src.display(), dst.display())
@@ -471,6 +458,18 @@ async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn clone_to_stage(real_src: &Path, parent: &Path) -> Result<PathBuf> {
+    let temp_dir = tempfile::Builder::new()
+        .prefix(".utoo-clone-")
+        .tempdir_in(parent)
+        .with_context(|| format!("Failed to create clone staging dir in {}", parent.display()))?;
+    let stage = temp_dir.path().to_path_buf();
+
+    clone_materialized_dir(real_src, &stage).await?;
+
+    Ok(temp_dir.keep())
 }
 
 /// Validate that the package.json in dst has matching name and version
@@ -484,11 +483,10 @@ async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
 /// Clone a package from cache to destination with name/version validation.
 ///
 /// Uses an advisory file lock (`<dst>.clone-lock`) to prevent concurrent
-/// processes from racing on the same destination directory.  Multiple `utx`
-/// invocations (e.g. `AgentPackageInstaller` spawning N parallel
-/// `utx @antskill/agentic-installer …` commands) can all try to clone the
-/// same package simultaneously; without the lock they corrupt each other's
-/// output and, on overlayfs, can zero out the source cache files.
+/// processes from racing on the same destination directory. Multiple `utx`
+/// invocations can all try to clone the same package simultaneously; without
+/// the lock they corrupt each other's output and can zero out source cache
+/// files through hardlink fallback copies.
 ///
 /// `find_real`: if `true`, look for the first subdirectory in `src` (registry
 /// tarballs use a `package/` wrapper); if `false`, use `src` directly (git
@@ -502,22 +500,14 @@ pub async fn clone_package(
     version: &str,
     find_real: bool,
 ) -> Result<bool> {
-    // ── Cross-process mutual exclusion ──────────────────────────────
-    // The in-process `CLONE_CACHE` deduplicates clones *within* a single
-    // utoo process, but it cannot synchronise with other `utx` child
-    // processes that the agent scheduler spawns in parallel.  Each child
-    // enters `clone_package` independently, and without a lock they all
-    // race to `remove_dir_all` + `clone_dir` the same destination —
-    // truncating each other's in-flight writes and, on overlayfs, zeroing
-    // the npm-cache source files (see the `copy_file_sync` fix below).
-    let lock_path = dst.with_extension("clone-lock");
-    let lock_file = acquire_clone_lock(&lock_path).await?;
+    let real_src = real_source_path(src, find_real).await?;
+    let lock_path = process_lock::lock_path_for(dst, ".clone-lock");
+    let _lock = process_lock::lock_exclusive(&lock_path).await?;
 
     // Re-validate after acquiring the lock — another process may have
     // finished cloning while we waited.
     if crate::fs::try_exists(dst).await? {
         if validate_name_version(dst, name, version).await {
-            release_clone_lock(lock_file, &lock_path).await;
             return Ok(false);
         }
         if let Err(e) = fs::remove_dir_all(dst).await {
@@ -525,84 +515,60 @@ pub async fn clone_package(
         }
     }
 
-    clone(src, dst, find_real).await?;
+    let parent = dst
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("clone destination has no parent: {}", dst.display()))?;
+    fs::create_dir_all(parent).await?;
 
-    release_clone_lock(lock_file, &lock_path).await;
-    Ok(true)
-}
+    let stage = clone_to_stage(&real_src, parent).await?;
 
-// ── Advisory file lock helpers ──────────────────────────────────────
+    if !validate_name_version(&stage, name, version).await {
+        let _ = fs::remove_dir_all(&stage).await;
+        anyhow::bail!(
+            "Cloned package identity mismatch for {}@{} in {}",
+            name,
+            version,
+            stage.display()
+        );
+    }
+    if !validate_directory(&real_src, &stage).await.unwrap_or(false) {
+        let _ = fs::remove_dir_all(&stage).await;
+        anyhow::bail!(
+            "Cloned package contents did not validate for {}@{} in {}",
+            name,
+            version,
+            stage.display()
+        );
+    }
 
-/// Acquire an exclusive advisory lock on `lock_path`.
-///
-/// Uses `flock(LOCK_EX)` on Unix and `LockFileEx` on Windows so that
-/// multiple *processes* serialise access to the same destination directory.
-#[cfg(unix)]
-async fn acquire_clone_lock(lock_path: &Path) -> Result<std::fs::File> {
-    use std::os::unix::io::AsRawFd;
-
-    let lock_path = lock_path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        // Ensure the parent directory exists before creating the lock file.
-        if let Some(parent) = lock_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+    match fs::rename(&stage, dst).await {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if validate_name_version(dst, name, version).await {
+                let _ = fs::remove_dir_all(&stage).await;
+                Ok(false)
+            } else {
+                fs::remove_dir_all(dst).await.with_context(|| {
+                    format!(
+                        "Failed to replace invalid target directory {}",
+                        dst.display()
+                    )
+                })?;
+                fs::rename(&stage, dst).await.with_context(|| {
+                    format!("Failed to publish staged clone to {}", dst.display())
+                })?;
+                Ok(true)
+            }
         }
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)
-            .with_context(|| format!("Failed to create clone lock file {}", lock_path.display()))?;
-
-        let fd = file.as_raw_fd();
-        let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
-        if ret != 0 {
-            let err = std::io::Error::last_os_error();
-            return Err(anyhow::anyhow!(
-                "Failed to acquire clone lock on {}: {}",
-                lock_path.display(),
-                err
-            ));
+        Err(e) => {
+            let _ = fs::remove_dir_all(&stage).await;
+            Err(anyhow::anyhow!(
+                "Failed to publish staged clone to {}: {}",
+                dst.display(),
+                e
+            ))
         }
-        Ok(file)
-    })
-    .await?
-}
-
-#[cfg(windows)]
-async fn acquire_clone_lock(lock_path: &Path) -> Result<std::fs::File> {
-    // Windows: use std::fs::File with LockFileEx via the windows-sys crate,
-    // or fall back to a simpler rename-based mutex if windows-sys is not
-    // available.  For now, we create the lock file without actual locking on
-    // Windows — the concurrent-clone race is primarily a Linux/overlayfs
-    // issue where multiple `utx` child processes are spawned.
-    let lock_path = lock_path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        if let Some(parent) = lock_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_path)
-            .with_context(|| format!("Failed to create clone lock file {}", lock_path.display()))?;
-        Ok(file)
-    })
-    .await?
-}
-
-/// Release the advisory lock by dropping the file handle (which releases
-/// `flock`) and best-effort removing the lock file.
-async fn release_clone_lock(lock_file: std::fs::File, lock_path: &Path) {
-    let lock_path = lock_path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        // Dropping the File releases flock(LOCK_UN) automatically.
-        drop(lock_file);
-        let _ = std::fs::remove_file(&lock_path);
-    })
-    .await
-    .ok();
+    }
 }
 
 #[cfg(test)]
@@ -786,7 +752,7 @@ mod tests {
         .await?;
 
         // Test cloning with find_real=false
-        clone(&src_dir, &dst_dir, false).await?;
+        clone_materialized_dir(&src_dir, &dst_dir).await?;
 
         // Verify everything was cloned
         assert!(dst_dir.join("real_dir").exists());
@@ -809,8 +775,8 @@ mod tests {
         create_test_structure(&src_dir, &[("file.txt", Some(b"old content"))]).await?;
         create_test_structure(&dst_dir, &[("file.txt", Some(b"old content"))]).await?;
 
-        // Clone should succeed and skip since content is identical
-        clone(&src_dir, &dst_dir, false).await?;
+        // Clone should succeed when content is identical
+        clone_materialized_dir(&src_dir, &dst_dir).await?;
         assert_eq!(
             fs::read_to_string(dst_dir.join("file.txt")).await?,
             "old content"
@@ -820,7 +786,7 @@ mod tests {
         create_test_structure(&src_dir, &[("file.txt", Some(b"content changed"))]).await?;
 
         // Clone should update the destination
-        clone(&src_dir, &dst_dir, false).await?;
+        clone_materialized_dir(&src_dir, &dst_dir).await?;
         assert_eq!(
             fs::read_to_string(dst_dir.join("file.txt")).await?,
             "content changed"
@@ -985,6 +951,55 @@ mod tests {
         assert!(dst_dir.join("index.js").exists());
         let content = fs::read_to_string(dst_dir.join("package.json")).await?;
         assert!(content.contains("my-git-pkg"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clone_package_concurrent_same_destination() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache_dir = temp.path().join("cache/lodash/4.17.21");
+        let src_dir = cache_dir.join("package");
+        let dst_dir = temp.path().join("node_modules/lodash");
+
+        fs::create_dir_all(&src_dir).await?;
+        let pkg_json = create_package_json("lodash", "4.17.21");
+        fs::write(src_dir.join("package.json"), &pkg_json).await?;
+        fs::write(src_dir.join("index.js"), "module.exports = 'stable';").await?;
+
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let cache_dir = cache_dir.clone();
+            let dst_dir = dst_dir.clone();
+            tasks.push(tokio::spawn(async move {
+                clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await
+            }));
+        }
+
+        for task in tasks {
+            task.await??;
+        }
+
+        assert!(validate_name_version(&dst_dir, "lodash", "4.17.21").await);
+        assert_eq!(
+            fs::read_to_string(src_dir.join("index.js")).await?,
+            "module.exports = 'stable';"
+        );
+        assert_eq!(
+            fs::read_to_string(dst_dir.join("index.js")).await?,
+            "module.exports = 'stable';"
+        );
+
+        let parent = dst_dir.parent().unwrap();
+        let mut read_dir = fs::read_dir(parent).await?;
+        while let Some(entry) = read_dir.next_entry().await? {
+            let name = entry.file_name();
+            assert!(
+                !name.to_string_lossy().starts_with(".utoo-clone-"),
+                "stale clone staging directory left behind: {}",
+                entry.path().display()
+            );
+        }
+
         Ok(())
     }
 

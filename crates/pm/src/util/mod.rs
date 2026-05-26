@@ -14,6 +14,7 @@ pub mod linker;
 pub mod logger;
 pub mod manifest_store;
 pub mod platform_const;
+pub mod process_lock;
 pub mod project_cache;
 pub mod registry;
 pub mod retry;
