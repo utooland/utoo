@@ -193,7 +193,7 @@ pub type PackageCache = MemoryCache;
 ///
 /// Stores resolved package information for a specific project. Hosts persist
 /// this (typically as `node_modules/.utoo-manifest.json`) and pass it back via
-/// `BuildDepsOptions::warm_project_cache`.
+/// `BuildDepsOptions::project_cache`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectCacheData {
     /// package name -> per-package cache

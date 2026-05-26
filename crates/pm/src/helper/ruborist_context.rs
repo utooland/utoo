@@ -50,13 +50,13 @@ impl Context {
         receiver: R,
     ) -> BuildDepsOptions<GlobImpl, R> {
         let catalogs = get_catalogs().await;
-        let warm_project_cache = Some(project_cache::load(&cwd).await);
+        let project_cache = Some(project_cache::load(&cwd).await);
         BuildDepsOptions {
             cwd,
             registry_url: get_registry(),
             cache_dir: Some(get_cache_dir()),
             manifest_store: Self::manifest_store(),
-            warm_project_cache,
+            project_cache,
             concurrency: get_manifests_concurrency_limit().await,
             peer_deps: get_peer_deps().await,
             glob: TokioGlob,

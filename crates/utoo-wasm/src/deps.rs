@@ -39,7 +39,7 @@ pub async fn build_deps_from_file(
         registry_url: registry_url.unwrap_or(DEFAULT_REGISTRY).to_string(),
         cache_dir: None,
         manifest_store: Arc::new(NoopStore),
-        warm_project_cache: None,
+        project_cache: None,
         concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENCY),
         peer_deps: PeerDeps::Skip,
         glob: OpfsGlob,
