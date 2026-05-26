@@ -2,6 +2,7 @@
 
 pub mod builder;
 pub mod common;
+pub(crate) mod demand;
 pub mod edges;
 #[cfg(feature = "native-git")]
 pub mod git;
