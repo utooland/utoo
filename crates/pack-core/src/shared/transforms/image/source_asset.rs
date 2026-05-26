@@ -36,11 +36,16 @@ pub struct StructuredImageFileSource {
 #[turbo_tasks::value_impl]
 impl Source for StructuredImageFileSource {
     #[turbo_tasks::function]
-    fn ident(&self) -> Vc<AssetIdent> {
-        self.image
+    async fn ident(&self) -> Result<Vc<AssetIdent>> {
+        let ident = self
+            .image
             .ident()
+            .owned()
+            .await?
             .with_modifier(rcstr!("structured image object"))
-            .rename_as("*.mjs".into())
+            .rename_as("*.mjs");
+
+        Ok(ident.into_vc())
     }
 
     #[turbo_tasks::function]

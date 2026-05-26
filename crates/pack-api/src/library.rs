@@ -321,7 +321,8 @@ impl LibraryEndpoint {
 
             let library_chunk_group = library_chunking_context.evaluated_chunk_group(
                 AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
-                    .with_query(query.into()),
+                    .with_query(query.into())
+                    .into_vc(),
                 ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,
                 AvailabilityInfo::root(),

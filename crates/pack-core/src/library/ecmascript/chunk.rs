@@ -213,11 +213,13 @@ impl EcmascriptLibraryEvaluateChunk {
 
     #[turbo_tasks::function]
     pub async fn ident(&self) -> Result<Vc<AssetIdent>> {
-        let mut ident = self.ident.owned().await?;
+        let ident = self
+            .ident
+            .owned()
+            .await?
+            .with_modifier(rcstr!("ecmascript library evaluate chunk"));
 
-        ident.add_modifier(rcstr!("ecmascript library evaluate chunk"));
-
-        Ok(AssetIdent::new(ident))
+        Ok(ident.into_vc())
     }
 
     #[turbo_tasks::function]

@@ -50,7 +50,13 @@ impl ServerReferenceModule {
 impl Module for ServerReferenceModule {
     #[turbo_tasks::function]
     async fn ident(&self) -> Result<Vc<AssetIdent>> {
-        Ok(self.server_ident.with_modifier(rcstr!("server reference")))
+        let ident = self
+            .server_ident
+            .owned()
+            .await?
+            .with_modifier(rcstr!("server reference"));
+
+        Ok(ident.into_vc())
     }
 
     #[turbo_tasks::function]

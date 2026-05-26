@@ -205,7 +205,8 @@ impl AppEntrypoint {
                     AssetIdent::from_path(
                         project.project_path().await?.join(this.import.as_str())?,
                     )
-                    .with_query(query.into()),
+                    .with_query(query.into())
+                    .into_vc(),
                     ChunkGroup::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?
@@ -674,7 +675,8 @@ impl AppEndpoint {
         let chunk_query = "?name=index";
 
         let ident = AssetIdent::from_path(project.project_path().await?.join(chunk_name)?)
-            .with_query(chunk_query.into());
+            .with_query(chunk_query.into())
+            .into_vc();
         let chunk_group_result = server_chunking_context
             .evaluated_chunk_group(
                 ident,

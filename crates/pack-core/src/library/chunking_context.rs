@@ -322,9 +322,9 @@ impl LibraryChunkingContext {
                 let content_hash = self.ecmascript_chunk_content_hash(ecmascript_chunk).await?;
                 filename = replace_content_hash_placeholder(&filename, &content_hash);
             };
-            Ok(AssetIdent::from_path(root.join(&filename)?))
+            Ok(AssetIdent::from_path(root.join(&filename)?).into_vc())
         } else {
-            Ok(AssetIdent::from_path(root.join(name)?))
+            Ok(AssetIdent::from_path(root.join(name)?).into_vc())
         }
     }
 
@@ -550,7 +550,7 @@ impl ChunkingContext for LibraryChunkingContext {
         _tag: Option<RcStr>,
     ) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
-        let source_path = original_asset_ident.path().await?;
+        let source_path = original_asset_ident.await?.path.clone();
         let basename = source_path.file_name();
         let content_hash = content
             .content_hash(no_hash_salt(), HashAlgorithm::Xxh3Hash64Hex)
