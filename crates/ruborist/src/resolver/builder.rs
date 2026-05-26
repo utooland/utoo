@@ -7,17 +7,16 @@
 //! - Hoisting (placing packages as high as possible in the tree)
 //! - Override rules
 //! - Different dependency types (prod, dev, peer, optional)
-//! - Parallel manifest preloading for performance
+//! - Demand-driven parallel manifest jobs for performance
 //!
-//! # Two-Phase Resolution
+//! # Demand BFS Resolution
 //!
-//! The builder uses a two-phase approach for optimal performance:
-//! 1. **Preload Phase**: Parallel fetch of all manifests to warm up caches
-//! 2. **Build Phase**: Sequential BFS traversal reading from cache
-//!
-//! This separation allows for maximum parallelism during network I/O
-//! while keeping the graph building logic simple and deterministic.
+//! The builder owns breadth-first traversal, per-run manifest cache, waiters,
+//! and inflight de-duplication. Provider tasks only execute concrete manifest
+//! jobs such as fetch, parse, extract, and persistence.
 
+#[cfg(feature = "http-tarball")]
+use crate::model::manifest::NodeManifest;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,12 +26,11 @@ use std::sync::Arc;
 use anyhow::Context as _;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
-use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::preload::{PreloadConfig, preload_manifests};
+use crate::resolver::demand::{ResolverManifestCache, run_main_loop_bfs};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::service::ProjectCacheData;
+use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -100,15 +98,15 @@ pub use super::edges::{
 };
 pub use crate::model::node::{DevDeps, PeerDeps};
 
+const DEFAULT_CONCURRENCY: usize = 128;
+
 /// Configuration for dependency resolution.
 #[derive(Debug, Clone)]
 pub struct BuildDepsConfig {
     /// How to handle peer dependencies.
     pub peer_deps: PeerDeps,
-    /// Maximum number of concurrent manifest fetches during preload
+    /// Maximum number of concurrent manifest jobs.
     pub concurrency: usize,
-    /// Whether to skip preload phase (useful when cache is already warm)
-    pub skip_preload: bool,
     /// Cache directory for git clones (defaults to `~/.cache/nm`)
     pub cache_dir: Option<PathBuf>,
     /// Shared dedup cache for concurrent git clone operations
@@ -118,8 +116,7 @@ pub struct BuildDepsConfig {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
-    /// Host-provided project cache used to seed the resolver-owned manifest
-    /// cache. Consumed by the demand mainloop; the preload path ignores it.
+    /// Host-provided project cache used to seed the resolver-owned manifest cache.
     pub project_cache: Option<ProjectCacheData>,
 }
 
@@ -127,8 +124,7 @@ impl Default for BuildDepsConfig {
     fn default() -> Self {
         Self {
             peer_deps: PeerDeps::Skip,
-            concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
-            skip_preload: false,
+            concurrency: DEFAULT_CONCURRENCY,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
@@ -151,12 +147,6 @@ impl BuildDepsConfig {
         self
     }
 
-    /// Create config that skips preload phase
-    pub fn with_skip_preload(mut self, skip: bool) -> Self {
-        self.skip_preload = skip;
-        self
-    }
-
     /// Set the cache directory for git clones
     pub fn with_cache_dir(mut self, cache_dir: PathBuf) -> Self {
         self.cache_dir = Some(cache_dir);
@@ -169,7 +159,6 @@ impl BuildDepsConfig {
         self
     }
 
-    /// Seed the resolver-owned manifest cache with a host-provided project cache.
     pub fn with_project_cache(mut self, project_cache: Option<ProjectCacheData>) -> Self {
         self.project_cache = project_cache;
         self
@@ -184,44 +173,6 @@ struct NodeFlags {
     is_dev: bool,
     is_optional: bool,
     is_peer: bool,
-}
-
-/// Gather all unresolved deps from root and workspace nodes for preloading.
-///
-/// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
-/// resolved at edge creation time, so by the time this runs they are already
-/// concrete registry specs.
-fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
-    use crate::spec::SpecStr;
-    use std::collections::HashSet;
-
-    let mut deps = HashSet::new();
-
-    let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
-        for (_, edge) in graph.get_dependency_edges(node_index) {
-            if edge.valid {
-                continue;
-            }
-            if peer_deps == PeerDeps::Skip && edge.edge_type == EdgeType::Peer {
-                continue;
-            }
-            if edge.spec.is_registry_spec() {
-                deps.insert((edge.name.clone(), edge.spec.clone()));
-            }
-        }
-    };
-
-    collect(graph.root_index, &mut deps);
-
-    for node_index in graph.graph.node_indices() {
-        if let Some(node) = graph.get_node(node_index)
-            && node.is_workspace()
-        {
-            collect(node_index, &mut deps);
-        }
-    }
-
-    deps.into_iter().collect()
 }
 
 /// Create a new package node for a resolved dependency.
@@ -678,11 +629,15 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -700,215 +655,80 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
 
 /// Build the complete dependency tree with full configuration.
 ///
-/// This is the most flexible entry point for dependency resolution. It performs:
-/// 1. **Preload Phase** (unless skipped): Parallel fetch of all manifests to warm up caches
-/// 2. **Build Phase**: Sequential BFS traversal reading from cache
+/// This is the most flexible entry point for dependency resolution. It runs
+/// demand BFS and schedules manifest jobs only when the current frontier needs
+/// them.
 ///
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `config` - Build configuration (concurrency, peer_deps, skip_preload)
+/// * `config` - Build configuration (concurrency, peer_deps, cache_dir, etc.)
 /// * `receiver` - Event receiver for handling build events
 ///
 /// # Example
 /// ```ignore
 /// let config = BuildDepsConfig::default()
-///     .with_concurrency(50)
-///     .with_skip_preload(true); // Skip preload if cache is warm
+///     .with_concurrency(50);
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
+    build_deps_with_config_output(graph, registry, config, receiver)
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn build_deps_with_config_output<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: BuildDepsConfig,
+    receiver: &E,
+) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     tracing::debug!(
-        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
+        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
-        config.concurrency,
-        config.skip_preload
+        config.concurrency
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
-
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
     });
 
-    Ok(())
-}
-
-/// Run the preload phase to warm up the cache with manifests.
-async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
-    graph: &DependencyGraph,
-    registry: &R,
-    config: &BuildDepsConfig,
-    receiver: &E,
-) {
-    if config.skip_preload {
-        return;
-    }
-
-    let start = tokio::time::Instant::now();
-
-    let initial_deps = gather_preload_deps(graph, config.peer_deps);
-    if initial_deps.is_empty() {
-        return;
-    }
-
-    tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    receiver.on_event(BuildEvent::PreloadStart {
-        count: initial_deps.len(),
-    });
-
-    let preload_config = PreloadConfig {
-        peer_deps: config.peer_deps,
-        concurrency: config.concurrency,
-    };
-
-    let stats = preload_manifests(
-        initial_deps,
-        registry,
-        preload_config,
-        receiver,
-        |_name, _manifest| {
-            // Registry client's resolve_package should cache the manifest
-        },
-    )
-    .await;
-
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
-        stats.success_count,
-        stats.failed_count
-    );
-    receiver.on_event(BuildEvent::PreloadComplete {
-        success: stats.success_count,
-        failed: stats.failed_count,
-    });
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
-}
-
-/// Run the BFS traversal phase to build the dependency tree.
-async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
-    graph: &mut DependencyGraph,
-    registry: &R,
-    config: &BuildDepsConfig,
-    receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
-    let start = tokio::time::Instant::now();
-
-    let mut current_level = vec![graph.root_index];
-
-    while !current_level.is_empty() {
-        receiver.on_event(BuildEvent::LevelStart {
-            node_count: current_level.len(),
-        });
-        let mut next_level = Vec::new();
-
-        for node_index in current_level {
-            // Add workspace nodes to next level
-            for (_, dep) in graph.get_dependency_edges(node_index) {
-                if dep.valid
-                    && let Some(to) = dep.to
-                    && let Some(n) = graph.get_node(to)
-                    && n.is_workspace()
-                    && node_index == graph.root_index
-                {
-                    next_level.push(to);
-                }
-            }
-
-            // Process unresolved dependencies
-            let unresolved = collect_unresolved_edges(graph, node_index);
-            receiver.on_event(BuildEvent::DependencyCount {
-                count: unresolved.len(),
-            });
-
-            for edge_info in unresolved {
-                receiver.on_event(BuildEvent::Resolving {
-                    name: &edge_info.name,
-                });
-                let result = process_dependency(graph, registry, node_index, &edge_info, config)
-                    .await
-                    .map_err(|inner| {
-                        let mut chain = graph.logical_ancestry(node_index);
-                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
-                        ResolveError::WithChain {
-                            chain,
-                            source: Box::new(inner),
-                        }
-                    });
-                match result? {
-                    ProcessResult::Created(idx) => {
-                        // Extract node info for events
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Resolved {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-
-                            // Send PackagePlaced for pipeline cloning
-                            if let NodeManifest::Registry(ref manifest) = node.manifest {
-                                // Get parent path for dependency ordering
-                                let parent_path = graph
-                                    .get_node(node_index)
-                                    .map(|parent| parent.path.as_path());
-                                receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.as_ref().into(),
-                                    path: &node.path,
-                                    parent_path,
-                                });
-                            }
-                        }
-
-                        next_level.push(idx);
-                    }
-                    ProcessResult::Reused(idx) => {
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Reused {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-                        }
-                    }
-                    ProcessResult::Skipped => {
-                        receiver.on_event(BuildEvent::Skipped {
-                            name: &edge_info.name,
-                            spec: &edge_info.spec,
-                        });
-                    }
-                }
-            }
-        }
-
-        receiver.on_event(BuildEvent::LevelComplete {
-            next_level_count: next_level.len(),
-        });
-        current_level = next_level;
-    }
-
-    tracing::debug!("Build phase: {:?}", start.elapsed());
-    Ok(())
+    Ok(manifest_cache)
 }
 
 // ============================================================================
@@ -932,10 +752,14 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -946,12 +770,17 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R, E>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 
@@ -1124,8 +953,6 @@ mod tests {
         assert_eq!(lodash.version, Some("4.17.21".to_string()));
     }
 
-    // Helper to create a graph with source -> target for testing update_node_type_from_edge
-    // Returns (graph, source_index, target_index) where source is NOT root
     fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
         let root_pkg = PackageJson::new("root", "1.0.0");
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
@@ -1273,13 +1100,6 @@ mod tests {
         assert_eq!(edges.get("lodash"), Some(&"^4.17.0".to_string()));
         assert_eq!(edges.get("react"), Some(&"^18.0.0".to_string()));
         assert_eq!(edges.get("tslib"), Some(&"^2.0.0".to_string()));
-
-        // Since edges are now resolved, gather_preload_deps should find them
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        let deps_map: HashMap<String, String> = deps.into_iter().collect();
-        assert_eq!(deps_map.get("lodash"), Some(&"^4.17.0".to_string()));
-        assert_eq!(deps_map.get("react"), Some(&"^18.0.0".to_string()));
-        assert_eq!(deps_map.get("tslib"), Some(&"^2.0.0".to_string()));
     }
 
     #[test]
@@ -1307,9 +1127,5 @@ mod tests {
             .map(|(_, e)| (e.name.clone(), e.spec.clone()))
             .collect();
         assert_eq!(edges.get("missing-pkg"), Some(&"catalog:".to_string()));
-
-        // gather_preload_deps should NOT include it (not a registry spec)
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        assert!(deps.is_empty());
     }
 }

@@ -10,30 +10,10 @@ pub use crate::model::tarball_info::PackageTarballInfo;
 /// Events emitted during dependency resolution.
 #[derive(Debug, Clone, Copy)]
 pub enum BuildEvent<'a> {
-    /// Starting preload phase with N initial dependencies.
-    PreloadStart { count: usize },
-
-    /// More dependencies were discovered and queued for preloading.
-    PreloadQueued { count: usize },
-
-    /// A fetch task was started for a package.
-    PreloadFetching { name: &'a str },
-
-    /// A package was preloaded successfully.
-    PreloadProgress {
-        name: &'a str,
-        version: &'a str,
-        /// Current count of preloaded packages
-        current: usize,
-    },
-
     /// A package was fully resolved with download info.
     /// This event enables pipeline downloading - tarball can be downloaded
     /// immediately while other manifests are still being fetched.
     PackageResolved(PackageTarballInfo<'a>),
-
-    /// Preload phase completed with success/failed counts.
-    PreloadComplete { success: usize, failed: usize },
 
     /// Starting a new BFS level with N nodes to process.
     LevelStart { node_count: usize },

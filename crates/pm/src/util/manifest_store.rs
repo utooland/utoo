@@ -11,11 +11,9 @@
 //! Serialization and file writes run on a dedicated writer thread so manifest
 //! persistence does not occupy async runtime workers or Tokio's blocking pool.
 
-use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
 
 use async_trait::async_trait;
@@ -23,11 +21,7 @@ use serde::Serialize;
 use utoo_ruborist::model::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
-use crate::util::json::{read_json_file, write_compact_sync};
-
-/// Opportunistic writer backlog. If disk stalls beyond this, new cache writes
-/// are dropped instead of letting resolver memory grow without bound.
-const MANIFEST_WRITE_QUEUE_CAPACITY: usize = 1024;
+use crate::util::json::read_json_file;
 
 pub struct DiskManifestStore {
     cache_dir: PathBuf,
@@ -112,13 +106,13 @@ enum ManifestWriteJob {
 }
 
 struct ManifestWriter {
-    tx: SyncSender<ManifestWriteJob>,
+    tx: Sender<ManifestWriteJob>,
     handle: JoinHandle<()>,
 }
 
 impl ManifestWriter {
     fn spawn() -> Self {
-        let (tx, rx) = mpsc::sync_channel(MANIFEST_WRITE_QUEUE_CAPACITY);
+        let (tx, rx) = mpsc::channel();
         let handle = std::thread::Builder::new()
             .name("utoo-manifest-store".to_string())
             .spawn(move || {
@@ -138,14 +132,8 @@ impl ManifestWriter {
     }
 
     fn enqueue(&self, job: ManifestWriteJob) {
-        match self.tx.try_send(job) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
-                tracing::debug!("Manifest store writer queue full; dropping cache write");
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                tracing::debug!("Manifest store writer stopped before accepting write");
-            }
+        if self.tx.send(job).is_err() {
+            tracing::debug!("Manifest store writer stopped before accepting write");
         }
     }
 
@@ -157,23 +145,27 @@ impl ManifestWriter {
     }
 }
 
-/// Apply the manifest-cache write policy on top of
-/// [`crate::util::json::write_compact_sync`]: on `NotFound`, create the
-/// parent directory once and retry — this is how the resolver hot path
-/// avoids the up-front `mkdir` syscall on every warm-cache rewrite. All
-/// errors are swallowed at the `debug` log level because the disk cache is
-/// opportunistic; a dropped write only costs a future cache miss.
+/// Serialize `value` and write to `path`. On `NotFound`, create the parent
+/// directory and retry once — saves the mkdir syscall on every warm-cache
+/// rewrite. Errors are logged at debug; disk cache is opportunistic.
 fn write_json_sync<T: Serialize>(path: &Path, value: &T) {
-    match write_compact_sync(path, value) {
+    let bytes = match serde_json::to_vec(value) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::debug!("Failed to serialize {path:?}: {e}");
+            return;
+        }
+    };
+    match std::fs::write(path, &bytes) {
         Ok(()) => {}
-        Err(e) if e.kind() == ErrorKind::NotFound => {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if let Some(parent) = path.parent()
-                && let Err(e) = fs::create_dir_all(parent)
+                && let Err(e) = std::fs::create_dir_all(parent)
             {
                 tracing::debug!("Failed to create {parent:?}: {e}");
                 return;
             }
-            if let Err(e) = write_compact_sync(path, value) {
+            if let Err(e) = std::fs::write(path, &bytes) {
                 tracing::debug!("Failed to write {path:?}: {e}");
             }
         }

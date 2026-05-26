@@ -123,7 +123,7 @@ mod tests {
         }));
 
         // Should not forward other events
-        receiver.on_event(BuildEvent::PreloadStart { count: 10 });
+        receiver.on_event(BuildEvent::LevelStart { node_count: 10 });
 
         // Only one message should be in the download channel
         assert!(channels.download_rx.try_recv().is_ok());
