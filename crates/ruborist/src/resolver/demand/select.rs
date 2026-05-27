@@ -38,14 +38,6 @@ fn resolve_version_from_versions<RE>(
     Ok(Some(version))
 }
 
-fn resolve_version_from_full_manifest<RE>(
-    edge: &DependencyEdgeInfo,
-    full: &FullManifest,
-    real_spec: &str,
-) -> Result<Option<String>, ResolveError<RE>> {
-    resolve_version_from_versions(edge, &full.name, full.into(), real_spec)
-}
-
 /// What to do with one registry dependency edge, decided from the current store
 /// without mutating it. The caller applies the side effects (cache alias,
 /// parking the waiter, enqueueing the fetch), so this stays a pure, testable
@@ -93,6 +85,28 @@ enum ExactFetch {
     Version,
 }
 
+/// Terminal outcome when `(name, lookup_key)` is already settled in the store:
+/// a recorded failure -> [`EdgeStep::Fail`], or a cached manifest ->
+/// [`EdgeStep::Resolve`]. `spec` is the edge's requested spec; it's used for the
+/// failure message and, when the lookup key is a resolved version
+/// (`lookup_key != spec`), to alias the manifest back under the spec.
+fn settled_step(
+    state: &ManifestState,
+    name: &str,
+    lookup_key: &str,
+    spec: &str,
+) -> Option<EdgeStep> {
+    if let Some(error) = state.get_version_failure(name, lookup_key) {
+        return Some(EdgeStep::Fail(format!("{name}@{spec}: {error}")));
+    }
+    state
+        .get_version_manifest(name, lookup_key)
+        .map(|manifest| EdgeStep::Resolve {
+            manifest,
+            alias: (lookup_key != spec).then(|| (name.to_string(), spec.to_string())),
+        })
+}
+
 /// Decide what to do with `edge` given the current store. `Err` is a fatal
 /// version-resolution error; `Ok(EdgeStep::Fail)` is a recorded fetch failure
 /// the caller treats as skip-or-error by dependency kind.
@@ -104,24 +118,18 @@ pub(super) fn select_edge<RE>(
     mode: ResolutionMode,
 ) -> Result<EdgeStep, ResolveError<RE>> {
     match mode {
+        // Semver registries resolve the spec server-side, so a cached/failed
+        // spec settles the edge; otherwise fetch the version manifest directly.
         ResolutionMode::Semver => {
-            // The registry resolves the spec server-side: fetch it directly.
-            if let Some(error) = state.get_version_failure(name, spec) {
-                return Ok(EdgeStep::Fail(format!("{name}@{spec}: {error}")));
-            }
-            if let Some(manifest) = state.get_version_manifest(name, spec) {
-                return Ok(EdgeStep::Resolve {
-                    manifest,
-                    alias: None,
-                });
-            }
-            Ok(EdgeStep::Park {
-                wait: WaitKey::Version((name.to_string(), spec.to_string())),
-                fetch: FetchPlan::Registry {
-                    name: name.to_string(),
-                    spec: spec.to_string(),
-                },
-            })
+            Ok(
+                settled_step(state, name, spec, spec).unwrap_or_else(|| EdgeStep::Park {
+                    wait: WaitKey::Version((name.to_string(), spec.to_string())),
+                    fetch: FetchPlan::Registry {
+                        name: name.to_string(),
+                        spec: spec.to_string(),
+                    },
+                }),
+            )
         }
         ResolutionMode::FullManifest => select_full_manifest::<RE>(state, edge, name, spec),
     }
@@ -135,39 +143,42 @@ fn select_full_manifest<RE>(
     name: &str,
     spec: &str,
 ) -> Result<EdgeStep, ResolveError<RE>> {
+    // A failed full-manifest fetch is a package-level failure (no version can
+    // resolve), so it shadows the per-version checks below.
     if let Some(error) = state.full.failures.get(name) {
         return Ok(EdgeStep::Fail(format!("{name}: {error}")));
     }
-    if let Some(error) = state.get_version_failure(name, spec) {
-        return Ok(EdgeStep::Fail(format!("{name}@{spec}: {error}")));
-    }
-    if let Some(manifest) = state.get_version_manifest(name, spec) {
-        return Ok(EdgeStep::Resolve {
-            manifest,
-            alias: None,
-        });
+    if let Some(step) = settled_step(state, name, spec, spec) {
+        return Ok(step);
     }
 
+    // Resolve the version client-side from whatever version source is cached.
     if let Some(full) = state.full.cache.get(name).cloned() {
-        let Some(version) = resolve_version_from_full_manifest::<RE>(edge, &full, spec)? else {
+        let Some(version) = resolve_version_from_versions::<RE>(edge, name, (&*full).into(), spec)?
+        else {
             return Ok(EdgeStep::Skip);
         };
-        return select_resolved_version::<RE>(
+        return Ok(select_resolved_version(
             state,
             name,
             spec,
             version,
             ExactFetch::Extract(full),
-        );
+        ));
     }
-
     if let Some(versions) = state.versions_cache.get(name).cloned() {
         let Some(version) =
             resolve_version_from_versions::<RE>(edge, name, (&*versions).into(), spec)?
         else {
             return Ok(EdgeStep::Skip);
         };
-        return select_resolved_version::<RE>(state, name, spec, version, ExactFetch::Version);
+        return Ok(select_resolved_version(
+            state,
+            name,
+            spec,
+            version,
+            ExactFetch::Version,
+        ));
     }
 
     Ok(EdgeStep::Park {
@@ -181,21 +192,15 @@ fn select_full_manifest<RE>(
 
 /// Decide an edge whose exact `version` is already known (resolved
 /// client-side). Shared by the full-manifest-cache and versions-list paths.
-fn select_resolved_version<RE>(
+fn select_resolved_version(
     state: &ManifestState,
     name: &str,
     spec: &str,
     version: String,
     fetch: ExactFetch,
-) -> Result<EdgeStep, ResolveError<RE>> {
-    if let Some(error) = state.get_version_failure(name, &version) {
-        return Ok(EdgeStep::Fail(format!("{name}@{spec}: {error}")));
-    }
-    if let Some(manifest) = state.get_version_manifest(name, &version) {
-        return Ok(EdgeStep::Resolve {
-            manifest,
-            alias: Some((name.to_string(), spec.to_string())),
-        });
+) -> EdgeStep {
+    if let Some(step) = settled_step(state, name, &version, spec) {
+        return step;
     }
     let fetch = match fetch {
         ExactFetch::Extract(full) => FetchPlan::Extract {
@@ -208,14 +213,13 @@ fn select_resolved_version<RE>(
             version: version.clone(),
         },
     };
-    Ok(EdgeStep::Park {
+    EdgeStep::Park {
         wait: WaitKey::Version((name.to_string(), version)),
         fetch,
-    })
+    }
 }
 
 /// How a registry resolves versions: server-side semver vs full-manifest fetch.
-/// Replaces a bare `supports_semver: bool` threaded through the resolve loop.
 #[derive(Clone, Copy)]
 pub(crate) enum ResolutionMode {
     /// Registry resolves semver server-side — fetch version manifests directly.
