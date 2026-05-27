@@ -396,7 +396,8 @@ pub mod mock {
         }
     }
 
-    #[async_trait::async_trait(?Send)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
     impl crate::service::ManifestProvider for MockRegistryClient {
         async fn execute_manifest_job(
             &self,

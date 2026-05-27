@@ -80,21 +80,18 @@ pub enum ManifestJobDone {
 /// The driver clones the provider for each job it issues, so implementors
 /// should keep `Clone` cheap (for example by storing shared state behind `Arc`).
 ///
-/// The demand loop runs single-threaded — it polls fetch jobs on a
-/// `FuturesUnordered` and never spawns them onto other threads — so the
-/// provider needs no `Send`/`Sync` bound and uses `?Send` futures uniformly
-/// across native and wasm.
+/// On native the driver runs each fetch job as a `tokio::spawn`ed task, so the
+/// provider is `Send + Sync` and its job futures are `Send` — fetch + parse for
+/// independent manifests run in parallel across the multi-threaded runtime. On
+/// wasm32 there are no threads, so the provider is `?Send` and jobs run via
+/// `spawn_local`.
 ///
-/// Because the loop is single-threaded, CPU-bound work inside a job (manifest
-/// JSON parsing, version extraction) must be offloaded by the implementor, and
-/// the offload strategy differs per platform: on native, hand it to a CPU
-/// thread pool (the `*_off_runtime` helpers use `rayon` plus a oneshot
-/// back-channel) so the async runtime keeps driving network IO for the other
-/// in-flight jobs; on wasm32 there are no threads, so the same work runs
-/// inline. Confining this platform split to the provider is what lets the
-/// driver stay single-threaded and platform-agnostic.
-#[async_trait(?Send)]
-pub trait ManifestProvider: RegistryClient + Clone + 'static {
+/// CPU-bound work inside a job (manifest JSON parsing, version extraction) is
+/// offloaded by the implementor: on native the `*_off_runtime` helpers use
+/// `rayon` plus a oneshot back-channel; on wasm32 the same work runs inline.
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+pub trait ManifestProvider: RegistryClient + Clone + Send + Sync + 'static {
     /// Execute one manifest job. The provider owns I/O, persistence, and
     /// parse/extract offloading; scheduling, waiters, and inflight
     /// de-duplication stay in the demand loop.

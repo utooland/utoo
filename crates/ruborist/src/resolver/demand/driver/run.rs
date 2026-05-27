@@ -353,6 +353,9 @@ where
                 let Some(done) = ready else {
                     break;
                 };
+                let done = done.map_err(|e| {
+                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+                })?;
 
                 apply_fetch_result(
                     &mut state,
@@ -397,6 +400,9 @@ where
                 }
                 break;
             };
+            let done = done.map_err(|e| {
+                registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
+            })?;
 
             apply_fetch_result(
                 &mut state,
@@ -474,7 +480,8 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait(?Send)]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
     impl ManifestProvider for CountingRegistry {
         async fn execute_manifest_job(
             &self,

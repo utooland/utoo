@@ -52,7 +52,10 @@ impl FetchDone {
     }
 }
 
-pub(crate) type FetchFuture = std::pin::Pin<Box<dyn std::future::Future<Output = FetchDone>>>;
+/// A spawned fetch job. On native it's a `tokio::spawn` task (multi-threaded
+/// runtime → fetch + parse for independent manifests run in parallel); on wasm
+/// it's a `spawn_local` task. Either way the driver awaits the `JoinHandle`.
+pub(crate) type FetchFuture = tokio::task::JoinHandle<FetchDone>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FetchPriority {

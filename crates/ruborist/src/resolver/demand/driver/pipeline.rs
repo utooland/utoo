@@ -64,11 +64,24 @@ where
     }
 }
 
+/// Spawn a fetch job. Native runs it on the multi-threaded runtime so
+/// independent fetch + parse jobs progress in parallel; wasm has no threads, so
+/// it runs on the current local set.
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_registry_manifest<R>(registry: R, request: ManifestJob) -> FetchFuture
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    tokio::spawn(fetch_registry_manifest_inner(registry, request))
+}
+
+#[cfg(target_arch = "wasm32")]
 fn fetch_registry_manifest<R>(registry: R, request: ManifestJob) -> FetchFuture
 where
     R: ManifestProvider,
 {
-    Box::pin(fetch_registry_manifest_inner(registry, request))
+    tokio::task::spawn_local(fetch_registry_manifest_inner(registry, request))
 }
 
 pub(super) fn pump_fetches<R>(
