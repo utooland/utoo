@@ -284,19 +284,24 @@ impl InstallService {
     }
 
     pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
-        // Prepare global package directory and package.json
-        let package_path = prepare_global_package_json(npm_spec, prefix)
+        // Install the package as a *dependency* of a generated wrapper project
+        // rather than as a root project. As a dependency it runs the install
+        // lifecycle (preinstall/install/postinstall, e.g. esbuild's binary
+        // download) but never prepare/prepublish, and its devDependencies are
+        // not installed — matching `npm install -g`.
+        let (name, wrapper_dir) = prepare_global_package_json(npm_spec, prefix)
             .await
             .context("Failed to prepare global package.json")?;
 
         tracing::debug!("Installing global package: {npm_spec}");
 
-        // Install dependencies (global install never omits)
-        Self::install(ScriptPolicy::Run, &package_path, &HashSet::new())
+        Self::install(ScriptPolicy::Run, &wrapper_dir, &HashSet::new())
             .await
             .context("Failed to install global package dependencies")?;
 
-        // Create package info from path
+        // The package now lives at `<wrapper_dir>/node_modules/<name>`; link its
+        // bins into the global bin dir so they are runnable.
+        let package_path = wrapper_dir.join("node_modules").join(&name);
         let package_info = PackageInfo::from_path(&package_path)
             .await
             .context("Failed to create package info from path")?;

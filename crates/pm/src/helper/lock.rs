@@ -16,8 +16,6 @@ use super::workspace::find_workspace_path;
 use crate::fs;
 use crate::helper::workspace::find_workspaces;
 use crate::util::cli_enum::{PackageAction, SaveType};
-use crate::util::cloner::clone_package;
-use crate::util::downloader::{is_git_url, resolve_cache_path};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
 
@@ -230,13 +228,30 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
     }
 }
 
-pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
-    // Parse package name and version
-    let (name, _version, version_spec) = resolve_package_spec(npm_spec).await?;
-    let lib_path = match prefix {
+/// Generate (or extend) the wrapper project that holds globally-installed
+/// packages as *dependencies*, returning the resolved package name and the
+/// wrapper project directory.
+///
+/// Globally-installed packages (`utoo install -g`, `utoo x`) are installed as
+/// dependencies of this wrapper rather than as root projects. As dependencies
+/// they run the install lifecycle (`preinstall`/`install`/`postinstall`, e.g.
+/// esbuild's binary download in `postinstall`) but never `prepare`/`prepublish`,
+/// and their `devDependencies` are not installed — matching `npm install -g`
+/// and bun. This means we no longer rewrite the package's own package.json: the
+/// previous root-install approach deleted `devDependencies`/`prepare` in place,
+/// which both ran prepare on published tarballs (wrong) and raced under
+/// concurrent installs sharing the cache dir.
+pub async fn prepare_global_package_json(
+    npm_spec: &str,
+    prefix: Option<&str>,
+) -> Result<(String, PathBuf)> {
+    let (name, version, _version_spec) = resolve_package_spec(npm_spec).await?;
+
+    // Wrapper project root = parent of the global node_modules dir.
+    // Unix: `<prefix>/lib`  ·  Windows: `<prefix>`.
+    let global_node_modules = match prefix {
         Some(prefix) => PathBuf::from(prefix).join(GLOBAL_NODE_MODULES),
         None => {
-            // Get current executable path
             let current_exe = std::env::current_exe()?;
             current_exe
                 .parent()
@@ -246,88 +261,68 @@ pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -
                 .join(GLOBAL_NODE_MODULES)
         }
     };
+    let wrapper_dir = global_node_modules
+        .parent()
+        .ok_or_else(|| {
+            anyhow!(
+                "global node_modules has no parent: {}",
+                global_node_modules.display()
+            )
+        })?
+        .to_path_buf();
+    fs::create_dir_all(&wrapper_dir).await?;
 
-    tracing::debug!("lib_path: {}", lib_path.to_string_lossy());
+    upsert_wrapper_dependency(&wrapper_dir, &name, &version).await?;
 
-    // Create global package directory
-    let package_path = lib_path.join(&name);
-    fs::create_dir_all(&package_path).await?;
+    tracing::debug!("wrapper_dir: {}", wrapper_dir.to_string_lossy());
+    Ok((name, wrapper_dir))
+}
 
-    // Get package info from registry
-    let resolved = resolve_package(&Context::registry(), &name, &version_spec)
-        .await
-        .context("Failed to resolve package")?;
+/// Add or update `name@version` in the wrapper project's `package.json`
+/// dependencies, accumulating across `install -g` calls.
+///
+/// Written atomically (temp file + rename) so concurrent writers never observe
+/// a half-written file; skips the write entirely when the entry is already
+/// present and identical (the common concurrent `utx` re-install case).
+async fn upsert_wrapper_dependency(wrapper_dir: &Path, name: &str, version: &str) -> Result<()> {
+    let pkg_json_path = wrapper_dir.join("package.json");
 
-    // Get tarball URL from manifest
-    let tarball_url = resolved
-        .manifest
-        .dist
-        .tarball
-        .as_ref()
-        .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
+    let mut package_json: Value = if fs::try_exists(&pkg_json_path).await.unwrap_or(false) {
+        let content = fs::read_to_string(&pkg_json_path).await?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
 
-    // Download and extract package to cache.
-    let cache_path = resolve_cache_path(&name, &resolved.version, tarball_url)
-        .await
-        .ok_or_else(|| anyhow!("Failed to download package {name}"))?;
-
-    // If the package has install scripts, create a flag file
-    // in linux, we can use hardlink when FICLONE is not supported
-    // so we need to copy the file to the package directory to avoid effect other packages
-    if resolved.manifest.has_install_script == Some(true) {
-        let has_install_script_flag_path = cache_path.join("_hasInstallScript");
-        if !fs::try_exists(&has_install_script_flag_path)
-            .await
-            .unwrap_or(false)
-        {
-            fs::write(has_install_script_flag_path, "").await?;
-        }
-    }
-
-    // Clone to package directory
-    tracing::debug!(
-        "Cloning {} to {}",
-        cache_path.display(),
-        package_path.display()
-    );
-    clone_package(
-        &cache_path,
-        &package_path,
-        &name,
-        &resolved.version,
-        !is_git_url(tarball_url),
-    )
-    .await
-    .context("Failed to clone package")?;
-
-    // Remove devDependencies from package.json
-    let package_json_path = package_path.join("package.json");
-    let package_json_content = fs::read_to_string(&package_json_path).await?;
-    let mut package_json: Value = serde_json::from_str(&package_json_content)?;
-
-    // Remove specified dependency fields and scripts.prepare
-    let package_obj = package_json
+    let obj = package_json
         .as_object_mut()
-        .expect("package.json must be an object");
-    package_obj.remove("devDependencies");
+        .ok_or_else(|| anyhow!("wrapper package.json is not a JSON object"))?;
+    obj.entry("name")
+        .or_insert_with(|| Value::String("utoo-global".to_string()));
+    obj.entry("version")
+        .or_insert_with(|| Value::String("0.0.0".to_string()));
+    obj.entry("private").or_insert(Value::Bool(true));
 
-    // Remove scripts.prepare if it exists
-    if let Some(scripts) = package_obj.get_mut("scripts")
-        && let Some(scripts_obj) = scripts.as_object_mut()
-    {
-        scripts_obj.remove("prepare");
-        scripts_obj.remove("prepublish");
+    let deps = obj
+        .entry("dependencies")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let deps_obj = deps
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("wrapper dependencies is not a JSON object"))?;
+
+    let new_value = Value::String(version.to_string());
+    if deps_obj.get(name) == Some(&new_value) {
+        // Already recorded (e.g. a concurrent utx of the same package).
+        return Ok(());
     }
+    deps_obj.insert(name.to_string(), new_value);
 
-    // Write back the modified package.json
-    fs::write(
-        &package_json_path,
-        serde_json::to_string_pretty(&package_json)?,
-    )
-    .await?;
+    let content = serde_json::to_string_pretty(&package_json)?;
+    let tmp_path = wrapper_dir.join(format!(".package.json.{}.tmp", std::process::id()));
+    fs::write(&tmp_path, content).await?;
+    fs::rename(&tmp_path, &pkg_json_path).await?;
 
-    tracing::debug!("package_path: {}", package_path.to_string_lossy());
-    Ok(package_path)
+    Ok(())
 }
 
 /// Extract the relative package name from a package directory path string.
