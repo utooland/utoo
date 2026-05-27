@@ -10,7 +10,7 @@ use crate::resolver::edges::DependencyEdgeInfo;
 use crate::resolver::registry::ResolveError;
 use crate::resolver::version::resolve_target_version;
 
-use super::state::ManifestState;
+use super::state::{ManifestState, PackageVersions};
 
 fn resolve_version_from_versions<RE>(
     edge: &DependencyEdgeInfo,
@@ -143,51 +143,53 @@ fn select_full_manifest<RE>(
     name: &str,
     spec: &str,
 ) -> Result<EdgeStep, ResolveError<RE>> {
-    // A failed full-manifest fetch is a package-level failure (no version can
-    // resolve), so it shadows the per-version checks below.
-    if let Some(error) = state.full.failures.get(name) {
-        return Ok(EdgeStep::Fail(format!("{name}: {error}")));
-    }
+    // A cached or failed version for the spec settles the edge first — a cached
+    // manifest still resolves even if the package's full fetch later failed.
     if let Some(step) = settled_step(state, name, spec, spec) {
         return Ok(step);
     }
 
-    // Resolve the version client-side from whatever version source is cached.
-    if let Some(full) = state.full.cache.get(name).cloned() {
-        let Some(version) = resolve_version_from_versions::<RE>(edge, name, (&*full).into(), spec)?
-        else {
-            return Ok(EdgeStep::Skip);
-        };
-        return Ok(select_resolved_version(
-            state,
-            name,
-            spec,
-            version,
-            ExactFetch::Extract(full),
-        ));
+    // Otherwise resolve a version client-side from the package's cached source.
+    match state.package(name) {
+        Some(PackageVersions::Failed(error)) => Ok(EdgeStep::Fail(format!("{name}: {error}"))),
+        Some(PackageVersions::Full(full)) => {
+            let full = Arc::clone(full);
+            let Some(version) =
+                resolve_version_from_versions::<RE>(edge, name, (&*full).into(), spec)?
+            else {
+                return Ok(EdgeStep::Skip);
+            };
+            Ok(select_resolved_version(
+                state,
+                name,
+                spec,
+                version,
+                ExactFetch::Extract(full),
+            ))
+        }
+        Some(PackageVersions::List(list)) => {
+            let list = Arc::clone(list);
+            let Some(version) =
+                resolve_version_from_versions::<RE>(edge, name, (&*list).into(), spec)?
+            else {
+                return Ok(EdgeStep::Skip);
+            };
+            Ok(select_resolved_version(
+                state,
+                name,
+                spec,
+                version,
+                ExactFetch::Version,
+            ))
+        }
+        None => Ok(EdgeStep::Park {
+            wait: WaitKey::Full(name.to_string()),
+            fetch: FetchPlan::Registry {
+                name: name.to_string(),
+                spec: spec.to_string(),
+            },
+        }),
     }
-    if let Some(versions) = state.versions_cache.get(name).cloned() {
-        let Some(version) =
-            resolve_version_from_versions::<RE>(edge, name, (&*versions).into(), spec)?
-        else {
-            return Ok(EdgeStep::Skip);
-        };
-        return Ok(select_resolved_version(
-            state,
-            name,
-            spec,
-            version,
-            ExactFetch::Version,
-        ));
-    }
-
-    Ok(EdgeStep::Park {
-        wait: WaitKey::Full(name.to_string()),
-        fetch: FetchPlan::Registry {
-            name: name.to_string(),
-            spec: spec.to_string(),
-        },
-    })
 }
 
 /// Decide an edge whose exact `version` is already known (resolved
@@ -320,7 +322,7 @@ mod tests {
     #[test]
     fn full_manifest_failure_returns_fail() {
         let mut state = ManifestState::default();
-        state.full.failures.insert("pkg".into(), "gone".into());
+        state.set_package("pkg".into(), PackageVersions::Failed("gone".into()));
         let e = edge("pkg", "^1.0.0", EdgeType::Prod);
         match select(&state, &e, ResolutionMode::FullManifest) {
             EdgeStep::Fail(msg) => assert!(msg.contains("gone")),
@@ -344,10 +346,10 @@ mod tests {
     #[test]
     fn full_cache_resolves_version_then_parks_for_extract() {
         let mut state = ManifestState::default();
-        state
-            .full
-            .cache
-            .insert("pkg".into(), full_manifest("pkg", &["1.2.3"]));
+        state.set_package(
+            "pkg".into(),
+            PackageVersions::Full(full_manifest("pkg", &["1.2.3"])),
+        );
         let e = edge("pkg", "^1.0.0", EdgeType::Prod);
         match select(&state, &e, ResolutionMode::FullManifest) {
             EdgeStep::Park {
@@ -364,14 +366,35 @@ mod tests {
     #[test]
     fn optional_with_no_matching_version_skips() {
         let mut state = ManifestState::default();
-        state
-            .full
-            .cache
-            .insert("pkg".into(), full_manifest("pkg", &["1.2.3"]));
+        state.set_package(
+            "pkg".into(),
+            PackageVersions::Full(full_manifest("pkg", &["1.2.3"])),
+        );
         let e = edge("pkg", "^9.0.0", EdgeType::Optional);
         match select(&state, &e, ResolutionMode::FullManifest) {
             EdgeStep::Skip => {}
             _ => panic!("expected Skip"),
+        }
+    }
+
+    #[test]
+    fn cached_version_resolves_despite_package_failure() {
+        // A cached version manifest settles the edge even when the package's
+        // full-manifest fetch failed (e.g. a warm-cache hit + a flaky refetch).
+        let mut state = ManifestState::default();
+        state.set_package(
+            "pkg".into(),
+            PackageVersions::Failed("full fetch boom".into()),
+        );
+        state.cache_version(
+            "pkg".into(),
+            "^1.0.0".into(),
+            version_manifest("pkg", "1.2.3"),
+        );
+        let e = edge("pkg", "^1.0.0", EdgeType::Prod);
+        match select(&state, &e, ResolutionMode::FullManifest) {
+            EdgeStep::Resolve { manifest, .. } => assert_eq!(manifest.version, "1.2.3"),
+            _ => panic!("expected Resolve"),
         }
     }
 }

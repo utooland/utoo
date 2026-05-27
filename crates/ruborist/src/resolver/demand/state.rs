@@ -65,17 +65,32 @@ impl<K: Eq + Hash + Clone, V> ManifestSlot<K, V> {
     }
 }
 
-/// The per-run manifest store: one slot per manifest kind plus the versions
-/// lists. Read/written by the driver through the methods below; the driver owns
-/// scheduling separately (see [`super::queue`]).
+/// What the store knows about a package's available versions. A package has at
+/// most one source at a time — its full-manifest fetch failed, or we have its
+/// full manifest, or we have just its versions list (from a 304/abbreviated
+/// response). Folding these into one enum keeps the "at most one" invariant in
+/// the type and lets the resolver decide with a single lookup + `match`.
+pub(crate) enum PackageVersions {
+    /// The full-manifest fetch failed; no version of the package can resolve.
+    Failed(String),
+    /// Full manifest (all versions) — resolve a concrete version client-side.
+    Full(Arc<FullManifest>),
+    /// Versions list only — resolve a version, then fetch its manifest.
+    List(Arc<VersionsInfo>),
+}
+
+/// The per-run manifest store. `packages` holds each package's version source
+/// (failed / full manifest / versions list); `version` holds the resolved
+/// per-version manifests. Read/written by the driver through the methods below;
+/// scheduling lives separately (see [`super::queue`]).
 #[derive(Default)]
 pub(crate) struct ManifestState {
-    /// Full package manifests, keyed by package name.
-    pub(crate) full: ManifestSlot<String, FullManifest>,
-    /// Version manifests, keyed by `(name, spec)`.
+    /// Per-package version source/status, keyed by package name.
+    pub(crate) packages: HashMap<String, PackageVersions>,
+    /// Edges parked waiting on a package's full/versions fetch, keyed by name.
+    pub(crate) package_waiters: HashMap<String, Vec<WaitingEdge>>,
+    /// Resolved version manifests, keyed by `(name, spec)`.
     pub(crate) version: ManifestSlot<(String, String), CoreVersionManifest>,
-    /// Versions lists from 304/abbreviated responses (a `Full` job by-product).
-    pub(crate) versions_cache: HashMap<String, Arc<VersionsInfo>>,
 }
 
 impl ManifestState {
@@ -99,6 +114,34 @@ impl ManifestState {
                 .into_iter()
                 .map(|((name, spec), manifest)| (name, spec, manifest))
                 .collect(),
+        }
+    }
+
+    /// The cached version source for `name`, if any.
+    pub(crate) fn package(&self, name: &str) -> Option<&PackageVersions> {
+        self.packages.get(name)
+    }
+
+    /// Whether a version source (full manifest, versions list, or failure) is
+    /// already known for `name`, so its full manifest need not be re-fetched.
+    pub(crate) fn has_package_source(&self, name: &str) -> bool {
+        self.packages.contains_key(name)
+    }
+
+    /// Record a package's version source.
+    pub(crate) fn set_package(&mut self, name: String, source: PackageVersions) {
+        self.packages.insert(name, source);
+    }
+
+    /// Park an edge waiting on `name`'s package (full/versions) fetch.
+    pub(crate) fn park_on_package(&mut self, name: String, waiter: WaitingEdge) {
+        self.package_waiters.entry(name).or_default().push(waiter);
+    }
+
+    /// Move every edge waiting on `name`'s package fetch into `ready`.
+    pub(crate) fn wake_package(&mut self, name: &str, ready: &mut VecDeque<WaitingEdge>) {
+        if let Some(waiters) = self.package_waiters.remove(name) {
+            ready.extend(waiters);
         }
     }
 
