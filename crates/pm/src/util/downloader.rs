@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
@@ -206,12 +206,43 @@ pub async fn download_to_cache(name: &str, version: &str, tarball_url: &str) -> 
                 })
                 .ok()?;
 
+            // Mark packages that declare install scripts so the cloner
+            // force-copies them instead of hardlinking from the shared cache:
+            // an in-place `postinstall` mutation on a hardlinked file would
+            // corrupt the cache inode shared with other installs.
+            write_install_script_flag(&cache_path).await;
+
             DOWNLOAD_COUNT.fetch_add(1, Ordering::Relaxed);
             Some(cache_path)
         })
         .await
         .as_deref()
         .cloned()
+}
+
+/// If a freshly-extracted registry package declares `preinstall`/`install`/
+/// `postinstall`, drop a `_hasInstallScript` marker in its cache dir so
+/// `cloner::has_install_script_sync` makes the clone force-copy rather than
+/// hardlink. Best-effort: a missing/unreadable manifest just skips the marker.
+async fn write_install_script_flag(cache_path: &Path) {
+    // Registry tarballs extract under a `package/` wrapper dir.
+    let pkg_json = cache_path.join("package").join("package.json");
+    let Ok(content) = crate::fs::read_to_string(&pkg_json).await else {
+        return;
+    };
+    let has_install_script = serde_json::from_str::<serde_json::Value>(&content)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("scripts"))
+        .and_then(|scripts| scripts.as_object())
+        .is_some_and(|scripts| {
+            ["preinstall", "install", "postinstall"]
+                .iter()
+                .any(|hook| scripts.contains_key(*hook))
+        });
+    if has_install_script {
+        let _ = crate::fs::write(cache_path.join("_hasInstallScript"), b"").await;
+    }
 }
 
 /// Download tarball bytes with retries (network phase only).

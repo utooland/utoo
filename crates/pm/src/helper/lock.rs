@@ -245,7 +245,7 @@ pub async fn prepare_global_package_json(
     npm_spec: &str,
     prefix: Option<&str>,
 ) -> Result<(String, PathBuf)> {
-    let (name, version, _version_spec) = resolve_package_spec(npm_spec).await?;
+    let (name, version, version_spec) = resolve_package_spec(npm_spec).await?;
 
     // Wrapper project root = parent of the global node_modules dir.
     // Unix: `<prefix>/lib`  ·  Windows: `<prefix>`.
@@ -272,7 +272,13 @@ pub async fn prepare_global_package_json(
         .to_path_buf();
     fs::create_dir_all(&wrapper_dir).await?;
 
-    upsert_wrapper_dependency(&wrapper_dir, &name, &version).await?;
+    // Record the dependency using the user's spec converted for package.json
+    // via `format_save_spec` (registry range/dist-tag pinned to the resolved
+    // version; git/file/url specs kept as-is), not the bare resolved semver —
+    // otherwise a git/github global would be recorded as a plain version and
+    // re-resolved from the registry.
+    let dep_spec = format_save_spec(&version_spec, &version);
+    upsert_wrapper_dependency(&wrapper_dir, &name, &dep_spec).await?;
 
     tracing::debug!("wrapper_dir: {}", wrapper_dir.to_string_lossy());
     Ok((name, wrapper_dir))
@@ -289,7 +295,14 @@ async fn upsert_wrapper_dependency(wrapper_dir: &Path, name: &str, version: &str
 
     let mut package_json: Value = if fs::try_exists(&pkg_json_path).await.unwrap_or(false) {
         let content = fs::read_to_string(&pkg_json_path).await?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        // Do NOT silently reset a corrupt wrapper to `{}` — that would drop
+        // every previously-recorded global dependency. Surface the error.
+        serde_json::from_str(&content).with_context(|| {
+            format!(
+                "global wrapper package.json is corrupt: {}",
+                pkg_json_path.display()
+            )
+        })?
     } else {
         serde_json::json!({})
     };
@@ -318,9 +331,16 @@ async fn upsert_wrapper_dependency(wrapper_dir: &Path, name: &str, version: &str
     deps_obj.insert(name.to_string(), new_value);
 
     let content = serde_json::to_string_pretty(&package_json)?;
-    let tmp_path = wrapper_dir.join(format!(".package.json.{}.tmp", std::process::id()));
+    // Unique temp name (pid + sequence) so concurrent upserts — even two within
+    // the same process — never share a temp file; clean it up if rename fails.
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = wrapper_dir.join(format!(".package.json.{}.{}.tmp", std::process::id(), seq));
     fs::write(&tmp_path, content).await?;
-    fs::rename(&tmp_path, &pkg_json_path).await?;
+    if let Err(e) = fs::rename(&tmp_path, &pkg_json_path).await {
+        let _ = fs::remove_file(&tmp_path).await;
+        return Err(e).context("Failed to publish wrapper package.json");
+    }
 
     Ok(())
 }
