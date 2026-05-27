@@ -2,8 +2,9 @@
 //!
 //! - [`state`] — per-run manifest store (cache, waiters, failures).
 //! - [`queue`] — fetch scheduling, single-flight de-duplication, priority.
+//! - [`select`] — per-edge resolution decision (pure; reads the store).
 //!
-//! The two are independent; the driver that coordinates them (and exposes
+//! These are independent leaf concerns; the driver that coordinates them (and exposes
 //! `run_main_loop_bfs`) lands in the follow-up PR. Until then they are staged
 //! here and exercised by their own unit tests.
 
@@ -12,4 +13,5 @@
 #![allow(dead_code)]
 
 mod queue;
+mod select;
 mod state;
