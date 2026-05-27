@@ -30,9 +30,10 @@ use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+use crate::resolver::demand::{ResolverManifestCache, run_main_loop_bfs};
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::service::ProjectCacheData;
+use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -191,6 +192,9 @@ struct NodeFlags {
 /// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
 /// resolved at edge creation time, so by the time this runs they are already
 /// concrete registry specs.
+// Retired preload path: orphaned now that resolution runs through the demand
+// driver. Kept compiling until the cleanup PR removes the preload module.
+#[allow(dead_code)]
 fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
     use crate::spec::SpecStr;
     use std::collections::HashSet;
@@ -678,11 +682,15 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -700,12 +708,16 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
@@ -730,33 +742,54 @@ pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    build_deps_with_config_output(graph, registry, config, receiver)
+        .await
+        .map(|_| ())
+}
+
+/// Demand-driven dependency resolution: a single BFS loop that schedules
+/// manifest jobs through the [`ManifestProvider`] while owning the per-run
+/// manifest cache, waiters, and in-flight de-duplication. Returns the
+/// manifests resolved this run for the host to persist.
+pub(crate) async fn build_deps_with_config_output<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: BuildDepsConfig,
+    receiver: &E,
+) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     tracing::debug!(
-        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
+        "Starting demand dependency build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
-        config.concurrency,
-        config.skip_preload
+        config.concurrency
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
-
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
     });
 
-    Ok(())
+    Ok(manifest_cache)
 }
 
 /// Run the preload phase to warm up the cache with manifests.
+// Retired preload path (see `gather_preload_deps`); removed in the cleanup PR.
+#[allow(dead_code)]
 async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     graph: &DependencyGraph,
     registry: &R,
@@ -809,6 +842,8 @@ async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
 }
 
 /// Run the BFS traversal phase to build the dependency tree.
+// Retired preload path (see `gather_preload_deps`); removed in the cleanup PR.
+#[allow(dead_code)]
 async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -932,10 +967,14 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -946,12 +985,16 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R, E: EventReceiver>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 

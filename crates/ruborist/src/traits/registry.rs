@@ -298,6 +298,7 @@ pub mod mock {
     use super::*;
 
     /// Internal package data for mock registry.
+    #[derive(Clone)]
     struct MockPackage {
         name: String,
         dist_tags: HashMap<String, String>,
@@ -305,6 +306,7 @@ pub mod mock {
     }
 
     /// Mock registry client that returns predefined packages.
+    #[derive(Clone)]
     pub struct MockRegistryClient {
         packages: HashMap<String, MockPackage>,
     }
@@ -391,6 +393,70 @@ pub mod mock {
                 raw: bytes::Bytes::from(raw),
                 ..Default::default()
             }))
+        }
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl crate::service::ManifestProvider for MockRegistryClient {
+        async fn execute_manifest_job(
+            &self,
+            job: crate::service::ManifestJob,
+        ) -> Result<crate::service::ManifestJobDone, Self::Error> {
+            use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone};
+
+            match job {
+                ManifestJob::Full { name, spec } => {
+                    let full = self.fetch_full_manifest(&name).await?;
+                    let speculative = spec.and_then(|spec| {
+                        resolve_target_version((&*full).into(), &spec)
+                            .ok()
+                            .and_then(|version| {
+                                full.get_core_version(&version)
+                                    .map(|core| (spec, Arc::new(core)))
+                            })
+                    });
+                    Ok(ManifestJobDone::Full {
+                        name,
+                        data: ManifestFullData::Full {
+                            manifest: full,
+                            speculative,
+                        },
+                    })
+                }
+                ManifestJob::Version {
+                    name,
+                    spec,
+                    fetch_spec,
+                    format: _,
+                } => {
+                    let manifest = self.fetch_version_manifest(&name, &fetch_spec).await?;
+                    Ok(ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    })
+                }
+                ManifestJob::ExtractVersion {
+                    name,
+                    spec,
+                    version,
+                    full,
+                } => {
+                    let manifest =
+                        full.get_core_version(&version)
+                            .map(Arc::new)
+                            .ok_or_else(|| {
+                                MockError(format!(
+                                    "Version {version} not found in manifest for {name}"
+                                ))
+                            })?;
+                    Ok(ManifestJobDone::Version {
+                        name,
+                        spec,
+                        manifest,
+                    })
+                }
+            }
         }
     }
 }

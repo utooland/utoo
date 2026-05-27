@@ -13,12 +13,15 @@ use super::fetch::{
 };
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::resolver::version::resolve_target_version;
 
-/// Parse JSON bytes on rayon's CPU thread pool (native) or inline
-/// (wasm32). Keeps the tokio runtime free of `simd_json` work so other
-/// in-flight manifest fetches keep driving network IO while this one
-/// parses.
-pub(crate) async fn parse_json_off_runtime<T>(bytes: Bytes) -> Result<T, anyhow::Error>
+/// Parse a JSON buffer on rayon's CPU thread pool (native) or inline
+/// (wasm32). The buffer is consumed because `simd_json` mutates it in-place.
+/// Keeps the tokio runtime free of `simd_json` work so other in-flight
+/// manifest fetches keep driving network IO while this one parses.
+pub(crate) async fn parse_json_vec_off_runtime<T>(
+    mut parse_buf: Vec<u8>,
+) -> Result<T, anyhow::Error>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
@@ -26,7 +29,6 @@ where
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
-            let mut parse_buf = bytes.to_vec();
             let result = simd_json::serde::from_slice::<T>(&mut parse_buf)
                 .map_err(|e| anyhow!("JSON parse error: {e}"));
             let _ = tx.send(result);
@@ -36,7 +38,6 @@ where
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let mut parse_buf = bytes.to_vec();
         simd_json::serde::from_slice::<T>(&mut parse_buf)
             .map_err(|e| anyhow!("JSON parse error: {e}"))
     }
@@ -49,21 +50,65 @@ where
 pub(crate) async fn parse_full_manifest_off_runtime(
     raw_bytes: Bytes,
 ) -> Result<FullManifest, anyhow::Error> {
+    parse_full_manifest_with_core_off_runtime(raw_bytes, None)
+        .await
+        .map(|(manifest, _)| manifest)
+}
+
+pub(crate) type FullManifestParseResult = (FullManifest, Option<(String, CoreVersionManifest)>);
+
+fn parse_full_manifest_with_core_sync(
+    raw_bytes: Bytes,
+    spec: Option<String>,
+) -> Result<FullManifestParseResult, anyhow::Error> {
+    // simd_json mutates the parse buffer; copy inside the worker so
+    // response-body bytes can stay immutable until parsing starts.
+    let mut parse_buf = raw_bytes.to_vec();
+    let mut manifest: FullManifest = simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
+        .map_err(|e| anyhow!("JSON parse error: {e}"))?;
+    manifest.raw = raw_bytes;
+
+    let speculative = match spec {
+        Some(spec) => match resolve_target_version((&manifest).into(), &spec) {
+            Ok(version) => match manifest.get_core_version(&version) {
+                Some(core) => Some((spec, core)),
+                None => {
+                    tracing::trace!(
+                        package = %manifest.name,
+                        spec = %spec,
+                        version = %version,
+                        "speculative manifest extract missed resolved version"
+                    );
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::trace!(
+                    package = %manifest.name,
+                    spec = %spec,
+                    error = %error,
+                    "speculative manifest version resolution failed"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+
+    Ok((manifest, speculative))
+}
+
+/// Parse a full wire-fetched manifest and optionally extract the current BFS
+/// edge's version in the same off-runtime worker task.
+pub(crate) async fn parse_full_manifest_with_core_off_runtime(
+    raw_bytes: Bytes,
+    spec: Option<String>,
+) -> Result<FullManifestParseResult, anyhow::Error> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let (tx, rx) = tokio::sync::oneshot::channel();
         rayon::spawn(move || {
-            let result = (|| -> Result<FullManifest, anyhow::Error> {
-                // simd_json mutates the parse buffer; copy inside the worker so
-                // response-body bytes can stay immutable until parsing starts.
-                let mut parse_buf = raw_bytes.to_vec();
-                let mut manifest: FullManifest =
-                    simd_json::serde::from_slice::<FullManifest>(&mut parse_buf)
-                        .map_err(|e| anyhow!("JSON parse error: {e}"))?;
-                manifest.raw = raw_bytes;
-
-                Ok(manifest)
-            })();
+            let result = parse_full_manifest_with_core_sync(raw_bytes, spec);
             let _ = tx.send(result);
         });
         rx.await
@@ -71,9 +116,7 @@ pub(crate) async fn parse_full_manifest_off_runtime(
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let mut manifest: FullManifest = parse_json_off_runtime(raw_bytes.clone()).await?;
-        manifest.raw = raw_bytes;
-        Ok(manifest)
+        parse_full_manifest_with_core_sync(raw_bytes, spec)
     }
 }
 
@@ -220,6 +263,28 @@ pub async fn fetch_full_manifest_fresh(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+async fn read_body_vec(mut response: reqwest::Response) -> Result<Vec<u8>, FetchError> {
+    let capacity = response
+        .content_length()
+        .and_then(|len| usize::try_from(len).ok())
+        .unwrap_or(0);
+    let mut body = Vec::with_capacity(capacity);
+    while let Some(chunk) = response.chunk().await.map_err(classify_reqwest_error)? {
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_body_vec(response: reqwest::Response) -> Result<Vec<u8>, FetchError> {
+    response
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(classify_reqwest_error)
+}
+
 /// Options for fetching a version manifest.
 pub struct FetchVersionManifestOptions<'a> {
     pub registry_url: &'a str,
@@ -230,6 +295,17 @@ pub struct FetchVersionManifestOptions<'a> {
 
 /// Fetch version manifest bytes with retry, without parsing.
 pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>) -> Result<Bytes> {
+    fetch_version_manifest_vec(opts).await.map(Bytes::from)
+}
+
+/// Fetch version manifest into a mutable parse buffer with retry.
+///
+/// Unlike full manifests, exact-version manifests do not need to keep raw
+/// response bytes for later extraction. Reading directly into `Vec<u8>` avoids
+/// the hot-path `Bytes -> Vec` copy before `simd_json` parses in place.
+pub(crate) async fn fetch_version_manifest_vec(
+    opts: FetchVersionManifestOptions<'_>,
+) -> Result<Vec<u8>> {
     let url = format!("{}/{}/{}", opts.registry_url, opts.name, opts.spec);
 
     let accept = match opts.format {
@@ -251,7 +327,7 @@ pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>)
                     .map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
-                    response.bytes().await.map_err(classify_reqwest_error)
+                    read_body_vec(response).await
                 } else {
                     Err(classify_status(response.status(), &url))
                 }
@@ -271,6 +347,65 @@ pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>)
 pub async fn fetch_version_manifest(
     opts: FetchVersionManifestOptions<'_>,
 ) -> Result<CoreVersionManifest> {
-    let bytes = fetch_version_manifest_bytes(opts).await?;
-    parse_json_off_runtime::<CoreVersionManifest>(bytes).await
+    let bytes = fetch_version_manifest_vec(opts).await?;
+    parse_json_vec_off_runtime::<CoreVersionManifest>(bytes).await
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Deserialize;
+
+    use super::*;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct TinyManifest {
+        name: String,
+        version: String,
+    }
+
+    #[tokio::test]
+    async fn parse_json_vec_off_runtime_consumes_mutable_buffer() {
+        let parsed = parse_json_vec_off_runtime::<TinyManifest>(
+            br#"{"name":"demo","version":"1.0.0"}"#.to_vec(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            parsed,
+            TinyManifest {
+                name: "demo".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn parse_full_manifest_with_core_extracts_requested_spec() {
+        let raw = Bytes::from_static(
+            br#"{
+                "name":"demo",
+                "dist-tags":{"latest":"1.0.0"},
+                "versions":{
+                    "1.0.0":{
+                        "name":"demo",
+                        "version":"1.0.0",
+                        "dist":{"tarball":"https://registry.example/demo-1.0.0.tgz"}
+                    }
+                }
+            }"#,
+        );
+
+        let (manifest, speculative) =
+            parse_full_manifest_with_core_off_runtime(raw.clone(), Some("latest".to_string()))
+                .await
+                .unwrap();
+
+        assert_eq!(manifest.name, "demo");
+        assert_eq!(manifest.raw, raw);
+        let (spec, core) = speculative.unwrap();
+        assert_eq!(spec, "latest");
+        assert_eq!(core.name, "demo");
+        assert_eq!(core.version, "1.0.0");
+    }
 }

@@ -33,9 +33,8 @@ use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
-use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
-    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
+    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config_output,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -239,7 +238,8 @@ where
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
         .with_skip_preload(skip_preload)
-        .with_catalogs(catalogs);
+        .with_catalogs(catalogs)
+        .with_project_cache(project_cache);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
     }
@@ -254,23 +254,14 @@ where
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
-    build_deps_with_config(&mut graph, &registry, config, &receiver)
+    let manifest_cache = build_deps_with_config_output(&mut graph, &registry, config, &receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
     let (packages, _total) = graph.serialize_to_packages(&root_path);
 
-    // Export project cache from memory cache for the host to persist.
-    let mut project_cache = ProjectCacheData::default();
-    for (key, manifest) in registry.cache().export_version_manifests() {
-        // `parse_package_spec` rather than `split_once('@')` so scoped names
-        // (`@babel/core@^7.0.0`) parse to (`@babel/core`, `^7.0.0`).
-        let (name, spec) = parse_package_spec(&key);
-        let version = manifest.version.clone();
-        let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();
-        pkg_cache.specs.insert(spec.to_string(), version.clone());
-        pkg_cache.manifests.insert(version, (*manifest).clone());
-    }
+    // Export the manifests resolved this run for the host to persist.
+    let project_cache = ProjectCacheData::from_resolved(manifest_cache.entries);
 
     Ok(BuildDepsOutput {
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),

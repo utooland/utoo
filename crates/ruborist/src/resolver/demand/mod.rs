@@ -2,14 +2,13 @@
 //!
 //! - [`state`] — per-run manifest store (cache, waiters, failures).
 //! - [`queue`] — fetch scheduling, single-flight de-duplication, priority.
+//! - [`driver`] — walks the dependency graph and coordinates the store + queue.
 //!
-//! The two are independent; the driver that coordinates them (and exposes
-//! `run_main_loop_bfs`) lands in the follow-up PR. Until then they are staged
-//! here and exercised by their own unit tests.
+//! `state` and `queue` are independent; only the driver knows about both.
 
-// Staged ahead of the driver: the only consumers so far are the unit tests, so
-// the driver-facing API is dead in this PR.
-#![allow(dead_code)]
-
+mod driver;
 mod queue;
 mod state;
+
+pub(crate) use driver::run_main_loop_bfs;
+pub(crate) use state::ResolverManifestCache;
