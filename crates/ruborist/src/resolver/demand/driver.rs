@@ -8,88 +8,29 @@ use std::sync::Arc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
 
-use crate::model::graph::{DependencyGraph, FindResult};
-use crate::model::manifest::CoreVersionManifest;
+use crate::model::graph::DependencyGraph;
 use crate::model::manifest::NodeManifest;
-use crate::model::node::{DevDeps, EdgeType};
+use crate::model::node::EdgeType;
 use crate::resolver::builder::{
-    BuildDepsConfig, ProcessResult, create_package_node, process_dependency,
-    update_node_type_from_edge,
+    BuildDepsConfig, ProcessResult, chain_err, handle_resolved_registry_manifest,
+    process_dependency, try_reuse_dependency,
 };
-use crate::resolver::edges::{
-    DependencyEdgeInfo, EdgeContext, add_edges_from, collect_unresolved_edges,
-};
+use crate::resolver::edges::{DependencyEdgeInfo, collect_unresolved_edges};
 use crate::resolver::registry::ResolveError;
 use crate::resolver::semver::normalize_spec;
 use crate::service::ManifestProvider;
 use crate::spec::SpecStr;
 use crate::traits::progress::{BuildEvent, EventReceiver};
-use crate::traits::registry::{RegistryClient, ResolvedPackage};
 
-use super::super::queue::{FetchFuture, FetchPriority, FetchQueues};
-use super::super::state::{ManifestState, ResolverManifestCache};
-use super::pipeline::{apply_fetch_result, pump_fetches, registry_error};
-use super::plan::{EdgeStep, FetchPlan, ResolutionMode, WaitKey, plan_edge};
-use super::schedule::{enqueue_version_extract, enqueue_version_fetch, schedule_registry_fetch};
-
-fn try_reuse_dependency(
-    graph: &mut DependencyGraph,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-) -> Option<ProcessResult> {
-    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
-        FindResult::Reuse(existing_index) => {
-            graph.mark_dependency_resolved(edge.edge_id, existing_index);
-            update_node_type_from_edge(graph, parent, existing_index, &edge.edge_type);
-            Some(ProcessResult::Reused(existing_index))
-        }
-        FindResult::Conflict(_) | FindResult::New(_) => None,
-    }
-}
-
-pub fn process_dependency_with_resolved(
-    graph: &mut DependencyGraph,
-    node_index: NodeIndex,
-    edge_info: &DependencyEdgeInfo,
-    resolved: &ResolvedPackage,
-    config: &BuildDepsConfig,
-) -> ProcessResult {
-    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
-        FindResult::Reuse(existing_index) => {
-            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
-            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
-            ProcessResult::Reused(existing_index)
-        }
-        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
-            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
-            let new_index = graph.add_node(new_node);
-            graph.add_physical_edge(conflict_parent, new_index);
-            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
-            add_edges_from(
-                graph,
-                new_index,
-                &*resolved.manifest,
-                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-            );
-            ProcessResult::Created(new_index)
-        }
-    }
-}
-
-fn chain_err<E>(
-    graph: &DependencyGraph,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    inner: ResolveError<E>,
-) -> ResolveError<E> {
-    let mut chain = graph.logical_ancestry(parent);
-    chain.push((edge.name.clone(), edge.spec.clone()));
-    ResolveError::WithChain {
-        chain,
-        source: Box::new(inner),
-    }
-}
+use super::queue::{FetchDone, FetchKey};
+use super::queue::{FetchFuture, FetchPriority, FetchQueues};
+use super::select::{EdgeStep, FetchPlan, ResolutionMode, WaitKey, select_edge};
+use super::state::{ManifestState, ResolverManifestCache};
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
+use crate::model::node::{DevDeps, PeerDeps};
+use crate::resolver::edges::DependencySource;
+use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone, MetadataFormat};
+use crate::traits::registry::RegistryError;
 
 fn handle_processed<E: EventReceiver>(
     graph: &DependencyGraph,
@@ -132,40 +73,6 @@ fn handle_processed<E: EventReceiver>(
             });
         }
     }
-}
-
-async fn handle_resolved_registry_manifest<R, E>(
-    graph: &mut DependencyGraph,
-    registry: &R,
-    receiver: &E,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    manifest: Arc<CoreVersionManifest>,
-    config: &BuildDepsConfig,
-) -> Result<ProcessResult, ResolveError<R::Error>>
-where
-    R: RegistryClient,
-    E: EventReceiver,
-{
-    let resolved = ResolvedPackage {
-        name: edge.name.clone(),
-        version: manifest.version.clone(),
-        manifest,
-    };
-
-    let processed = if graph
-        .check_override(parent, &edge.name, Some(&resolved.version))
-        .is_some()
-    {
-        process_dependency(graph, registry, parent, edge, config)
-            .await
-            .map_err(|inner| chain_err(graph, parent, edge, inner))?
-    } else {
-        receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
-        process_dependency_with_resolved(graph, parent, edge, &resolved, config)
-    };
-
-    Ok(processed)
 }
 
 /// Demand-driven BFS resolution loop.
@@ -264,7 +171,7 @@ where
 
                 let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
                 let step =
-                    plan_edge::<R::Error>(&state, &edge, &real_name, &real_spec, supports_semver)
+                    select_edge::<R::Error>(&state, &edge, &real_name, &real_spec, supports_semver)
                         .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
 
                 match step {
@@ -427,6 +334,259 @@ where
 //
 // These tie the manifest store and the fetch scheduler together; the store and
 // the queue stay unaware of each other.
+
+/// A parked edge waiting on a pending fetch (matches `state`'s waiter payload).
+pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
+
+pub(super) fn registry_error<E>(message: impl Into<String>) -> ResolveError<E>
+where
+    E: From<RegistryError>,
+{
+    ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
+}
+
+async fn fetch_registry_manifest_inner<R>(registry: R, request: ManifestJob) -> FetchDone
+where
+    R: ManifestProvider,
+{
+    let key = request.key();
+    match registry.execute_manifest_job(request).await {
+        Ok(done) => match done {
+            ManifestJobDone::Full { name, data } => FetchDone::Full {
+                name,
+                result: Ok(data),
+            },
+            ManifestJobDone::Version {
+                name,
+                spec,
+                manifest,
+            } => FetchDone::Version {
+                name,
+                spec,
+                result: Ok(manifest),
+            },
+        },
+        Err(error) => match key {
+            FetchKey::Full(name) => FetchDone::Full {
+                name,
+                result: Err(format!("{error:#}")),
+            },
+            FetchKey::Version(name, spec) => FetchDone::Version {
+                name,
+                spec,
+                result: Err(format!("{error:#}")),
+            },
+        },
+    }
+}
+
+/// Spawn a fetch job. Native runs it on the multi-threaded runtime so
+/// independent fetch + parse jobs progress in parallel; wasm has no threads, so
+/// it runs on the current local set.
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_registry_manifest<R>(registry: R, request: ManifestJob) -> FetchFuture
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    tokio::spawn(fetch_registry_manifest_inner(registry, request))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn fetch_registry_manifest<R>(registry: R, request: ManifestJob) -> FetchFuture
+where
+    R: ManifestProvider,
+{
+    tokio::task::spawn_local(fetch_registry_manifest_inner(registry, request))
+}
+
+pub(super) fn pump_fetches<R>(
+    fetches: &mut FuturesUnordered<FetchFuture>,
+    fetch_queues: &mut FetchQueues,
+    registry: &R,
+    concurrency: usize,
+) where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    while fetches.len() < concurrency {
+        let Some(request) = fetch_queues.pop() else {
+            break;
+        };
+        fetches.push(fetch_registry_manifest(registry.clone(), request));
+    }
+}
+
+/// Apply one completed fetch to the store: cache it, wake parked edges, and
+/// schedule any transitive prefetches.
+pub(super) fn apply_fetch_result(
+    state: &mut ManifestState,
+    queues: &mut FetchQueues,
+    done: FetchDone,
+    supports_semver: ResolutionMode,
+    peer_deps: PeerDeps,
+    ready: &mut VecDeque<WaitingEdge>,
+) {
+    let done_key = done.key();
+    queues.complete(&done_key);
+
+    match done {
+        FetchDone::Full { name, result } => {
+            match result {
+                Ok(ManifestFullData::Full {
+                    manifest: full,
+                    speculative,
+                }) => {
+                    if let Some((resolved_spec, manifest)) = speculative {
+                        state.cache_version(name.clone(), resolved_spec, Arc::clone(&manifest));
+                        schedule_transitive_prefetches(
+                            state,
+                            queues,
+                            &manifest,
+                            peer_deps,
+                            supports_semver,
+                        );
+                    }
+                    state.full.cache.insert(name.clone(), full);
+                }
+                Ok(ManifestFullData::Versions(versions)) => {
+                    state.versions_cache.insert(name.clone(), versions);
+                }
+                Err(e) => {
+                    state.full.failures.insert(name.clone(), e);
+                }
+            }
+            state.full.wake(&name, ready);
+        }
+        FetchDone::Version { name, spec, result } => {
+            match result {
+                Ok(manifest) => {
+                    state.cache_version(name.clone(), spec.clone(), Arc::clone(&manifest));
+                    schedule_transitive_prefetches(
+                        state,
+                        queues,
+                        &manifest,
+                        peer_deps,
+                        supports_semver,
+                    );
+                }
+                Err(e) => state.fail_version(&name, &spec, e),
+            }
+            state.wake_version(&name, &spec, ready);
+        }
+    }
+}
+
+fn version_metadata_format(supports_semver: ResolutionMode) -> MetadataFormat {
+    if matches!(supports_semver, ResolutionMode::Semver) {
+        MetadataFormat::Abbreviated
+    } else {
+        MetadataFormat::Complete
+    }
+}
+
+fn collect_registry_prefetches(
+    manifest: &CoreVersionManifest,
+    peer_deps: PeerDeps,
+) -> Vec<(String, String)> {
+    let mut deps = Vec::new();
+    manifest.for_each_dep(peer_deps, DevDeps::Exclude, |_, name, spec| {
+        if spec.is_registry_spec() {
+            deps.push((name.to_string(), spec.to_string()));
+        }
+    });
+    deps
+}
+
+/// Queue a registry fetch for `(name, spec)` unless the store already has it.
+pub(super) fn schedule_registry_fetch(
+    state: &mut ManifestState,
+    queues: &mut FetchQueues,
+    name: String,
+    spec: String,
+    supports_semver: ResolutionMode,
+    priority: FetchPriority,
+) {
+    let (real_name, real_spec) = normalize_spec(&name, &spec);
+    if matches!(supports_semver, ResolutionMode::Semver) {
+        if state.is_version_settled(&real_name, &real_spec) {
+            return;
+        }
+        queues.push(
+            ManifestJob::Version {
+                name: real_name.clone(),
+                spec: real_spec.clone(),
+                fetch_spec: real_spec,
+                format: version_metadata_format(supports_semver),
+            },
+            priority,
+        );
+    } else {
+        if state.full.is_settled(&real_name) || state.versions_cache.contains_key(&real_name) {
+            return;
+        }
+        queues.push(
+            ManifestJob::Full {
+                name: real_name,
+                spec: Some(real_spec),
+            },
+            priority,
+        );
+    }
+}
+
+pub(super) fn enqueue_version_extract(
+    queues: &mut FetchQueues,
+    name: String,
+    version: String,
+    full: Arc<FullManifest>,
+) {
+    queues.push(
+        ManifestJob::ExtractVersion {
+            name,
+            spec: version.clone(),
+            version,
+            full,
+        },
+        FetchPriority::Demand,
+    );
+}
+
+pub(super) fn enqueue_version_fetch(
+    queues: &mut FetchQueues,
+    name: String,
+    fetch_spec: String,
+    supports_semver: ResolutionMode,
+) {
+    queues.push(
+        ManifestJob::Version {
+            name,
+            spec: fetch_spec.clone(),
+            fetch_spec,
+            format: version_metadata_format(supports_semver),
+        },
+        FetchPriority::Demand,
+    );
+}
+
+pub(super) fn schedule_transitive_prefetches(
+    state: &mut ManifestState,
+    queues: &mut FetchQueues,
+    manifest: &CoreVersionManifest,
+    peer_deps: PeerDeps,
+    supports_semver: ResolutionMode,
+) {
+    for (name, spec) in collect_registry_prefetches(manifest, peer_deps) {
+        schedule_registry_fetch(
+            state,
+            queues,
+            name,
+            spec,
+            supports_semver,
+            FetchPriority::Prefetch,
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {

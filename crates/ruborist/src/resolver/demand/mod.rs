@@ -2,12 +2,14 @@
 //!
 //! - [`state`] — per-run manifest store (cache, waiters, failures).
 //! - [`queue`] — fetch scheduling, single-flight de-duplication, priority.
-//! - [`driver`] — walks the dependency graph and coordinates the store + queue.
+//! - [`select`] — per-edge resolution decision (pure; reads the store).
+//! - [`driver`] — BFS loop: drives fetches, applies results, builds the graph.
 //!
-//! `state` and `queue` are independent; only the driver knows about both.
+//! `state`/`queue`/`select` are leaf concerns; the driver coordinates them.
 
 mod driver;
 mod queue;
+mod select;
 mod state;
 
 pub(crate) use driver::run_main_loop_bfs;

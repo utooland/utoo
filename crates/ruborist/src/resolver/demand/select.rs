@@ -10,7 +10,7 @@ use crate::resolver::edges::DependencyEdgeInfo;
 use crate::resolver::registry::ResolveError;
 use crate::resolver::version::resolve_target_version;
 
-use super::super::state::ManifestState;
+use super::state::ManifestState;
 
 fn resolve_version_from_versions<RE>(
     edge: &DependencyEdgeInfo,
@@ -96,7 +96,7 @@ enum ExactFetch {
 /// Decide what to do with `edge` given the current store. `Err` is a fatal
 /// version-resolution error; `Ok(EdgeStep::Fail)` is a recorded fetch failure
 /// the caller treats as skip-or-error by dependency kind.
-pub(super) fn plan_edge<RE>(
+pub(super) fn select_edge<RE>(
     state: &ManifestState,
     edge: &DependencyEdgeInfo,
     name: &str,
@@ -123,13 +123,13 @@ pub(super) fn plan_edge<RE>(
                 },
             })
         }
-        ResolutionMode::FullManifest => plan_edge_full_manifest::<RE>(state, edge, name, spec),
+        ResolutionMode::FullManifest => select_full_manifest::<RE>(state, edge, name, spec),
     }
 }
 
 /// Full-manifest mode: resolve the version client-side, falling through the
 /// full-manifest cache, then the versions list, then a full fetch.
-fn plan_edge_full_manifest<RE>(
+fn select_full_manifest<RE>(
     state: &ManifestState,
     edge: &DependencyEdgeInfo,
     name: &str,
@@ -152,7 +152,13 @@ fn plan_edge_full_manifest<RE>(
         let Some(version) = resolve_version_from_full_manifest::<RE>(edge, &full, spec)? else {
             return Ok(EdgeStep::Skip);
         };
-        return plan_resolved_version::<RE>(state, name, spec, version, ExactFetch::Extract(full));
+        return select_resolved_version::<RE>(
+            state,
+            name,
+            spec,
+            version,
+            ExactFetch::Extract(full),
+        );
     }
 
     if let Some(versions) = state.versions_cache.get(name).cloned() {
@@ -161,7 +167,7 @@ fn plan_edge_full_manifest<RE>(
         else {
             return Ok(EdgeStep::Skip);
         };
-        return plan_resolved_version::<RE>(state, name, spec, version, ExactFetch::Version);
+        return select_resolved_version::<RE>(state, name, spec, version, ExactFetch::Version);
     }
 
     Ok(EdgeStep::Park {
@@ -175,7 +181,7 @@ fn plan_edge_full_manifest<RE>(
 
 /// Decide an edge whose exact `version` is already known (resolved
 /// client-side). Shared by the full-manifest-cache and versions-list paths.
-fn plan_resolved_version<RE>(
+fn select_resolved_version<RE>(
     state: &ManifestState,
     name: &str,
     spec: &str,
