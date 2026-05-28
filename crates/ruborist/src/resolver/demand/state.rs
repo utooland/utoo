@@ -23,12 +23,6 @@ type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 /// adapts these to/from disk; the store itself stays format-agnostic.
 #[derive(Default)]
 pub(crate) struct ResolverManifestCache {
-    // The resolver writes this on each run via `ManifestState::into_resolver_cache`;
-    // the reader is `ProjectCacheData::from_resolved` in the cutover PR's `api.rs`
-    // edit. Staged write-only here so the driver lands ahead of the entry-point
-    // switch — see the matching `#[allow(dead_code)]` on `ProjectCacheData`'s
-    // bridges in `service/cache.rs` introduced by the preceding (provider) PR.
-    #[allow(dead_code)]
     pub(crate) entries: Vec<(String, String, Arc<CoreVersionManifest>)>,
 }
 

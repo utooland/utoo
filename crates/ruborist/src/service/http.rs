@@ -9,7 +9,7 @@
 //!       |          |                                            |
 //!       |        true (npmmirror)                     false (npmjs.org)
 //!       |          |                                            |
-//!       |   fetch_version_manifest          resolve_full_manifest
+//!       |   fetch version job              fetch full manifest job
 //!       |   GET /{name}/{spec}              GET /{name}
 //!       |   Accept: abbreviated             Accept: abbreviated
 //!       |          |                        + If-None-Match: {etag}
@@ -29,7 +29,7 @@
 //!       v
 //!  +-----------------------------------------------------------------+
 //!  |  http.rs -- HTTP Client  (this file)                            |
-//!  |  global singleton reqwest::Client (LazyLock)                    |
+//!  |  global reqwest::Client pool (LazyLock)                         |
 //!  |  rustls TLS + no_proxy + env proxy + CachingResolver            |
 //!  +-----------------------------------------------------------------+
 //!       |
@@ -76,6 +76,8 @@
 //! WASM targets skip DNS entirely (browser handles it).
 
 use std::sync::LazyLock;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
@@ -85,16 +87,48 @@ use anyhow::{Context, Result, anyhow};
 /// error, which silently-stalled sockets never raise.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Global HTTP client with connection pooling and DNS caching.
+/// Number of independent registry HTTP client pools.
 ///
-/// Stores `Result<Client, String>` so that proxy-configuration errors are
+/// GHA npmjs pcap showed bun spreading resolve traffic across a few
+/// Cloudflare edge IPs while a single reqwest pool concentrated requests on
+/// one IP. Four pools keeps the model small but gives the resolver enough
+/// independent keep-alive pools to fan out when npmjs/full-manifest
+/// concurrency is raised.
+#[cfg(not(target_arch = "wasm32"))]
+const CLIENT_POOL_SIZE: usize = 4;
+
+/// Global HTTP clients with connection pooling and DNS caching.
+///
+/// Stores `Result<Vec<Client>, String>` so that proxy-configuration errors are
 /// surfaced to callers instead of panicking or calling `process::exit`.
+#[cfg(not(target_arch = "wasm32"))]
+static HTTP_CLIENTS: LazyLock<Result<Vec<reqwest::Client>, String>> = LazyLock::new(|| {
+    (0..CLIENT_POOL_SIZE)
+        .map(|_| client_builder().and_then(|b| b.build().context("Failed to build reqwest client")))
+        .collect::<Result<Vec<_>>>()
+        .map_err(|e| e.to_string())
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+static CLIENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
+    let clients = HTTP_CLIENTS.as_ref().map_err(|e| anyhow!("{e}"))?;
+    let idx = CLIENT_COUNTER.fetch_add(1, Ordering::Relaxed) % clients.len();
+    Ok(&clients[idx])
+}
+
+/// WASM targets retain a single browser-backed client; there is no native TCP
+/// connection pool to fan out.
+#[cfg(target_arch = "wasm32")]
 static HTTP_CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
     client_builder()
         .and_then(|b| b.build().context("Failed to build reqwest client"))
         .map_err(|e| e.to_string())
 });
 
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }

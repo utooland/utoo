@@ -609,14 +609,6 @@ mod tests {
         }
     }
 
-    // The `resolve` entry in `builder` still routes through the legacy
-    // `RegistryClient::fetch_version_manifest` path in this PR — the cutover
-    // that points it at the demand driver lives in the follow-up PR in this
-    // stack. Until then the `CountingRegistry`'s `ManifestProvider`-side job
-    // counter stays at zero (the legacy path bypasses it), so the
-    // single-flight assertion below has nothing to count. The cutover PR
-    // removes this `#[ignore]` alongside flipping the entry-point bounds.
-    #[ignore = "exercises the demand-driver pipeline, wired in the cutover PR"]
     #[tokio::test]
     async fn test_non_semver_exact_version_extract_single_flight() {
         let mut inner = MockRegistryClient::new();

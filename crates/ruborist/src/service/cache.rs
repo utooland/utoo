@@ -212,10 +212,6 @@ pub struct ProjectPackageCache {
     pub manifests: HashMap<String, CoreVersionManifest>,
 }
 
-// Bridges between the on-disk project cache and the demand resolver's
-// neutral `(name, spec, manifest)` tuples. Wired up in the resolver
-// cutover PR — staged here so the trait + adapter PRs stay self-contained.
-#[allow(dead_code)]
 impl ProjectCacheData {
     /// Flatten into neutral `(name, spec, manifest)` tuples for seeding an
     /// in-memory resolver store. The store stays unaware of this on-disk shape.
