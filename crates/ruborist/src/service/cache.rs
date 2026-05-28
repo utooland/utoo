@@ -212,6 +212,45 @@ pub struct ProjectPackageCache {
     pub manifests: HashMap<String, CoreVersionManifest>,
 }
 
+impl ProjectCacheData {
+    /// Flatten into neutral `(name, spec, manifest)` tuples for seeding an
+    /// in-memory resolver store. The store stays unaware of this on-disk shape.
+    pub(crate) fn resolved_manifests(
+        &self,
+    ) -> Vec<(String, String, std::sync::Arc<CoreVersionManifest>)> {
+        let mut out = Vec::new();
+        for (name, pkg) in &self.cache {
+            for (spec, version) in &pkg.specs {
+                if let Some(manifest) = pkg.manifests.get(version) {
+                    out.push((
+                        name.clone(),
+                        spec.clone(),
+                        std::sync::Arc::new(manifest.clone()),
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    /// Rebuild from the resolver's neutral `(name, spec, manifest)` tuples,
+    /// indexing each manifest under both its spec and its resolved version.
+    pub(crate) fn from_resolved(
+        entries: Vec<(String, String, std::sync::Arc<CoreVersionManifest>)>,
+    ) -> Self {
+        let mut data = Self::default();
+        for (name, spec, manifest) in entries {
+            let version = manifest.version.clone();
+            let pkg = data.cache.entry(name).or_default();
+            pkg.specs.insert(spec, version.clone());
+            pkg.manifests
+                .entry(version)
+                .or_insert_with(|| (*manifest).clone());
+        }
+        data
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

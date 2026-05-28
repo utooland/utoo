@@ -50,6 +50,11 @@ use crate::resolver::version::resolve_target_version;
 use crate::traits::registry::{RegistryClient, RegistryError, ResolvedPackage, is_npm_registry};
 use crate::util::OnceMap;
 
+/// `ManifestProvider` implementation for the demand BFS resolver. A child
+/// module so it can reach `UnifiedRegistry`'s private fields without widening
+/// their visibility.
+mod provider;
+
 /// Unified registry client that works on both native and WASM.
 ///
 /// Cache lookup order:
