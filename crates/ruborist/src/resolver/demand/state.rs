@@ -23,6 +23,12 @@ type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 /// adapts these to/from disk; the store itself stays format-agnostic.
 #[derive(Default)]
 pub(crate) struct ResolverManifestCache {
+    // The resolver writes this on each run via `ManifestState::into_resolver_cache`;
+    // the reader is `ProjectCacheData::from_resolved` in the cutover PR's `api.rs`
+    // edit. Staged write-only here so the driver lands ahead of the entry-point
+    // switch — see the matching `#[allow(dead_code)]` on `ProjectCacheData`'s
+    // bridges in `service/cache.rs` introduced by the preceding (provider) PR.
+    #[allow(dead_code)]
     pub(crate) entries: Vec<(String, String, Arc<CoreVersionManifest>)>,
 }
 
@@ -136,6 +142,36 @@ impl ManifestState {
     /// Park an edge waiting on `name`'s package (full/versions) fetch.
     pub(crate) fn park_on_package(&mut self, name: String, waiter: WaitingEdge) {
         self.package_waiters.entry(name).or_default().push(waiter);
+    }
+
+    /// Park an edge waiting on a `(name, spec)` version-manifest fetch.
+    pub(crate) fn park_on_version(&mut self, key: (String, String), waiter: WaitingEdge) {
+        self.version.waiters.entry(key).or_default().push(waiter);
+    }
+
+    /// Whether any edge is still parked on a pending package or version fetch.
+    pub(crate) fn has_pending_waiters(&self) -> bool {
+        !self.package_waiters.is_empty() || !self.version.waiters.is_empty()
+    }
+
+    /// Parked-edge counts as `(package, version)`, for diagnostics.
+    pub(crate) fn pending_waiter_counts(&self) -> (usize, usize) {
+        let package = self.package_waiters.values().map(Vec::len).sum();
+        let version = self.version.waiters.values().map(Vec::len).sum();
+        (package, version)
+    }
+
+    /// Drain every parked edge (package + version waiters) for last-resort
+    /// sequential resolution.
+    pub(crate) fn drain_waiters(&mut self) -> Vec<WaitingEdge> {
+        let mut all = Vec::new();
+        for (_, waiters) in self.package_waiters.drain() {
+            all.extend(waiters);
+        }
+        for (_, waiters) in self.version.waiters.drain() {
+            all.extend(waiters);
+        }
+        all
     }
 
     /// Move every edge waiting on `name`'s package fetch into `ready`.

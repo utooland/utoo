@@ -27,12 +27,13 @@ use std::sync::Arc;
 use anyhow::Context as _;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
-use crate::model::manifest::NodeManifest;
+use crate::model::manifest::{CoreVersionManifest, NodeManifest};
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+use crate::resolver::demand::{ResolverManifestCache, run_main_loop_bfs};
 use crate::resolver::preload::{PreloadConfig, preload_manifests};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::service::ProjectCacheData;
+use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::{RegistryClient, ResolvedPackage};
@@ -756,6 +757,40 @@ pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
     Ok(())
 }
 
+// Wired by the cutover PR (“demand cutover”) where `api.rs` switches to
+// this output-returning entry; staged here so the trait, the driver, and the
+// entry-point flip arrive in three separately reviewable PRs.
+#[allow(dead_code)]
+/// Demand-driven dependency resolution: a single BFS loop that schedules
+/// manifest jobs through the [`ManifestProvider`] while owning the per-run
+/// manifest cache, waiters, and in-flight de-duplication. Returns the
+/// manifests resolved this run for the host to persist.
+pub(crate) async fn build_deps_with_config_output<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: BuildDepsConfig,
+    receiver: &E,
+) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
+    tracing::debug!(
+        "Starting demand dependency build, peer_deps: {:?}, concurrency: {}",
+        config.peer_deps,
+        config.concurrency
+    );
+
+    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
+
+    receiver.on_event(BuildEvent::Complete {
+        total_nodes: graph.graph.node_count(),
+    });
+
+    Ok(manifest_cache)
+}
+
 /// Run the preload phase to warm up the cache with manifests.
 async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
     graph: &DependencyGraph,
@@ -979,6 +1014,122 @@ fn graph_to_package_lock(
 ) -> PackageLock {
     let (packages, _total) = graph.serialize_to_packages(root_path);
     PackageLock::new(&pkg.name, &pkg.version, packages)
+}
+
+// ---- demand-resolver graph building (moved from demand::driver) ----
+
+/// Resolve `edge` onto an already-present compatible node: mark the edge
+/// resolved and update that node's type from the edge. Shared by the pre-fetch
+/// reuse probe ([`try_reuse_dependency`]) and the post-resolution placement
+/// ([`process_dependency_with_resolved`]), whose `FindResult::Reuse` arms are
+/// otherwise identical.
+fn reuse_existing_node(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    existing_index: NodeIndex,
+) -> ProcessResult {
+    graph.mark_dependency_resolved(edge.edge_id, existing_index);
+    update_node_type_from_edge(graph, parent, existing_index, &edge.edge_type);
+    ProcessResult::Reused(existing_index)
+}
+
+pub(crate) fn try_reuse_dependency(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+) -> Option<ProcessResult> {
+    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
+        FindResult::Reuse(existing_index) => {
+            Some(reuse_existing_node(graph, parent, edge, existing_index))
+        }
+        FindResult::Conflict(_) | FindResult::New(_) => None,
+    }
+}
+
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => {
+            reuse_existing_node(graph, node_index, edge_info, existing_index)
+        }
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
+pub(crate) fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+pub(crate) async fn handle_resolved_registry_manifest<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    manifest: Arc<CoreVersionManifest>,
+    config: &BuildDepsConfig,
+) -> Result<ProcessResult, ResolveError<R::Error>>
+where
+    R: RegistryClient,
+    E: EventReceiver,
+{
+    let resolved = ResolvedPackage {
+        name: edge.name.clone(),
+        version: manifest.version.clone(),
+        manifest,
+    };
+
+    // Apply an override keyed on the resolved version by re-resolving the
+    // override spec directly. Calling the full `process_dependency` here would
+    // redundantly re-resolve the original spec (whose manifest we already have)
+    // before it checks the override and resolves the override spec.
+    let resolved = if let Some(override_spec) =
+        graph.check_override(parent, &edge.name, Some(&resolved.version))
+    {
+        match resolve_registry_dep(registry, &edge.name, &override_spec, &edge.edge_type)
+            .await
+            .map_err(|inner| chain_err(graph, parent, edge, inner))?
+        {
+            Some(overridden) => overridden,
+            None => resolved, // override failed to resolve — keep the original
+        }
+    } else {
+        resolved
+    };
+
+    receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+    Ok(process_dependency_with_resolved(
+        graph, parent, edge, &resolved, config,
+    ))
 }
 
 #[cfg(test)]

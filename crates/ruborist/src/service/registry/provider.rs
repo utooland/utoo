@@ -24,6 +24,18 @@ use crate::model::manifest::{CoreVersionManifest, extract_core_version_off_runti
 use crate::traits::registry::RegistryError;
 
 impl UnifiedRegistry {
+    /// Metadata format for a version-manifest fetch. Semver registries accept
+    /// the abbreviated install-v1 form for range/tag queries; non-semver (npmjs)
+    /// exact-version fetches need the complete document. Derived from the
+    /// registry's own capability, so the demand loop never has to pass it.
+    fn version_fetch_format(&self) -> manifest::MetadataFormat {
+        if self.supports_semver {
+            manifest::MetadataFormat::Abbreviated
+        } else {
+            manifest::MetadataFormat::Complete
+        }
+    }
+
     /// Persist a resolved version manifest through the host store.
     ///
     /// De-duplicated by `(name, version)`: sibling specs frequently resolve to
@@ -114,7 +126,6 @@ impl ManifestProvider for UnifiedRegistry {
                 name,
                 spec,
                 fetch_spec,
-                format,
             } => {
                 if Version::parse_from_npm(&fetch_spec).is_ok()
                     && let Some(manifest) =
@@ -133,7 +144,7 @@ impl ManifestProvider for UnifiedRegistry {
                         registry_url: &self.registry_url,
                         name: &name,
                         spec: &fetch_spec,
-                        format,
+                        format: self.version_fetch_format(),
                     })
                     .await
                     .map_err(RegistryError)?;

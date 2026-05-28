@@ -52,7 +52,10 @@ impl FetchDone {
     }
 }
 
-pub(crate) type FetchFuture = std::pin::Pin<Box<dyn std::future::Future<Output = FetchDone>>>;
+/// A spawned fetch job. On native it's a `tokio::spawn` task (multi-threaded
+/// runtime → fetch + parse for independent manifests run in parallel); on wasm
+/// it's a `spawn_local` task. Either way the driver awaits the `JoinHandle`.
+pub(crate) type FetchFuture = tokio::task::JoinHandle<FetchDone>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FetchPriority {
@@ -127,7 +130,6 @@ impl FetchQueues {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::service::MetadataFormat;
 
     fn full(name: &str) -> ManifestJob {
         ManifestJob::Full {
@@ -145,7 +147,6 @@ mod tests {
                 name: "demand".to_string(),
                 spec: "^1.0.0".to_string(),
                 fetch_spec: "^1.0.0".to_string(),
-                format: MetadataFormat::Abbreviated,
             },
             FetchPriority::Demand,
         );
