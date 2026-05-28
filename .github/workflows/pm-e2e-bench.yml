@@ -162,9 +162,15 @@ jobs:
           # can now overwrite target/.../release/utoo safely.
           git fetch origin next --depth=1
           # Overlay origin/next's working tree onto the current workdir
-          # without moving HEAD. After this every tracked file matches
-          # origin/next; submodule pointers may differ so re-init.
+          # without moving HEAD. `checkout -- .` restores next's tracked files
+          # but leaves files the PR adds that next lacks; drop those too, or new
+          # module dirs (e.g. registry/, driver/) shadow next's flat-file
+          # modules and the baseline build fails with E0761. Submodule pointers
+          # may differ so re-init.
           git checkout origin/next -- .
+          # --no-renames so rename targets (e.g. registry.rs -> registry/mod.rs)
+          # count as Added and get removed too, not paired away as renames.
+          git diff --no-renames --diff-filter=A --name-only origin/next HEAD | xargs -r rm -f
           git submodule update --init --recursive --depth 1
           cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
       - name: Upload utoo-next binary
