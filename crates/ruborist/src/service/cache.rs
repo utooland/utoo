@@ -212,6 +212,49 @@ pub struct ProjectPackageCache {
     pub manifests: HashMap<String, CoreVersionManifest>,
 }
 
+// Bridges between the on-disk project cache and the demand resolver's
+// neutral `(name, spec, manifest)` tuples. Wired up in the resolver
+// cutover PR — staged here so the trait + adapter PRs stay self-contained.
+#[allow(dead_code)]
+impl ProjectCacheData {
+    /// Flatten into neutral `(name, spec, manifest)` tuples for seeding an
+    /// in-memory resolver store. The store stays unaware of this on-disk shape.
+    pub(crate) fn resolved_manifests(&self) -> Vec<(String, String, Arc<CoreVersionManifest>)> {
+        let mut out = Vec::new();
+        for (name, pkg) in &self.cache {
+            // Build one Arc per resolved version, then share it across every
+            // spec pointing at that version — sibling ranges commonly collapse
+            // to the same version, so this avoids cloning the manifest per spec.
+            let version_arcs: HashMap<&String, Arc<CoreVersionManifest>> = pkg
+                .manifests
+                .iter()
+                .map(|(version, manifest)| (version, Arc::new(manifest.clone())))
+                .collect();
+            for (spec, version) in &pkg.specs {
+                if let Some(arc) = version_arcs.get(version) {
+                    out.push((name.clone(), spec.clone(), Arc::clone(arc)));
+                }
+            }
+        }
+        out
+    }
+
+    /// Rebuild from the resolver's neutral `(name, spec, manifest)` tuples,
+    /// indexing each manifest under both its spec and its resolved version.
+    pub(crate) fn from_resolved(entries: Vec<(String, String, Arc<CoreVersionManifest>)>) -> Self {
+        let mut data = Self::default();
+        for (name, spec, manifest) in entries {
+            let version = manifest.version.clone();
+            let pkg = data.cache.entry(name).or_default();
+            pkg.specs.insert(spec, version.clone());
+            pkg.manifests
+                .entry(version)
+                .or_insert_with(|| (*manifest).clone());
+        }
+        data
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

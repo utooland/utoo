@@ -71,9 +71,9 @@
 //! cloning at every cache read and graph insertion:
 //!
 //! ```text
-//!   MemoryCache ──┐
-//!                 ├── Arc<CoreVersionManifest> ── (ref-count clone)
-//!   PackageNode ──┘
+//!   ManifestState ──┐
+//!                   ├── Arc<CoreVersionManifest> ── (ref-count clone)
+//!   PackageNode ────┘
 //!
 //!   Cold paths (disk I/O, serde) still use owned CoreVersionManifest,
 //!   wrapping in Arc::new() at the boundary.

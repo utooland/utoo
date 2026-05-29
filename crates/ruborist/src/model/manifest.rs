@@ -128,9 +128,8 @@ impl FullManifest {
     /// subtree is visited in place — no intermediate `serde_json::Value`
     /// allocation.
     ///
-    /// `OnceMap` single-flight in `UnifiedRegistry` reduces the per-key
-    /// invocation count to one, so the per-call full-tree parse cost is
-    /// bounded.
+    /// The BFS resolver de-duplicates in-flight extract jobs per key, so the
+    /// per-call full-tree parse cost is bounded.
     fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
         use simd_json::prelude::ValueObjectAccess;
         let mut buf = self.raw.to_vec();
