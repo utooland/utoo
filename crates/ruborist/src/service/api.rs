@@ -29,12 +29,12 @@ use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use super::store::{ManifestStore, NoopStore};
-use crate::model::graph::{DependencyGraph, PackageNode};
-use crate::model::node::EdgeType;
+use crate::model::graph::DependencyGraph;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
 use crate::resolver::builder::{
-    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config_output,
+    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, add_workspace_member,
+    build_deps_with_config_output,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -169,38 +169,19 @@ where
     let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
 
     for workspace in workspaces {
-        let ws_pkg = workspace.package_json;
-
-        // Create workspace node
-        let workspace_node =
-            PackageNode::workspace_from_package_json(workspace.path.clone(), ws_pkg.clone());
-        let workspace_index = graph.add_node(workspace_node);
-
-        // Create link node
-        let link_node = PackageNode::link_from_package_json(workspace.path.clone(), ws_pkg.clone());
-        let link_index = graph.add_node(link_node);
-
-        // Add physical edges
-        graph.add_physical_edge(root_index, workspace_index);
-        graph.add_physical_edge(root_index, link_index);
-
-        // Create and mark dependency edge as resolved
-        let dep_edge_id = graph.add_dependency_edge(
-            root_index,
-            workspace.name.clone(),
-            &ws_pkg.version,
-            EdgeType::Prod,
-        );
-        graph.mark_dependency_resolved(dep_edge_id, workspace_index);
-
         tracing::debug!(
             "Added workspace: {} at {:?}",
             workspace.name,
             workspace.path
         );
-
-        // Add workspace dependencies (catalog: specs resolved at edge creation)
-        add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
+        add_workspace_member(
+            &mut graph,
+            root_index,
+            &workspace.name,
+            workspace.path,
+            &workspace.package_json,
+            &edge_ctx,
+        );
     }
 
     // 7. Create the stateless registry client (persistence backend only).

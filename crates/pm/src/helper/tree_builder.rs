@@ -7,10 +7,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde_json::{Value, json};
-use utoo_ruborist::builder::{DevDeps, EdgeContext, add_edges_from};
-use utoo_ruborist::graph::{DependencyGraph, EdgeType, PackageNode};
+use utoo_ruborist::builder::{DevDeps, EdgeContext, add_edges_from, add_workspace_member};
+use utoo_ruborist::graph::{DependencyGraph, EdgeType};
+use utoo_ruborist::resolver::runtime::install_runtime;
 
-use crate::helper::install_runtime::install_runtime;
 use crate::helper::workspace::find_workspaces;
 use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
 
@@ -40,7 +40,7 @@ impl TreeBuilder {
             Some(engines) => json!(engines),
             None => Value::Null,
         };
-        let deps = install_runtime(&engines_value)?;
+        let deps = install_runtime(&engines_value);
         for (name, version) in deps {
             graph.add_dependency_edge(graph.root_index, name, version, EdgeType::Optional);
         }
@@ -84,42 +84,12 @@ impl TreeBuilder {
         })?;
 
         let peer_deps = get_peer_deps().await;
+        let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include);
+        let root_index = graph.root_index;
 
-        // Process each workspace member
         for (name, path, pkg) in workspaces {
-            let version = &pkg.version;
-
-            // Create workspace node
-            let workspace_node =
-                PackageNode::workspace_from_package_json(path.clone(), pkg.clone());
-            let workspace_index = graph.add_node(workspace_node);
-
-            // Create link node
-            let link_node = PackageNode::link_from_package_json(path.clone(), pkg.clone());
-            let link_index = graph.add_node(link_node);
-
-            // Add physical edges
-            graph.add_physical_edge(graph.root_index, workspace_index);
-            graph.add_physical_edge(graph.root_index, link_index);
-
-            // Create and mark dependency edge as resolved
-            let dep_edge_id = graph.add_dependency_edge(
-                graph.root_index,
-                name.as_str(),
-                version.as_str(),
-                EdgeType::Prod,
-            );
-            graph.mark_dependency_resolved(dep_edge_id, workspace_index);
-
             tracing::debug!("Added workspace: {} {:?}", name, path);
-
-            // Add workspace dependencies using ruborist's shared logic
-            add_edges_from(
-                graph,
-                workspace_index,
-                &pkg,
-                &EdgeContext::new(peer_deps, DevDeps::Include),
-            );
+            add_workspace_member(graph, root_index, &name, path, &pkg, &edge_ctx);
         }
 
         Ok(())

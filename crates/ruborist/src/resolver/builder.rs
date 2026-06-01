@@ -204,6 +204,35 @@ pub fn create_package_node(
     PackageNode::from_version_manifest(name.to_string(), path, pkg.manifest.clone())
 }
 
+/// Attach a workspace member to the root of `graph`: add its workspace node and
+/// link node physically under root, mark root's dependency edge on it resolved,
+/// and seed the member's own dependency edges via `edge_ctx`.
+///
+/// Shared by the install graph setup in `service::api` and pm's
+/// workspace-topology builder so the workspace-node shape is defined once.
+pub fn add_workspace_member(
+    graph: &mut DependencyGraph,
+    root_index: NodeIndex,
+    name: &str,
+    path: PathBuf,
+    pkg: &PackageJson,
+    edge_ctx: &EdgeContext,
+) {
+    let workspace_node = PackageNode::workspace_from_package_json(path.clone(), pkg.clone());
+    let workspace_index = graph.add_node(workspace_node);
+
+    let link_node = PackageNode::link_from_package_json(path, pkg.clone());
+    let link_index = graph.add_node(link_node);
+
+    graph.add_physical_edge(root_index, workspace_index);
+    graph.add_physical_edge(root_index, link_index);
+
+    let dep_edge_id = graph.add_dependency_edge(root_index, name, &pkg.version, EdgeType::Prod);
+    graph.mark_dependency_resolved(dep_edge_id, workspace_index);
+
+    add_edges_from(graph, workspace_index, pkg, edge_ctx);
+}
+
 /// Update target node type based on source node and edge type.
 ///
 /// This function propagates dependency types through the graph according to npm rules:
