@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use super::cache::VersionsInfo;
-use super::manifest::MetadataFormat;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::traits::registry::RegistryClient;
 
@@ -48,10 +47,6 @@ pub enum ManifestJob {
         /// Registry request spec. For npmjs 304 flows this is the resolved
         /// exact version, while `spec` remains the original range key.
         fetch_spec: String,
-        /// Metadata format for the version endpoint. Semver-capable registries
-        /// accept install-v1 for range/tag queries; npmjs exact-version
-        /// fallback requires the complete metadata format.
-        format: MetadataFormat,
     },
     ExtractVersion {
         name: String,

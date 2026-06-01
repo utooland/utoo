@@ -428,7 +428,6 @@ pub mod mock {
                     name,
                     spec,
                     fetch_spec,
-                    format: _,
                 } => {
                     let manifest = self.fetch_version_manifest(&name, &fetch_spec).await?;
                     Ok(ManifestJobDone::Version {

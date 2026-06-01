@@ -3,15 +3,17 @@
 //! - [`state`] — per-run manifest store (cache, waiters, failures).
 //! - [`queue`] — fetch scheduling, single-flight de-duplication, priority.
 //! - [`select`] — per-edge resolution decision (pure; reads the store).
+//! - [`schedule`] — fetch-scheduling policy: which manifest jobs to enqueue.
+//! - [`driver`] — BFS loop: drives fetches, applies results, builds the graph.
 //!
-//! These are independent leaf concerns; the driver that coordinates them (and exposes
-//! `run_main_loop_bfs`) lands in the follow-up PR. Until then they are staged
-//! here and exercised by their own unit tests.
+//! `state`/`queue`/`select`/`schedule` are leaf concerns; the driver
+//! coordinates them.
 
-// Staged ahead of the driver: the only consumers so far are the unit tests, so
-// the driver-facing API is dead in this PR.
-#![allow(dead_code)]
-
+mod driver;
 mod queue;
+mod schedule;
 mod select;
 mod state;
+
+pub(crate) use driver::run_main_loop_bfs;
+pub(crate) use state::ResolverManifestCache;
