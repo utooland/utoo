@@ -31,7 +31,7 @@ impl From<ServerPath> for NapiServerPath {
     fn from(server_path: ServerPath) -> Self {
         Self {
             path: server_path.path,
-            content_hash: format!("{:x}", server_path.content_hash),
+            content_hash: server_path.content_hash.into_owned(),
         }
     }
 }

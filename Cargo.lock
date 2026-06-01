@@ -5796,6 +5796,7 @@ dependencies = [
  "turbo-tasks-backend",
  "turbo-tasks-env",
  "turbo-tasks-fs",
+ "turbo-tasks-hash",
  "turbo-unix-path",
  "turbopack",
  "turbopack-browser",

@@ -1,10 +1,11 @@
 use anyhow::Result;
 use tracing::Instrument;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{ResolvedVc, TryFlatJoinIterExt, Vc};
+use turbo_tasks::{ReadRef, ResolvedVc, TryFlatJoinIterExt, Vc};
 use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_hash::HashAlgorithm;
 use turbopack_core::{
-    asset::{Asset, AssetContent},
+    asset::Asset,
     output::{OutputAsset, OutputAssets},
     reference::all_assets_from_entries,
 };
@@ -15,7 +16,7 @@ use turbopack_core::{
 pub struct ServerPath {
     /// Relative to the root_path
     pub path: String,
-    pub content_hash: u64,
+    pub content_hash: RcStr,
 }
 
 /// A list of server paths
@@ -40,10 +41,9 @@ pub async fn all_server_paths(
                 .map(|&asset| async move {
                     Ok(
                         if let Some(path) = node_root.get_path_to(&*asset.path().await?) {
-                            let content_hash = match *asset.content().await? {
-                                AssetContent::File(file) => *file.hash().await?,
-                                AssetContent::Redirect { .. } => 0,
-                            };
+                            let content_hash = ReadRef::into_owned(
+                                asset.content().hash(HashAlgorithm::Xxh3Hash64Hex).await?,
+                            );
                             Some(ServerPath {
                                 path: path.to_string(),
                                 content_hash,
