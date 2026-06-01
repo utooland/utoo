@@ -60,7 +60,7 @@ pub use http::client_builder;
 pub use manifest::{
     FetchManifestBytesResult, FetchManifestOptions, FetchManifestResult,
     FetchVersionManifestOptions, MetadataFormat, fetch_full_manifest, fetch_full_manifest_bytes,
-    fetch_full_manifest_fresh, fetch_version_manifest, fetch_version_manifest_bytes,
+    fetch_full_manifest_fresh,
 };
 pub use manifest_provider::{ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider};
 pub use registry::UnifiedRegistry;

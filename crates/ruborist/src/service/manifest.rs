@@ -293,11 +293,6 @@ pub struct FetchVersionManifestOptions<'a> {
     pub format: MetadataFormat,
 }
 
-/// Fetch version manifest bytes with retry, without parsing.
-pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>) -> Result<Bytes> {
-    fetch_version_manifest_vec(opts).await.map(Bytes::from)
-}
-
 /// Fetch version manifest into a mutable parse buffer with retry.
 ///
 /// Unlike full manifests, exact-version manifests do not need to keep raw
@@ -341,14 +336,6 @@ pub(crate) async fn fetch_version_manifest_vec(
             anyhow!("Failed to fetch {}@{}: {:#}", opts.name, opts.spec, e)
         }
     })
-}
-
-/// Fetch version manifest with retry.
-pub async fn fetch_version_manifest(
-    opts: FetchVersionManifestOptions<'_>,
-) -> Result<CoreVersionManifest> {
-    let bytes = fetch_version_manifest_vec(opts).await?;
-    parse_json_vec_off_runtime::<CoreVersionManifest>(bytes).await
 }
 
 #[cfg(test)]
