@@ -23,7 +23,7 @@ pub struct Entrypoints {
     pub libraries: Option<ResolvedVc<Endpoints>>,
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_all_written_entrypoints_with_issues_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<EntrypointsWithIssues>> {
@@ -40,7 +40,7 @@ pub async fn get_all_written_entrypoints_with_issues_operation(
     .cell())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn all_entrypoints_write_to_disk_operation(
     project: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<Entrypoints>> {
@@ -53,7 +53,7 @@ pub async fn all_entrypoints_write_to_disk_operation(
     Ok(project.entrypoints())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn all_output_assets_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<OutputAssets>> {
@@ -130,7 +130,7 @@ pub struct EntrypointsWithIssues {
     pub effects: Arc<Effects>,
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_entrypoints_with_issues_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<EntrypointsWithIssues>> {
@@ -147,7 +147,7 @@ pub async fn get_entrypoints_with_issues_operation(
     .cell())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn project_container_entrypoints_operation(
     // the container is a long-lived object with internally mutable state, there's no risk of it
     // becoming stale

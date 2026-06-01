@@ -59,7 +59,7 @@ pub enum EndpointOutputPaths {
 #[turbo_tasks::value(transparent)]
 pub struct Endpoints(pub Vec<ResolvedVc<Box<dyn Endpoint>>>);
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn endpoint_server_changed_operation(
     endpoint: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<Completion>> {
@@ -70,7 +70,7 @@ pub async fn endpoint_server_changed_operation(
     })
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn endpoint_write_to_disk_operation(
     endpoint: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<EndpointOutputPaths>> {
@@ -100,13 +100,13 @@ pub async fn endpoint_write_to_disk(
     Ok(*output_paths)
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 #[tracing::instrument(name = "output_assets_operation", skip_all)]
 fn output_assets_operation(endpoint: ResolvedVc<Box<dyn Endpoint>>) -> Vc<EndpointOutput> {
     endpoint.output()
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn endpoint_output_assets_operation(
     output: OperationVc<EndpointOutput>,
 ) -> Result<Vc<OutputAssets>> {
@@ -123,7 +123,7 @@ pub struct WrittenEndpointWithIssues {
 #[turbo_tasks::value(transparent)]
 pub struct OptionEndpoint(pub Option<ResolvedVc<Box<dyn Endpoint>>>);
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_written_endpoint_with_issues_operation(
     endpoint_op: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<WrittenEndpointWithIssues>> {

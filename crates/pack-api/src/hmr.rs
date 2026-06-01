@@ -20,7 +20,7 @@ pub struct HmrUpdateWithIssues {
     pub effects: Arc<Effects>,
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn hmr_update_with_issues_operation(
     project: ResolvedVc<Project>,
     identifier: RcStr,
@@ -38,7 +38,7 @@ pub async fn hmr_update_with_issues_operation(
     .cell())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn project_hmr_update_operation(
     project: ResolvedVc<Project>,
     identifier: RcStr,
@@ -54,7 +54,7 @@ pub struct HmrIdentifiersWithIssues {
     pub effects: Arc<Effects>,
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_hmr_identifiers_with_issues_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<HmrIdentifiersWithIssues>> {
@@ -70,7 +70,7 @@ pub async fn get_hmr_identifiers_with_issues_operation(
     .cell())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn project_container_hmr_identifiers_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Vc<Vec<RcStr>> {

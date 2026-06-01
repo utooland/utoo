@@ -11,7 +11,7 @@ use crate::endpoint::{
     Endpoint, EndpointIssuesAndDiags, OptionEndpoint, endpoint_server_changed_operation,
 };
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn subscribe_issues_and_diags_operation(
     endpoint_op: OperationVc<OptionEndpoint>,
     should_include_issues: bool,
@@ -38,7 +38,7 @@ pub async fn subscribe_issues_and_diags_operation(
     }
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn endpoint_client_changed_operation(
     endpoint: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<Completion>> {

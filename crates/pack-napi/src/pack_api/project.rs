@@ -844,7 +844,7 @@ pub struct StackFrame {
 #[derive(Clone)]
 pub struct OptionStackFrame(Option<StackFrame>);
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn project_trace_source_operation(
     container: ResolvedVc<ProjectContainer>,
     frame: StackFrame,
@@ -1015,7 +1015,7 @@ pub async fn project_get_source_map(
     Ok(source_map)
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub fn get_source_map_rope_operation(
     container: ResolvedVc<ProjectContainer>,
     file_path: RcStr,
