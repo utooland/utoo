@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use turbo_rcstr::rcstr;
 use turbo_tasks::{ResolvedVc, Vc};
 use turbopack_core::{
@@ -135,12 +136,10 @@ impl ChunkItem for ServerReferenceChunkItem {
         self.inner_module.ident()
     }
 
-    #[turbo_tasks::function]
     fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
         *self.chunking_context
     }
 
-    #[turbo_tasks::function]
     fn ty(&self) -> Vc<Box<dyn ChunkType>> {
         Vc::upcast(Vc::<EcmascriptChunkType>::default())
     }
@@ -151,20 +150,14 @@ impl ChunkItem for ServerReferenceChunkItem {
     }
 }
 
+#[async_trait]
 #[turbo_tasks::value_impl]
 impl EcmascriptChunkItem for ServerReferenceChunkItem {
-    #[turbo_tasks::function]
-    fn content(&self) -> Vc<EcmascriptChunkItemContent> {
-        // Empty content — server code is built separately as Node.js
-        EcmascriptChunkItemContent::default().cell()
-    }
-
-    #[turbo_tasks::function]
-    fn content_with_async_module_info(
+    async fn content_with_async_module_info(
         &self,
         _async_module_info: Option<Vc<AsyncModuleInfo>>,
         _estimated: bool,
-    ) -> Vc<EcmascriptChunkItemContent> {
-        EcmascriptChunkItemContent::default().cell()
+    ) -> Result<Vc<EcmascriptChunkItemContent>> {
+        Ok(EcmascriptChunkItemContent::default().cell())
     }
 }

@@ -138,10 +138,14 @@ impl AppEntrypoint {
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
-        Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(), ty)
-            .await?
-            .primary_modules())
+        Ok(Vc::cell(
+            origin
+                .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
+                .await?
+                .primary_modules()
+                .await?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -644,6 +648,7 @@ impl AppEndpoint {
             let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
             let modules = origin
                 .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
                 .await?
                 .primary_modules()
                 .await?;

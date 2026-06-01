@@ -42,6 +42,7 @@ impl RuntimeEntry {
         )
         .resolve()
         .await?
+        .await?
         .primary_modules()
         .await?;
 
