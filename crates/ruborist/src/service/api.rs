@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::cache::{PackageCache, ProjectCacheData};
+use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use super::store::{ManifestStore, NoopStore};
@@ -203,24 +203,11 @@ where
         add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
     }
 
-    // 7. Create in-memory package cache and pre-populate from the warm
-    // project cache (host-supplied; `None` for cold runs).
-    let package_cache = Arc::new(PackageCache::default());
-    let (cache_count, missing_count) =
-        prepopulate_warm_cache(&package_cache, project_cache.as_ref());
-    if missing_count > 0 {
-        tracing::warn!(
-            "Project cache has {missing_count} specs with missing manifests, will re-fetch from registry"
-        );
-    }
-    if cache_count > 0 {
-        tracing::debug!("Loaded {cache_count} manifests from project cache");
-    }
-
-    // 8. Create registry client with shared cache and persistence backend.
+    // 7. Create the stateless registry client (persistence backend only).
+    //    The warm `project_cache` seeds the demand resolver's manifest cache
+    //    directly via `BuildDepsConfig::project_cache` below.
     let mut builder = UnifiedRegistry::builder()
         .registry(&registry_url)
-        .cache(package_cache)
         .store(Arc::clone(&manifest_store));
     if let Some(semver) = supports_semver {
         builder = builder.supports_semver(semver);
@@ -258,32 +245,6 @@ where
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),
         project_cache,
     })
-}
-
-/// Pre-populate `cache` from a warm project cache. Returns
-/// `(loaded, missing)` — `loaded` is the count of usable spec→manifest
-/// entries; `missing` counts specs whose resolved version had no manifest
-/// (corrupted cache, will be re-fetched).
-fn prepopulate_warm_cache(cache: &PackageCache, warm: Option<&ProjectCacheData>) -> (usize, usize) {
-    let Some(warm) = warm else {
-        return (0, 0);
-    };
-    let mut loaded = 0;
-    let mut missing = 0;
-    for (name, pkg_cache) in &warm.cache {
-        for (spec, version) in &pkg_cache.specs {
-            let Some(manifest) = pkg_cache.manifests.get(version) else {
-                tracing::debug!(
-                    "Project cache missing manifest: {name}@{spec} (version {version})"
-                );
-                missing += 1;
-                continue;
-            };
-            cache.set_version_manifest(name.clone(), spec.clone(), Arc::new(manifest.clone()));
-            loaded += 1;
-        }
-    }
-    (loaded, missing)
 }
 
 #[cfg(test)]

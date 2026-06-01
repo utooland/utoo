@@ -530,7 +530,7 @@ mod tests {
     use petgraph::graph::EdgeIndex;
 
     use super::*;
-    use crate::model::manifest::{CoreVersionManifest, FullManifest};
+    use crate::model::manifest::CoreVersionManifest;
     use crate::model::package_json::PackageJson;
     use crate::resolver::builder::resolve;
     use crate::service::{ManifestJob, ManifestJobDone};
@@ -583,10 +583,6 @@ mod tests {
 
     impl crate::traits::registry::RegistryClient for CountingRegistry {
         type Error = MockError;
-
-        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
-            self.inner.fetch_full_manifest(name).await
-        }
     }
 
     #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]

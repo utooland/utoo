@@ -31,7 +31,7 @@ use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
-use crate::traits::registry::{RegistryClient, ResolvedPackage};
+use crate::traits::registry::ResolvedPackage;
 
 /// Dispatch a git/github spec to the real `gix`-backed resolver when the
 /// `native-git` feature is enabled, otherwise error with a hint.
@@ -413,7 +413,7 @@ async fn process_file_dep<E>(
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
-pub async fn process_dependency<R: RegistryClient>(
+pub async fn process_dependency<R: ManifestProvider>(
     graph: &mut DependencyGraph,
     registry: &R,
     node_index: NodeIndex,
@@ -893,7 +893,7 @@ pub(crate) async fn handle_resolved_registry_manifest<R, E>(
     config: &BuildDepsConfig,
 ) -> Result<ProcessResult, ResolveError<R::Error>>
 where
-    R: RegistryClient,
+    R: ManifestProvider,
     E: EventReceiver,
 {
     let resolved = ResolvedPackage {

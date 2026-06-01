@@ -1,11 +1,12 @@
 //! Registry client trait for dependency resolution.
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::Arc;
 
-use crate::model::manifest::{CoreVersionManifest, FullManifest};
-use crate::resolver::semver::normalize_spec;
+use crate::model::manifest::CoreVersionManifest;
+#[cfg(test)]
+use crate::model::manifest::FullManifest;
+#[cfg(test)]
 use crate::resolver::version::resolve_target_version;
 
 /// Check if a registry URL is the official npm registry.
@@ -132,149 +133,6 @@ pub trait RegistryClient {
     fn supports_semver_resolution(&self) -> bool {
         false
     }
-
-    /// Fetch full package manifest from registry.
-    ///
-    /// Returns the complete package manifest with all versions, wrapped in
-    /// an `Arc` so callers share the (potentially large) payload without
-    /// cloning.
-    fn fetch_full_manifest(
-        &self,
-        name: &str,
-    ) -> impl Future<Output = Result<Arc<FullManifest>, Self::Error>>;
-
-    /// Fetch specific version manifest from registry.
-    ///
-    /// For semver-supporting registries, this can directly query `registry/name/spec`.
-    /// The `spec` can be a semver range (^1.0.0), dist-tag (latest), or exact version.
-    ///
-    /// Default implementation fetches full manifest and resolves locally.
-    /// Override this for semver-supporting registries for better performance.
-    fn fetch_version_manifest(
-        &self,
-        name: &str,
-        spec: &str,
-    ) -> impl Future<Output = Result<Arc<CoreVersionManifest>, Self::Error>> {
-        async move {
-            let manifest = self.fetch_full_manifest(name).await?;
-
-            // Resolve version using shared logic
-            let resolved_version = resolve_target_version((&*manifest).into(), spec)
-                .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
-
-            manifest
-                .get_core_version(&resolved_version)
-                .map(Arc::new)
-                .ok_or_else(|| {
-                    RegistryError(anyhow::anyhow!(
-                        "Version {} not found in manifest for {}",
-                        resolved_version,
-                        name
-                    ))
-                    .into()
-                })
-        }
-    }
-
-    /// Resolve a package by name and version spec.
-    ///
-    /// This is the main entry point for package resolution. It automatically
-    /// chooses the best strategy based on registry capabilities:
-    ///
-    /// - If `supports_semver_resolution()` is true, uses `fetch_version_manifest` directly
-    /// - Otherwise, fetches full manifest and resolves locally
-    ///
-    /// Handles npm alias specs like `npm:package@version` by fetching the aliased package.
-    ///
-    /// # Arguments
-    /// * `name` - Package name (used as the alias name in the result)
-    /// * `spec` - Version specification (semver range, dist-tag, exact version, or npm alias)
-    fn resolve_package(
-        &self,
-        name: &str,
-        spec: &str,
-    ) -> impl Future<Output = Result<ResolvedPackage, Self::Error>> {
-        async move {
-            // Normalize spec (handles npm: alias and workspace: prefix)
-            let (fetch_name, fetch_spec) = normalize_spec(name, spec);
-            if fetch_name != name || fetch_spec != spec {
-                tracing::debug!(
-                    "Normalized {}@{} -> {}@{}",
-                    name,
-                    spec,
-                    fetch_name,
-                    fetch_spec
-                );
-            }
-
-            if self.supports_semver_resolution() {
-                // Semver-supporting registry: direct query
-                tracing::debug!("Using semver resolution for {}@{}", fetch_name, fetch_spec);
-                let manifest = self
-                    .fetch_version_manifest(&fetch_name, &fetch_spec)
-                    .await?;
-                Ok(ResolvedPackage {
-                    name: name.to_string(), // Keep original name as the dependency name
-                    version: manifest.version.clone(),
-                    manifest,
-                })
-            } else {
-                // Traditional registry: fetch full manifest and resolve locally
-                tracing::debug!(
-                    "Using full manifest resolution for {}@{}",
-                    fetch_name,
-                    fetch_spec
-                );
-                let full_manifest = self.fetch_full_manifest(&fetch_name).await?;
-
-                if full_manifest.versions.is_empty() {
-                    return Err(RegistryError(anyhow::anyhow!(
-                        "No versions available for {}",
-                        fetch_name
-                    ))
-                    .into());
-                }
-
-                let resolved_version =
-                    resolve_target_version((&*full_manifest).into(), &fetch_spec)
-                        .map_err(|e| RegistryError(anyhow::anyhow!("{}@{}: {}", name, spec, e)))?;
-
-                let version_manifest = full_manifest
-                    .get_core_version(&resolved_version)
-                    .map(Arc::new)
-                    .ok_or_else(|| {
-                        RegistryError(anyhow::anyhow!(
-                            "Version {} not found in manifest for {}",
-                            resolved_version,
-                            fetch_name
-                        ))
-                    })?;
-
-                Ok(ResolvedPackage {
-                    name: name.to_string(), // Keep original name as the dependency name
-                    version: resolved_version,
-                    manifest: version_manifest,
-                })
-            }
-        }
-    }
-
-    /// Fetch only versions info (lightweight, without full manifests).
-    ///
-    /// Default implementation calls `fetch_full_manifest` and extracts version info.
-    /// Override for more efficient implementation if the registry supports it.
-    fn fetch_versions_info(
-        &self,
-        name: &str,
-    ) -> impl Future<Output = Result<VersionsInfo, Self::Error>> {
-        async move {
-            let manifest = self.fetch_full_manifest(name).await?;
-            Ok(VersionsInfo {
-                version_list: manifest.versions.clone(),
-                dist_tags: manifest.dist_tags.clone(),
-            })
-        }
-    }
 }
 
 /// A simple in-memory registry client for testing.
@@ -356,8 +214,10 @@ pub mod mock {
 
     impl RegistryClient for MockRegistryClient {
         type Error = MockError;
+    }
 
-        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
+    impl MockRegistryClient {
+        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, MockError> {
             let pkg = self
                 .packages
                 .get(name)
@@ -378,6 +238,24 @@ pub mod mock {
                 raw: bytes::Bytes::from(raw),
                 ..Default::default()
             }))
+        }
+
+        async fn fetch_version_manifest(
+            &self,
+            name: &str,
+            spec: &str,
+        ) -> Result<Arc<CoreVersionManifest>, MockError> {
+            let manifest = self.fetch_full_manifest(name).await?;
+            let resolved_version = resolve_target_version((&*manifest).into(), spec)
+                .map_err(|e| MockError(format!("{name}@{spec}: {e}")))?;
+            manifest
+                .get_core_version(&resolved_version)
+                .map(Arc::new)
+                .ok_or_else(|| {
+                    MockError(format!(
+                        "Version {resolved_version} not found in manifest for {name}"
+                    ))
+                })
         }
     }
 
