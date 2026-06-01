@@ -61,7 +61,7 @@ use turbopack_trace_utils::{
 
 use super::{
     endpoint::ExternalEndpoint,
-    utils::{NapiDiagnostic, NapiIssue, TurbopackResult, create_turbo_tasks, subscribe},
+    utils::{NapiIssue, TurbopackResult, create_turbo_tasks, subscribe},
 };
 use crate::util::{DetachedVc, DhatProfilerGuard};
 
@@ -507,7 +507,7 @@ pub async fn project_write_all_entrypoints_to_disk(
     let container = project.container;
     let tt = ctx.turbo_tasks();
 
-    let (entrypoints, issues, diags) = tt
+    let (entrypoints, issues) = tt
         .run(async move {
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(container);
@@ -515,7 +515,6 @@ pub async fn project_write_all_entrypoints_to_disk(
             let EntrypointsWithIssues {
                 entrypoints,
                 issues,
-                diagnostics,
                 effects,
             } = &*entrypoints_with_issues_op
                 .read_strongly_consistent()
@@ -526,7 +525,6 @@ pub async fn project_write_all_entrypoints_to_disk(
             Ok((
                 entrypoints.clone(),
                 issues.iter().cloned().collect::<Vec<_>>(),
-                diagnostics.iter().cloned().collect::<Vec<_>>(),
             ))
         })
         .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
@@ -542,7 +540,6 @@ pub async fn project_write_all_entrypoints_to_disk(
     Ok(TurbopackResult {
         result: napi_entrypoints,
         issues: issues.iter().map(|i| NapiIssue::from(&**i)).collect(),
-        diagnostics: diags.iter().map(|d| NapiDiagnostic::from(d)).collect(),
     })
 }
 
@@ -562,18 +559,17 @@ pub fn project_entrypoints_subscribe(
                 let EntrypointsWithIssues {
                     entrypoints,
                     issues,
-                    diagnostics,
                     effects,
                 } = &*entrypoints_with_issues_op
                     .read_strongly_consistent()
                     .await?;
                 effects.apply().await?;
-                Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
+                Ok((entrypoints.clone(), issues.clone()))
             }
             .instrument(tracing::trace_span!("entrypoints subscription"))
         },
         move |ctx| {
-            let (entrypoints, issues, diags) = ctx.value;
+            let (entrypoints, issues) = ctx.value;
 
             Ok(vec![TurbopackResult {
                 result: NapiEntrypoints::from_entrypoints_op(&entrypoints, &turbopack_ctx)?,
@@ -581,7 +577,6 @@ pub fn project_entrypoints_subscribe(
                     .iter()
                     .map(|issue| NapiIssue::from(&**issue))
                     .collect(),
-                diagnostics: diags.iter().map(|d| NapiDiagnostic::from(d)).collect(),
             }])
         },
     )
@@ -619,7 +614,6 @@ pub fn project_hmr_events(
                     let HmrUpdateWithIssues {
                         update,
                         issues,
-                        diagnostics,
                         effects,
                     } = &*update;
                     effects.apply().await?;
@@ -632,12 +626,12 @@ pub fn project_hmr_events(
                             state.set(to.clone()).await?;
                         }
                     }
-                    Ok((Some(update.clone()), issues.clone(), diagnostics.clone()))
+                    Ok((Some(update.clone()), issues.clone()))
                 }
             }
         },
         move |ctx| {
-            let (update, issues, diags) = ctx.value;
+            let (update, issues) = ctx.value;
 
             let napi_issues = issues
                 .iter()
@@ -667,7 +661,6 @@ pub fn project_hmr_events(
             Ok(vec![TurbopackResult {
                 result: ctx.env.to_js_value(&update)?,
                 issues: napi_issues,
-                diagnostics: diags.iter().map(|d| NapiDiagnostic::from(d)).collect(),
             }])
         },
     )
@@ -694,17 +687,16 @@ pub fn project_hmr_identifiers_subscribe(
             let HmrIdentifiersWithIssues {
                 identifiers,
                 issues,
-                diagnostics,
                 effects,
             } = &*hmr_identifiers_with_issues_op
                 .read_strongly_consistent()
                 .await?;
             effects.apply().await?;
 
-            Ok((identifiers.clone(), issues.clone(), diagnostics.clone()))
+            Ok((identifiers.clone(), issues.clone()))
         },
         move |ctx| {
-            let (identifiers, issues, diagnostics) = ctx.value;
+            let (identifiers, issues) = ctx.value;
 
             Ok(vec![TurbopackResult {
                 result: HmrIdentifiers {
@@ -716,10 +708,6 @@ pub fn project_hmr_identifiers_subscribe(
                 issues: issues
                     .iter()
                     .map(|issue| NapiIssue::from(&**issue))
-                    .collect(),
-                diagnostics: diagnostics
-                    .iter()
-                    .map(|d| NapiDiagnostic::from(d))
                     .collect(),
             }])
         },

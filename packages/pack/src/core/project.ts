@@ -660,7 +660,6 @@ export function projectFactory() {
       apps: (entrypoints.apps || []).map((e) => new EndpointImpl(e)),
       libraries: (entrypoints.libraries || []).map((e) => new EndpointImpl(e)),
       issues: entrypoints.issues,
-      diagnostics: entrypoints.diagnostics,
     };
   }
 

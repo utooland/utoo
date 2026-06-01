@@ -4,7 +4,6 @@ use anyhow::Result;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{Completion, Effects, OperationVc, ReadRef, ResolvedVc, Vc};
 use turbopack_core::{
-    diagnostics::PlainDiagnostic,
     issue::PlainIssue,
     module_graph::{GraphEntries, ModuleGraph},
     output::OutputAssets,
@@ -118,7 +117,6 @@ async fn endpoint_output_assets_operation(
 pub struct WrittenEndpointWithIssues {
     pub written: Option<ReadRef<EndpointOutputPaths>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
-    pub diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     pub effects: Arc<Effects>,
 }
 
@@ -130,12 +128,11 @@ pub async fn get_written_endpoint_with_issues_operation(
     endpoint_op: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<WrittenEndpointWithIssues>> {
     let write_to_disk_op = endpoint_write_to_disk_operation(endpoint_op);
-    let (written, issues, diagnostics, effects) =
+    let (written, issues, effects) =
         strongly_consistent_catch_collectables(write_to_disk_op).await?;
     Ok(WrittenEndpointWithIssues {
         written,
         issues,
-        diagnostics,
         effects,
     }
     .cell())
@@ -145,7 +142,6 @@ pub async fn get_written_endpoint_with_issues_operation(
 pub struct EndpointIssuesAndDiags {
     pub changed: Option<ReadRef<Completion>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
-    pub diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     pub effects: Arc<Effects>,
 }
 
@@ -156,7 +152,6 @@ impl PartialEq for EndpointIssuesAndDiags {
             (None, None) => true,
             (None, Some(_)) | (Some(_), None) => false,
         }) && self.issues == other.issues
-            && self.diagnostics == other.diagnostics
     }
 }
 

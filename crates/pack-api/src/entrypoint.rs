@@ -4,7 +4,6 @@ use turbo_tasks::{Effects, FxIndexSet, ReadRef, ResolvedVc, TryJoinIterExt, Vc, 
 use turbo_tasks_fs::{File, FileContent, FileSystemPath};
 use turbopack_core::{
     asset::AssetContent,
-    diagnostics::PlainDiagnostic,
     issue::PlainIssue,
     output::{OutputAsset, OutputAssets},
     virtual_output::VirtualOutputAsset,
@@ -14,7 +13,7 @@ use crate::{
     endpoint::{Endpoint, Endpoints},
     operation::EntrypointsOperation,
     project::ProjectContainer,
-    utils::{get_diagnostics, get_issues},
+    utils::get_issues,
     webpack_stats::generate_webpack_stats,
 };
 
@@ -32,12 +31,10 @@ pub async fn get_all_written_entrypoints_with_issues_operation(
         EntrypointsOperation::new(all_entrypoints_write_to_disk_operation(container));
     let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
     let issues = get_issues(entrypoints_operation).await?;
-    let diagnostics = get_diagnostics(entrypoints_operation).await?;
     let effects = Arc::new(take_effects(entrypoints_operation).await?);
     Ok(EntrypointsWithIssues {
         entrypoints,
         issues,
-        diagnostics,
         effects,
     }
     .cell())
@@ -130,7 +127,6 @@ async fn make_stats_output(
 pub struct EntrypointsWithIssues {
     pub entrypoints: ReadRef<EntrypointsOperation>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
-    pub diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     pub effects: Arc<Effects>,
 }
 
@@ -142,12 +138,10 @@ pub async fn get_entrypoints_with_issues_operation(
         EntrypointsOperation::new(project_container_entrypoints_operation(container));
     let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
     let issues = get_issues(entrypoints_operation).await?;
-    let diagnostics = get_diagnostics(entrypoints_operation).await?;
     let effects = Arc::new(take_effects(entrypoints_operation).await?);
     Ok(EntrypointsWithIssues {
         entrypoints,
         issues,
-        diagnostics,
         effects,
     }
     .cell())

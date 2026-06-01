@@ -10,7 +10,6 @@ use napi::{
     threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{turbo_tasks::UtooTurboTasks, utils::StyledStringSerialize};
-use rustc_hash::FxHashMap;
 use serde::Serialize;
 use turbo_tasks::{
     TurboTasks, TurboTasksCallApi, Vc,
@@ -22,7 +21,6 @@ use turbo_tasks_backend::{
 };
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
-    diagnostics::PlainDiagnostic,
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos,
 };
@@ -234,32 +232,9 @@ impl From<SourcePos> for NapiSourcePos {
     }
 }
 
-#[napi(object)]
-pub struct NapiDiagnostic {
-    pub category: String,
-    pub name: String,
-    #[napi(ts_type = "Record<string, string>")]
-    pub payload: FxHashMap<String, String>,
-}
-
-impl NapiDiagnostic {
-    pub fn from(diagnostic: &PlainDiagnostic) -> Self {
-        Self {
-            category: diagnostic.category.to_string(),
-            name: diagnostic.name.to_string(),
-            payload: diagnostic
-                .payload
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        }
-    }
-}
-
 pub struct TurbopackResult<T: ToNapiValue> {
     pub result: T,
     pub issues: Vec<NapiIssue>,
-    pub diagnostics: Vec<NapiDiagnostic>,
 }
 
 impl<T: ToNapiValue> ToNapiValue for TurbopackResult<T> {
@@ -282,7 +257,6 @@ impl<T: ToNapiValue> ToNapiValue for TurbopackResult<T> {
         }
 
         obj.set_named_property("issues", val.issues)?;
-        obj.set_named_property("diagnostics", val.diagnostics)?;
 
         Ok(unsafe { obj.raw() })
     }

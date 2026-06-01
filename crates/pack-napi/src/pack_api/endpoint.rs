@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use super::utils::{NapiDiagnostic, NapiIssue, TurbopackResult, subscribe};
+use super::utils::{NapiIssue, TurbopackResult, subscribe};
 use crate::pack_api::turbopack_ctx::RootTask;
 use crate::util::DetachedVc;
 use futures_util::TryFutureExt;
@@ -100,7 +100,7 @@ pub async fn endpoint_write_to_disk(
 ) -> napi::Result<TurbopackResult<NapiWrittenEndpoint>> {
     let ctx = endpoint.turbopack_ctx();
     let endpoint_op = ***endpoint;
-    let (written, issues, diags) = endpoint
+    let (written, issues) = endpoint
         .turbopack_ctx()
         .turbo_tasks()
         .run(async move {
@@ -109,21 +109,19 @@ pub async fn endpoint_write_to_disk(
             let WrittenEndpointWithIssues {
                 written,
                 issues,
-                diagnostics,
                 effects,
             } = &*written_entrypoint_with_issues_op
                 .read_strongly_consistent()
                 .await?;
             effects.apply().await?;
 
-            Ok((written.clone(), issues.clone(), diagnostics.clone()))
+            Ok((written.clone(), issues.clone()))
         })
         .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
         .await?;
     Ok(TurbopackResult {
         result: NapiWrittenEndpoint::from(written.map(ReadRef::into_owned)),
         issues: issues.iter().map(|i| NapiIssue::from(&**i)).collect(),
-        diagnostics: diags.iter().map(|d| NapiDiagnostic::from(d)).collect(),
     })
 }
 
@@ -151,17 +149,12 @@ pub fn endpoint_server_changed_subscribe(
             let EndpointIssuesAndDiags {
                 changed: _,
                 issues,
-                diagnostics,
                 effects: _,
             } = &*ctx.value;
 
             Ok(vec![TurbopackResult {
                 result: (),
                 issues: issues.iter().map(|i| NapiIssue::from(&**i)).collect(),
-                diagnostics: diagnostics
-                    .iter()
-                    .map(|d| NapiDiagnostic::from(d))
-                    .collect(),
             }])
         },
     )
@@ -180,8 +173,8 @@ pub fn endpoint_client_changed_subscribe(
         move || {
             async move {
                 let changed_op = endpoint_client_changed_operation(endpoint_op);
-                // We don't capture issues and diagnostics here since we don't want to be
-                // notified when they change
+                // We don't capture issues here since we don't want to be notified when they
+                // change.
                 //
                 // This must be a *read*, not just a resolve, because we need the root task created
                 // by `subscribe` to re-run when the `Completion`'s value changes (via equality),
@@ -195,7 +188,6 @@ pub fn endpoint_client_changed_subscribe(
             Ok(vec![TurbopackResult {
                 result: (),
                 issues: vec![],
-                diagnostics: vec![],
             }])
         },
     )

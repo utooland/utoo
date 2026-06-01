@@ -306,7 +306,6 @@ async fn run_test_operation(
     let EntrypointsWithIssues {
         entrypoints: _,
         issues: _,
-        diagnostics: _,
         effects: _,
     } = &*entrypoints_with_issues_op
         .read_strongly_consistent()

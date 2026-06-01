@@ -1,6 +1,6 @@
 use anyhow::Result;
-use turbo_tasks::{CollectiblesSource, OperationVc, Vc, take_effects};
-use turbopack_core::{diagnostics::Diagnostic, issue::CollectibleIssuesExt};
+use turbo_tasks::{OperationVc, Vc, take_effects};
+use turbopack_core::issue::CollectibleIssuesExt;
 
 use crate::{endpoint::OptionEndpoint, entrypoint::Entrypoints};
 
@@ -24,14 +24,13 @@ fn entrypoints_wrapper(entrypoints: OperationVc<Entrypoints>) -> Vc<Entrypoints>
     entrypoints.connect()
 }
 
-/// Removes diagnostics, issues, and effects from the top-level `entrypoints` operation so that
-/// they're not duplicated across many different individual entrypoints or routes.
+/// Removes issues and effects from the top-level `entrypoints` operation so that they're not
+/// duplicated across many different individual entrypoints or routes.
 #[turbo_tasks::function(operation)]
 async fn entrypoints_without_collectibles_operation(
     entrypoints: OperationVc<Entrypoints>,
 ) -> Result<Vc<Entrypoints>> {
     let _ = entrypoints.read_strongly_consistent().await?;
-    entrypoints.drop_collectibles::<Box<dyn Diagnostic>>();
     entrypoints.drop_issues();
     let _ = take_effects(entrypoints).await?;
     Ok(entrypoints.connect())
