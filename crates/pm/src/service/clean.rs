@@ -5,7 +5,7 @@ use std::path::Path;
 use utoo_ruborist::util::PackageNameStr;
 
 use crate::helper::lock::{Package, path_to_pkg_name};
-use crate::helper::workspace;
+use crate::helper::ruborist_context::Context as FsContext;
 
 /// Remove a symlink with platform-specific handling.
 ///
@@ -151,8 +151,8 @@ pub async fn clean_deps(groups: &HashMap<usize, Vec<(String, Package)>>, cwd: &P
     tracing::debug!("Valid packages: {valid_packages:?}");
 
     let mut nm_dirs = vec![cwd.join("node_modules")];
-    for (_, ws_path, _) in workspace::find_workspaces(cwd).await? {
-        let ws_nm = ws_path.join("node_modules");
+    for ws in FsContext::discovery().find_workspaces(cwd).await? {
+        let ws_nm = ws.path.join("node_modules");
         if crate::fs::try_exists(&ws_nm).await? {
             tracing::debug!("Adding workspace node_modules: {}", ws_nm.display());
             nm_dirs.push(ws_nm);

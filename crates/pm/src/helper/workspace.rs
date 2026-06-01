@@ -8,62 +8,32 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use super::ruborist_context::Context as FsContext;
-use utoo_ruborist::manifest::PackageJson;
-use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
-
-/// Find all workspaces in the given root path.
-///
-/// Returns a list of (name, path, package_json) tuples.
-pub async fn find_workspaces(root_path: &Path) -> Result<Vec<(String, PathBuf, PackageJson)>> {
-    let discovery = WorkspaceDiscovery::new(FsContext::glob());
-    let workspaces = discovery.find_workspaces(root_path).await?;
-    Ok(workspaces
-        .into_iter()
-        .map(|ws| (ws.name, ws.path, ws.package_json))
-        .collect())
-}
 
 /// Find a workspace by name or path.
 pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf> {
-    let workspaces = find_workspaces(cwd)
+    let workspaces = FsContext::discovery()
+        .find_workspaces(cwd)
         .await
         .context("Failed to find workspaces")?;
-    for (name, path, _) in workspaces {
+    for ws in workspaces {
         // Try exact name match
-        if name == workspace {
-            return Ok(path);
+        if ws.name == workspace {
+            return Ok(ws.path);
         }
 
         // Try absolute path match
-        if path.to_string_lossy() == workspace {
-            return Ok(path);
+        if ws.path.to_string_lossy() == workspace {
+            return Ok(ws.path);
         }
 
         // Try relative path match
-        if let Ok(relative) = path.strip_prefix(cwd)
+        if let Ok(relative) = ws.path.strip_prefix(cwd)
             && relative.to_string_lossy() == workspace
         {
-            return Ok(path);
+            return Ok(ws.path);
         }
     }
     anyhow::bail!("Workspace '{workspace}' not found")
-}
-
-/// Find the project root path by traversing up the directory tree.
-///
-/// If the current directory is inside a workspace, returns the workspace root.
-/// Otherwise, returns the directory containing the closest package.json.
-pub async fn find_root_path(cwd: &Path) -> Result<PathBuf> {
-    WorkspaceDiscovery::new(FsContext::glob())
-        .find_root_path(cwd)
-        .await
-}
-
-/// Find the closest directory containing package.json.
-pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
-    WorkspaceDiscovery::new(FsContext::glob())
-        .find_project_path(cwd)
-        .await
 }
 
 /// Resolve the workspace root and change into it.
@@ -71,7 +41,7 @@ pub async fn find_project_path(cwd: &Path) -> Result<PathBuf> {
 /// This is the standard entry point for commands that operate on the
 /// project root (install, update, deps, etc.).
 pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
-    let root_dir = find_root_path(cwd).await?;
+    let root_dir = FsContext::discovery().find_root_path(cwd).await?;
     if !compare_paths(cwd, &root_dir) {
         tracing::debug!(
             "Changing directory to workspace root: {}",
@@ -85,7 +55,7 @@ pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
 
 /// Update current working directory to project directory (closest package.json).
 pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
-    let project_dir = find_project_path(cwd).await?;
+    let project_dir = FsContext::discovery().find_project_path(cwd).await?;
     if !compare_paths(cwd, &project_dir) {
         tracing::debug!("Changing directory to project: {}", project_dir.display());
         env::set_current_dir(&project_dir).context("Failed to change to project directory")?;
@@ -155,21 +125,30 @@ mod tests {
     async fn test_find_project_path_in_workspace() {
         let (_temp_dir, root_path) = setup_test_workspace().await;
         let workspace_path = root_path.join("packages").join("test-workspace");
-        let found_project = find_project_path(&workspace_path).await.unwrap();
+        let found_project = FsContext::discovery()
+            .find_project_path(&workspace_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_project, &workspace_path));
     }
 
     #[tokio::test]
     async fn test_find_project_path_in_root() {
         let (_temp_dir, root_path) = setup_test_workspace().await;
-        let found_project = find_project_path(&root_path).await.unwrap();
+        let found_project = FsContext::discovery()
+            .find_project_path(&root_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_project, &root_path));
     }
 
     #[tokio::test]
     async fn test_find_project_path_in_project() {
         let (_temp_dir, project_path) = setup_test_project().await;
-        let found_project = find_project_path(&project_path).await.unwrap();
+        let found_project = FsContext::discovery()
+            .find_project_path(&project_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_project, &project_path));
     }
 
@@ -177,7 +156,10 @@ mod tests {
     async fn test_find_project_path_no_package_json() {
         let temp_dir = TempDir::new().unwrap();
         let test_path = temp_dir.path().to_path_buf();
-        let found_project = find_project_path(&test_path).await.unwrap();
+        let found_project = FsContext::discovery()
+            .find_project_path(&test_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_project, &test_path));
     }
 
@@ -211,7 +193,10 @@ mod tests {
     #[tokio::test]
     async fn test_find_root_path_in_workspace_root() {
         let (_temp_dir, root_path) = setup_test_workspace().await;
-        let found_root = find_root_path(&root_path).await.unwrap();
+        let found_root = FsContext::discovery()
+            .find_root_path(&root_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_root, &root_path));
     }
 
@@ -219,7 +204,10 @@ mod tests {
     async fn test_find_root_path_in_workspace_package() {
         let (_temp_dir, root_path) = setup_test_workspace().await;
         let workspace_path = root_path.join("packages").join("test-workspace");
-        let found_root = find_root_path(&workspace_path).await.unwrap();
+        let found_root = FsContext::discovery()
+            .find_root_path(&workspace_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_root, &root_path));
     }
 
@@ -231,14 +219,20 @@ mod tests {
             .join("test-workspace")
             .join("src");
         fs::create_dir_all(&subdir_path).unwrap();
-        let found_root = find_root_path(&subdir_path).await.unwrap();
+        let found_root = FsContext::discovery()
+            .find_root_path(&subdir_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_root, &root_path));
     }
 
     #[tokio::test]
     async fn test_find_root_path_in_independent_project() {
         let (_temp_dir, project_path) = setup_test_project().await;
-        let found_root = find_root_path(&project_path).await.unwrap();
+        let found_root = FsContext::discovery()
+            .find_root_path(&project_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_root, &project_path));
     }
 
@@ -247,7 +241,10 @@ mod tests {
         let (_temp_dir, project_path) = setup_test_project().await;
         let subdir_path = project_path.join("src");
         fs::create_dir_all(&subdir_path).unwrap();
-        let found_root = find_root_path(&subdir_path).await.unwrap();
+        let found_root = FsContext::discovery()
+            .find_root_path(&subdir_path)
+            .await
+            .unwrap();
         assert!(compare_paths(&found_root, &project_path));
     }
 }

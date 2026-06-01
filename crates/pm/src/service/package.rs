@@ -1,4 +1,4 @@
-use crate::helper::workspace::find_workspaces;
+use crate::helper::ruborist_context::Context as FsContext;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
@@ -48,13 +48,14 @@ impl PackageService {
             ResolvedWorkspaces::Current => return Ok(()),
         };
 
-        let mut by_name: HashMap<String, PackageInfo> = find_workspaces(root_path)
+        let mut by_name: HashMap<String, PackageInfo> = FsContext::discovery()
+            .find_workspaces(root_path)
             .await?
             .into_iter()
-            .map(|(name, path, pkg)| {
-                let info = PackageInfo::from_package_json(&path, &pkg)
-                    .with_context(|| format!("Failed to load workspace {name}"))?;
-                Ok((name, info))
+            .map(|ws| {
+                let info = PackageInfo::from_package_json(&ws.path, &ws.package_json)
+                    .with_context(|| format!("Failed to load workspace {}", ws.name))?;
+                Ok((ws.name, info))
             })
             .collect::<Result<_>>()?;
 

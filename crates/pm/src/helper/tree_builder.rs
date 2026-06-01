@@ -11,7 +11,7 @@ use utoo_ruborist::builder::{DevDeps, EdgeContext, add_edges_from, add_workspace
 use utoo_ruborist::graph::{DependencyGraph, EdgeType};
 use utoo_ruborist::resolver::runtime::install_runtime;
 
-use crate::helper::workspace::find_workspaces;
+use crate::helper::ruborist_context::Context as FsContext;
 use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
 
 /// TreeBuilder - builds workspace dependency graph.
@@ -74,22 +74,32 @@ impl TreeBuilder {
     }
 
     async fn init_workspaces(&self, graph: &mut DependencyGraph) -> Result<()> {
-        let workspaces = find_workspaces(&self.path).await.map_err(|e| {
-            let err_msg = e
-                .chain()
-                .map(|err| format!("  {err}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            anyhow::anyhow!(err_msg)
-        })?;
+        let workspaces = FsContext::discovery()
+            .find_workspaces(&self.path)
+            .await
+            .map_err(|e| {
+                let err_msg = e
+                    .chain()
+                    .map(|err| format!("  {err}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                anyhow::anyhow!(err_msg)
+            })?;
 
         let peer_deps = get_peer_deps().await;
         let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include);
         let root_index = graph.root_index;
 
-        for (name, path, pkg) in workspaces {
-            tracing::debug!("Added workspace: {} {:?}", name, path);
-            add_workspace_member(graph, root_index, &name, path, &pkg, &edge_ctx);
+        for ws in workspaces {
+            tracing::debug!("Added workspace: {} {:?}", ws.name, ws.path);
+            add_workspace_member(
+                graph,
+                root_index,
+                &ws.name,
+                ws.path,
+                &ws.package_json,
+                &edge_ctx,
+            );
         }
 
         Ok(())
