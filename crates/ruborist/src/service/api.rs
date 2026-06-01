@@ -53,8 +53,8 @@ pub struct BuildDepsOptions<G, R> {
     /// Persistence backend for manifest cache. Defaults to `NoopStore`
     /// (everything is in-memory).
     pub manifest_store: Arc<dyn ManifestStore>,
-    /// Project-level warm cache pre-loaded by the host. Pre-populates the
-    /// in-memory manifest cache to skip the preload phase on a warm install.
+    /// Project-level warm cache pre-loaded by the host. Seeds the demand
+    /// resolver's manifest cache so a warm install skips re-fetching.
     pub project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
@@ -233,22 +233,13 @@ where
         registry.supports_semver(),
     );
 
-    let skip_preload = cache_count > 0;
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload)
         .with_catalogs(catalogs)
         .with_project_cache(project_cache);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
-    }
-
-    if skip_preload {
-        tracing::debug!(
-            "Skipping preload phase (project cache has {} entries)",
-            cache_count
-        );
     }
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI

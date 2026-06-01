@@ -275,21 +275,6 @@ pub trait RegistryClient {
             })
         }
     }
-
-    /// Cache a resolved version manifest for later use.
-    ///
-    /// This method is called by preload to cache (name, spec) -> version_manifest mappings,
-    /// allowing build phase to directly hit memory cache without traversing full_manifest.
-    ///
-    /// Default implementation is no-op (no caching).
-    fn cache_version_manifest(
-        &self,
-        _name: &str,
-        _spec: &str,
-        _manifest: Arc<CoreVersionManifest>,
-    ) {
-        // Default: no-op
-    }
 }
 
 /// A simple in-memory registry client for testing.
