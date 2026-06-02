@@ -912,17 +912,18 @@ pub(crate) fn chain_err<E>(
     }
 }
 
-pub(crate) async fn handle_resolved_registry_manifest<R, E>(
+/// Build the graph node for an already-resolved registry manifest (override
+/// resolution is applied upstream by the demand loop, which owns the per-run
+/// manifest cache). Emits the resolve event and links the node.
+pub(crate) fn handle_resolved_registry_manifest<E>(
     graph: &mut DependencyGraph,
-    registry: &R,
     receiver: &E,
     parent: NodeIndex,
     edge: &DependencyEdgeInfo,
     manifest: Arc<CoreVersionManifest>,
     config: &BuildDepsConfig,
-) -> Result<ProcessResult, ResolveError<R::Error>>
+) -> ProcessResult
 where
-    R: ManifestProvider,
     E: EventReceiver,
 {
     let resolved = ResolvedPackage {
@@ -930,29 +931,8 @@ where
         version: manifest.version.clone(),
         manifest,
     };
-
-    // Apply an override keyed on the resolved version by re-resolving the
-    // override spec directly. Calling the full `process_dependency` here would
-    // redundantly re-resolve the original spec (whose manifest we already have)
-    // before it checks the override and resolves the override spec.
-    let resolved = if let Some(override_spec) =
-        graph.check_override(parent, &edge.name, Some(&resolved.version))
-    {
-        match resolve_registry_dep(registry, &edge.name, &override_spec, &edge.edge_type)
-            .await
-            .map_err(|inner| chain_err(graph, parent, edge, inner))?
-        {
-            Some(overridden) => overridden,
-            None => resolved, // override failed to resolve — keep the original
-        }
-    } else {
-        resolved
-    };
-
     receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
-    Ok(process_dependency_with_resolved(
-        graph, parent, edge, &resolved, config,
-    ))
+    process_dependency_with_resolved(graph, parent, edge, &resolved, config)
 }
 
 #[cfg(test)]

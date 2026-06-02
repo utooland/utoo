@@ -11,14 +11,14 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
 
 use crate::model::graph::DependencyGraph;
-use crate::model::manifest::NodeManifest;
+use crate::model::manifest::{CoreVersionManifest, NodeManifest};
 use crate::model::node::EdgeType;
 use crate::resolver::builder::{
     BuildDepsConfig, ProcessResult, chain_err, handle_resolved_registry_manifest,
     process_dependency, try_reuse_dependency,
 };
 use crate::resolver::edges::{DependencyEdgeInfo, collect_unresolved_edges};
-use crate::resolver::registry::ResolveError;
+use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::resolver::semver::normalize_spec;
 use crate::service::ManifestProvider;
 use crate::spec::SpecStr;
@@ -181,16 +181,17 @@ where
                 if let Some((alias_name, alias_spec)) = alias {
                     state.cache_version(alias_name, alias_spec, Arc::clone(&manifest));
                 }
+                let manifest = self
+                    .apply_override(graph, state, parent, &edge, manifest)
+                    .await?;
                 let processed = handle_resolved_registry_manifest(
                     graph,
-                    self.registry,
                     self.receiver,
                     parent,
                     &edge,
                     manifest,
                     self.config,
-                )
-                .await?;
+                );
                 handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
             }
             EdgeStep::Skip => {
@@ -219,6 +220,51 @@ where
         }
 
         Ok(())
+    }
+
+    /// Apply a dependency override for `edge`, returning the manifest to install.
+    ///
+    /// The override is routed through the per-run manifest cache: a sibling
+    /// edge's already-resolved override is reused (single-flight within the
+    /// run), and a freshly-resolved one is recorded so it persists to the
+    /// project cache. Without this, every edge sharing an override re-fetches
+    /// it and the overridden manifest is omitted from the warm cache, forcing a
+    /// network round-trip on every subsequent install. Falls back to the
+    /// original manifest when no override applies or the override fails to
+    /// resolve.
+    async fn apply_override(
+        &self,
+        graph: &mut DependencyGraph,
+        state: &mut ManifestState,
+        parent: NodeIndex,
+        edge: &DependencyEdgeInfo,
+        manifest: Arc<CoreVersionManifest>,
+    ) -> Result<Arc<CoreVersionManifest>, ResolveError<R::Error>> {
+        match graph.check_override(parent, &edge.name, Some(&manifest.version)) {
+            Some(override_spec) => match state.get_version_manifest(&edge.name, &override_spec) {
+                Some(cached) => Ok(cached),
+                None => match resolve_registry_dep(
+                    self.registry,
+                    &edge.name,
+                    &override_spec,
+                    &edge.edge_type,
+                )
+                .await
+                .map_err(|inner| chain_err(graph, parent, edge, inner))?
+                {
+                    Some(overridden) => {
+                        state.cache_version(
+                            edge.name.clone(),
+                            override_spec,
+                            Arc::clone(&overridden.manifest),
+                        );
+                        Ok(overridden.manifest)
+                    }
+                    None => Ok(manifest),
+                },
+            },
+            None => Ok(manifest),
+        }
     }
 
     /// Last-resort path when the fetch stream drains while edges are still parked:

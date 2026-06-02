@@ -70,7 +70,7 @@ fn parse_full_manifest_with_core_sync(
 
     let speculative = match spec {
         Some(spec) => match resolve_target_version((&manifest).into(), &spec) {
-            Ok(version) => match manifest.get_core_version(&version) {
+            Ok(version) => match manifest.get_core_version_oneshot(&version) {
                 Some(core) => Some((spec, core)),
                 None => {
                     tracing::trace!(

@@ -130,6 +130,10 @@ impl ManifestProvider for UnifiedRegistry {
                 if Version::parse_from_npm(&fetch_spec).is_ok()
                     && let Some(manifest) =
                         self.store.load_version_manifest(&name, &fetch_spec).await
+                    // Guard against a stale/corrupt store entry filed under the
+                    // wrong key: only trust the cached manifest when its own
+                    // version matches the exact spec we asked for.
+                    && manifest.version == fetch_spec
                 {
                     let manifest = Arc::new(manifest);
                     return Ok(ManifestJobDone::Version {
