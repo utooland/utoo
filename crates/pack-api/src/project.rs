@@ -1353,7 +1353,7 @@ impl Project {
                         .await?
                         .into_iter()
                         .map(|l| async move {
-                            let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(**l);
+                            let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(*l);
                             endpoint.to_resolved().await
                         })
                         .try_join()
@@ -1768,10 +1768,7 @@ async fn any_output_changed(
     server: bool,
 ) -> Result<Vc<Completion>> {
     let all_assets = expand_output_assets(
-        roots
-            .await?
-            .into_iter()
-            .map(|&a| ExpandOutputAssetsInput::Asset(a)),
+        roots.await?.into_iter().map(ExpandOutputAssetsInput::Asset),
         true,
     )
     .await?;

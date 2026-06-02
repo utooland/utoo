@@ -355,7 +355,7 @@ impl LibraryChunkingContext {
         hasher.write_value(chunk_items.len());
 
         for item in &chunk_items {
-            for (module_id, code) in item {
+            for (module_id, code) in &**item {
                 hasher.write_value((module_id, code.source_code()));
             }
         }

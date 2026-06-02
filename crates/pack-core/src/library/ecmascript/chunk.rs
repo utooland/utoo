@@ -174,9 +174,9 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let content = this.chunk.chunk_content().await?;
         let chunk_items = content.chunk_item_code_and_ids().await?;
-        for item in chunk_items {
-            for (id, item_code) in item {
-                write!(code, "\n{}, ", StringifyJs(&id))?;
+        for item in &chunk_items {
+            for (id, item_code) in &**item {
+                write!(code, "\n{}, ", StringifyJs(id))?;
                 code.push_code(item_code);
                 write!(code, ",")?;
             }
