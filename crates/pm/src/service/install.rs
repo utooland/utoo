@@ -1,6 +1,6 @@
 use crate::util::cli_enum::ScriptPolicy;
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
@@ -10,20 +10,20 @@ use crate::fs;
 use crate::helper::global_bin::get_global_bin_dir;
 use crate::helper::lock::{
     Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
-    prepare_global_package_json, update_package_json,
+    prepare_global_package_json, save_package_lock, update_package_json,
 };
+use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
-use crate::util::cloner::clone_count;
-use crate::util::downloader::download_stats;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
+use utoo_ruborist::progress::PackageTarballInfo;
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
@@ -62,13 +62,12 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
-pub async fn install_packages(
+async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
+    scheduler: &super::install_scheduler::InstallScheduler,
 ) -> Result<()> {
-    use crate::util::cloner::clone_package_once;
-
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
@@ -76,14 +75,14 @@ pub async fn install_packages(
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
-    // children. Within each level, tasks run concurrently. The pipeline's
-    // clone_worker may have already cloned some packages — clone_package_once
-    // deduplicates via CLONE_CACHE so no double work occurs.
+    // children. Within each level, tasks run concurrently. The install
+    // scheduler owns clone/download dedupe, so package tasks only request the
+    // concrete target they need.
     let mut depths: Vec<_> = groups.keys().cloned().collect();
     depths.sort_unstable();
 
     for depth in depths.iter() {
-        let mut clone_tasks: Vec<tokio::task::JoinHandle<Result<()>>> = Vec::new();
+        let mut clone_tasks = FuturesUnordered::new();
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
@@ -140,14 +139,16 @@ pub async fn install_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let cwd_clone = cwd.to_path_buf();
                     let target_path = cwd_clone.join(&path);
+                    let scheduler = scheduler.clone();
 
                     // Check if this is an optional dependency
                     let is_optional =
                         package.optional == Some(true) || package.dev_optional == Some(true);
 
-                    let task = tokio::spawn(async move {
-                        if let Err(e) =
-                            clone_package_once(&name, &version, &resolved, &target_path).await
+                    clone_tasks.push(async move {
+                        if let Err(e) = scheduler
+                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                            .await
                         {
                             if is_optional {
                                 tracing::warn!(
@@ -162,19 +163,31 @@ pub async fn install_packages(
                         log_progress(&format!("{name} resolved"));
                         update_package_binary(&target_path, &name).await
                     });
-                    clone_tasks.push(task);
                 } else {
                     PROGRESS_BAR.inc(1);
                 }
             }
         }
 
-        for task in clone_tasks {
-            task.await??;
+        while let Some(result) = clone_tasks.next().await {
+            result?;
         }
     }
 
     Ok(())
+}
+
+async fn resolve_package_lock_with_scheduler(
+    root_path: &Path,
+    scheduler: super::install_scheduler::InstallScheduler,
+) -> Result<utoo_ruborist::lock::PackageLock> {
+    let options = Context::install_deps_options(root_path.to_path_buf(), scheduler).await;
+    let output = utoo_ruborist::service::build_deps(options).await?;
+
+    save_package_lock(root_path, &output.lock).await?;
+    spawn_save_project_cache(root_path.to_path_buf(), output.project_cache);
+
+    Ok(output.lock)
 }
 
 pub struct InstallService;
@@ -233,28 +246,74 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
-        // Snapshot counts so nested install() calls (e.g. global install)
-        // report only their own delta instead of the whole process total.
-        let clone_baseline = clone_count();
-        let download_baseline = download_stats();
-
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
         // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
         // itself emits a `tracing::warn` with the specific mismatch reason.
         let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
             && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
+        let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
+        let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, pipeline_handles) = if use_fresh_lock {
-            let lock = load_package_lock_json_from_path(root_path).await?;
-            (lock, None)
+        let (package_lock, events_prefetched) = if use_fresh_lock {
+            let lock = match load_package_lock_json_from_path(root_path).await {
+                Ok(lock) => lock,
+                Err(e) => {
+                    scheduler_handle.shutdown().await;
+                    return Err(e);
+                }
+            };
+            (lock, false)
         } else {
             start_progress_bar();
             let resolve_start = Instant::now();
-            let result = super::pipeline::resolve_with_pipeline(root_path).await?;
+            let lock = match resolve_package_lock_with_scheduler(root_path, scheduler.clone()).await
+            {
+                Ok(lock) => lock,
+                Err(e) => {
+                    scheduler_handle.shutdown().await;
+                    return Err(e);
+                }
+            };
             finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-            (result.package_lock, Some(result.handles))
+            (lock, true)
         };
+
+        // Installing from an existing lockfile fires no resolver events, so the
+        // download pipeline would otherwise be driven only by the depth-by-depth
+        // `ensure_clone` pass (each level awaited before the next) — serializing
+        // tarball downloads behind the clone order. Seed every package's
+        // download up front so the network runs ahead of, and overlaps with, the
+        // level-by-level clone — the same head start the fresh-resolve path gets
+        // from `PackageResolved` events. Non-registry specs (file/git/link) are
+        // filtered inside `prefetch_download`; the scheduler dedupes against the
+        // authoritative `ensure_clone`.
+        if !events_prefetched {
+            for (path, package) in &package_lock.packages {
+                // Skip what `install_packages` won't clone: workspace links and
+                // omitted deps. The platform filter lives in the shared
+                // `prefetch_tarball` gate (same one the resolver event path
+                // uses), so it can't drift from the install-time skip logic — an
+                // earlier hand-rolled filter here missed it and over-downloaded
+                // gigabytes of incompatible (darwin/win) binaries.
+                if package.link.is_some() || should_omit_package(package, omit) {
+                    continue;
+                }
+                if let (Some(version), Some(resolved)) =
+                    (package.version.as_deref(), package.resolved.as_deref())
+                {
+                    let name = package.get_name(path);
+                    scheduler.prefetch_tarball(&PackageTarballInfo {
+                        name: &name,
+                        version,
+                        tarball_url: Some(resolved),
+                        integrity: None,
+                        os: package.os.as_ref(),
+                        cpu: package.cpu.as_ref(),
+                    });
+                }
+            }
+        }
 
         let groups = group_by_depth(&package_lock.packages);
 
@@ -264,22 +323,17 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        install_packages(&groups, root_path, omit)
+        let install_result = install_packages(&groups, root_path, omit, &scheduler)
             .await
-            .context("Failed to install packages")?;
+            .context("Failed to install packages");
 
-        // Wait for pipeline workers to complete (if any)
-        if let Some(handles) = pipeline_handles {
-            handles.await_completion().await;
-            super::pipeline::print_pipeline_summary();
-        }
+        let counts = scheduler_handle.shutdown().await;
+        install_result?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
 
-        let added = clone_count().saturating_sub(clone_baseline);
-        let download_delta = download_stats() - download_baseline;
-        print_install_counts(added, download_delta.reused, download_delta.downloaded);
+        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }
 
