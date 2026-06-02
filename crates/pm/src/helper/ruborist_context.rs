@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
 use utoo_ruborist::service::{
     BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
 };
@@ -103,6 +104,13 @@ impl Context {
     /// Get the glob instance.
     pub fn glob() -> GlobImpl {
         TokioGlob
+    }
+
+    /// Workspace discovery wired to the native glob. The single entry point for
+    /// `find_workspaces` / `find_root_path` / `find_project_path`; callers
+    /// consume `WorkspacePackage` directly.
+    pub fn discovery() -> WorkspaceDiscovery<GlobImpl> {
+        WorkspaceDiscovery::new(Self::glob())
     }
 }
 

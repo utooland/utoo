@@ -132,9 +132,17 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration
-static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
-    LazyLock::new(|| ConfigValue::new("manifests-concurrency-limit", 64));
+// Manifest fetch concurrency limit, shared by resolver manifest fetches and
+// tarball download/extract. Defaults to 64; overridable via the
+// `--manifests-concurrency-limit` CLI flag / config.
+const DEFAULT_MANIFESTS_CONCURRENCY_LIMIT: usize = 64;
+
+static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> = LazyLock::new(|| {
+    ConfigValue::new(
+        "manifests-concurrency-limit",
+        DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
+    )
+});
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
     MANIFESTS_CONCURRENCY_LIMIT.set(value);

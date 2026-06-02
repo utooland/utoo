@@ -243,27 +243,6 @@ impl<G: Glob> WorkspaceDiscovery<G> {
     }
 }
 
-/// Collect all package.json data from workspaces for dependency resolution.
-///
-/// This function reads all workspace package.json files and returns them
-/// along with their paths for initializing the dependency graph.
-pub async fn collect_workspace_packages<G: Glob + Clone>(
-    glob: G,
-    root_path: &Path,
-    root_pkg: &PackageJson,
-) -> Result<Vec<(PathBuf, PackageJson)>> {
-    let discovery = WorkspaceDiscovery::new(glob);
-
-    let workspaces = discovery
-        .find_workspaces_from_pkg(root_path, root_pkg)
-        .await?;
-
-    Ok(workspaces
-        .into_iter()
-        .map(|ws| (ws.path, ws.package_json))
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

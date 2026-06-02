@@ -70,7 +70,7 @@ fn parse_full_manifest_with_core_sync(
 
     let speculative = match spec {
         Some(spec) => match resolve_target_version((&manifest).into(), &spec) {
-            Ok(version) => match manifest.get_core_version(&version) {
+            Ok(version) => match manifest.get_core_version_oneshot(&version) {
                 Some(core) => Some((spec, core)),
                 None => {
                     tracing::trace!(
@@ -293,11 +293,6 @@ pub struct FetchVersionManifestOptions<'a> {
     pub format: MetadataFormat,
 }
 
-/// Fetch version manifest bytes with retry, without parsing.
-pub async fn fetch_version_manifest_bytes(opts: FetchVersionManifestOptions<'_>) -> Result<Bytes> {
-    fetch_version_manifest_vec(opts).await.map(Bytes::from)
-}
-
 /// Fetch version manifest into a mutable parse buffer with retry.
 ///
 /// Unlike full manifests, exact-version manifests do not need to keep raw
@@ -341,14 +336,6 @@ pub(crate) async fn fetch_version_manifest_vec(
             anyhow!("Failed to fetch {}@{}: {:#}", opts.name, opts.spec, e)
         }
     })
-}
-
-/// Fetch version manifest with retry.
-pub async fn fetch_version_manifest(
-    opts: FetchVersionManifestOptions<'_>,
-) -> Result<CoreVersionManifest> {
-    let bytes = fetch_version_manifest_vec(opts).await?;
-    parse_json_vec_off_runtime::<CoreVersionManifest>(bytes).await
 }
 
 #[cfg(test)]

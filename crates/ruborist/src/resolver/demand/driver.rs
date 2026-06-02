@@ -11,14 +11,14 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
 
 use crate::model::graph::DependencyGraph;
-use crate::model::manifest::NodeManifest;
+use crate::model::manifest::{CoreVersionManifest, NodeManifest};
 use crate::model::node::EdgeType;
 use crate::resolver::builder::{
     BuildDepsConfig, ProcessResult, chain_err, handle_resolved_registry_manifest,
     process_dependency, try_reuse_dependency,
 };
 use crate::resolver::edges::{DependencyEdgeInfo, collect_unresolved_edges};
-use crate::resolver::registry::ResolveError;
+use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::resolver::semver::normalize_spec;
 use crate::service::ManifestProvider;
 use crate::spec::SpecStr;
@@ -181,16 +181,17 @@ where
                 if let Some((alias_name, alias_spec)) = alias {
                     state.cache_version(alias_name, alias_spec, Arc::clone(&manifest));
                 }
+                let manifest = self
+                    .apply_override(graph, state, parent, &edge, manifest)
+                    .await?;
                 let processed = handle_resolved_registry_manifest(
                     graph,
-                    self.registry,
                     self.receiver,
                     parent,
                     &edge,
                     manifest,
                     self.config,
-                )
-                .await?;
+                );
                 handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
             }
             EdgeStep::Skip => {
@@ -219,6 +220,51 @@ where
         }
 
         Ok(())
+    }
+
+    /// Apply a dependency override for `edge`, returning the manifest to install.
+    ///
+    /// The override is routed through the per-run manifest cache: a sibling
+    /// edge's already-resolved override is reused (single-flight within the
+    /// run), and a freshly-resolved one is recorded so it persists to the
+    /// project cache. Without this, every edge sharing an override re-fetches
+    /// it and the overridden manifest is omitted from the warm cache, forcing a
+    /// network round-trip on every subsequent install. Falls back to the
+    /// original manifest when no override applies or the override fails to
+    /// resolve.
+    async fn apply_override(
+        &self,
+        graph: &mut DependencyGraph,
+        state: &mut ManifestState,
+        parent: NodeIndex,
+        edge: &DependencyEdgeInfo,
+        manifest: Arc<CoreVersionManifest>,
+    ) -> Result<Arc<CoreVersionManifest>, ResolveError<R::Error>> {
+        match graph.check_override(parent, &edge.name, Some(&manifest.version)) {
+            Some(override_spec) => match state.get_version_manifest(&edge.name, &override_spec) {
+                Some(cached) => Ok(cached),
+                None => match resolve_registry_dep(
+                    self.registry,
+                    &edge.name,
+                    &override_spec,
+                    &edge.edge_type,
+                )
+                .await
+                .map_err(|inner| chain_err(graph, parent, edge, inner))?
+                {
+                    Some(overridden) => {
+                        state.cache_version(
+                            edge.name.clone(),
+                            override_spec,
+                            Arc::clone(&overridden.manifest),
+                        );
+                        Ok(overridden.manifest)
+                    }
+                    None => Ok(manifest),
+                },
+            },
+            None => Ok(manifest),
+        }
     }
 
     /// Last-resort path when the fetch stream drains while edges are still parked:
@@ -530,7 +576,7 @@ mod tests {
     use petgraph::graph::EdgeIndex;
 
     use super::*;
-    use crate::model::manifest::{CoreVersionManifest, FullManifest};
+    use crate::model::manifest::CoreVersionManifest;
     use crate::model::package_json::PackageJson;
     use crate::resolver::builder::resolve;
     use crate::service::{ManifestJob, ManifestJobDone};
@@ -583,10 +629,6 @@ mod tests {
 
     impl crate::traits::registry::RegistryClient for CountingRegistry {
         type Error = MockError;
-
-        async fn fetch_full_manifest(&self, name: &str) -> Result<Arc<FullManifest>, Self::Error> {
-            self.inner.fetch_full_manifest(name).await
-        }
     }
 
     #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
@@ -609,14 +651,6 @@ mod tests {
         }
     }
 
-    // The `resolve` entry in `builder` still routes through the legacy
-    // `RegistryClient::fetch_version_manifest` path in this PR — the cutover
-    // that points it at the demand driver lives in the follow-up PR in this
-    // stack. Until then the `CountingRegistry`'s `ManifestProvider`-side job
-    // counter stays at zero (the legacy path bypasses it), so the
-    // single-flight assertion below has nothing to count. The cutover PR
-    // removes this `#[ignore]` alongside flipping the entry-point bounds.
-    #[ignore = "exercises the demand-driver pipeline, wired in the cutover PR"]
     #[tokio::test]
     async fn test_non_semver_exact_version_extract_single_flight() {
         let mut inner = MockRegistryClient::new();

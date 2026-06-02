@@ -30,7 +30,7 @@ pub fn build_dns_cached_client() -> reqwest::Client {
         .read_timeout(std::time::Duration::from_secs(30)) // Timeout for individual read operations
         // No total timeout - large files (e.g. node binary ~100MB) need longer download time
         // No pool_max_idle_per_host - let reqwest manage connections freely
-        // Concurrency is controlled by semaphore in preload service
+        // Concurrency is bounded by the resolver's in-flight fetch cap
         .build()
         .expect("Failed to build reqwest client")
 }

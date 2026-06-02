@@ -4,8 +4,6 @@
 //! A provider only executes one manifest job and hides whether it satisfied the
 //! job from memory, disk/OPFS, or the network.
 
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use async_trait::async_trait;

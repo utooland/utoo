@@ -14,7 +14,6 @@ use utoo_ruborist::util::PackageNameStr;
 use super::ruborist_context::Context;
 use super::workspace::find_workspace_path;
 use crate::fs;
-use crate::helper::workspace::find_workspaces;
 use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::cloner::clone_package;
 use crate::util::downloader::{is_git_url, resolve_cache_path};
@@ -397,16 +396,17 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
     let packages = &lock_file.packages;
     let peer_deps = get_peer_deps().await;
 
-    let workspaces = find_workspaces(root_path).await?;
+    let workspaces = Context::discovery().find_workspaces(root_path).await?;
     let mut pkgs_to_check: Vec<(String, &PackageJson)> = Vec::with_capacity(1 + workspaces.len());
     pkgs_to_check.push((String::new(), &root_pkg));
-    for (_, path, pkg) in &workspaces {
-        let target_path = path
+    for ws in &workspaces {
+        let target_path = ws
+            .path
             .strip_prefix(root_path)
-            .unwrap_or(path)
+            .unwrap_or(&ws.path)
             .to_string_lossy()
             .to_string();
-        pkgs_to_check.push((target_path, pkg));
+        pkgs_to_check.push((target_path, &ws.package_json));
     }
 
     for (path, pkg) in &pkgs_to_check {
