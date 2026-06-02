@@ -651,7 +651,7 @@ impl ChunkingContext for LibraryChunkingContext {
             tracing::trace_span!("chunking", chunking_type = "evaluated", ident = ident)
         };
         async move {
-            let entries = chunk_group.entries();
+            let module_graph = module_graph.to_resolved().await?;
 
             let MakeChunkGroupResult {
                 chunks,
@@ -659,7 +659,7 @@ impl ChunkingContext for LibraryChunkingContext {
                 referenced_output_assets,
                 availability_info,
             } = make_chunk_group(
-                entries,
+                chunk_group.clone(),
                 module_graph,
                 ResolvedVc::upcast(self),
                 availability_info,
@@ -708,7 +708,7 @@ impl ChunkingContext for LibraryChunkingContext {
                                 *ecmascript_chunk,
                                 Vc::cell(other_chunks),
                                 evaluatable_assets,
-                                module_graph,
+                                *module_graph,
                             )
                             .to_resolved()
                             .await?,
