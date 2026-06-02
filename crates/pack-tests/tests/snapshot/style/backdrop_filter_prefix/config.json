@@ -1,0 +1,16 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.js",
+                "name": "main"
+            }
+        ],
+        "target": "Safari 16",
+        "sourceMaps": false,
+        "optimization": {
+            "minify": false,
+            "moduleIds": "named"
+        }
+    }
+}
