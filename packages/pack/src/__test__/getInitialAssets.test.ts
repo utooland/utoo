@@ -63,4 +63,23 @@ describe("initial asset discovery", () => {
       css: ["index_456.css"],
     });
   });
+
+  it("finds hashed entry javascript when output includes multiple chunks", () => {
+    const outputDir = createTempDir();
+    for (const file of [
+      "index.a8f3b2c1.js",
+      "chunk-vendors.12345678.js",
+      "lazy-route.87654321.js",
+      "index.a8f3b2c1.js.map",
+      "index.a8f3b2c1.js.LICENSE.txt",
+      "index.a8f3b2c1.css",
+    ]) {
+      fs.writeFileSync(path.join(outputDir, file), "");
+    }
+
+    expect(getInitialAssetsFromOutput(outputDir, ["./src/index.jsx"])).toEqual({
+      js: ["index.a8f3b2c1.js"],
+      css: ["index.a8f3b2c1.css"],
+    });
+  });
 });

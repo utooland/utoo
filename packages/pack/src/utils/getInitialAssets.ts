@@ -18,6 +18,29 @@ function entryNameFromImport(entryImport: string): string {
   return extname ? basename.slice(0, -extname.length) : basename;
 }
 
+function isJavascriptAsset(file: string): boolean {
+  return (
+    file.endsWith(".js") &&
+    !file.endsWith(".LICENSE.txt") &&
+    !file.endsWith(".map")
+  );
+}
+
+function findEntryJavascript(
+  filenames: string[],
+  entryName: string,
+): string | undefined {
+  const exactFile = `${entryName}.js`;
+  if (filenames.includes(exactFile)) {
+    return exactFile;
+  }
+
+  const hashedPrefix = `${entryName}.`;
+  return filenames
+    .filter((file) => isJavascriptAsset(file) && file.startsWith(hashedPrefix))
+    .sort()[0];
+}
+
 export function getInitialAssetsFromStats(outputDir: string): Assets {
   const assets = { js: [] as string[], css: [] as string[] };
   const statsPath = path.join(outputDir, "stats.json");
@@ -56,23 +79,16 @@ export function getInitialAssetsFromOutput(
     return assets;
   }
 
-  const files = new Set(filenames);
-
   for (const entryImport of entryImports) {
-    const entryJs = `${entryNameFromImport(entryImport)}.js`;
-    if (files.has(entryJs)) {
+    const entryJs = findEntryJavascript(filenames, entryNameFromImport(entryImport));
+    if (entryJs) {
       addUniqueAsset(assets.js, entryJs);
     }
   }
 
   if (assets.js.length === 0) {
     const jsFiles = filenames
-      .filter(
-        (file) =>
-          file.endsWith(".js") &&
-          !file.endsWith(".LICENSE.txt") &&
-          !file.endsWith(".map"),
-      )
+      .filter((file) => isJavascriptAsset(file))
       .sort();
     if (jsFiles.length === 1) {
       addUniqueAsset(assets.js, jsFiles[0]);
