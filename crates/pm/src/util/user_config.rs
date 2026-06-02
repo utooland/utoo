@@ -132,14 +132,10 @@ pub fn get_install_scope() -> InstallScope {
     INSTALL_SCOPE.get().copied().unwrap_or_default()
 }
 
-// Manifest fetch concurrency configuration.
-//
-// Keep the user-visible/default tarball download limit at 64. Registry
-// resolution can opt into a higher default for non-semver registries via
-// `get_resolver_manifests_concurrency_limit`; tarball download/extract still
-// uses `get_manifests_concurrency_limit_sync` so install IO is not inflated.
+// Manifest fetch concurrency limit, shared by resolver manifest fetches and
+// tarball download/extract. Defaults to 64; overridable via the
+// `--manifests-concurrency-limit` CLI flag / config.
 const DEFAULT_MANIFESTS_CONCURRENCY_LIMIT: usize = 64;
-const NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT: usize = 256;
 
 static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> = LazyLock::new(|| {
     ConfigValue::new(
@@ -147,41 +143,13 @@ static MANIFESTS_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> = LazyLock::new
         DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
     )
 });
-static MANIFESTS_CONCURRENCY_CLI_SET: OnceLock<()> = OnceLock::new();
 
 pub fn set_manifests_concurrency_limit(value: Option<usize>) {
-    if value.is_some() {
-        let _ = MANIFESTS_CONCURRENCY_CLI_SET.set(());
-    }
     MANIFESTS_CONCURRENCY_LIMIT.set(value);
 }
 
 pub async fn get_manifests_concurrency_limit() -> usize {
     MANIFESTS_CONCURRENCY_LIMIT.get().await
-}
-
-fn resolver_manifest_concurrency_limit(
-    configured_limit: usize,
-    cli_set: bool,
-    supports_semver: Option<bool>,
-) -> usize {
-    if !cli_set
-        && configured_limit == DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
-        && supports_semver == Some(false)
-    {
-        NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT
-    } else {
-        configured_limit
-    }
-}
-
-pub async fn get_resolver_manifests_concurrency_limit() -> usize {
-    let limit = get_manifests_concurrency_limit().await;
-    resolver_manifest_concurrency_limit(
-        limit,
-        MANIFESTS_CONCURRENCY_CLI_SET.get().is_some(),
-        get_supports_semver(),
-    )
 }
 
 pub fn get_manifests_concurrency_limit_sync() -> usize {
@@ -396,50 +364,6 @@ mod tests {
         assert!(config.parse_config_value("True"));
         assert!(!config.parse_config_value("false"));
         assert!(!config.parse_config_value("anything"));
-    }
-
-    #[test]
-    fn test_resolver_manifest_concurrency_raises_npmjs_default() {
-        assert_eq!(
-            resolver_manifest_concurrency_limit(
-                DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
-                false,
-                Some(false),
-            ),
-            NON_SEMVER_RESOLVER_CONCURRENCY_LIMIT
-        );
-    }
-
-    #[test]
-    fn test_resolver_manifest_concurrency_preserves_explicit_limit() {
-        assert_eq!(
-            resolver_manifest_concurrency_limit(32, true, Some(false)),
-            32
-        );
-        assert_eq!(
-            resolver_manifest_concurrency_limit(
-                DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
-                true,
-                Some(false),
-            ),
-            DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
-        );
-    }
-
-    #[test]
-    fn test_resolver_manifest_concurrency_preserves_semver_default() {
-        assert_eq!(
-            resolver_manifest_concurrency_limit(
-                DEFAULT_MANIFESTS_CONCURRENCY_LIMIT,
-                false,
-                Some(true),
-            ),
-            DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
-        );
-        assert_eq!(
-            resolver_manifest_concurrency_limit(DEFAULT_MANIFESTS_CONCURRENCY_LIMIT, false, None),
-            DEFAULT_MANIFESTS_CONCURRENCY_LIMIT
-        );
     }
 
     #[tokio::test]
