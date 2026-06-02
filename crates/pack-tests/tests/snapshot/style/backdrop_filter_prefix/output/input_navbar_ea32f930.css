@@ -1,0 +1,10 @@
+/* [project]/style/backdrop_filter_prefix/input/navbar.css [client] (css) */
+.navbar {
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.toolbar {
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
