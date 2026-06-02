@@ -80,16 +80,17 @@ export function getInitialAssetsFromOutput(
   }
 
   for (const entryImport of entryImports) {
-    const entryJs = findEntryJavascript(filenames, entryNameFromImport(entryImport));
+    const entryJs = findEntryJavascript(
+      filenames,
+      entryNameFromImport(entryImport),
+    );
     if (entryJs) {
       addUniqueAsset(assets.js, entryJs);
     }
   }
 
   if (assets.js.length === 0) {
-    const jsFiles = filenames
-      .filter((file) => isJavascriptAsset(file))
-      .sort();
+    const jsFiles = filenames.filter((file) => isJavascriptAsset(file)).sort();
     if (jsFiles.length === 1) {
       addUniqueAsset(assets.js, jsFiles[0]);
     }
