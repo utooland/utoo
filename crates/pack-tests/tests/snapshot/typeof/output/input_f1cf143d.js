@@ -3,7 +3,7 @@
 
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
-        return `file://${__turbopack_context__.P("input/cjs.js")}`;
+        return __turbopack_context__.F("input/cjs.js");
     }
 };
 console.log('typeof require', ("TURBOPACK compile-time value", "function"));
@@ -24,7 +24,7 @@ require(/* turbopackIgnore: true */ '');
 var __TURBOPACK__imported__module__$5b$project$5d2f$typeof$2f$input$2f$dep$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/typeof/input/dep.js [client] (ecmascript)");
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
-        return `file://${__turbopack_context__.P("input/esm-automatic.js")}`;
+        return __turbopack_context__.F("input/esm-automatic.js");
     }
 };
 ;
@@ -42,7 +42,7 @@ __turbopack_context__.s([]);
 
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
-        return `file://${__turbopack_context__.P("input/esm-specified.mjs")}`;
+        return __turbopack_context__.F("input/esm-specified.mjs");
     }
 };
 console.log('typeof require', ("TURBOPACK compile-time value", "function"));

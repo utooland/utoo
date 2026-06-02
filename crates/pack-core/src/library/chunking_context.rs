@@ -656,7 +656,6 @@ impl ChunkingContext for LibraryChunkingContext {
             let MakeChunkGroupResult {
                 chunks,
                 references,
-                referenced_output_assets,
                 availability_info,
             } = make_chunk_group(
                 chunk_group.clone(),
@@ -727,7 +726,7 @@ impl ChunkingContext for LibraryChunkingContext {
             Ok(ChunkGroupResult {
                 assets: ResolvedVc::cell(assets),
                 references: ResolvedVc::cell(references),
-                referenced_assets: ResolvedVc::cell(referenced_output_assets),
+                referenced_assets: OutputAssets::empty_resolved(),
                 availability_info,
             }
             .cell())
