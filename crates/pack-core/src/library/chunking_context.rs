@@ -644,6 +644,7 @@ impl ChunkingContext for LibraryChunkingContext {
         ident: Vc<AssetIdent>,
         chunk_group: ChunkGroup,
         module_graph: Vc<ModuleGraph>,
+        _extra_chunks: Vc<OutputAssets>,
         availability_info: AvailabilityInfo,
     ) -> Result<Vc<ChunkGroupResult>> {
         let span = {

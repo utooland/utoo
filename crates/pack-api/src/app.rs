@@ -219,6 +219,7 @@ impl AppEntrypoint {
                             .collect(),
                     ),
                     module_graph,
+                    OutputAssets::empty(),
                     AvailabilityInfo::root(),
                 );
 
@@ -687,6 +688,7 @@ impl AppEndpoint {
                 ident,
                 ChunkGroup::Entry(all_evaluatables),
                 server_module_graph,
+                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             )
             .await?;

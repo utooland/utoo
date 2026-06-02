@@ -329,6 +329,7 @@ impl LibraryEndpoint {
                     .into_vc(),
                 ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,
+                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             );
 
