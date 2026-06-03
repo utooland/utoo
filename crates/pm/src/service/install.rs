@@ -199,11 +199,14 @@ async fn resolve_package_lock_with_scheduler(
 ) -> Result<utoo_ruborist::lock::PackageLock> {
     let (resolved_root, pkg) =
         utoo_ruborist::service::read_root_manifest(root_path, Context::glob()).await?;
-    let options = Context::install_deps_options(resolved_root, scheduler).await;
+    let options = Context::install_deps_options(resolved_root.clone(), scheduler).await;
     let output = utoo_ruborist::service::build_deps(options, pkg).await?;
 
-    save_package_lock(root_path, &output.lock).await?;
-    spawn_save_project_cache(root_path.to_path_buf(), output.project_cache);
+    // Persist at the resolved workspace root the lock was built against (not the
+    // caller's possibly-nested `root_path`), so the lockfile and its root-relative
+    // `resolved` paths stay consistent with where it lives.
+    save_package_lock(&resolved_root, &output.lock).await?;
+    spawn_save_project_cache(resolved_root, output.project_cache);
 
     Ok(output.lock)
 }
@@ -402,7 +405,13 @@ impl InstallService {
         let resolve_start = Instant::now();
         let options = Context::install_deps_options(root_path.clone(), scheduler.clone()).await;
         let lock = match utoo_ruborist::service::build_deps(options, pkg).await {
-            Ok(output) => output.lock,
+            Ok(output) => {
+                // Persist the resolved manifests so the next global install into
+                // this prefix resolves warm (install_deps_options already loads
+                // this cache).
+                spawn_save_project_cache(root_path.clone(), output.project_cache);
+                output.lock
+            }
             Err(e) => {
                 scheduler_handle.shutdown().await;
                 return Err(e).context("Failed to resolve global package");
