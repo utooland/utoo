@@ -13,6 +13,7 @@ pub mod json;
 pub mod linker;
 pub mod logger;
 pub mod manifest_store;
+pub mod package_cache;
 pub mod platform_const;
 pub mod project_cache;
 pub mod registry;
