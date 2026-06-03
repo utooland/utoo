@@ -53,7 +53,7 @@ mod manifest_provider;
 mod registry;
 mod store;
 
-pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps};
+pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps, read_root_manifest};
 pub use cache::{ProjectCacheData, ProjectPackageCache, Versions, VersionsInfo};
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;

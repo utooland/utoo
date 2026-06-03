@@ -20,7 +20,7 @@
 //! ```
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -105,22 +105,26 @@ pub struct BuildDepsOutput {
     pub project_cache: ProjectCacheData,
 }
 
-/// Build dependency tree and return [`BuildDepsOutput`].
-///
-/// This is the main entry point for dependency resolution. It:
-/// 1. Reads package.json from cwd (and finds workspace root if applicable)
-/// 2. Discovers and adds workspace packages
-/// 3. Injects runtime dependencies (node-bin packages from engines.install-node)
-/// 4. Initializes the dependency graph
-/// 5. Resolves all dependencies using the registry
-/// 6. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
-pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<BuildDepsOutput>
+/// Build dependency tree from an **in-memory root manifest** `pkg` and return
+/// [`BuildDepsOutput`]. `options.cwd` is the resolution root, already resolved by
+/// the caller — a normal install reads it via [`read_root_manifest`]; a global
+/// install (`utoo install -g`, `utoo x`) synthesizes a private root
+/// `{ dependencies: { <tool>: <spec> } }` so the tool resolves as a *dependency*
+/// (no `prepare`/`prepublish`, no `devDependencies`). It:
+/// 1. Injects runtime dependencies (node-bin packages from engines.install-node)
+/// 2. Builds the graph and adds root + workspace edges
+/// 3. Resolves all dependencies using the registry
+/// 4. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
+pub async fn build_deps<G, R>(
+    options: BuildDepsOptions<G, R>,
+    mut pkg: PackageJson,
+) -> Result<BuildDepsOutput>
 where
     G: Glob + Clone,
     R: EventReceiver,
 {
     let BuildDepsOptions {
-        cwd,
+        cwd: root_path,
         registry_url,
         cache_dir,
         manifest_store,
@@ -133,17 +137,7 @@ where
         catalogs,
     } = options;
 
-    // 1. Find root path (workspace root if applicable)
-    let discovery = WorkspaceDiscovery::new(glob.clone());
-    let root_path = discovery.find_root_path(&cwd).await?;
-
-    // 2. Read root package.json
-    let pkg_path = root_path.join("package.json");
-    let mut pkg: PackageJson = super::fs::read_json(&pkg_path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read/parse package.json: {}", e))?;
-
-    // 3. Inject runtime dependencies (node-bin packages)
+    // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
         let runtime_deps = install_runtime_from_map(engines);
         if !runtime_deps.is_empty() {
@@ -157,17 +151,17 @@ where
         }
     }
 
-    // 4. Initialize dependency graph
+    // 2. Initialize dependency graph + root dependency edges (catalog: specs
+    //    resolved at edge creation).
     let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
-
-    // 5. Add root dependency edges (catalog: specs resolved at edge creation)
     let root_index = graph.root_index;
     let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
     add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
 
-    // 6. Discover and add workspace packages
+    // 3. Discover and add workspace packages. A synthetic global-install root has
+    //    no `workspaces` field, so this returns immediately without touching disk.
+    let discovery = WorkspaceDiscovery::new(glob);
     let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
-
     for workspace in workspaces {
         tracing::debug!(
             "Added workspace: {} at {:?}",
@@ -184,7 +178,7 @@ where
         );
     }
 
-    // 7. Create the stateless registry client (persistence backend only).
+    // 4. Create the stateless registry client (persistence backend only).
     //    The warm `project_cache` seeds the demand resolver's manifest cache
     //    directly via `BuildDepsConfig::project_cache` below.
     let mut builder = UnifiedRegistry::builder()
@@ -228,6 +222,27 @@ where
     })
 }
 
+/// Resolve the workspace root for `cwd` and read its `package.json`. The
+/// disk-side counterpart to [`build_deps`]: a normal install calls this to get
+/// the `(root_path, manifest)` pair, then passes the manifest to `build_deps`.
+/// (Global installs skip this and synthesize the manifest in memory.)
+pub async fn read_root_manifest<G: Glob + Clone>(
+    cwd: &Path,
+    glob: G,
+) -> Result<(PathBuf, PackageJson)> {
+    use anyhow::Context as _;
+    let discovery = WorkspaceDiscovery::new(glob);
+    let root_path = discovery.find_root_path(cwd).await?;
+    let pkg_path = root_path.join("package.json");
+    let pkg: PackageJson = super::fs::read_json(&pkg_path).await.with_context(|| {
+        format!(
+            "Failed to read/parse package.json at {}",
+            pkg_path.display()
+        )
+    })?;
+    Ok((root_path, pkg))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +268,35 @@ mod tests {
         assert_eq!(options.concurrency, 20);
         assert_eq!(options.peer_deps, PeerDeps::Skip);
         assert!(options.supports_semver.is_none());
+    }
+
+    /// `build_deps` resolves an **in-memory** synthetic root (no disk
+    /// package.json, no workspace discovery) — the path global installs use. A
+    /// root with no dependencies resolves offline to a lock with only the root
+    /// entry.
+    #[tokio::test]
+    async fn test_build_deps_in_memory_root_no_deps() {
+        let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
+            cwd: PathBuf::from("/synthetic-root"),
+            registry_url: "https://registry.npmmirror.com".to_string(),
+            cache_dir: None,
+            manifest_store: Arc::new(NoopStore),
+            project_cache: None,
+            concurrency: 20,
+            peer_deps: PeerDeps::Skip,
+            glob: NoopGlob,
+            receiver: NoopReceiver,
+            supports_semver: None,
+            catalogs: HashMap::new(),
+        };
+        let mut pkg = PackageJson::new("utoo-global", "0.0.0");
+        pkg.private = Some(true);
+
+        let output = build_deps(options, pkg)
+            .await
+            .expect("in-memory synthetic root should resolve offline");
+        assert!(output.lock.packages.contains_key(""), "root entry present");
+        assert_eq!(output.lock.packages.len(), 1, "no deps → only the root");
     }
 
     #[test]

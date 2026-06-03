@@ -101,13 +101,28 @@ cd ../../..
 # Case 7: test global install
 echo -e "${YELLOW}Case 7: cowsay global install/uninstall${NC}"
 
-# Test global install
+# Test global install. The tool is installed as a *dependency* of a synthetic
+# root (never a root project), so it runs the install lifecycle but never
+# prepare/prepublish, and its devDependencies are not installed.
 utoo install -g cowsay || { echo -e "${RED}FAIL: global install cowsay failed${NC}"; exit 1; }
 if ! which cowsay >/dev/null 2>&1; then
     echo -e "${RED}FAIL: cowsay not found in PATH after global install${NC}"
     exit 1
 fi
 echo -e "${GREEN}PASS: cowsay global install successful${NC}"
+
+# Coexistence: a second global install must reify ADDITIVELY into the shared
+# global node_modules — installing semver must not prune cowsay.
+utoo install -g semver || { echo -e "${RED}FAIL: global install semver failed${NC}"; exit 1; }
+if ! which semver >/dev/null 2>&1; then
+    echo -e "${RED}FAIL: semver not found in PATH after global install${NC}"
+    exit 1
+fi
+if ! which cowsay >/dev/null 2>&1; then
+    echo -e "${RED}FAIL: cowsay pruned by second global install (coexistence broken)${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: global installs coexist (additive reify)${NC}"
 
 
 # Case 8: git dependency install
