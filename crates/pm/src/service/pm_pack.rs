@@ -13,7 +13,7 @@ use crate::service::publish_manifest::normalize_publish_manifest;
 use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::integrity::compute_integrity;
 use crate::util::json::load_package_json;
-use crate::util::user_config::{get_or_load_package_json, set_package_json};
+use crate::util::user_config::get_or_load_package_json;
 
 #[derive(Default)]
 pub struct PackResult {
@@ -53,12 +53,10 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     ScriptService::execute_script(&package_info, LifecycleHook::Prepack, ScriptOutput::Verbose)
         .await?;
 
-    // Re-read the manifest after `prepack`: the script may have rewritten
-    // package.json (version bumps, stripped fields), and npm/pnpm pack the
-    // post-`prepack` manifest. `get_or_load_package_json` is cached from before
-    // the script ran, so read fresh and refresh the cache write-through.
-    let pkg = load_package_json::<PackageJson>(package_root).await?;
-    set_package_json(package_root, pkg.clone());
+    // npm/pnpm pack the post-`prepack` manifest, and the script may have
+    // rewritten package.json (version bump, stripped fields). The `pkg` above
+    // is cached from before the script ran, so read the current file from disk.
+    let pkg: PackageJson = load_package_json(package_root).await?;
 
     // Rewrite `workspace:`/`catalog:` specifiers so the packed manifest is
     // installable outside the workspace. `None` means there was nothing to
