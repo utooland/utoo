@@ -20,13 +20,10 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result, bail};
 use utoo_ruborist::manifest::PackageJson;
-use utoo_ruborist::spec::{Catalogs, resolve_catalog_spec, resolve_workspace_spec};
+use utoo_ruborist::spec::{Catalogs, Protocol, resolve_catalog_spec, resolve_workspace_spec};
 
 use crate::helper::ruborist_context::Context;
 use crate::util::config_file::Config;
-
-const WORKSPACE_PREFIX: &str = "workspace:";
-const CATALOG_PREFIX: &str = "catalog:";
 
 /// Return a normalized clone of `pkg` with `workspace:`/`catalog:` dependency
 /// specifiers rewritten to concrete version ranges, or `Ok(None)` when there is
@@ -38,8 +35,8 @@ pub(crate) async fn normalize_publish_manifest(
     package_root: &Path,
     pkg: &PackageJson,
 ) -> Result<Option<PackageJson>> {
-    let needs_workspace = has_spec_with_prefix(pkg, WORKSPACE_PREFIX);
-    let needs_catalog = has_spec_with_prefix(pkg, CATALOG_PREFIX);
+    let needs_workspace = has_protocol(pkg, Protocol::Workspace);
+    let needs_catalog = has_protocol(pkg, Protocol::Catalog);
     if !needs_workspace && !needs_catalog {
         return Ok(None);
     }
@@ -64,7 +61,7 @@ pub(crate) async fn normalize_publish_manifest(
         HashMap::new()
     };
     let catalogs = if needs_catalog {
-        load_catalogs(&root).await
+        load_catalogs(&root).await?
     } else {
         Catalogs::new()
     };
@@ -91,23 +88,27 @@ fn rewrite_dep_specs(
     ];
     for map in maps.into_iter().flatten() {
         for (name, spec) in map.iter_mut() {
-            if spec.starts_with(WORKSPACE_PREFIX) {
-                let version = workspace_versions.get(name).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "cannot resolve workspace dependency `{name}` (\"{spec}\"): \
-                         no workspace package named `{name}` with a version was found"
-                    )
-                })?;
-                *spec = resolve_workspace_spec(spec, version)
-                    .expect("spec starts with workspace: prefix");
-            } else if spec.starts_with(CATALOG_PREFIX) {
-                let resolved = resolve_catalog_spec(name, spec, catalogs).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "cannot resolve catalog dependency `{name}` (\"{spec}\"): \
-                         no matching catalog entry (check `pnpm-workspace.yaml` / `.utoo.toml`)"
-                    )
-                })?;
-                *spec = resolved.to_string();
+            match Protocol::strip_prefix(spec) {
+                Some((Protocol::Workspace, _)) => {
+                    let version = workspace_versions.get(name).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "cannot resolve workspace dependency `{name}` (\"{spec}\"): \
+                             no workspace package named `{name}` with a version was found"
+                        )
+                    })?;
+                    *spec = resolve_workspace_spec(spec, version)
+                        .expect("spec starts with workspace: prefix");
+                }
+                Some((Protocol::Catalog, _)) => {
+                    let resolved = resolve_catalog_spec(name, spec, catalogs).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "cannot resolve catalog dependency `{name}` (\"{spec}\"): \
+                             no matching catalog entry (check `pnpm-workspace.yaml` / `.utoo.toml`)"
+                        )
+                    })?;
+                    *spec = resolved.to_string();
+                }
+                _ => {}
             }
         }
     }
@@ -143,17 +144,21 @@ async fn discover_workspace_versions(root: &Path) -> Result<HashMap<String, Stri
 }
 
 /// Load catalog definitions from the workspace root's `.utoo.toml` (written by
-/// `ut install --from pnpm` from `pnpm-workspace.yaml`). Missing config yields
-/// an empty catalog, which surfaces as a clear per-dependency error later.
-async fn load_catalogs(root: &Path) -> Catalogs {
-    Config::load_from_path(&root.join(".utoo.toml"))
+/// `ut install --from pnpm` from `pnpm-workspace.yaml`).
+///
+/// `Config::load_from_path` already treats a missing file as an empty config,
+/// so only a malformed or unreadable `.utoo.toml` surfaces an error here — and
+/// that should fail loudly rather than silently yield an empty catalog (which
+/// would later read as a confusing "no matching catalog entry").
+async fn load_catalogs(root: &Path) -> Result<Catalogs> {
+    Ok(Config::load_from_path(&root.join(".utoo.toml"))
         .await
-        .map(|c| c.catalogs())
-        .unwrap_or_default()
+        .context("failed to load catalog config from .utoo.toml")?
+        .catalogs())
 }
 
-/// Whether any dependency map contains a spec starting with `prefix`.
-fn has_spec_with_prefix(pkg: &PackageJson, prefix: &str) -> bool {
+/// Whether any dependency map contains a spec using `protocol`.
+fn has_protocol(pkg: &PackageJson, protocol: Protocol) -> bool {
     [
         &pkg.dependencies,
         &pkg.dev_dependencies,
@@ -163,7 +168,7 @@ fn has_spec_with_prefix(pkg: &PackageJson, prefix: &str) -> bool {
     .into_iter()
     .flatten()
     .flat_map(|m| m.values())
-    .any(|spec| spec.starts_with(prefix))
+    .any(|spec| Protocol::strip_prefix(spec).is_some_and(|(p, _)| p == protocol))
 }
 
 #[cfg(test)]
@@ -273,13 +278,17 @@ mod tests {
     }
 
     #[test]
-    fn has_spec_with_prefix_detects_protocols() {
+    fn has_protocol_detects_protocols() {
         let ws = pkg_with_deps(&[("a", "workspace:*")]);
-        assert!(has_spec_with_prefix(&ws, WORKSPACE_PREFIX));
-        assert!(!has_spec_with_prefix(&ws, CATALOG_PREFIX));
+        assert!(has_protocol(&ws, Protocol::Workspace));
+        assert!(!has_protocol(&ws, Protocol::Catalog));
+
+        let cat = pkg_with_deps(&[("a", "catalog:")]);
+        assert!(has_protocol(&cat, Protocol::Catalog));
+        assert!(!has_protocol(&cat, Protocol::Workspace));
 
         let plain = pkg_with_deps(&[("a", "^1.0.0")]);
-        assert!(!has_spec_with_prefix(&plain, WORKSPACE_PREFIX));
-        assert!(!has_spec_with_prefix(&plain, CATALOG_PREFIX));
+        assert!(!has_protocol(&plain, Protocol::Workspace));
+        assert!(!has_protocol(&plain, Protocol::Catalog));
     }
 }
