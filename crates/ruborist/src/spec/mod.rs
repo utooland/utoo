@@ -26,6 +26,7 @@
 //! | `npm:`          | `Registry`          | Alias: `npm:lodash@^4`          |
 //! | (semver)        | `Registry`          | Resolved by registry            |
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::model::util::{PackageNameStr, parse_package_spec};
@@ -303,8 +304,6 @@ impl SpecStr for str {
 // Catalog protocol
 // ---------------------------------------------------------------------------
 
-use std::collections::HashMap;
-
 /// Catalog definitions for the `catalog:` dependency protocol.
 ///
 /// Maps catalog name to (package_name -> version_spec).
@@ -325,6 +324,33 @@ pub fn resolve_catalog_spec<'a>(
         .get(catalog_name)
         .and_then(|c| c.get(pkg_name))
         .map(|s| s.as_str())
+}
+
+/// Resolve a `workspace:` spec to the version range that should appear in a
+/// **published** manifest, given the concrete `version` of the linked
+/// workspace package. Mirrors pnpm / bun pack behavior:
+///
+/// | Spec                | Result (version = `1.2.3`) |
+/// |---------------------|----------------------------|
+/// | `workspace:*`       | `1.2.3`                    |
+/// | `workspace:~`       | `~1.2.3`                   |
+/// | `workspace:^`       | `^1.2.3`                   |
+/// | `workspace:^1.2.0`  | `^1.2.0` (prefix stripped) |
+/// | `workspace:./path`  | `1.2.3` (path → version)   |
+///
+/// Returns `None` if `spec` is not a `workspace:` spec.
+pub fn resolve_workspace_spec(spec: &str, version: &str) -> Option<String> {
+    let rest = spec.strip_prefix("workspace:")?;
+    Some(match rest {
+        "" | "*" => version.to_string(),
+        "~" => format!("~{version}"),
+        "^" => format!("^{version}"),
+        // Path-based workspace deps (`workspace:./pkg`) publish as the concrete
+        // version, since the relative path is meaningless outside the monorepo.
+        p if p.starts_with('.') || p.starts_with('/') => version.to_string(),
+        // Explicit range/version: strip the prefix and keep it verbatim.
+        other => other.to_string(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +733,35 @@ mod tests {
                 path: "legacy".to_string(),
             }
         );
+    }
+
+    // -- resolve_workspace_spec --
+
+    #[test]
+    fn test_resolve_workspace_spec() {
+        let v = "1.2.3";
+        assert_eq!(resolve_workspace_spec("workspace:*", v).unwrap(), "1.2.3");
+        assert_eq!(resolve_workspace_spec("workspace:~", v).unwrap(), "~1.2.3");
+        assert_eq!(resolve_workspace_spec("workspace:^", v).unwrap(), "^1.2.3");
+        // Bare `workspace:` behaves like `workspace:*`.
+        assert_eq!(resolve_workspace_spec("workspace:", v).unwrap(), "1.2.3");
+        // Explicit ranges keep their text, only the prefix is dropped.
+        assert_eq!(
+            resolve_workspace_spec("workspace:^1.2.0", v).unwrap(),
+            "^1.2.0"
+        );
+        assert_eq!(
+            resolve_workspace_spec("workspace:>=1.0.0", v).unwrap(),
+            ">=1.0.0"
+        );
+        // Path-based workspace deps publish as the concrete version.
+        assert_eq!(
+            resolve_workspace_spec("workspace:./pkgs/foo", v).unwrap(),
+            "1.2.3"
+        );
+        // Non-workspace specs are left untouched.
+        assert!(resolve_workspace_spec("^1.0.0", v).is_none());
+        assert!(resolve_workspace_spec("catalog:", v).is_none());
     }
 
     // -- PackageSpec: npm alias --

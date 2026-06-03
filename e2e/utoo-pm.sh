@@ -401,6 +401,37 @@ echo -e "${GREEN}PASS: catalog update flow successful${NC}"
 mv .utoo.toml.bak .utoo.toml
 cd ../../..
 
+# Case 10c: pm-pack rewrites workspace:/catalog: protocols in the packed manifest (#3094)
+# A workspace member depends on a sibling via workspace: and on a catalog: entry.
+# `utoo pm-pack` must emit a tarball whose package.json carries concrete versions,
+# otherwise downstream `npm install` of the tgz fails with EUNSUPPORTEDPROTOCOL.
+echo -e "${YELLOW}Case 10c: pm-pack workspace:/catalog: rewrite${NC}"
+cd e2e/pm/pack-protocols/packages/foo
+rm -f ./*.tgz
+utoo pm-pack || { echo -e "${RED}FAIL: utoo pm-pack failed${NC}"; cd ../../../../..; exit 1; }
+PACK_TGZ=$(ls ./*.tgz)
+PACKED_PKG=$(tar -xzOf "$PACK_TGZ" package/package.json)
+echo "$PACKED_PKG"
+# workspace:^ -> ^2.4.1 (dependencies), workspace:~ -> ~2.4.1 (peerDependencies),
+# workspace:* -> 2.4.1 (devDependencies), catalog: -> ^4.17.21
+echo "$PACKED_PKG" | grep -q '"@pack-protocols/bar": "\^2.4.1"' \
+  || { echo -e "${RED}FAIL: workspace:^ not rewritten to ^2.4.1${NC}"; cd ../../../../..; exit 1; }
+echo "$PACKED_PKG" | grep -q '"@pack-protocols/bar": "~2.4.1"' \
+  || { echo -e "${RED}FAIL: workspace:~ not rewritten to ~2.4.1${NC}"; cd ../../../../..; exit 1; }
+echo "$PACKED_PKG" | grep -q '"@pack-protocols/bar": "2.4.1"' \
+  || { echo -e "${RED}FAIL: workspace:* not rewritten to 2.4.1${NC}"; cd ../../../../..; exit 1; }
+echo "$PACKED_PKG" | grep -q '"lodash": "\^4.17.21"' \
+  || { echo -e "${RED}FAIL: catalog: not rewritten to ^4.17.21${NC}"; cd ../../../../..; exit 1; }
+if echo "$PACKED_PKG" | grep -qE 'workspace:|catalog:'; then
+    echo -e "${RED}FAIL: raw workspace:/catalog: protocol left in packed manifest${NC}"; cd ../../../../..; exit 1
+fi
+# The on-disk source manifest must be left untouched (still uses the protocols).
+grep -q 'workspace:' package.json \
+  || { echo -e "${RED}FAIL: source package.json was mutated by pack${NC}"; cd ../../../../..; exit 1; }
+rm -f "$PACK_TGZ"
+cd ../../../../..
+echo -e "${GREEN}PASS: pm-pack workspace:/catalog: rewrite successful${NC}"
+
 # Case 11: npm alias (npm: prefix) install
 echo -e "${YELLOW}Case 11: npm alias install${NC}"
 cd e2e/pm/npm-alias

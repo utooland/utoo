@@ -35,7 +35,6 @@ use crate::service::pm_pack;
 use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::format_print::print_pack_details;
 use crate::util::integrity::compute_shasum;
-use crate::util::user_config::get_or_load_package_json;
 
 /// Options for publishing a package, resolved by the cmd layer.
 pub struct PublishOptions<'a> {
@@ -80,10 +79,10 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
 
     let token = auth::require_token(opts.registry).await?;
 
-    // Load package.json for version metadata in the publish payload
-    let pkg = get_or_load_package_json(&opts.package_info.path).await?;
+    // Reuse the manifest packed into the tarball (with `workspace:`/`catalog:`
+    // already rewritten) so the registry metadata matches the tarball contents.
     let payload = PublishPayload::new(&PublishPayloadInput {
-        package_json: &pkg,
+        package_json: &pack_result.manifest,
         name: &pack_result.name,
         version: &pack_result.version,
         tag: opts.tag,
