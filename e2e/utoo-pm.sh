@@ -657,12 +657,26 @@ if [ ! -f "lib-b/lib/index.js" ]; then
     echo -e "${RED}FAIL: lib-b/lib/index.js missing — topological order broken${NC}"
     exit 1
 fi
-# postinstall on a workspace package must also fire (not just prepare)
+# postinstall on a workspace package must also fire (not just prepare) —
+# and EXACTLY once. Regression guard for #3097: lib-a carries a `bin`, which
+# made the rebuild collector queue its scripts from both the workspace source
+# node and the node_modules link node, on top of the topological workspace
+# walk, running postinstall 3×. The counter must read exactly 1.
 if [ ! -f "lib-a/.markers/postinstall" ]; then
     echo -e "${RED}FAIL: lib-a postinstall did not run${NC}"
     exit 1
 fi
-echo -e "${GREEN}PASS: utoo install ran workspace prepare/postinstall in topo order${NC}"
+count=$(wc -l < lib-a/.markers/postinstall | tr -d ' ')
+if [ "$count" != "1" ]; then
+    echo -e "${RED}FAIL: lib-a postinstall ran ${count}× (expected 1) — #3097 regression${NC}"
+    exit 1
+fi
+# the workspace `bin` must still be linked into node_modules/.bin
+if [ ! -e "node_modules/.bin/lib-a-cli" ]; then
+    echo -e "${RED}FAIL: workspace bin lib-a-cli not linked into node_modules/.bin${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: utoo install ran workspace prepare/postinstall once in topo order${NC}"
 
 # ut rebuild must re-run the same hooks (per issue: rebuild was also broken)
 rm -rf lib-a/lib lib-a/.markers lib-b/lib
@@ -678,7 +692,12 @@ if [ ! -f "lib-a/.markers/postinstall" ]; then
     echo -e "${RED}FAIL: utoo rebuild did not run workspace postinstall${NC}"
     exit 1
 fi
-echo -e "${GREEN}PASS: utoo rebuild re-ran workspace prepare/postinstall${NC}"
+count=$(wc -l < lib-a/.markers/postinstall | tr -d ' ')
+if [ "$count" != "1" ]; then
+    echo -e "${RED}FAIL: utoo rebuild ran lib-a postinstall ${count}× (expected 1) — #3097 regression${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: utoo rebuild re-ran workspace prepare/postinstall once${NC}"
 
 # --ignore-scripts must skip workspace hooks too (no surprise side effects)
 rm -rf node_modules lib-a/lib lib-a/.markers lib-b/lib package-lock.json
