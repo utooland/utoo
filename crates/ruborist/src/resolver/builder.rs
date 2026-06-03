@@ -14,6 +14,7 @@
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -317,6 +318,71 @@ pub fn update_node_type_from_edge(
     }
 }
 
+/// Assign dependency types (prod/dev/optional/peer) across the whole graph.
+///
+/// This is the single source of truth for node types: the BFS only builds graph
+/// structure and never touches types, so this pass — run once after the tree is
+/// complete — cannot observe a half-built tree and therefore can't leave stale
+/// `dev` marks on the subtree of a node that turns out to be prod (the bug that
+/// motivated centralizing it here).
+///
+/// It applies the per-edge propagation rules ([`update_node_type_from_edge`])
+/// over every resolved edge, starting from the importer roots (whose
+/// `is_root`/edge type seeds their direct deps) and re-queuing a node's children
+/// whenever its flags change, until nothing changes.
+///
+/// Termination relies on the type lattice being monotone: each node's flags only
+/// move "up" (dev/optional/peer may be set once, then `is_prod` is absorbing —
+/// once set it clears the others and the `!is_prod` guards freeze the node), so
+/// every node changes O(1) times.
+pub fn compute_node_types(graph: &mut DependencyGraph) {
+    use std::collections::VecDeque;
+
+    // Seed only the importers (root + workspace members); their edge types seed
+    // their direct deps, and the fixpoint re-queues every changed node's
+    // children, so the whole reachable graph is covered without visiting leaves
+    // that have nothing to propagate.
+    let mut queued: HashSet<NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|&i| {
+            graph
+                .get_node(i)
+                .is_some_and(|n| n.is_root() || n.is_workspace())
+        })
+        .collect();
+    let mut worklist: VecDeque<NodeIndex> = queued.iter().copied().collect();
+
+    while let Some(src) = worklist.pop_front() {
+        queued.remove(&src);
+
+        // Snapshot resolved out-edges so we can mutate targets while iterating.
+        let edges: Vec<(NodeIndex, EdgeType)> = graph
+            .get_dependency_edges(src)
+            .into_iter()
+            .filter_map(|(_, edge)| {
+                edge.to
+                    .filter(|_| edge.valid)
+                    .map(|to| (to, edge.edge_type))
+            })
+            .collect();
+
+        for (to, edge_type) in edges {
+            let before = graph
+                .get_node(to)
+                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
+            update_node_type_from_edge(graph, src, to, &edge_type);
+            let after = graph
+                .get_node(to)
+                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
+
+            if before != after && queued.insert(to) {
+                worklist.push_back(to);
+            }
+        }
+    }
+}
+
 /// Result of processing a single dependency.
 #[derive(Debug)]
 pub enum ProcessResult {
@@ -393,7 +459,6 @@ async fn process_file_dep<E>(
         let idx = graph.add_node(PackageNode::link_from_package_json(abs, pkg));
         graph.add_physical_edge(conflict_parent, idx);
         graph.mark_dependency_resolved(edge.edge_id, idx);
-        update_node_type_from_edge(graph, node_index, idx, &edge.edge_type);
         return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
     }
 
@@ -452,11 +517,9 @@ pub async fn process_dependency<R: ManifestProvider>(
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
         FindResult::Reuse(existing_index) => {
-            // Mark edge as resolved
+            // Mark edge as resolved. Node types are assigned in a single pass
+            // after the tree is built (see `compute_node_types`).
             graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
-
-            // Update target node type
-            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
 
             Ok(ProcessResult::Reused(existing_index))
         }
@@ -627,9 +690,6 @@ pub async fn process_dependency<R: ManifestProvider>(
             // Mark dependency as resolved
             graph.mark_dependency_resolved(edge_info.edge_id, new_index);
 
-            // Update node type
-            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
-
             // Add dependencies of the new node
             add_edges_from(
                 graph,
@@ -754,6 +814,10 @@ where
 
     let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
+    // The BFS only builds graph structure; assign all node types in one pass now
+    // that the tree is complete, so prod-ness reaches every transitive dep.
+    compute_node_types(graph);
+
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
     });
@@ -841,19 +905,17 @@ fn graph_to_package_lock(
 
 // ---- demand-resolver graph building (moved from demand::driver) ----
 
-/// Resolve `edge` onto an already-present compatible node: mark the edge
-/// resolved and update that node's type from the edge. Shared by the pre-fetch
-/// reuse probe ([`try_reuse_dependency`]) and the post-resolution placement
-/// ([`process_dependency_with_resolved`]), whose `FindResult::Reuse` arms are
-/// otherwise identical.
+/// Resolve `edge` onto an already-present compatible node by marking the edge
+/// resolved. Shared by the pre-fetch reuse probe ([`try_reuse_dependency`]) and
+/// the post-resolution placement ([`process_dependency_with_resolved`]), whose
+/// `FindResult::Reuse` arms are otherwise identical. Node types are assigned in
+/// a single pass after the tree is built (see [`compute_node_types`]).
 fn reuse_existing_node(
     graph: &mut DependencyGraph,
-    parent: NodeIndex,
     edge: &DependencyEdgeInfo,
     existing_index: NodeIndex,
 ) -> ProcessResult {
     graph.mark_dependency_resolved(edge.edge_id, existing_index);
-    update_node_type_from_edge(graph, parent, existing_index, &edge.edge_type);
     ProcessResult::Reused(existing_index)
 }
 
@@ -863,9 +925,7 @@ pub(crate) fn try_reuse_dependency(
     edge: &DependencyEdgeInfo,
 ) -> Option<ProcessResult> {
     match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
-        FindResult::Reuse(existing_index) => {
-            Some(reuse_existing_node(graph, parent, edge, existing_index))
-        }
+        FindResult::Reuse(existing_index) => Some(reuse_existing_node(graph, edge, existing_index)),
         FindResult::Conflict(_) | FindResult::New(_) => None,
     }
 }
@@ -878,15 +938,12 @@ pub fn process_dependency_with_resolved(
     config: &BuildDepsConfig,
 ) -> ProcessResult {
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
-        FindResult::Reuse(existing_index) => {
-            reuse_existing_node(graph, node_index, edge_info, existing_index)
-        }
+        FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
             let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
             let new_index = graph.add_node(new_node);
             graph.add_physical_edge(conflict_parent, new_index);
             graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
             add_edges_from(
                 graph,
                 new_index,

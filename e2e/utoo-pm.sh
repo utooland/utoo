@@ -1216,4 +1216,33 @@ utoo add -g cowsay --registry=https://registry.npmjs.org \
 which cowsay >/dev/null 2>&1 || { echo -e "${RED}FAIL: cowsay not in PATH after global add${NC}"; exit 1; }
 echo -e "${GREEN}  ✓ PASS: utoo add -g works${NC}"
 
+# ═══════════════════════════════════════════════════════════════
+# Case: prod-reachable devDependency must not be marked `dev`
+# ═══════════════════════════════════════════════════════════════
+# `p-timeout` is declared as a root devDependency (shallow dev path) but is
+# also a prod dependency of `sdk-base` (a root prod dependency). Since it is
+# reachable through a prod chain it must be a prod node — no `"dev": true` —
+# matching npm. Regression test for the demand resolver leaving stale dev marks
+# on prod-reachable transitive deps.
+echo -e "${YELLOW}Case: prod-reachable devDependency is not marked dev${NC}"
+cd e2e/pm/dev-prod-dedup
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for dev-prod-dedup${NC}"; exit 1; }
+node -e '
+const lock = require("./package-lock.json");
+const sdkBase = lock.packages["node_modules/sdk-base"];
+const pTimeout = lock.packages["node_modules/p-timeout"];
+if (!sdkBase) { console.error("sdk-base missing from lockfile"); process.exit(1); }
+if (!pTimeout) { console.error("p-timeout missing from lockfile"); process.exit(1); }
+if (sdkBase.dev === true) { console.error("sdk-base wrongly marked dev"); process.exit(1); }
+if (pTimeout.dev === true) {
+  console.error("REGRESSION: p-timeout is prod-reachable via sdk-base but marked dev:true");
+  process.exit(1);
+}
+' || { echo -e "${RED}FAIL: prod-reachable dep marked dev in lockfile${NC}"; exit 1; }
+echo -e "${GREEN}PASS: prod-reachable devDependency correctly not marked dev${NC}"
+cd ../../../
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
