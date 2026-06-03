@@ -11,6 +11,7 @@ pub mod package;
 pub mod package_management;
 pub mod pm_pack;
 pub mod publish;
+pub mod publish_manifest;
 pub mod rebuild;
 pub mod script;
 pub mod update;
