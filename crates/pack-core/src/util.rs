@@ -1,4 +1,7 @@
-use std::{path::Path, sync::LazyLock};
+use std::{
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use anyhow::{Context, Result};
 use bincode::{Decode, Encode};
@@ -102,12 +105,17 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
     ]))
 }
 
+fn canonicalize_existing_path(path: &str) -> PathBuf {
+    let simplified = simplified(Path::new(path));
+    canonicalize(simplified).unwrap_or_else(|_| simplified.to_path_buf())
+}
+
 pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str) -> Result<RcStr> {
     let to_request_path = |path: &str| -> RcStr { path.replace('\\', "/").into() };
 
     if is_absolute_path(project_inside_path) {
         pathdiff::diff_paths(
-            simplified(Path::new(project_inside_path)),
+            canonicalize_existing_path(project_inside_path),
             canonicalize(if is_absolute_path(project_path) {
                 project_path.into()
             } else {
@@ -188,6 +196,7 @@ pub fn module_styles_rule_condition() -> RuleCondition {
 #[cfg(test)]
 mod tests {
     use super::{convert_to_project_relative, is_absolute_path};
+    use std::{fs, time::SystemTime};
 
     #[test]
     fn windows_style_path_is_recognized_as_absolute() {
@@ -199,5 +208,28 @@ mod tests {
     fn relative_windows_style_path_is_normalized_for_requests() {
         let relative = convert_to_project_relative(r".\src\.umi-production\umi.ts", ".").unwrap();
         assert_eq!(relative.to_string(), "./src/.umi-production/umi.ts");
+    }
+
+    #[test]
+    fn absolute_project_path_is_canonicalized_before_diffing() {
+        let temp = std::env::temp_dir().join(format!(
+            "utoo-pack-core-test-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let project = temp.join("project");
+        let target = project.join("src").join(".umi").join("core");
+        fs::create_dir_all(&target).unwrap();
+        let plugin = target.join("plugin.ts");
+        fs::write(&plugin, "export {}").unwrap();
+
+        let relative =
+            convert_to_project_relative(plugin.to_str().unwrap(), project.to_str().unwrap())
+                .unwrap();
+        assert_eq!(relative.to_string(), "./src/.umi/core/plugin.ts");
+
+        fs::remove_dir_all(temp).unwrap();
     }
 }
