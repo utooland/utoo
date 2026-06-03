@@ -19,6 +19,13 @@ use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 /// `pre<event>` / `<event>` / `post<event>` via [`ScriptService::run_lifecycle`].
 const NPM_INSTALL_EVENTS: &[&str] = &["install", "prepublish", "prepare"];
 
+/// True if `path` contains `node_modules` as a distinct path segment — not just
+/// as a substring of some other segment (e.g. a workspace dir literally named
+/// `node_modules-utils`). Handles both `/` and `\` separators.
+fn has_node_modules_segment(path: &str) -> bool {
+    path.split(['/', '\\']).any(|seg| seg == "node_modules")
+}
+
 /// Execution queues for package scripts and binary linking
 /// Each entry is (PackageInfo, is_optional) where is_optional indicates if the package
 /// is an optional dependency (based on edge type in dependency graph)
@@ -127,7 +134,7 @@ impl PackageService {
         let workspace_source_paths: HashSet<String> = package_lock
             .packages
             .keys()
-            .filter(|p| !p.is_empty() && !p.contains("node_modules"))
+            .filter(|p| !p.is_empty() && !has_node_modules_segment(p))
             .map(|p| p.replace('\\', "/"))
             .collect();
 
@@ -141,7 +148,7 @@ impl PackageService {
             // Its lifecycle runs via the workspace walk, and npm never bin-links
             // the source dir — collecting it here re-runs its scripts on top of
             // the walk.
-            if !path.contains("node_modules") {
+            if !has_node_modules_segment(path) {
                 continue;
             }
 
@@ -152,13 +159,16 @@ impl PackageService {
             // `node_modules/.bin` (npm's `#linkAllBins`). A `file:<dir>` dep is
             // also `link:true` but its `resolved` does not back-reference a
             // workspace source, so it is NOT a workspace link and keeps its
-            // scripts. `resolved` is already POSIX-normalized by the lock writer
-            // (`get_relative_path`), matching the normalized keys above.
+            // scripts. `resolved` is normalized to `/` before the lookup to match
+            // the normalized keys above — utoo's lock writer already emits POSIX
+            // separators (`get_relative_path`), but a lock written by another tool
+            // may not, so we normalize defensively.
             let is_workspace_link = lock_package.link == Some(true)
                 && lock_package
                     .resolved
                     .as_deref()
-                    .is_some_and(|r| workspace_source_paths.contains(r));
+                    .map(|r| r.replace('\\', "/"))
+                    .is_some_and(|r| workspace_source_paths.contains(&r));
 
             // Early filtering based on scripts parameter
             let has_scripts = lock_package.has_install_scripts();
@@ -1017,6 +1027,19 @@ mod tests {
             },
         );
 
+        // A workspace whose dir name merely *contains* "node_modules" as a
+        // substring (not a path segment). It must still be treated as a source
+        // node and excluded — guards against a substring `contains` check.
+        packages.insert(
+            "node_modules-utils".to_string(),
+            LockPackage {
+                name: Some("node_modules-utils".to_string()),
+                version: Some("1.0.0".to_string()),
+                has_install_script: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
         let package_lock = PackageLock::new("ws".to_string(), "1.0.0".to_string(), packages);
 
         // Materialize package.json for every entry's on-disk path.
@@ -1024,6 +1047,7 @@ mod tests {
             ("lib-a", "echo source"),
             ("node_modules/lib-a", "echo link"),
             ("node_modules/file-dep", "echo file"),
+            ("node_modules-utils", "echo substring-ws"),
         ] {
             let dir = temp_dir.path().join(rel);
             std::fs::create_dir_all(&dir).unwrap();
@@ -1053,6 +1077,15 @@ mod tests {
                 .iter()
                 .any(|(p, _)| p.path == temp_dir.path().join("lib-a")),
             "workspace source node must be excluded"
+        );
+
+        // A workspace dir containing "node_modules" as a substring is still a
+        // source node and must be excluded (path-segment, not substring, check).
+        assert!(
+            !collected
+                .iter()
+                .any(|(p, _)| p.path == temp_dir.path().join("node_modules-utils")),
+            "substring-named workspace source must be excluded"
         );
 
         // The workspace link is collected for bin linking but with no scripts.
