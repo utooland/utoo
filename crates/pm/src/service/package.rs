@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
-use utoo_ruborist::lock::PackageLock;
+use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
@@ -24,6 +24,18 @@ const NPM_INSTALL_EVENTS: &[&str] = &["install", "prepublish", "prepare"];
 /// `node_modules-utils`). Handles both `/` and `\` separators.
 fn has_node_modules_segment(path: &str) -> bool {
     path.split(['/', '\\']).any(|seg| seg == "node_modules")
+}
+
+/// Whether `pkg` is a workspace's `node_modules` link — a link whose `resolved`
+/// target is one of the workspace source dirs. A `file:<dir>` dep is also a link
+/// but resolves to a non-workspace dir, so it returns `false` and keeps its own
+/// scripts. `resolved` is normalized to `/` to match the normalized source keys.
+fn links_to_workspace_source(pkg: &LockPackage, workspace_sources: &HashSet<String>) -> bool {
+    pkg.is_link()
+        && pkg
+            .resolved
+            .as_deref()
+            .is_some_and(|target| workspace_sources.contains(&target.replace('\\', "/")))
 }
 
 /// Execution queues for package scripts and binary linking
@@ -154,21 +166,11 @@ impl PackageService {
 
             // (1) Split out the workspace link (npm's `node.isLink` branch). Its
             // install scripts are owned by the workspace walk, so we suppress them
-            // here (link + source + walk = the 3× run in #3097). We still keep it
+            // here (link + source + walk = the 3× run in #3097), but still keep it
             // for bin linking — this link is how a workspace `bin` lands in
-            // `node_modules/.bin` (npm's `#linkAllBins`). A `file:<dir>` dep is
-            // also `link:true` but its `resolved` does not back-reference a
-            // workspace source, so it is NOT a workspace link and keeps its
-            // scripts. `resolved` is normalized to `/` before the lookup to match
-            // the normalized keys above — utoo's lock writer already emits POSIX
-            // separators (`get_relative_path`), but a lock written by another tool
-            // may not, so we normalize defensively.
-            let is_workspace_link = lock_package.link == Some(true)
-                && lock_package
-                    .resolved
-                    .as_deref()
-                    .map(|r| r.replace('\\', "/"))
-                    .is_some_and(|r| workspace_source_paths.contains(&r));
+            // `node_modules/.bin` (npm's `#linkAllBins`).
+            let is_workspace_link =
+                links_to_workspace_source(lock_package, &workspace_source_paths);
 
             // Early filtering based on scripts parameter
             let has_scripts = lock_package.has_install_scripts();

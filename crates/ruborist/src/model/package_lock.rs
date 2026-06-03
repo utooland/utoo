@@ -112,6 +112,12 @@ impl LockPackage {
     pub fn has_install_scripts(&self) -> bool {
         self.has_install_script.unwrap_or(false)
     }
+
+    /// Whether this entry is a symlink node — a workspace `node_modules` link
+    /// or a `file:<dir>` dependency (both serialize as `"link": true`).
+    pub fn is_link(&self) -> bool {
+        self.link == Some(true)
+    }
 }
 
 /// A wrapper around LockPackage that includes the path.
