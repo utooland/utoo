@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context as _, Result, anyhow};
 use serde_json::Value;
@@ -15,12 +15,8 @@ use super::ruborist_context::Context;
 use super::workspace::find_workspace_path;
 use crate::fs;
 use crate::util::cli_enum::{PackageAction, SaveType};
-use crate::util::cloner::{PackageClone, clone_package};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};
-use crate::util::package_cache::download_and_extract_to_cache;
-
-use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use crate::util::user_config::{
     get_catalogs, get_or_load_package_json, get_peer_deps, set_package_json,
 };
@@ -180,7 +176,7 @@ pub async fn update_package_json(opts: &UpdatePackageJsonOptions<'_>) -> Result<
 /// Git/non-registry specs are written as-is (e.g. the resolved URL with pinned commit).
 /// Wildcard specs (`*`, `latest`, empty) are pinned to `^<resolved_version>`.
 /// Everything else (semver ranges, exact versions) passes through unchanged.
-fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
+pub fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
     // Non-registry specs (git, github, file, http, etc.) are written as-is.
     if version_spec.parse::<Protocol>().is_ok() {
         return version_spec.to_string();
@@ -227,106 +223,6 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
             anyhow::bail!("HTTP tarball spec ({url}) not supported in this context")
         }
     }
-}
-
-pub async fn prepare_global_package_json(npm_spec: &str, prefix: Option<&str>) -> Result<PathBuf> {
-    // Parse package name and version
-    let (name, _version, version_spec) = resolve_package_spec(npm_spec).await?;
-    let lib_path = match prefix {
-        Some(prefix) => PathBuf::from(prefix).join(GLOBAL_NODE_MODULES),
-        None => {
-            // Get current executable path
-            let current_exe = std::env::current_exe()?;
-            current_exe
-                .parent()
-                .expect("executable must have parent directory")
-                .parent()
-                .expect("executable parent must have parent directory")
-                .join(GLOBAL_NODE_MODULES)
-        }
-    };
-
-    tracing::debug!("lib_path: {}", lib_path.to_string_lossy());
-
-    // Create global package directory
-    let package_path = lib_path.join(&name);
-    fs::create_dir_all(&package_path).await?;
-
-    // Get package info from registry
-    let resolved = resolve_package(&Context::registry(), &name, &version_spec)
-        .await
-        .context("Failed to resolve package")?;
-
-    // Get tarball URL from manifest
-    let tarball_url = resolved
-        .manifest
-        .dist
-        .tarball
-        .as_ref()
-        .ok_or_else(|| anyhow!("Failed to get tarball URL from manifest"))?;
-
-    // Download and extract package to cache.
-    let cache_path = download_and_extract_to_cache(&name, &resolved.version, tarball_url)
-        .await
-        .with_context(|| format!("Failed to download package {name}"))?;
-
-    // If the package has install scripts, create a flag file
-    // in linux, we can use hardlink when FICLONE is not supported
-    // so we need to copy the file to the package directory to avoid effect other packages
-    if resolved.manifest.has_install_script == Some(true) {
-        let has_install_script_flag_path = cache_path.join("_hasInstallScript");
-        if !fs::try_exists(&has_install_script_flag_path)
-            .await
-            .unwrap_or(false)
-        {
-            fs::write(has_install_script_flag_path, "").await?;
-        }
-    }
-
-    // Clone to package directory
-    tracing::debug!(
-        "Cloning {} to {}",
-        cache_path.display(),
-        package_path.display()
-    );
-    clone_package(&PackageClone {
-        name: &name,
-        version: &resolved.version,
-        tarball_url,
-        cache: &cache_path,
-        target: &package_path,
-    })
-    .await
-    .context("Failed to clone package")?;
-
-    // Remove devDependencies from package.json
-    let package_json_path = package_path.join("package.json");
-    let package_json_content = fs::read_to_string(&package_json_path).await?;
-    let mut package_json: Value = serde_json::from_str(&package_json_content)?;
-
-    // Remove specified dependency fields and scripts.prepare
-    let package_obj = package_json
-        .as_object_mut()
-        .expect("package.json must be an object");
-    package_obj.remove("devDependencies");
-
-    // Remove scripts.prepare if it exists
-    if let Some(scripts) = package_obj.get_mut("scripts")
-        && let Some(scripts_obj) = scripts.as_object_mut()
-    {
-        scripts_obj.remove("prepare");
-        scripts_obj.remove("prepublish");
-    }
-
-    // Write back the modified package.json
-    fs::write(
-        &package_json_path,
-        serde_json::to_string_pretty(&package_json)?,
-    )
-    .await?;
-
-    tracing::debug!("package_path: {}", package_path.to_string_lossy());
-    Ok(package_path)
 }
 
 /// Extract the relative package name from a package directory path string.

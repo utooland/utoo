@@ -11,7 +11,6 @@ use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
-use super::downloader::download_bytes;
 use super::extractor::extract_and_write;
 
 /// Outcome of materializing a registry tarball into the cache. Returned so the
@@ -22,14 +21,6 @@ pub enum ExtractOutcome {
     Reused(PathBuf),
     /// Freshly extracted from downloaded bytes.
     Extracted(PathBuf),
-}
-
-impl ExtractOutcome {
-    pub fn into_path(self) -> PathBuf {
-        match self {
-            ExtractOutcome::Reused(p) | ExtractOutcome::Extracted(p) => p,
-        }
-    }
 }
 
 /// Look up the cache path for a git-resolved package.
@@ -142,25 +133,6 @@ pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result
         .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
 
     Ok(ExtractOutcome::Extracted(cache_path))
-}
-
-/// Download and extract a registry tarball without global single-flight or
-/// semaphore state. Callers that already own scheduling/deduplication should use
-/// the network + extract primitives directly.
-pub async fn download_and_extract_to_cache(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-) -> Result<PathBuf> {
-    if let Some(cache_path) = registry_cache_lookup(name, version).await? {
-        return Ok(cache_path);
-    }
-
-    let bytes = download_bytes(tarball_url)
-        .await
-        .with_context(|| format!("Download {name}@{version} from {tarball_url}"))?;
-
-    Ok(extract_to_cache(name, version, bytes).await?.into_path())
 }
 
 #[cfg(test)]

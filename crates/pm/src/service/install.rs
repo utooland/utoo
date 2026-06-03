@@ -7,14 +7,15 @@ use std::time::Instant;
 
 use crate::cmd::deps::build_deps;
 use crate::fs;
-use crate::helper::global_bin::get_global_bin_dir;
+use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::lock::{
-    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
-    prepare_global_package_json, save_package_lock, update_package_json,
+    Package, UpdatePackageJsonOptions, extract_package_name, format_save_spec, group_by_depth,
+    is_pkg_lock_outdated, resolve_package_spec, save_package_lock, update_package_json,
 };
 use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
+use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::json::load_package_lock_json_from_path;
@@ -72,6 +73,21 @@ async fn install_packages(
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
+    reify_packages(groups, cwd, omit, scheduler).await
+}
+
+/// Clone/link every package in `groups` into `<cwd>/node_modules`, level by
+/// level, WITHOUT pruning extraneous entries (no `clean_deps`). Within each
+/// level, tasks run concurrently. Global installs (`utoo install -g`, `utoo x`)
+/// reify additively into a shared global `node_modules` so previously-installed
+/// tools survive — and there is no synthetic root `package.json` on disk for
+/// `clean_deps` / `find_workspaces` to read.
+async fn reify_packages(
+    groups: &HashMap<usize, Vec<(String, Package)>>,
+    cwd: &Path,
+    omit: &HashSet<OmitType>,
+    scheduler: &super::install_scheduler::InstallScheduler,
+) -> Result<()> {
     log_progress("linking packages");
 
     // Always process level-by-level to ensure parent directories exist before
@@ -181,11 +197,16 @@ async fn resolve_package_lock_with_scheduler(
     root_path: &Path,
     scheduler: super::install_scheduler::InstallScheduler,
 ) -> Result<utoo_ruborist::lock::PackageLock> {
-    let options = Context::install_deps_options(root_path.to_path_buf(), scheduler).await;
-    let output = utoo_ruborist::service::build_deps(options).await?;
+    let (resolved_root, pkg) =
+        utoo_ruborist::service::read_root_manifest(root_path, Context::glob()).await?;
+    let options = Context::install_deps_options(resolved_root.clone(), scheduler).await;
+    let output = utoo_ruborist::service::build_deps(options, pkg).await?;
 
-    save_package_lock(root_path, &output.lock).await?;
-    spawn_save_project_cache(root_path.to_path_buf(), output.project_cache);
+    // Persist at the resolved workspace root the lock was built against (not the
+    // caller's possibly-nested `root_path`), so the lockfile and its root-relative
+    // `resolved` paths stay consistent with where it lives.
+    save_package_lock(&resolved_root, &output.lock).await?;
+    spawn_save_project_cache(resolved_root, output.project_cache);
 
     Ok(output.lock)
 }
@@ -337,38 +358,104 @@ impl InstallService {
         Ok(())
     }
 
+    /// Install a package globally (`utoo install -g`, `utoo x`).
+    ///
+    /// The tool is installed as a **production dependency** of an in-memory
+    /// synthetic root — never as a root project — so it runs the install
+    /// lifecycle (`preinstall`/`install`/`postinstall` + bin) but never
+    /// `prepare`/`prepublish`, and its `devDependencies` are not installed
+    /// (matching `npm install -g` and bun). No wrapper `package.json` is written:
+    /// the global `node_modules` is the source of truth, reified **additively**
+    /// so previously-installed globals survive.
     pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
-        // Prepare global package directory and package.json
-        let package_path = prepare_global_package_json(npm_spec, prefix)
+        let (name, resolved_version, version_spec) = resolve_package_spec(npm_spec).await?;
+        // Resolvable spec for the synthetic dependency: registry ranges pinned to
+        // the resolved version; git/file/url specs kept as-is.
+        let dep_spec = format_save_spec(&version_spec, &resolved_version);
+
+        // Shared global `node_modules` base (`<prefix>/lib/node_modules`); reify
+        // from its parent so the tool lands at `<root>/node_modules/<name>`.
+        let global_node_modules = get_global_package_dir(prefix)?;
+        let root_path = global_node_modules
+            .parent()
+            .context("global node_modules has no parent directory")?
+            .to_path_buf();
+        fs::create_dir_all(&root_path).await?;
+
+        // Synthetic private root: `{ private, dependencies: { <name>: <spec> } }`.
+        // Lives only in memory — fed straight to the resolver.
+        let mut pkg = utoo_ruborist::manifest::PackageJson::new("utoo-global", "0.0.0");
+        pkg.private = Some(true);
+        pkg.dependencies = Some(HashMap::from([(name.clone(), dep_spec)]));
+
+        tracing::debug!(
+            "Installing global package {name} into {}",
+            root_path.display()
+        );
+
+        // Production install: never pull devDependencies.
+        let omit = HashSet::from([OmitType::Dev]);
+
+        let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
+        let scheduler = scheduler_handle.scheduler();
+
+        // Resolve the tool + its prod deps from the synthetic root. Resolver
+        // events drive the download pipeline (same head start a cold install gets).
+        start_progress_bar();
+        let resolve_start = Instant::now();
+        let options = Context::install_deps_options(root_path.clone(), scheduler.clone()).await;
+        let lock = match utoo_ruborist::service::build_deps(options, pkg).await {
+            Ok(output) => {
+                // Persist the resolved manifests so the next global install into
+                // this prefix resolves warm (install_deps_options already loads
+                // this cache).
+                spawn_save_project_cache(root_path.clone(), output.project_cache);
+                output.lock
+            }
+            Err(e) => {
+                scheduler_handle.shutdown().await;
+                return Err(e).context("Failed to resolve global package");
+            }
+        };
+        finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
+
+        // Reify ADDITIVELY (no clean_deps) into the shared global node_modules.
+        let groups = group_by_depth(&lock.packages);
+        if !lock.packages.is_empty() {
+            start_progress_bar();
+            PROGRESS_BAR.set_length(lock.packages.len() as u64);
+        }
+        let link_start = Instant::now();
+        let reify = reify_packages(&groups, &root_path, &omit, &scheduler).await;
+        let counts = scheduler_handle.shutdown().await;
+        reify.context("Failed to install global package")?;
+        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
+
+        // Dependency lifecycle only — preinstall/install/postinstall + bin
+        // linking for the tool and its deps. No project/workspace hooks, so no
+        // `prepare`/`prepublish`, and no disk root `package.json` is required.
+        let packages =
+            PackageService::collect_packages_from_lock(&lock, &root_path, ScriptPolicy::Run)
+                .await?;
+        if !packages.is_empty() {
+            let queues =
+                PackageService::create_execution_queues_with_options(packages, ScriptPolicy::Run)?;
+            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await?;
+        }
+
+        // Link the tool's own bin into the global bin dir.
+        let tool_dir = global_node_modules.join(&name);
+        let package_info = PackageInfo::from_path(&tool_dir)
             .await
-            .context("Failed to prepare global package.json")?;
-
-        tracing::debug!("Installing global package: {npm_spec}");
-
-        // Install dependencies (global install never omits)
-        Self::install(ScriptPolicy::Run, &package_path, &HashSet::new())
-            .await
-            .context("Failed to install global package dependencies")?;
-
-        // Create package info from path
-        let package_info = PackageInfo::from_path(&package_path)
-            .await
-            .context("Failed to create package info from path")?;
-
-        // Get global bin directory using the common helper
+            .context("Failed to load installed global tool")?;
         let target_bin_dir =
             get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
-
-        // Link binary files to global
-        tracing::debug!(
-            "Linking binary files to global... {}",
-            target_bin_dir.display()
-        );
         package_info
             .link_to_global(&target_bin_dir)
             .await
             .context("Failed to link binary files to global")?;
 
+        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }
 }

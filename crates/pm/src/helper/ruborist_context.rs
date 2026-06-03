@@ -80,9 +80,11 @@ impl Context {
     /// [`BuildDepsOutput`] (lock + project cache); the project cache is
     /// persisted in the background.
     pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
-        let options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
-        let output = utoo_ruborist::service::build_deps(options).await?;
-        spawn_save_project_cache(cwd, output.project_cache.clone());
+        let (root_path, pkg) =
+            utoo_ruborist::service::read_root_manifest(&cwd, Self::glob()).await?;
+        let options = Self::deps_options(root_path.clone(), ProgressReceiver).await;
+        let output = utoo_ruborist::service::build_deps(options, pkg).await?;
+        spawn_save_project_cache(root_path, output.project_cache.clone());
         Ok(output)
     }
 
