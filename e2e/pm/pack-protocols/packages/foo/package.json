@@ -1,0 +1,14 @@
+{
+  "name": "@pack-protocols/foo",
+  "version": "1.0.0",
+  "dependencies": {
+    "@pack-protocols/bar": "workspace:^",
+    "lodash": "catalog:"
+  },
+  "peerDependencies": {
+    "@pack-protocols/bar": "workspace:~"
+  },
+  "devDependencies": {
+    "@pack-protocols/bar": "workspace:*"
+  }
+}
