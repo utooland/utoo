@@ -23,8 +23,9 @@ impl PackageManagementService {
         package_name.replace("/", "_")
     }
 
-    /// Install a package to the utoo cache directory using utoo's own installation logic
-    /// This function is similar to prepare_global_package_json but installs to ~/.utoo/utx
+    /// Install a package to the utoo cache directory using utoo's own installation logic.
+    /// Delegates to `InstallService::install_global_package` with a per-tool prefix
+    /// (`~/.utoo/utx/<name>@<version>`), so the tool is installed as a dependency.
     pub async fn install_package_to_cache(package_name: &str) -> Result<PathBuf> {
         let (name, version, _) = resolve_package_spec(package_name).await?;
 

@@ -23,8 +23,6 @@ pub enum ExtractOutcome {
     Extracted(PathBuf),
 }
 
-impl ExtractOutcome {}
-
 /// Look up the cache path for a git-resolved package.
 ///
 /// Git packages are cloned during BFS resolution (inside ruborist) and

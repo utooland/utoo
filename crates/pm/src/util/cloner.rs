@@ -296,8 +296,8 @@ fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
 
 // find the first non built subdirectory
 
-/// Sync clone from a resolved cache dir to `target_path`, with the same
-/// name/version validation as [`clone_package`]. The cache layout (registry
+/// Sync clone from a resolved cache dir to `target_path`, validating the
+/// existing target's name/version before skipping. The cache layout (registry
 /// `package/` wrapper vs flat git checkout) is derived from `tarball_url`.
 ///
 /// Returns `Ok(true)` when freshly materialized, `Ok(false)` when an existing
@@ -395,6 +395,78 @@ mod tests {
 
         use super::*;
         use crate::fs::File;
+
+        /// Recursively compare two directories by entry set + file sizes
+        /// (ignoring nested `node_modules`). Test-only assertion helper.
+        async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
+            if !crate::fs::try_exists(dst).await? {
+                return Ok(false);
+            }
+            if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
+                return Ok(false);
+            }
+
+            #[derive(Debug)]
+            struct EntryInfo {
+                path: PathBuf,
+                is_dir: bool,
+                size: u64,
+            }
+
+            async fn collect_entries(
+                dir: &Path,
+                ignore: Option<&[&str]>,
+            ) -> Result<Vec<EntryInfo>> {
+                let mut entries = Vec::new();
+                let mut read_dir = fs::read_dir(dir)
+                    .await
+                    .with_context(|| format!("Failed to read directory {}", dir.display()))?;
+                while let Some(entry) = read_dir.next_entry().await? {
+                    if let Some(ignore_list) = ignore
+                        && let Some(file_name) = entry.path().file_name()
+                        && ignore_list.contains(&&*file_name.to_string_lossy())
+                    {
+                        continue;
+                    }
+                    let metadata = entry.metadata().await.with_context(|| {
+                        format!("Failed to get metadata for {}", entry.path().display())
+                    })?;
+                    entries.push(EntryInfo {
+                        path: entry.path(),
+                        is_dir: metadata.is_dir(),
+                        size: if metadata.is_file() {
+                            metadata.len()
+                        } else {
+                            0
+                        },
+                    });
+                }
+                Ok(entries)
+            }
+
+            let mut src_entries = collect_entries(src, Some(&["node_modules"])).await?;
+            let mut dst_entries = collect_entries(dst, Some(&["node_modules"])).await?;
+            src_entries.sort_by(|a, b| a.path.cmp(&b.path));
+            dst_entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+            if src_entries.len() != dst_entries.len() {
+                return Ok(false);
+            }
+            for (src_entry, dst_entry) in src_entries.iter().zip(dst_entries.iter()) {
+                if src_entry.is_dir && dst_entry.is_dir {
+                    if !Box::pin(validate_directory(&src_entry.path, &dst_entry.path)).await? {
+                        return Ok(false);
+                    }
+                } else if !src_entry.is_dir && !dst_entry.is_dir {
+                    if src_entry.size != dst_entry.size {
+                        return Ok(false);
+                    }
+                } else {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
 
         #[tokio::test]
         async fn test_clone_dir_basic() -> Result<()> {
