@@ -86,31 +86,40 @@ fn rewrite_dep_specs(
         &mut pkg.peer_dependencies,
         &mut pkg.optional_dependencies,
     ];
-    for map in maps.into_iter().flatten() {
-        for (name, spec) in map.iter_mut() {
-            match Protocol::strip_prefix(spec) {
-                Some((Protocol::Workspace, _)) => {
-                    let version = workspace_versions.get(name).ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "cannot resolve workspace dependency `{name}` (\"{spec}\"): \
-                             no workspace package named `{name}` with a version was found"
-                        )
-                    })?;
-                    *spec = resolve_workspace_spec(spec, version)
-                        .expect("spec starts with workspace: prefix");
-                }
-                Some((Protocol::Catalog, _)) => {
-                    let resolved = resolve_catalog_spec(name, spec, catalogs).ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "cannot resolve catalog dependency `{name}` (\"{spec}\"): \
-                             no matching catalog entry (check `pnpm-workspace.yaml` / `.utoo.toml`)"
-                        )
-                    })?;
-                    *spec = resolved.to_string();
-                }
-                _ => {}
-            }
+    for (name, spec) in maps.into_iter().flatten().flat_map(|m| m.iter_mut()) {
+        rewrite_spec(name, spec, workspace_versions, catalogs)?;
+    }
+    Ok(())
+}
+
+/// Rewrite a single dependency `spec` in place if it uses the `workspace:` or
+/// `catalog:` protocol; leave any other spec untouched.
+fn rewrite_spec(
+    name: &str,
+    spec: &mut String,
+    workspace_versions: &HashMap<String, String>,
+    catalogs: &Catalogs,
+) -> Result<()> {
+    match Protocol::strip_prefix(spec) {
+        Some((Protocol::Workspace, _)) => {
+            let version = workspace_versions.get(name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "cannot resolve workspace dependency `{name}` (\"{spec}\"): \
+                     no workspace package named `{name}` with a version was found"
+                )
+            })?;
+            *spec = resolve_workspace_spec(spec, version).expect("spec has workspace: prefix");
         }
+        Some((Protocol::Catalog, _)) => {
+            let resolved = resolve_catalog_spec(name, spec, catalogs).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "cannot resolve catalog dependency `{name}` (\"{spec}\"): \
+                     no matching catalog entry (check `pnpm-workspace.yaml` / `.utoo.toml`)"
+                )
+            })?;
+            *spec = resolved.to_string();
+        }
+        _ => {}
     }
     Ok(())
 }
