@@ -164,11 +164,14 @@ impl PackageService {
                 continue;
             }
 
-            // (1) Split out the workspace link (npm's `node.isLink` branch). Its
-            // install scripts are owned by the workspace walk, so we suppress them
-            // here (link + source + walk = the 3× run in #3097), but still keep it
-            // for bin linking — this link is how a workspace `bin` lands in
-            // `node_modules/.bin` (npm's `#linkAllBins`).
+            // (1) Split out link nodes (npm's `node.isLink` branch). The
+            // serializer no longer stamps script markers on links (see #3097), so
+            // `has_scripts` is always false for them and their scripts are decided
+            // from disk instead. A *workspace* link has its scripts suppressed
+            // (owned by the workspace walk) and is kept only for bin linking — how
+            // a workspace `bin` lands in `node_modules/.bin` (npm's `#linkAllBins`);
+            // a `file:` link keeps running its own scripts here.
+            let is_link = lock_package.is_link();
             let is_workspace_link =
                 links_to_workspace_source(lock_package, &workspace_source_paths);
 
@@ -189,11 +192,13 @@ impl PackageService {
                 continue;
             }
 
-            // Skip packages that don't meet the filter criteria
+            // Skip packages that don't meet the filter criteria. A link node is
+            // never dropped here on the `has_scripts` test (it carries no script
+            // marker in the lock); its scripts are read from disk below.
             if scripts == ScriptPolicy::Ignore && !has_bin {
                 continue; // scripts mode: only process packages with binaries
             }
-            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin {
+            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin && !is_link {
                 continue; // full mode: process packages with scripts or binaries
             }
 
@@ -1003,7 +1008,9 @@ mod tests {
             },
         );
 
-        // Workspace `node_modules` link — resolves back to the source dir.
+        // Workspace `node_modules` link — resolves back to the source dir. Link
+        // nodes carry no script marker (the serializer omits has_install_script /
+        // scripts on links since #3097); only `bin` + `link` + `resolved`.
         packages.insert(
             "node_modules/lib-a".to_string(),
             LockPackage {
@@ -1011,20 +1018,20 @@ mod tests {
                 link: Some(true),
                 resolved: Some("lib-a".to_string()),
                 bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
-                has_install_script: Some(true),
                 ..LockPackage::default()
             },
         );
 
         // A plain `file:` link — NOT a workspace (resolved points outside, with
-        // no matching source entry), so its scripts must still be collected.
+        // no matching source entry). It carries no script marker either, so its
+        // scripts must still be collected via the `is_link` gate exception and
+        // read from disk.
         packages.insert(
             "node_modules/file-dep".to_string(),
             LockPackage {
                 name: Some("file-dep".to_string()),
                 link: Some(true),
                 resolved: Some("../file-dep".to_string()),
-                has_install_script: Some(true),
                 ..LockPackage::default()
             },
         );
