@@ -162,7 +162,10 @@ mod hardlink_clone {
         Ok(())
     }
 
-    /// Clone directory using spawn_blocking for callers that are still async.
+    /// Async wrapper around [`clone_dir_sync`] for the dir-clone tests. The
+    /// production path calls `clone_dir_sync` directly (in a blocking pool via
+    /// the scheduler), so this wrapper is test-only.
+    #[cfg(test)]
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
