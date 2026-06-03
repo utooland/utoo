@@ -2,11 +2,14 @@ use anyhow::{Context, Result};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use ignore::WalkBuilder;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use tar::Builder;
+use utoo_ruborist::manifest::PackageJson;
 
 use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
+use crate::service::publish_manifest::normalize_publish_manifest;
 use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::integrity::compute_integrity;
 use crate::util::user_config::get_or_load_package_json;
@@ -20,6 +23,10 @@ pub struct PackResult {
     pub integrity: String,
     pub unpacked_size: u64,
     pub packed_size: u64,
+    /// The manifest as written into the tarball — with `workspace:`/`catalog:`
+    /// specifiers rewritten to concrete versions. Reused to build the publish
+    /// payload so the registry metadata matches the packed `package.json`.
+    pub manifest: PackageJson,
 }
 
 impl PackResult {
@@ -42,6 +49,12 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         anyhow::bail!("Missing 'version' field in package.json");
     }
 
+    // Rewrite `workspace:`/`catalog:` specifiers so the packed manifest is
+    // installable outside the workspace. `None` means there was nothing to
+    // rewrite, in which case the on-disk package.json is packed verbatim.
+    let normalized = normalize_publish_manifest(package_root, &pkg).await?;
+    let pkg_json_override = normalized.as_ref().map(serialize_manifest).transpose()?;
+
     ScriptService::execute_script(&package_info, LifecycleHook::Prepack, ScriptOutput::Verbose)
         .await?;
 
@@ -55,16 +68,26 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     })
     .await??;
 
-    let unpacked_size: u64 = collected.iter().map(|(_, size)| size).sum();
+    // When package.json is rewritten, account for the rewritten byte length
+    // instead of the on-disk size in the reported stats.
+    let effective_size = |path: &Path, on_disk: u64| match &pkg_json_override {
+        Some(bytes) if is_root_manifest(path) => bytes.len() as u64,
+        _ => on_disk,
+    };
+    let unpacked_size: u64 = collected
+        .iter()
+        .map(|(path, size)| effective_size(path, *size))
+        .sum();
     let file_paths: Vec<(String, u64)> = collected
         .iter()
-        .map(|(p, size)| (p.to_string_lossy().into_owned(), *size))
+        .map(|(p, size)| (p.to_string_lossy().into_owned(), effective_size(p, *size)))
         .collect();
 
     // create_tarball reads each file via std::fs — also blocking I/O.
-    let tar_data =
-        tokio::task::spawn_blocking(move || create_tarball(&package_root_owned, &collected))
-            .await??;
+    let tar_data = tokio::task::spawn_blocking(move || {
+        create_tarball(&package_root_owned, &collected, pkg_json_override)
+    })
+    .await??;
     let integrity = compute_integrity(&tar_data);
     let packed_size = tar_data.len() as u64;
 
@@ -83,7 +106,24 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         integrity,
         unpacked_size,
         packed_size,
+        manifest: normalized.unwrap_or(pkg),
     })
+}
+
+/// Whether `path` is the root-level `package.json` (the only manifest the
+/// `workspace:`/`catalog:` rewrite substitutes — nested `package.json` files
+/// are packed verbatim).
+fn is_root_manifest(path: &Path) -> bool {
+    path == Path::new("package.json")
+}
+
+/// Serialize a manifest to pretty 2-space JSON with a trailing newline, the
+/// formatting npm writes into packed tarballs.
+fn serialize_manifest(pkg: &PackageJson) -> Result<Vec<u8>> {
+    let mut bytes =
+        serde_json::to_vec_pretty(pkg).context("Failed to serialize rewritten package.json")?;
+    bytes.push(b'\n');
+    Ok(bytes)
 }
 
 /// Create a gzip-compressed tarball from the collected file list.
@@ -91,14 +131,25 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
 /// Each file is archived under a `package/` prefix (npm tarball convention).
 /// Pre-allocates the output buffer based on file sizes to reduce reallocation:
 /// each tar entry has a 512-byte header, and compressed output is typically ~50% of raw size.
-fn create_tarball(package_root: &Path, files: &[(PathBuf, u64)]) -> Result<Vec<u8>> {
+fn create_tarball(
+    package_root: &Path,
+    files: &[(PathBuf, u64)],
+    pkg_json_override: Option<Vec<u8>>,
+) -> Result<Vec<u8>> {
     let raw_estimate: usize = files.iter().map(|(_, size)| *size as usize + 512).sum();
     let mut encoder = GzEncoder::new(Vec::with_capacity(raw_estimate / 2), Compression::default());
     {
         let mut builder = Builder::new(&mut encoder);
         for (file_path, _) in files {
-            let full_path = package_root.join(file_path);
             let archive_path = Path::new("package").join(file_path);
+            // Substitute the rewritten manifest for the on-disk package.json.
+            if is_root_manifest(file_path)
+                && let Some(bytes) = &pkg_json_override
+            {
+                append_override(&mut builder, package_root, &archive_path, bytes)?;
+                continue;
+            }
+            let full_path = package_root.join(file_path);
             builder
                 .append_path_with_name(&full_path, &archive_path)
                 .with_context(|| format!("Failed to add {} to tarball", file_path.display()))?;
@@ -106,6 +157,31 @@ fn create_tarball(package_root: &Path, files: &[(PathBuf, u64)]) -> Result<Vec<u
         builder.finish()?;
     }
     Ok(encoder.finish()?)
+}
+
+/// Append in-memory bytes (the rewritten package.json) as a tarball entry,
+/// preserving the original file's mode/mtime where available.
+fn append_override<W: Write>(
+    builder: &mut Builder<W>,
+    package_root: &Path,
+    archive_path: &Path,
+    bytes: &[u8],
+) -> Result<()> {
+    let mut header = tar::Header::new_gnu();
+    match std::fs::metadata(package_root.join("package.json")) {
+        Ok(meta) => header.set_metadata(&meta),
+        Err(_) => {
+            header.set_mode(0o644);
+            header.set_mtime(0);
+        }
+    }
+    header.set_entry_type(tar::EntryType::file());
+    header.set_size(bytes.len() as u64);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, archive_path, bytes)
+        .context("Failed to add rewritten package.json to tarball")?;
+    Ok(())
 }
 
 /// Collect files to include in a pack tarball, returning `(relative_path, size)` pairs.
