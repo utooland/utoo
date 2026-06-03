@@ -225,9 +225,20 @@ impl PackageService {
             // `process_workspace_install_hooks`).
             let lifecycle_scripts =
                 if !is_workspace_link && (has_scripts || scripts == ScriptPolicy::Run) {
-                    Self::read_lifecycle_scripts(&package_path)
-                        .await
-                        .with_context(|| format!("Failed to read scripts for package: {path}"))?
+                    match Self::read_lifecycle_scripts(&package_path).await {
+                        Ok(s) => s,
+                        // A `file:` link can resolve to a missing or degenerate
+                        // `package.json` (e.g. a conflict artifact keyed
+                        // `node_modules/` with an empty name). Treat that as "no
+                        // scripts" rather than failing the whole install; a real
+                        // dependency with an unreadable manifest still errors.
+                        Err(_) if is_link => LifecycleScripts::default(),
+                        Err(e) => {
+                            return Err(e).with_context(|| {
+                                format!("Failed to read scripts for package: {path}")
+                            });
+                        }
+                    }
                 } else {
                     LifecycleScripts::default()
                 };
@@ -1126,6 +1137,45 @@ mod tests {
                 .get_script(LifecycleHook::Postinstall)
                 .is_some(),
             "non-workspace file: link must keep running its scripts"
+        );
+    }
+
+    /// A `file:` dep can serialize to a degenerate link entry (empty name →
+    /// key `node_modules/`) whose path has no `package.json`. Reading scripts
+    /// for it must not fail the whole install — collect tolerates the missing
+    /// manifest for link nodes and yields no scripts. Regression for the
+    /// `conflict-bundle-file-dep` e2e crash.
+    #[tokio::test]
+    async fn test_collect_tolerates_link_with_missing_manifest() {
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+        use utoo_ruborist::lock::{LockPackage, PackageLock};
+
+        let temp_dir = TempDir::new().unwrap();
+        // The link's path resolves to the node_modules dir itself, which exists
+        // but holds no package.json.
+        std::fs::create_dir_all(temp_dir.path().join("node_modules")).unwrap();
+
+        let mut packages = HashMap::new();
+        packages.insert(
+            "node_modules/".to_string(),
+            LockPackage {
+                link: Some(true),
+                resolved: Some("some-file-dep".to_string()),
+                ..LockPackage::default()
+            },
+        );
+        let package_lock = PackageLock::new("p".to_string(), "1.0.0".to_string(), packages);
+
+        let result = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Run,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "degenerate link entry must not fail collect: {result:?}"
         );
     }
 
