@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use ignore::WalkBuilder;
-use std::io::Write;
+use std::fs;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use tar::Builder;
+use tar::{Builder, EntryType, Header};
 use utoo_ruborist::manifest::PackageJson;
 
 use crate::model::package::LifecycleHook;
@@ -173,19 +174,19 @@ fn append_override<W: Write>(
     archive_path: &Path,
     bytes: &[u8],
 ) -> Result<()> {
-    let mut header = tar::Header::new_gnu();
-    match std::fs::metadata(package_root.join("package.json")) {
+    let mut header = Header::new_gnu();
+    match fs::metadata(package_root.join("package.json")) {
         Ok(meta) => header.set_metadata(&meta),
         // The manifest was just read, so a missing file here only means it was
         // racily removed — fall back to defaults. Surface any other error
         // (e.g. permissions) rather than masking it.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if e.kind() == ErrorKind::NotFound => {
             header.set_mode(0o644);
             header.set_mtime(0);
         }
         Err(e) => return Err(e).context("Failed to stat package.json for tarball header"),
     }
-    header.set_entry_type(tar::EntryType::file());
+    header.set_entry_type(EntryType::file());
     header.set_size(bytes.len() as u64);
     header.set_cksum();
     builder
