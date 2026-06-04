@@ -33,8 +33,11 @@ pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Res
         return Err(anyhow::anyhow!("Package specification cannot be empty"));
     }
 
+    // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
+    let prefix = crate::util::user_config::resolve_global_prefix(prefix).await;
+
     // Dispatch to service
-    InstallService::install_global_package(npm_spec, prefix).await
+    InstallService::install_global_package(npm_spec, prefix.as_deref()).await
 }
 
 #[cfg(test)]
