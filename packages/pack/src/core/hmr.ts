@@ -14,11 +14,12 @@ import { nanoid } from "nanoid";
 import type { Socket } from "net";
 import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
+import type { NapiWrittenEndpoint } from "../binding";
 import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
-import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
+import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
@@ -181,9 +182,7 @@ export async function createHotReloader(
       .map((e: EntryOptions) => e.html!),
   ];
   const shouldCreateWebpackStats =
-    Boolean(process.env.ANALYZE) ||
-    bundleOptions.config.stats ||
-    htmlConfigs.length > 0;
+    Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
 
   let project: Project;
   try {
@@ -295,6 +294,24 @@ export async function createHotReloader(
     sendEnqueuedMessagesDebounce();
   }
 
+  const writtenEndpointPaths = new Map<Endpoint, NapiWrittenEndpoint>();
+
+  function updateWrittenEndpointPaths(
+    endpoints: Endpoint[] | undefined,
+    paths: NapiWrittenEndpoint[] | undefined,
+  ) {
+    if (!endpoints || !paths) {
+      return;
+    }
+
+    endpoints.forEach((endpoint, index) => {
+      const written = paths[index];
+      if (written) {
+        writtenEndpointPaths.set(endpoint, written);
+      }
+    });
+  }
+
   async function regenerateHtml() {
     if (htmlConfigs.length === 0) {
       return;
@@ -302,7 +319,9 @@ export async function createHotReloader(
 
     const outputDir = getOutputPath(bundleOptions.config, resolvedProjectPath);
     const publicPath = bundleOptions.config.output?.publicPath;
-    const assets = getInitialAssetsFromStats(outputDir);
+    const assets = getInitialAssetsFromEndpointPaths([
+      ...writtenEndpointPaths.values(),
+    ]);
 
     for (const config of htmlConfigs) {
       const plugin = new HtmlPlugin(config);
@@ -313,12 +332,15 @@ export async function createHotReloader(
   async function writeAllEntrypointsToDisk() {
     const result = await project.writeAllEntrypointsToDisk();
     processIssues(result, true, true);
+    updateWrittenEndpointPaths(result.apps, result.appPaths);
+    updateWrittenEndpointPaths(result.libraries, result.libraryPaths);
     await regenerateHtml();
   }
 
   async function writeEntrypointToDisk(entrypoint: Endpoint) {
     const result = await entrypoint.writeToDisk();
     processIssues(result, true, true);
+    writtenEndpointPaths.set(entrypoint, result);
     await regenerateHtml();
   }
 

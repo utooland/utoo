@@ -97,6 +97,8 @@ export interface Project {
 export interface RawEntrypoints {
   apps?: Endpoint[];
   libraries?: Endpoint[];
+  appPaths?: NapiWrittenEndpoint[];
+  libraryPaths?: NapiWrittenEndpoint[];
 }
 
 export interface Endpoint {

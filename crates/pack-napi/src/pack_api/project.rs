@@ -7,8 +7,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::pack_api::turbopack_ctx::{
-    NapiTurbopackCallbacks, NapiTurbopackCallbacksJsObject, RootTask, TurbopackContext,
+use crate::pack_api::{
+    endpoint::NapiWrittenEndpoint,
+    turbopack_ctx::{
+        NapiTurbopackCallbacks, NapiTurbopackCallbacksJsObject, RootTask, TurbopackContext,
+    },
 };
 use anyhow::{Context, Result, anyhow, bail};
 use bincode::{Decode, Encode};
@@ -19,6 +22,7 @@ use napi::{
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{
+    endpoint::{Endpoint, EndpointOutputPaths, OptionEndpoint},
     entrypoint::{
         EntrypointsWithIssues, get_all_written_entrypoints_with_issues_operation,
         get_entrypoints_with_issues_operation,
@@ -41,7 +45,7 @@ use tracing_subscriber::{
 };
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    NonLocalValue, OperationValue, PrettyPrintError, ReadRef, ResolvedVc, TaskInput,
+    NonLocalValue, OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TaskInput,
     TransientInstance, TurboTasksApi, UpdateInfo, Vc, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
@@ -467,6 +471,8 @@ pub async fn project_shutdown(
 pub struct NapiEntrypoints {
     pub apps: Option<Vec<External<ExternalEndpoint>>>,
     pub libraries: Option<Vec<External<ExternalEndpoint>>>,
+    pub app_paths: Option<Vec<NapiWrittenEndpoint>>,
+    pub library_paths: Option<Vec<NapiWrittenEndpoint>>,
 }
 
 impl NapiEntrypoints {
@@ -493,8 +499,30 @@ impl NapiEntrypoints {
                     .map(make_endpoint)
                     .collect(),
             ),
+            app_paths: None,
+            library_paths: None,
         })
     }
+}
+
+async fn collect_endpoint_output_paths(
+    endpoints: &[OperationVc<OptionEndpoint>],
+) -> Result<Vec<EndpointOutputPaths>> {
+    let mut paths = Vec::with_capacity(endpoints.len());
+
+    for endpoint in endpoints {
+        let endpoint = endpoint.connect().await?;
+        let output_paths = if let Some(endpoint) = *endpoint {
+            let output = endpoint.output().await?;
+            let output_paths = output.output_paths.await?;
+            ReadRef::into_owned(output_paths)
+        } else {
+            EndpointOutputPaths::NotFound
+        };
+        paths.push(output_paths);
+    }
+
+    Ok(paths)
 }
 
 #[tracing::instrument(level = "info", name = "write all entrypoints to disk", skip_all)]
@@ -507,7 +535,7 @@ pub async fn project_write_all_entrypoints_to_disk(
     let container = project.container;
     let tt = ctx.turbo_tasks();
 
-    let (entrypoints, issues, diags) = tt
+    let (entrypoints, app_paths, library_paths, issues, diags) = tt
         .run(async move {
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(container);
@@ -522,9 +550,13 @@ pub async fn project_write_all_entrypoints_to_disk(
                 .await?;
             // Apply phase side effects. Asset emission is performed once at the end.
             effects.apply().await?;
+            let app_paths = collect_endpoint_output_paths(&entrypoints.apps).await?;
+            let library_paths = collect_endpoint_output_paths(&entrypoints.libraries).await?;
 
             Ok((
                 entrypoints.clone(),
+                app_paths,
+                library_paths,
                 issues.iter().cloned().collect::<Vec<_>>(),
                 diagnostics.iter().cloned().collect::<Vec<_>>(),
             ))
@@ -534,8 +566,20 @@ pub async fn project_write_all_entrypoints_to_disk(
 
     tracing::info!("All project entrypoints wrote to disk.");
 
-    let napi_entrypoints =
+    let mut napi_entrypoints =
         NapiEntrypoints::from_entrypoints_op(&entrypoints, &project.turbopack_ctx)?;
+    napi_entrypoints.app_paths = Some(
+        app_paths
+            .into_iter()
+            .map(|path| NapiWrittenEndpoint::from(Some(path)))
+            .collect(),
+    );
+    napi_entrypoints.library_paths = Some(
+        library_paths
+            .into_iter()
+            .map(|path| NapiWrittenEndpoint::from(Some(path)))
+            .collect(),
+    );
 
     tracing::info!("Compile done in {:?}", start.elapsed());
 

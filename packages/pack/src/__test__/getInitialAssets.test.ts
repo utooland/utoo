@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  getInitialAssetsFromOutput,
+  getInitialAssetsFromEndpointPaths,
   getInitialAssetsFromStats,
 } from "../utils/getInitialAssets";
 
@@ -46,40 +46,26 @@ describe("initial asset discovery", () => {
     });
   });
 
-  it("finds entry javascript and css from output files without stats", () => {
-    const outputDir = createTempDir();
-    for (const file of [
-      "index.js",
-      "index.js.map",
-      "chunk_123.js",
-      "index_456.css",
-      "stats.json",
-    ]) {
-      fs.writeFileSync(path.join(outputDir, file), "");
-    }
-
-    expect(getInitialAssetsFromOutput(outputDir, ["./src/index.jsx"])).toEqual({
-      js: ["index.js"],
-      css: ["index_456.css"],
-    });
-  });
-
-  it("finds hashed entry javascript when output includes multiple chunks", () => {
-    const outputDir = createTempDir();
-    for (const file of [
-      "index.a8f3b2c1.js",
-      "chunk-vendors.12345678.js",
-      "lazy-route.87654321.js",
-      "index.a8f3b2c1.js.map",
-      "index.a8f3b2c1.js.LICENSE.txt",
-      "index.a8f3b2c1.css",
-    ]) {
-      fs.writeFileSync(path.join(outputDir, file), "");
-    }
-
-    expect(getInitialAssetsFromOutput(outputDir, ["./src/index.jsx"])).toEqual({
-      js: ["index.a8f3b2c1.js"],
-      css: ["index.a8f3b2c1.css"],
+  it("uses endpoint client paths for html assets without stats", () => {
+    expect(
+      getInitialAssetsFromEndpointPaths([
+        {
+          type: "nodejs",
+          entryPath: "dist",
+          clientPaths: [
+            "static/runtime.js",
+            "static/runtime.js",
+            "static/runtime.js.map",
+            "static/runtime.js.LICENSE.txt",
+            "static/app.css",
+          ],
+          serverPaths: [],
+          config: {},
+        },
+      ]),
+    ).toEqual({
+      js: ["static/runtime.js"],
+      css: ["static/app.css"],
     });
   });
 });
