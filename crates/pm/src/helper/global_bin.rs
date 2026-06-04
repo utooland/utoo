@@ -24,12 +24,25 @@ use std::path::{Path, PathBuf};
 ///   (and any scope dir) to recover `<prefix>`. Otherwise bins and globals would
 ///   be written under utoo's own package dir instead of the real prefix.
 pub fn get_global_prefix(prefix: Option<&str>) -> Result<PathBuf> {
-    match prefix {
-        Some(prefix) => Ok(PathBuf::from(prefix)),
+    let prefix = match prefix {
+        Some(prefix) => PathBuf::from(prefix),
         None => {
             let exe = std::env::current_exe().context("Failed to get current executable path")?;
-            Ok(infer_prefix_from_exe(&exe))
+            infer_prefix_from_exe(&exe)
         }
+    };
+    Ok(to_absolute(prefix))
+}
+
+/// Make a prefix absolute (lexically, without touching the filesystem) so global
+/// installs don't land in cwd-relative dirs when `prefix` came from a relative
+/// `UTOO_PREFIX` / config value. Inferred-from-exe prefixes are already absolute.
+/// An empty/unresolvable path is returned unchanged.
+fn to_absolute(prefix: PathBuf) -> PathBuf {
+    if prefix.is_absolute() {
+        prefix
+    } else {
+        std::path::absolute(&prefix).unwrap_or(prefix)
     }
 }
 
@@ -60,9 +73,18 @@ fn infer_prefix_from_exe(exe: &Path) -> PathBuf {
         .unwrap_or_default()
 }
 
-/// Global bin directory: `<prefix>/bin`.
+/// Global bin directory: `<prefix>/bin` on Unix, `<prefix>` on Windows.
+///
+/// npm places global executable shims (`.cmd`/`.ps1`) directly in the prefix
+/// root on Windows — that root is what ends up on `PATH` — whereas on Unix the
+/// on-`PATH` dir is `<prefix>/bin`.
 pub fn get_global_bin_dir(prefix: Option<&str>) -> Result<PathBuf> {
-    Ok(get_global_prefix(prefix)?.join("bin"))
+    let prefix = get_global_prefix(prefix)?;
+    if cfg!(windows) {
+        Ok(prefix)
+    } else {
+        Ok(prefix.join("bin"))
+    }
 }
 
 /// Global package directory, e.g. `/usr/local/lib/node_modules`.
@@ -74,6 +96,10 @@ pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    // These use Unix-style absolute path strings (`/usr/local`), which are not
+    // absolute on Windows; the Windows bin-dir/normalization behavior is covered
+    // by dedicated `#[cfg(windows)]` tests below.
+    #[cfg(not(windows))]
     #[test]
     fn test_get_global_bin_dir_with_prefix() {
         let prefix: Option<&str> = Some("/usr/local");
@@ -81,6 +107,7 @@ mod tests {
         assert_eq!(result, PathBuf::from("/usr/local/bin"));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn test_get_global_package_dir_with_prefix() {
         let result = get_global_package_dir(Some("/usr/local")).unwrap();
@@ -90,11 +117,32 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn test_get_global_bin_dir_with_empty_prefix() {
         let prefix: Option<&str> = Some("");
         let result = get_global_bin_dir(prefix).unwrap();
         assert_eq!(result, PathBuf::from("bin"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_get_global_bin_dir_windows_is_prefix_root() {
+        // npm places global shims directly in the prefix root on Windows.
+        let result = get_global_bin_dir(Some("C:\\npm")).unwrap();
+        assert_eq!(result, PathBuf::from("C:\\npm"));
+    }
+
+    #[test]
+    fn test_get_global_prefix_normalizes_relative_to_absolute() {
+        // A relative prefix (e.g. from `UTOO_PREFIX=relative`) must be made
+        // absolute so installs don't land in cwd-relative dirs.
+        let result = get_global_prefix(Some("relative-prefix")).unwrap();
+        assert!(
+            result.is_absolute(),
+            "relative prefix should be absolute: {result:?}"
+        );
+        assert!(result.ends_with("relative-prefix"));
     }
 
     #[test]
