@@ -24,15 +24,22 @@ pub fn is_registry_tarball_url(url: &str) -> bool {
 }
 
 /// Download tarball bytes with retries (network phase only).
-pub async fn download_bytes(url: &str) -> Result<Bytes> {
+///
+/// `auth_token` is attached as a Bearer header when present; callers are
+/// responsible for the leak guard (only pass a token for registry-host URLs —
+/// see [`crate::service::auth::token_for_url`]).
+pub async fn download_bytes(url: &str, auth_token: Option<&str>) -> Result<Bytes> {
     let retry_count = AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
             let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
 
-            let response = DOWNLOADER_CLIENT
-                .get(url)
+            let mut request = DOWNLOADER_CLIENT.get(url);
+            if let Some(token) = auth_token {
+                request = request.bearer_auth(token);
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
