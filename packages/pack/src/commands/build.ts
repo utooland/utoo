@@ -10,7 +10,7 @@ import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
-import { getInitialAssetsFromStats } from "../utils/getInitialAssets";
+import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
@@ -46,6 +46,8 @@ async function buildInternal(
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
   const persistentCaching = bundleOptions.config.persistentCaching ?? false;
+  const shouldCreateWebpackStats =
+    Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
@@ -72,10 +74,7 @@ async function buildInternal(
         tracing: bundleOptions.tracing ?? true,
         config: {
           ...bundleOptions.config,
-          stats:
-            Boolean(process.env.ANALYZE) ||
-            bundleOptions.config.stats ||
-            bundleOptions.config.entry.some((e: EntryOptions) => !!e.html),
+          stats: shouldCreateWebpackStats,
           pluginRuntimeStrategy:
             bundleOptions?.config?.pluginRuntimeStrategy ??
             (useWorkerThreads() ? "workerThreads" : "childProcesses"),
@@ -89,7 +88,6 @@ async function buildInternal(
         // Build mode is a short-lived, one-shot compilation, so avoid paying
         // dependency graph bookkeeping cost unless the persistent cache needs it.
         dependencyTracking: persistentCaching,
-        isShortSession: true,
       },
     );
 
@@ -109,18 +107,15 @@ async function buildInternal(
     ];
 
     if (htmlConfigs.length > 0) {
-      const assets = { js: [] as string[], css: [] as string[] };
+      const assets = getInitialAssetsFromEndpointPaths([
+        ...(entrypoints.appPaths ?? []),
+        ...(entrypoints.libraryPaths ?? []),
+      ]);
 
       const outputDir = getOutputPath(
         bundleOptions.config,
         resolvedProjectPath,
       );
-
-      if (assets.js.length === 0 && assets.css.length === 0) {
-        const discovered = getInitialAssetsFromStats(outputDir);
-        assets.js.push(...discovered.js);
-        assets.css.push(...discovered.css);
-      }
 
       const publicPath = bundleOptions.config.output?.publicPath;
 
