@@ -10,10 +10,7 @@ import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
-import {
-  getInitialAssetsFromOutput,
-  getInitialAssetsFromStats,
-} from "../utils/getInitialAssets";
+import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
@@ -110,25 +107,15 @@ async function buildInternal(
     ];
 
     if (htmlConfigs.length > 0) {
-      const assets = { js: [] as string[], css: [] as string[] };
+      const assets = getInitialAssetsFromEndpointPaths([
+        ...(entrypoints.appPaths ?? []),
+        ...(entrypoints.libraryPaths ?? []),
+      ]);
 
       const outputDir = getOutputPath(
         bundleOptions.config,
         resolvedProjectPath,
       );
-
-      if (assets.js.length === 0 && assets.css.length === 0) {
-        const discovered = shouldCreateWebpackStats
-          ? getInitialAssetsFromStats(outputDir)
-          : getInitialAssetsFromOutput(
-              outputDir,
-              bundleOptions.config.entry
-                .filter((e: EntryOptions) => !!e.html)
-                .map((e: EntryOptions) => e.import),
-            );
-        assets.js.push(...discovered.js);
-        assets.css.push(...discovered.css);
-      }
 
       const publicPath = bundleOptions.config.output?.publicPath;
 

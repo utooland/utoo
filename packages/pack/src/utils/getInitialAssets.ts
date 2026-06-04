@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import type { NapiWrittenEndpoint } from "../binding";
 
 export interface Assets {
   js: string[];
@@ -12,33 +13,12 @@ function addUniqueAsset(assets: string[], file: string) {
   }
 }
 
-function entryNameFromImport(entryImport: string): string {
-  const basename = path.basename(entryImport);
-  const extname = path.extname(basename);
-  return extname ? basename.slice(0, -extname.length) : basename;
-}
-
 function isJavascriptAsset(file: string): boolean {
   return (
     file.endsWith(".js") &&
     !file.endsWith(".LICENSE.txt") &&
     !file.endsWith(".map")
   );
-}
-
-function findEntryJavascript(
-  filenames: string[],
-  entryName: string,
-): string | undefined {
-  const exactFile = `${entryName}.js`;
-  if (filenames.includes(exactFile)) {
-    return exactFile;
-  }
-
-  const hashedPrefix = `${entryName}.`;
-  return filenames
-    .filter((file) => isJavascriptAsset(file) && file.startsWith(hashedPrefix))
-    .sort()[0];
 }
 
 export function getInitialAssetsFromStats(outputDir: string): Assets {
@@ -66,40 +46,21 @@ export function getInitialAssetsFromStats(outputDir: string): Assets {
   return assets;
 }
 
-export function getInitialAssetsFromOutput(
-  outputDir: string,
-  entryImports: string[],
+export function getInitialAssetsFromEndpointPaths(
+  endpoints: NapiWrittenEndpoint[],
 ): Assets {
   const assets = { js: [] as string[], css: [] as string[] };
-  let filenames: string[];
 
-  try {
-    filenames = fs.readdirSync(outputDir);
-  } catch {
-    return assets;
-  }
-
-  for (const entryImport of entryImports) {
-    const entryJs = findEntryJavascript(
-      filenames,
-      entryNameFromImport(entryImport),
-    );
-    if (entryJs) {
-      addUniqueAsset(assets.js, entryJs);
-    }
-  }
-
-  if (assets.js.length === 0) {
-    const jsFiles = filenames.filter((file) => isJavascriptAsset(file)).sort();
-    if (jsFiles.length === 1) {
-      addUniqueAsset(assets.js, jsFiles[0]);
-    }
-  }
-
-  filenames
-    .filter((file) => file.endsWith(".css"))
-    .sort()
-    .forEach((file) => addUniqueAsset(assets.css, file));
+  endpoints.forEach((endpoint) => {
+    endpoint.clientPaths.forEach((file) => {
+      if (isJavascriptAsset(file)) {
+        addUniqueAsset(assets.js, file);
+      }
+      if (file.endsWith(".css")) {
+        addUniqueAsset(assets.css, file);
+      }
+    });
+  });
 
   return assets;
 }

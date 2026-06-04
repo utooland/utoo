@@ -146,6 +146,8 @@ export declare function projectShutdown(project: { __napiType: "Project" }): Pro
 export interface NapiEntrypoints {
   apps?: Array<ExternalObject<ExternalEndpoint>>
   libraries?: Array<ExternalObject<ExternalEndpoint>>
+  appPaths?: Array<NapiWrittenEndpoint>
+  libraryPaths?: Array<NapiWrittenEndpoint>
 }
 export declare function projectWriteAllEntrypointsToDisk(project: { __napiType: "Project" }): Promise<TurbopackResult>
 export declare function projectEntrypointsSubscribe(project: { __napiType: "Project" }, func: (...args: any[]) => any): { __napiType: "RootTask" }
