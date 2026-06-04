@@ -59,7 +59,14 @@ pub async fn cached_token() -> Option<String> {
 /// host only, never to a third-party CDN a manifest's `dist.tarball` points at.
 fn same_host(url: &str, registry: &str) -> bool {
     fn host(s: &str) -> Option<String> {
-        Url::parse(s).ok()?.host_str().map(str::to_ascii_lowercase)
+        // The registry may be configured as a bare host (no scheme), e.g.
+        // `registry.npmjs.org` or `localhost:4873`; give it one so it parses.
+        let parsed = if s.contains("://") {
+            Url::parse(s)
+        } else {
+            Url::parse(&format!("https://{s}"))
+        };
+        parsed.ok()?.host_str().map(str::to_ascii_lowercase)
     }
     matches!((host(url), host(registry)), (Some(a), Some(b)) if a == b)
 }
@@ -260,6 +267,16 @@ mod tests {
         assert!(same_host(
             "http://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz",
             registry
+        ));
+        // Registry configured as a bare host (no scheme) → still matches.
+        assert!(same_host(
+            "https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz",
+            "registry.npmjs.org"
+        ));
+        // Bare host with a port (e.g. a local Verdaccio) → matches by host.
+        assert!(same_host(
+            "http://localhost:4873/pkg/-/pkg-1.0.0.tgz",
+            "localhost:4873"
         ));
         // Host case is normalized.
         assert!(same_host("https://REGISTRY.npmjs.org/pkg.tgz", registry));

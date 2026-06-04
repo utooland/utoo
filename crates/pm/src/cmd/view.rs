@@ -23,8 +23,10 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
 
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
-    // Fetch full manifest directly from registry (Complete format for display, no ETag)
-    let token = auth::cached_token().await;
+    // Fetch full manifest directly from registry (Complete format for display, no ETag).
+    // token_for_url applies the leak guard: a token only when registry_url is
+    // the configured registry host.
+    let token = auth::token_for_url(registry_url).await;
     let (full_manifest, _etag) = fetch_full_manifest_fresh(
         registry_url,
         name,
