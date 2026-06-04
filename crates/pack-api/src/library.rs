@@ -38,6 +38,7 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
+    paths::initial_paths_in_root,
     project::Project,
 };
 
@@ -369,13 +370,19 @@ impl Endpoint for LibraryEndpoint {
             let output_assets = self.output_assets();
             let output_assets = output_assets.concatenate(self.project().copy_output_assets());
 
-            let dist_root = self.project().dist_root().await?;
+            let dist_root_vc = self.project().dist_root();
+            let dist_root = dist_root_vc.await?;
+            let client_paths = initial_paths_in_root(output_assets, dist_root_vc)
+                .await?
+                .iter()
+                .cloned()
+                .collect();
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 // FIXME: No server path when bundling library
                 server_entry_path: dist_root.path.clone(),
                 server_paths: vec![],
-                client_paths: vec![],
+                client_paths,
             };
 
             Ok(EndpointOutput {
