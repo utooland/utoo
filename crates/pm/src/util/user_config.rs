@@ -270,14 +270,6 @@ fn nearest_device(path: &Path) -> Option<u64> {
     None
 }
 
-/// A project-local cache on the same device as `node_modules`. Lives under
-/// `node_modules` so it is gitignored by convention and stays on the project's
-/// filesystem.
-#[cfg(unix)]
-fn relocated_cache_dir(project: &Path) -> PathBuf {
-    project.join("node_modules/.cache/nm")
-}
-
 #[cfg(windows)]
 fn is_cross_device(cache: &Path, project: &Path) -> bool {
     use super::platform_const::drive_root;
@@ -287,16 +279,13 @@ fn is_cross_device(cache: &Path, project: &Path) -> bool {
     }
 }
 
-/// On Windows, hardlinks cannot cross drive boundaries (e.g. cache on C:,
-/// project on D:). Put the cache at the project drive's root so it stays on the
-/// same drive and is reusable across projects on that drive.
-#[cfg(windows)]
+/// A project-local cache on the same device/drive as `node_modules`. Lives under
+/// `node_modules` (rather than the project root) so it is gitignored by
+/// convention, doesn't pollute the working tree, and stays on the project's
+/// filesystem. Same target on every platform — on Windows `node_modules` is on
+/// the project's drive, so hardlinks still work.
 fn relocated_cache_dir(project: &Path) -> PathBuf {
-    project
-        .ancestors()
-        .last()
-        .unwrap_or(project)
-        .join(".cache/nm")
+    project.join("node_modules/.cache/nm")
 }
 
 pub fn get_cache_dir() -> PathBuf {
