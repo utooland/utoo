@@ -28,6 +28,5 @@
         "maxMergeChunkSize": 200000
       }
     }
-  },
-  "stats": true
+  }
 }

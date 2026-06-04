@@ -73,7 +73,7 @@ function runServeStatsFixture() {
 }
 
 describe("serve stats", () => {
-  it("writes webpack stats.json in dev mode for top-level html config", async () => {
+  it("writes webpack stats.json in dev mode when stats are enabled", async () => {
     await expect(runServeStatsFixture()).resolves.toMatchInlineSnapshot(`
       {
         "assets": [
