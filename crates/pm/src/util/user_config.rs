@@ -183,7 +183,12 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 
     let resolved = match std::env::current_dir() {
         Ok(project) => resolve_cache_dir(explicit, &project),
-        Err(_) => explicit,
+        Err(e) => {
+            // Without the project dir we can't compare devices; skip relocation.
+            // Log it so a silent cross-device copy-mode install is diagnosable.
+            tracing::debug!("cannot resolve current dir for cache relocation: {e}");
+            explicit
+        }
     };
     CACHE_DIR.set(resolved);
 }

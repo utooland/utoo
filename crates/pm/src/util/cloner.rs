@@ -213,51 +213,12 @@ fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
     None
 }
 
-#[cfg(target_os = "macos")]
-fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
-    let src_c = CString::new(real_src.as_os_str().as_bytes())?;
-    let dst_c = CString::new(dst.as_os_str().as_bytes())?;
-    let mut last_error = None;
-
-    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
-        if !delay.is_zero() {
-            std::thread::sleep(delay);
-        }
-
-        match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-            0 => return Ok(()),
-            _ => {
-                let err = std::io::Error::last_os_error();
-                let _ = std::fs::remove_dir_all(dst);
-                let raw = err.raw_os_error();
-                last_error = Some(err);
-                // ENOTSUP (non-APFS volume) and EXDEV (cross-device) are
-                // permanent: clonefile can never succeed here, so retrying only
-                // adds delay to every clone. Fall back to hardlink/copy, which
-                // hardlinks within a device and copies across one.
-                if raw == Some(libc::ENOTSUP) || raw == Some(libc::EXDEV) {
-                    return hardlink_clone::clone_dir_sync(real_src, dst);
-                }
-            }
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "clonefile {} -> {}: {}",
-        real_src.display(),
-        dst.display(),
-        last_error
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "unknown error".to_string())
-    ))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
-    // Retry with backoff like the macOS arm: concurrent installs race on
-    // create_dir_all/remove_dir_all of shared parents and can hit transient
-    // EAGAIN/ENOENT during the hardlink walk. origin/next retried on all
-    // platforms; the sync rewrite must keep that for Linux/Windows too.
+/// Hardlink/copy clone with retry+backoff. Concurrent installs race on
+/// create_dir_all/remove_dir_all of shared parents and can hit transient
+/// EAGAIN/ENOENT during the hardlink walk, so a failed attempt is retried after
+/// clearing the partial destination. Used as the Linux/Windows clone path and
+/// as the macOS fallback when `clonefile` can't run.
+fn hardlink_clone_retry(real_src: &Path, dst: &Path) -> Result<()> {
     let mut last_error = None;
     for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
         if !delay.is_zero() {
@@ -278,6 +239,51 @@ fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
             real_src.display(),
             dst.display()
         )))
+}
+
+#[cfg(target_os = "macos")]
+fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+    let src_c = CString::new(real_src.as_os_str().as_bytes())?;
+    let dst_c = CString::new(dst.as_os_str().as_bytes())?;
+    let mut last_error = None;
+
+    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+
+        match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+            0 => return Ok(()),
+            _ => {
+                let err = std::io::Error::last_os_error();
+                let _ = std::fs::remove_dir_all(dst);
+                let raw = err.raw_os_error();
+                last_error = Some(err);
+                // ENOTSUP (non-APFS volume) and EXDEV (cross-device) are
+                // permanent: clonefile can never succeed here, so retrying it
+                // only adds delay. Fall back to the hardlink/copy path (which
+                // hardlinks within a device and copies across one), keeping the
+                // same retry-on-transient behavior as Linux/Windows.
+                if raw == Some(libc::ENOTSUP) || raw == Some(libc::EXDEV) {
+                    return hardlink_clone_retry(real_src, dst);
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "clonefile {} -> {}: {}",
+        real_src.display(),
+        dst.display(),
+        last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "unknown error".to_string())
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+    hardlink_clone_retry(real_src, dst)
 }
 
 fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
