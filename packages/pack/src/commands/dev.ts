@@ -349,8 +349,20 @@ async function runDev(
     printServerInfo(scheme, displayHost, serveOptsBase.port);
   }
 
-  const cleanup = () => {
-    hotReloader.close();
+  let cleanupStarted = false;
+  const cleanup = async () => {
+    if (cleanupStarted) {
+      return;
+    }
+    cleanupStarted = true;
+
+    try {
+      await hotReloader.close();
+    } catch (err) {
+      console.error(err);
+      process.exit(1);
+    }
+
     // We always create HTTP/1.1 server (http or https), so closeAllConnections exists; Hono's
     // ServerType union includes HTTP/2, so TS does not narrow. Use runtime check to satisfy types.
     if (
