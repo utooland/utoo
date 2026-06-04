@@ -230,6 +230,15 @@ fn hardlink_clone_retry(real_src: &Path, dst: &Path) -> Result<()> {
         match hardlink_clone::clone_dir_sync(real_src, dst) {
             Ok(()) => return Ok(()),
             Err(e) => {
+                // TEMP PROBE: is the concurrency-race retry still needed after
+                // #3093's lock-authoritative clone rework? Logged at error! so
+                // it surfaces in e2e/bench output. If this never fires across a
+                // full concurrent install, the retry is stale defensive code.
+                tracing::error!(
+                    "RETRY-PROBE hardlink_clone_retry: clone_dir_sync failed {} -> {}: {e:#}",
+                    real_src.display(),
+                    dst.display()
+                );
                 let _ = std::fs::remove_dir_all(dst);
                 last_error = Some(e);
             }
