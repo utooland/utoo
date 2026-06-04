@@ -42,6 +42,7 @@ use turbopack_core::{
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
+    paths::initial_paths_in_root,
     project::Project,
 };
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
@@ -501,12 +502,18 @@ impl Endpoint for AppEndpoint {
                 None
             };
 
-            let dist_root = this.project.dist_root().await?;
+            let dist_root_vc = this.project.dist_root();
+            let dist_root = dist_root_vc.await?;
+            let client_paths = initial_paths_in_root(output_assets, dist_root_vc)
+                .await?
+                .iter()
+                .cloned()
+                .collect();
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 server_entry_path: dist_root.path.clone(),
                 server_paths: vec![],
-                client_paths: vec![],
+                client_paths,
             };
 
             let mut output_assets = output_assets;
