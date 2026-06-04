@@ -2,6 +2,11 @@ import {
   BundleOptions,
   ConfigComplete,
   ExternalConfig,
+  ExternalConfigMap,
+  ExternalFunction,
+  ExternalFunctionCallback,
+  ExternalFunctionData,
+  ExternalFunctionResult,
   HtmlConfig,
   TurbopackRuleConfigCollection,
   TurbopackRuleConfigItem,
@@ -89,13 +94,21 @@ export type WebpackEntry =
       | string[]
     >;
 
-export type WebpackExternals =
+export type WebpackExternalItem =
   | string
   | RegExp
   | Record<string, string | string[] | object>
-  | (string | RegExp | Record<string, string | string[] | object>)[];
+  | ExternalFunction;
+
+export type WebpackExternals = WebpackExternalItem | WebpackExternalItem[];
 
 export type WebpackExternalsType = "promise";
+export interface WebpackCompatExternalRequest extends ExternalFunctionData {}
+
+export interface WebpackCompatOptions {
+  externalRequests?: Array<string | WebpackCompatExternalRequest>;
+}
+
 export type WebpackTarget = string | string[];
 export type WebpackDevTool = string | boolean;
 export type WebpackStats = string | boolean | object;
@@ -122,6 +135,7 @@ export interface WebpackConfig {
 
 export function compatOptionsFromWebpack(
   webpackConfig: WebpackConfig,
+  options: WebpackCompatOptions = {},
 ): BundleOptions {
   const {
     entry,
@@ -157,7 +171,11 @@ export function compatOptionsFromWebpack(
       mode: compatMode(mode),
       module: compatModule(module),
       resolve: compatResolve(resolve),
-      externals: compatExternals(externals, externalsType),
+      externals: compatExternals(
+        externals,
+        externalsType,
+        options.externalRequests,
+      ),
       output: outputCompat,
       target: compatTarget(target),
       sourceMaps: compatSourceMaps(devtool),
@@ -362,14 +380,15 @@ function compatProvider(
   return Object.keys(provider).length > 0 ? provider : undefined;
 }
 
-function compatExternals(
+export function compatExternals(
   webpackExternals?: WebpackExternals,
   externalsType?: WebpackExternalsType,
-): ConfigComplete["externals"] {
+  externalRequests: WebpackCompatOptions["externalRequests"] = [],
+): ExternalConfigMap | undefined {
   if (!webpackExternals) {
     return undefined;
   }
-  let externals: ConfigComplete["externals"] = {};
+  let externals: ExternalConfigMap = {};
   switch (typeof webpackExternals) {
     case "string": {
       // Single string external: "lodash" -> { "lodash": "lodash" }
@@ -381,18 +400,28 @@ function compatExternals(
     }
     case "object": {
       if (Array.isArray(webpackExternals)) {
+        const externalItems = webpackExternals as WebpackExternalItem[];
         // Array of externals: ["lodash", "react"] -> { "lodash": "lodash", "react": "react" }
-        externals = webpackExternals.reduce(
-          (acc, external) => {
-            if (typeof external === "string") {
-              acc![external] = compatExternalValue(external, externalsType);
-            } else if (typeof external === "object" && external !== null) {
-              Object.assign(acc!, compatExternals(external, externalsType));
-            }
-            return acc;
-          },
-          {} as ConfigComplete["externals"],
-        );
+        externals = externalItems.reduce<ExternalConfigMap>((acc, external) => {
+          if (typeof external === "string") {
+            acc[external] = compatExternalValue(external, externalsType);
+          } else if (typeof external === "object" && external !== null) {
+            Object.assign(
+              acc,
+              compatExternals(external, externalsType, externalRequests),
+            );
+          } else if (typeof external === "function") {
+            Object.assign(
+              acc,
+              compatFunctionalExternal(
+                external,
+                externalsType,
+                externalRequests,
+              ),
+            );
+          }
+          return acc;
+        }, {} as ExternalConfigMap);
       } else if (webpackExternals instanceof RegExp) {
         throw new Error("regex external not supported yet");
       } else {
@@ -497,13 +526,154 @@ function compatExternals(
       break;
     }
     case "function": {
-      throw new Error("functional external not supported yet");
+      externals = compatFunctionalExternal(
+        webpackExternals,
+        externalsType,
+        externalRequests,
+      );
+      break;
     }
     default:
       break;
   }
 
   return externals;
+}
+
+function compatFunctionalExternal(
+  external: ExternalFunction,
+  externalsType: WebpackExternalsType | undefined,
+  externalRequests: WebpackCompatOptions["externalRequests"],
+): ExternalConfigMap {
+  if (!externalRequests || externalRequests.length === 0) {
+    throw new Error(
+      "functional external requires external request candidates to be provided",
+    );
+  }
+
+  const externals: ExternalConfigMap = {};
+  for (const requestCandidate of externalRequests) {
+    const data =
+      typeof requestCandidate === "string"
+        ? { request: requestCandidate }
+        : requestCandidate;
+    const contextInfo = data.contextInfo ?? {};
+    const getResolve = data.getResolve ?? unsupportedExternalGetResolve;
+    let callbackCalled = false;
+    let callbackError: Error | null | undefined;
+    let callbackResult: ExternalFunctionResult;
+    let callbackType: string | undefined;
+
+    const callback = (
+      err?: Error | null,
+      result?: ExternalFunctionResult,
+      type?: string,
+    ) => {
+      callbackCalled = true;
+      callbackError = err;
+      callbackResult = result;
+      callbackType = type;
+    };
+
+    const returned =
+      external.length >= 3
+        ? (
+            external as unknown as (
+              context: string | undefined,
+              request: string,
+              callback: ExternalFunctionCallback,
+            ) => ReturnType<ExternalFunction>
+          )(data.context, data.request, callback)
+        : (
+            external as (
+              data: ExternalFunctionData,
+              callback: ExternalFunctionCallback,
+            ) => ReturnType<ExternalFunction>
+          )({ ...data, contextInfo, getResolve }, callback);
+    const returnedValue = returned as unknown;
+    if (
+      returnedValue &&
+      typeof (returnedValue as { then?: unknown }).then === "function"
+    ) {
+      throw new Error("async functional external not supported yet");
+    }
+
+    if (callbackError) {
+      throw callbackError;
+    }
+
+    const result = callbackCalled ? callbackResult : returned;
+    const externalValue = compatFunctionalExternalResult(
+      data.request,
+      result,
+      callbackType,
+      externalsType,
+    );
+    if (externalValue !== undefined) {
+      externals[data.request] = externalValue;
+    }
+  }
+
+  return externals;
+}
+
+function unsupportedExternalGetResolve(): never {
+  throw new Error("functional external getResolve is not supported yet");
+}
+
+function compatFunctionalExternalResult(
+  request: string,
+  result: ExternalFunctionResult | void,
+  externalType: string | undefined,
+  externalsType: WebpackExternalsType | undefined,
+): ExternalConfig | undefined {
+  if (result == null || result === false) {
+    return undefined;
+  }
+
+  const value = result === true ? request : result;
+  if (typeof value === "string") {
+    return compatExternalValue(
+      externalType ? applyExternalType(externalType, value) : value,
+      externalsType,
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return compatExternals({ [request]: value }, externalsType)?.[request];
+  }
+
+  if (typeof value === "object") {
+    if ("type" in value || "script" in value) {
+      return value as ExternalConfig;
+    }
+    return compatExternals({ [request]: value }, externalsType)?.[request];
+  }
+
+  return undefined;
+}
+
+function applyExternalType(externalType: string, value: string): string {
+  switch (externalType) {
+    case "commonjs":
+    case "commonjs2":
+    case "node-commonjs":
+      return `commonjs ${value}`;
+    case "module":
+    case "esm":
+      return `esm ${value}`;
+    case "promise":
+      return `promise ${value}`;
+    case "script":
+      return `script ${value}`;
+    case "global":
+    case "this":
+    case "var":
+    case "window":
+      return value;
+    default:
+      return `${externalType} ${value}`;
+  }
 }
 
 function compatExternalValue(

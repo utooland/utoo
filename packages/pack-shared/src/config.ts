@@ -163,6 +163,48 @@ export interface ExternalAdvanced {
 }
 
 export type ExternalConfig = string | ExternalAdvanced;
+export type ExternalConfigMap = Record<string, ExternalConfig>;
+
+export type ExternalFunctionResult =
+  | string
+  | string[]
+  | boolean
+  | ExternalAdvanced
+  | Record<string, unknown>
+  | null
+  | undefined;
+
+export interface ExternalFunctionData {
+  context?: string;
+  request: string;
+  dependencyType?: string;
+  contextInfo?: Record<string, unknown>;
+  getResolve?: (...args: unknown[]) => unknown;
+}
+
+export type ExternalFunctionCallback = (
+  err?: Error | null,
+  result?: ExternalFunctionResult,
+  type?: string,
+) => void;
+
+type ExternalFunctionReturn = ExternalFunctionResult | void;
+
+export type ExternalFunction =
+  | ((
+      data: ExternalFunctionData,
+      callback: ExternalFunctionCallback,
+    ) => ExternalFunctionReturn)
+  | ((
+      context: string | undefined,
+      request: string,
+      callback: ExternalFunctionCallback,
+    ) => ExternalFunctionReturn);
+
+export type ExternalsConfig =
+  | ExternalConfigMap
+  | ExternalFunction
+  | (string | RegExp | ExternalConfigMap | ExternalFunction)[];
 
 /**
  * Provider configuration for automatic module imports.
@@ -202,7 +244,7 @@ export interface ConfigComplete {
   mode?: "production" | "development";
   module?: ModuleOptions;
   resolve?: ResolveOptions;
-  externals?: Record<string, ExternalConfig>;
+  externals?: ExternalsConfig;
   output?: {
     path?: string;
     type?: "standalone" | "export";
