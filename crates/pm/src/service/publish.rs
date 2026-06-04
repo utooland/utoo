@@ -31,6 +31,7 @@ use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
 use crate::model::publish_payload::{PublishPayload, PublishPayloadInput};
 use crate::service::auth;
+use crate::service::oidc;
 use crate::service::pm_pack;
 use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::format_print::print_pack_details;
@@ -77,7 +78,12 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         });
     }
 
-    let token = auth::require_token(opts.registry).await?;
+    // Prefer OIDC trusted publishing when running in a supported CI (no
+    // long-lived token needed); fall back to a configured token otherwise.
+    let token = match oidc::try_mint_publish_token(opts.registry, &pack_result.name).await {
+        Some(token) => token,
+        None => auth::require_token(opts.registry).await?,
+    };
 
     // Reuse the manifest packed into the tarball (with `workspace:`/`catalog:`
     // already rewritten) so the registry metadata matches the tarball contents.
