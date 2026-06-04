@@ -1,6 +1,5 @@
 use crate::fs;
-use crate::service::auth;
-use crate::util::http::client;
+use crate::helper::ruborist_context::Context as RuboristContext;
 use crate::util::json::read_json_file;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
@@ -19,25 +18,16 @@ static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 async fn load_config() -> Result<&'static Value> {
     CONFIG
         .get_or_try_init(|| async {
-            let registry = get_registry();
-            let url = format!("{registry}/binary-mirror-config/latest");
-            let mut request = client().get(&url);
-            if let Some(token) = auth::token_for_url(&url).await {
-                request = request.bearer_auth(token);
-            }
-            let response = request
-                .send()
+            // Go through the registry client so URL construction and private-
+            // registry auth are handled in one place rather than hand-rolled.
+            // `binary-mirror-config@latest` is a normal version manifest whose
+            // `mirrors` field carries the config.
+            let bytes = RuboristContext::registry()
+                .await
+                .fetch_version_manifest_bytes("binary-mirror-config", "latest")
                 .await
                 .context("Failed to fetch binary mirror config")?;
-
-            if !response.status().is_success() {
-                return Err(anyhow::anyhow!("HTTP status: {}", response.status()));
-            }
-
-            response
-                .json()
-                .await
-                .context("Failed to parse binary mirror config")
+            serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")
         })
         .await
 }

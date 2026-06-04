@@ -33,6 +33,7 @@ fn current_timestamp_secs() -> u64 {
 
 use dashmap::DashSet;
 
+use super::manifest;
 use super::store::{ManifestStore, NoopStore};
 use crate::traits::registry::{RegistryClient, RegistryError, is_npm_registry};
 
@@ -172,6 +173,25 @@ impl UnifiedRegistry {
     /// Check if this registry supports semver resolution.
     pub fn supports_semver(&self) -> bool {
         self.supports_semver
+    }
+
+    /// Fetch the raw version-manifest JSON for `name@spec` through this
+    /// registry — URL construction and auth are applied here, not by the
+    /// caller. Returns the complete document so custom fields the typed model
+    /// omits are preserved (e.g. `binary-mirror-config`'s `mirrors`).
+    pub async fn fetch_version_manifest_bytes(
+        &self,
+        name: &str,
+        spec: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        manifest::fetch_version_manifest_vec(manifest::FetchVersionManifestOptions {
+            registry_url: &self.registry_url,
+            name,
+            spec,
+            format: manifest::MetadataFormat::Complete,
+            auth_token: self.auth_token.as_deref(),
+        })
+        .await
     }
 }
 
