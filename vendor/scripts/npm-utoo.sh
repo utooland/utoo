@@ -1,4 +1,6 @@
 #!/bin/bash
+# Without this, a failed npm publish is masked by the trailing cat/rm.
+set -euo pipefail
 
 # args check
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then

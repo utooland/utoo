@@ -1,0 +1,24 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/client.ts",
+        "name": "main"
+      }
+    ],
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "entry": "input/server.ts",
+      "output": {
+        "path": "output/server",
+        "filename": "index.js"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  }
+}

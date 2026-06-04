@@ -3,7 +3,6 @@ pub mod deps;
 pub mod fuzzy_select;
 pub mod git;
 pub mod global_bin;
-pub mod install_runtime;
 pub mod lock;
 pub mod migrate;
 pub mod ruborist_context;

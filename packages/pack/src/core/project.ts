@@ -102,6 +102,104 @@ function normalizeStyles(
   };
 }
 
+// Align with next.js turbopack default optimizePackageImports config:
+// https://nextjs.org/docs/app/api-reference/config/next-config-js/optimizePackageImports
+const DEFAULT_OPTIMIZE_PACKAGE_IMPORTS = [
+  "lucide-react",
+  "date-fns",
+  "lodash-es",
+  "ramda",
+  "antd",
+  "react-bootstrap",
+  "ahooks",
+  "@ant-design/icons",
+  "@headlessui/react",
+  "@headlessui-float/react",
+  "@heroicons/react/20/solid",
+  "@heroicons/react/24/solid",
+  "@heroicons/react/24/outline",
+  "@visx/visx",
+  "@tremor/react",
+  "rxjs",
+  "@mui/material",
+  "@mui/icons-material",
+  "recharts",
+  "react-use",
+  "effect",
+  "@effect/schema",
+  "@effect/platform",
+  "@effect/platform-node",
+  "@effect/platform-browser",
+  "@effect/platform-bun",
+  "@effect/sql",
+  "@effect/sql-mssql",
+  "@effect/sql-mysql2",
+  "@effect/sql-pg",
+  "@effect/sql-sqlite-node",
+  "@effect/sql-sqlite-bun",
+  "@effect/sql-sqlite-wasm",
+  "@effect/sql-sqlite-react-native",
+  "@effect/rpc",
+  "@effect/rpc-http",
+  "@effect/typeclass",
+  "@effect/experimental",
+  "@effect/opentelemetry",
+  "@material-ui/core",
+  "@material-ui/icons",
+  "@tabler/icons-react",
+  "mui-core",
+  "react-icons/ai",
+  "react-icons/bi",
+  "react-icons/bs",
+  "react-icons/cg",
+  "react-icons/ci",
+  "react-icons/di",
+  "react-icons/fa",
+  "react-icons/fa6",
+  "react-icons/fc",
+  "react-icons/fi",
+  "react-icons/gi",
+  "react-icons/go",
+  "react-icons/gr",
+  "react-icons/hi",
+  "react-icons/hi2",
+  "react-icons/im",
+  "react-icons/io",
+  "react-icons/io5",
+  "react-icons/lia",
+  "react-icons/lib",
+  "react-icons/lu",
+  "react-icons/md",
+  "react-icons/pi",
+  "react-icons/ri",
+  "react-icons/rx",
+  "react-icons/si",
+  "react-icons/sl",
+  "react-icons/tb",
+  "react-icons/tfi",
+  "react-icons/ti",
+  "react-icons/vsc",
+  "react-icons/wi",
+];
+
+function mergePackageImports(packageImports: string[] | undefined): string[] {
+  const defaultPackageImports =
+    process.env.UTOO_DISABLE_DEFAULT_PACKAGE_IMPORTS === "1"
+      ? []
+      : DEFAULT_OPTIMIZE_PACKAGE_IMPORTS;
+
+  return [...new Set([...(packageImports ?? []), ...defaultPackageImports])];
+}
+
+function normalizeOptimization(
+  optimization: ConfigComplete["optimization"],
+): NonNullable<ConfigComplete["optimization"]> {
+  return {
+    ...(optimization ?? {}),
+    packageImports: mergePackageImports(optimization?.packageImports),
+  };
+}
+
 export async function serializeConfig(
   config: ConfigComplete,
   isDev: boolean,
@@ -109,6 +207,7 @@ export async function serializeConfig(
   const configSerializable = {
     ...config,
     styles: normalizeStyles(config.styles, isDev),
+    optimization: normalizeOptimization(config.optimization),
   };
 
   if (configSerializable.entry) {
@@ -118,8 +217,7 @@ export async function serializeConfig(
     });
   }
 
-  if (configSerializable.optimization) {
-    configSerializable.optimization = { ...configSerializable.optimization };
+  {
     const { modularizeImports } = configSerializable.optimization;
 
     if (modularizeImports) {

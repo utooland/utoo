@@ -5,11 +5,17 @@ use utoo_ruborist::manifest::{FullManifest, VersionManifest};
 use utoo_ruborist::service::{MetadataFormat, fetch_full_manifest_fresh};
 use utoo_ruborist::util::parse_package_spec;
 
+use crate::service::auth;
 use crate::util::format_print::print_grid;
 use crate::util::user_config::get_registry;
 
 /// View package information from registry, similar to npm view
 pub async fn view(package_spec: &str) -> Result<()> {
+    let registry_url = get_registry();
+    view_with_registry(package_spec, &registry_url).await
+}
+
+async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()> {
     tracing::debug!("Viewing package: {package_spec}");
 
     // Parse package specification
@@ -17,12 +23,18 @@ pub async fn view(package_spec: &str) -> Result<()> {
 
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
-    // Fetch full manifest directly from registry (Complete format for display, no ETag)
-    let registry_url = get_registry();
-    let (full_manifest, _etag) =
-        fetch_full_manifest_fresh(&registry_url, name, MetadataFormat::Complete)
-            .await
-            .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
+    // Fetch full manifest directly from registry (Complete format for display, no ETag).
+    // token_for_url applies the leak guard: a token only when registry_url is
+    // the configured registry host.
+    let token = auth::token_for_url(registry_url).await;
+    let (full_manifest, _etag) = fetch_full_manifest_fresh(
+        registry_url,
+        name,
+        MetadataFormat::Complete,
+        token.as_deref(),
+    )
+    .await
+    .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
@@ -356,12 +368,41 @@ mod tests {
     /// because the registry service used ETag caching.
     #[tokio::test]
     async fn test_view_twice_no_304_error() {
+        use mockito::Matcher;
+
+        let mut server = mockito::Server::new_async().await;
+        let manifest = r#"{
+            "name": "is-odd",
+            "description": "mock package",
+            "dist-tags": { "latest": "1.0.0" },
+            "versions": {
+                "1.0.0": {
+                    "name": "is-odd",
+                    "version": "1.0.0",
+                    "description": "mock package",
+                    "dist": {}
+                }
+            }
+        }"#;
+        let mock = server
+            .mock("GET", "/is-odd")
+            .match_header("accept", "application/json")
+            .match_header("if-none-match", Matcher::Missing)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_header("etag", "\"mock-etag\"")
+            .with_body(manifest)
+            .expect(2)
+            .create_async()
+            .await;
+
         // First view - should succeed
-        let result1 = view("is-odd").await;
+        let result1 = view_with_registry("is-odd", &server.url()).await;
         assert!(result1.is_ok(), "First view failed: {:?}", result1.err());
 
         // Second view - should also succeed (not fail with 304 error)
-        let result2 = view("is-odd").await;
+        let result2 = view_with_registry("is-odd", &server.url()).await;
         assert!(result2.is_ok(), "Second view failed: {:?}", result2.err());
+        mock.assert_async().await;
     }
 }

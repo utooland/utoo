@@ -133,8 +133,10 @@ jobs:
           targets: x86_64-unknown-linux-gnu
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-linux
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -160,9 +162,15 @@ jobs:
           # can now overwrite target/.../release/utoo safely.
           git fetch origin next --depth=1
           # Overlay origin/next's working tree onto the current workdir
-          # without moving HEAD. After this every tracked file matches
-          # origin/next; submodule pointers may differ so re-init.
+          # without moving HEAD. `checkout -- .` restores next's tracked files
+          # but leaves files the PR adds that next lacks; drop those too, or new
+          # module dirs (e.g. registry/, driver/) shadow next's flat-file
+          # modules and the baseline build fails with E0761. Submodule pointers
+          # may differ so re-init.
           git checkout origin/next -- .
+          # --no-renames so rename targets (e.g. registry.rs -> registry/mod.rs)
+          # count as Added and get removed too, not paired away as renames.
+          git diff --no-renames --diff-filter=A --name-only origin/next HEAD | xargs -r rm -f
           git submodule update --init --recursive --depth 1
           cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
       - name: Upload utoo-next binary
@@ -199,8 +207,10 @@ jobs:
           targets: aarch64-apple-darwin
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-mac-arm64
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target aarch64-apple-darwin --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -230,8 +240,10 @@ jobs:
         run: rustup target add x86_64-apple-darwin
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-mac-x64
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target x86_64-apple-darwin --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -251,7 +263,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Disable Windows Defender
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          } catch {
+            Write-Warning "Unable to disable Windows Defender real-time monitoring: $_"
+          }
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
       - name: Setup Rust toolchain
@@ -261,8 +278,10 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           shared-key: pm-build-windows
+          cache-bin: false
       - name: Build utoo-pm
         run: cargo build --release --target x86_64-pc-windows-msvc --bin utoo -p utoo-pm
       - name: Upload utoo binary
@@ -404,7 +423,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Disable Windows Defender
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          try {
+            Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction Stop
+          } catch {
+            Write-Warning "Unable to disable Windows Defender real-time monitoring: $_"
+          }
       - name: Setup node
         uses: actions/setup-node@v4
         with:

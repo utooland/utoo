@@ -39,9 +39,9 @@ pub fn retry_strategy() -> impl Iterator<Item = Duration> + Clone {
 /// A fetch error that knows whether it should be retried.
 #[derive(Debug)]
 pub enum FetchError {
-    /// Transient error (network, timeout, 5xx, 429) — worth retrying.
+    /// Transient error (network, timeout, 5xx, 429, npmjs's flaky 406) — worth retrying.
     Retryable(anyhow::Error),
-    /// Permanent error (404, parse, 4xx) — do not retry.
+    /// Permanent error (404, parse, other 4xx) — do not retry.
     Permanent(anyhow::Error),
 }
 
@@ -93,7 +93,12 @@ pub fn classify_status(status: reqwest::StatusCode, url: &str) -> FetchError {
     // here so a 10-retry loop doesn't spam the same line ten times.
     match status.as_u16() {
         404 => FetchError::Permanent(anyhow!("HTTP 404: {url}")),
-        429 => FetchError::Retryable(anyhow!("HTTP 429: {url}")),
+        // npmjs's Cloudflare edge intermittently answers a manifest request
+        // with 406 under heavy concurrent fan-out (different package each time,
+        // ~one per run) — a transient content-negotiation hiccup, not a real
+        // "your Accept header is unsatisfiable" (that would 406 every request).
+        // Retry it like a 429 rather than aborting the whole resolve.
+        406 | 429 => FetchError::Retryable(anyhow!("HTTP {status}: {url}")),
         s if (500..600).contains(&s) => FetchError::Retryable(anyhow!("HTTP {status}: {url}")),
         _ => FetchError::Permanent(anyhow!("HTTP {status}: {url}")),
     }

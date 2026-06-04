@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "output": {
+      "filename": "scripts/[name].dev.js",
+      "chunkFilename": "chunks/[name].dev.js"
+    },
+    "sourceMaps": false
+  }
+}

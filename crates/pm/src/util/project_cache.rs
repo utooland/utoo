@@ -1,7 +1,7 @@
 //! Disk persistence for ruborist's project-level manifest cache.
 //!
-//! Stored at `<root>/node_modules/.utoo-manifest.json`. Used to skip the
-//! preload phase on warm installs.
+//! Stored at `<root>/node_modules/.utoo-manifest.json`. Seeds the demand
+//! resolver's manifest cache so warm installs skip re-fetching.
 
 use std::path::{Path, PathBuf};
 

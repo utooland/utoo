@@ -90,5 +90,9 @@
     "version": "napi version",
     "generate-features-list": "node ./scripts/generate-feature-list.js"
   },
-  "repository": "git@github.com:utooland/utoo.git"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/utooland/utoo",
+    "directory": "packages/pack"
+  }
 }

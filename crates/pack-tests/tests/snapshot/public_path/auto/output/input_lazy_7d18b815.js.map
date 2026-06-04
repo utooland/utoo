@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/auto/input/lazy.js"],"sourcesContent":["export default function lazyModule() {\n  return { loaded: true, source: \"auto\" };\n}\n"],"names":["lazyModule","loaded","source"],"mappings":"AAAe,SAASA;IACtB,OAAO;QAAEC,QAAQ;QAAMC,QAAQ;IAAO;AACxC"}}]
+}

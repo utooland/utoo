@@ -1,25 +1,20 @@
-//! Dependency tree builder using BFS traversal.
+//! Dependency tree builder.
 //!
 //! This module provides the core algorithm for building a dependency graph
-//! from a root package. It uses breadth-first traversal to resolve dependencies
-//! level by level, with support for:
+//! from a root package, with support for:
 //! - Version conflict detection and nested installation
 //! - Hoisting (placing packages as high as possible in the tree)
 //! - Override rules
 //! - Different dependency types (prod, dev, peer, optional)
-//! - Parallel manifest preloading for performance
 //!
-//! # Two-Phase Resolution
-//!
-//! The builder uses a two-phase approach for optimal performance:
-//! 1. **Preload Phase**: Parallel fetch of all manifests to warm up caches
-//! 2. **Build Phase**: Sequential BFS traversal reading from cache
-//!
-//! This separation allows for maximum parallelism during network I/O
-//! while keeping the graph building logic simple and deterministic.
+//! Resolution runs through the demand-driven BFS loop in [`super::demand`]:
+//! a single level-by-level traversal that schedules manifest fetches on
+//! demand (no separate preload phase), overlapping network I/O with graph
+//! construction.
 
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,14 +22,17 @@ use std::sync::Arc;
 use anyhow::Context as _;
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
+use crate::model::manifest::CoreVersionManifest;
+#[cfg(feature = "http-tarball")]
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::preload::{PreloadConfig, preload_manifests};
+use crate::resolver::demand::{ResolverManifestCache, run_main_loop_bfs};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
-use crate::traits::registry::{RegistryClient, ResolvedPackage};
+use crate::traits::registry::ResolvedPackage;
 
 /// Dispatch a git/github spec to the real `gix`-backed resolver when the
 /// `native-git` feature is enabled, otherwise error with a hint.
@@ -99,15 +97,16 @@ pub use super::edges::{
 };
 pub use crate::model::node::{DevDeps, PeerDeps};
 
+/// Default number of concurrent manifest fetches for the demand resolver.
+const DEFAULT_CONCURRENCY: usize = 128;
+
 /// Configuration for dependency resolution.
 #[derive(Debug, Clone)]
 pub struct BuildDepsConfig {
     /// How to handle peer dependencies.
     pub peer_deps: PeerDeps,
-    /// Maximum number of concurrent manifest fetches during preload
+    /// Maximum number of concurrent manifest fetches.
     pub concurrency: usize,
-    /// Whether to skip preload phase (useful when cache is already warm)
-    pub skip_preload: bool,
     /// Cache directory for git clones (defaults to `~/.cache/nm`)
     pub cache_dir: Option<PathBuf>,
     /// Shared dedup cache for concurrent git clone operations
@@ -117,18 +116,21 @@ pub struct BuildDepsConfig {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
+    /// Host-provided project cache used to seed the resolver-owned manifest
+    /// cache. Consumed by the demand mainloop.
+    pub project_cache: Option<ProjectCacheData>,
 }
 
 impl Default for BuildDepsConfig {
     fn default() -> Self {
         Self {
             peer_deps: PeerDeps::Skip,
-            concurrency: crate::resolver::preload::DEFAULT_CONCURRENCY,
-            skip_preload: false,
+            concurrency: DEFAULT_CONCURRENCY,
             cache_dir: dirs::home_dir().map(|d| d.join(".cache/nm")),
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
             catalogs: HashMap::new(),
+            project_cache: None,
         }
     }
 }
@@ -146,12 +148,6 @@ impl BuildDepsConfig {
         self
     }
 
-    /// Create config that skips preload phase
-    pub fn with_skip_preload(mut self, skip: bool) -> Self {
-        self.skip_preload = skip;
-        self
-    }
-
     /// Set the cache directory for git clones
     pub fn with_cache_dir(mut self, cache_dir: PathBuf) -> Self {
         self.cache_dir = Some(cache_dir);
@@ -161,6 +157,12 @@ impl BuildDepsConfig {
     /// Set catalog definitions for `catalog:` protocol resolution.
     pub fn with_catalogs(mut self, catalogs: Catalogs) -> Self {
         self.catalogs = catalogs;
+        self
+    }
+
+    /// Seed the resolver-owned manifest cache with a host-provided project cache.
+    pub fn with_project_cache(mut self, project_cache: Option<ProjectCacheData>) -> Self {
+        self.project_cache = project_cache;
         self
     }
 }
@@ -173,44 +175,6 @@ struct NodeFlags {
     is_dev: bool,
     is_optional: bool,
     is_peer: bool,
-}
-
-/// Gather all unresolved deps from root and workspace nodes for preloading.
-///
-/// Only registry specs (e.g. `^4.17.0`) are collected. `catalog:` specs are
-/// resolved at edge creation time, so by the time this runs they are already
-/// concrete registry specs.
-fn gather_preload_deps(graph: &DependencyGraph, peer_deps: PeerDeps) -> Vec<(String, String)> {
-    use crate::spec::SpecStr;
-    use std::collections::HashSet;
-
-    let mut deps = HashSet::new();
-
-    let collect = |node_index: NodeIndex, deps: &mut HashSet<(String, String)>| {
-        for (_, edge) in graph.get_dependency_edges(node_index) {
-            if edge.valid {
-                continue;
-            }
-            if peer_deps == PeerDeps::Skip && edge.edge_type == EdgeType::Peer {
-                continue;
-            }
-            if edge.spec.is_registry_spec() {
-                deps.insert((edge.name.clone(), edge.spec.clone()));
-            }
-        }
-    };
-
-    collect(graph.root_index, &mut deps);
-
-    for node_index in graph.graph.node_indices() {
-        if let Some(node) = graph.get_node(node_index)
-            && node.is_workspace()
-        {
-            collect(node_index, &mut deps);
-        }
-    }
-
-    deps.into_iter().collect()
 }
 
 /// Create a new package node for a resolved dependency.
@@ -239,6 +203,35 @@ pub fn create_package_node(
     };
 
     PackageNode::from_version_manifest(name.to_string(), path, pkg.manifest.clone())
+}
+
+/// Attach a workspace member to the root of `graph`: add its workspace node and
+/// link node physically under root, mark root's dependency edge on it resolved,
+/// and seed the member's own dependency edges via `edge_ctx`.
+///
+/// Shared by the install graph setup in `service::api` and pm's
+/// workspace-topology builder so the workspace-node shape is defined once.
+pub fn add_workspace_member(
+    graph: &mut DependencyGraph,
+    root_index: NodeIndex,
+    name: &str,
+    path: PathBuf,
+    pkg: &PackageJson,
+    edge_ctx: &EdgeContext,
+) {
+    let workspace_node = PackageNode::workspace_from_package_json(path.clone(), pkg.clone());
+    let workspace_index = graph.add_node(workspace_node);
+
+    let link_node = PackageNode::link_from_package_json(path, pkg.clone());
+    let link_index = graph.add_node(link_node);
+
+    graph.add_physical_edge(root_index, workspace_index);
+    graph.add_physical_edge(root_index, link_index);
+
+    let dep_edge_id = graph.add_dependency_edge(root_index, name, &pkg.version, EdgeType::Prod);
+    graph.mark_dependency_resolved(dep_edge_id, workspace_index);
+
+    add_edges_from(graph, workspace_index, pkg, edge_ctx);
 }
 
 /// Update target node type based on source node and edge type.
@@ -325,6 +318,71 @@ pub fn update_node_type_from_edge(
     }
 }
 
+/// Assign dependency types (prod/dev/optional/peer) across the whole graph.
+///
+/// This is the single source of truth for node types: the BFS only builds graph
+/// structure and never touches types, so this pass — run once after the tree is
+/// complete — cannot observe a half-built tree and therefore can't leave stale
+/// `dev` marks on the subtree of a node that turns out to be prod (the bug that
+/// motivated centralizing it here).
+///
+/// It applies the per-edge propagation rules ([`update_node_type_from_edge`])
+/// over every resolved edge, starting from the importer roots (whose
+/// `is_root`/edge type seeds their direct deps) and re-queuing a node's children
+/// whenever its flags change, until nothing changes.
+///
+/// Termination relies on the type lattice being monotone: each node's flags only
+/// move "up" (dev/optional/peer may be set once, then `is_prod` is absorbing —
+/// once set it clears the others and the `!is_prod` guards freeze the node), so
+/// every node changes O(1) times.
+pub fn compute_node_types(graph: &mut DependencyGraph) {
+    use std::collections::VecDeque;
+
+    // Seed only the importers (root + workspace members); their edge types seed
+    // their direct deps, and the fixpoint re-queues every changed node's
+    // children, so the whole reachable graph is covered without visiting leaves
+    // that have nothing to propagate.
+    let mut queued: HashSet<NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|&i| {
+            graph
+                .get_node(i)
+                .is_some_and(|n| n.is_root() || n.is_workspace())
+        })
+        .collect();
+    let mut worklist: VecDeque<NodeIndex> = queued.iter().copied().collect();
+
+    while let Some(src) = worklist.pop_front() {
+        queued.remove(&src);
+
+        // Snapshot resolved out-edges so we can mutate targets while iterating.
+        let edges: Vec<(NodeIndex, EdgeType)> = graph
+            .get_dependency_edges(src)
+            .into_iter()
+            .filter_map(|(_, edge)| {
+                edge.to
+                    .filter(|_| edge.valid)
+                    .map(|to| (to, edge.edge_type))
+            })
+            .collect();
+
+        for (to, edge_type) in edges {
+            let before = graph
+                .get_node(to)
+                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
+            update_node_type_from_edge(graph, src, to, &edge_type);
+            let after = graph
+                .get_node(to)
+                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
+
+            if before != after && queued.insert(to) {
+                worklist.push_back(to);
+            }
+        }
+    }
+}
+
 /// Result of processing a single dependency.
 #[derive(Debug)]
 pub enum ProcessResult {
@@ -401,7 +459,6 @@ async fn process_file_dep<E>(
         let idx = graph.add_node(PackageNode::link_from_package_json(abs, pkg));
         graph.add_physical_edge(conflict_parent, idx);
         graph.mark_dependency_resolved(edge.edge_id, idx);
-        update_node_type_from_edge(graph, node_index, idx, &edge.edge_type);
         return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
     }
 
@@ -450,7 +507,7 @@ async fn process_file_dep<E>(
 ///
 /// # Returns
 /// The result of processing (reused, created, or skipped)
-pub async fn process_dependency<R: RegistryClient>(
+pub async fn process_dependency<R: ManifestProvider>(
     graph: &mut DependencyGraph,
     registry: &R,
     node_index: NodeIndex,
@@ -460,11 +517,9 @@ pub async fn process_dependency<R: RegistryClient>(
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
         FindResult::Reuse(existing_index) => {
-            // Mark edge as resolved
+            // Mark edge as resolved. Node types are assigned in a single pass
+            // after the tree is built (see `compute_node_types`).
             graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
-
-            // Update target node type
-            update_node_type_from_edge(graph, node_index, existing_index, &edge_info.edge_type);
 
             Ok(ProcessResult::Reused(existing_index))
         }
@@ -635,9 +690,6 @@ pub async fn process_dependency<R: RegistryClient>(
             // Mark dependency as resolved
             graph.mark_dependency_resolved(edge_info.edge_id, new_index);
 
-            // Update node type
-            update_node_type_from_edge(graph, node_index, new_index, &edge_info.edge_type);
-
             // Add dependencies of the new node
             add_edges_from(
                 graph,
@@ -667,11 +719,15 @@ pub async fn process_dependency<R: RegistryClient>(
 /// // Add initial dependency edges to root...
 /// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
 /// ```
-pub async fn build_deps<R: RegistryClient>(
+pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, &NoopReceiver).await
 }
@@ -689,215 +745,84 @@ pub async fn build_deps<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for handling build events
-pub async fn build_deps_with_receiver<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_receiver<R, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     let config = BuildDepsConfig::default().with_peer_deps(peer_deps);
     build_deps_with_config(graph, registry, config, receiver).await
 }
 
 /// Build the complete dependency tree with full configuration.
 ///
-/// This is the most flexible entry point for dependency resolution. It performs:
-/// 1. **Preload Phase** (unless skipped): Parallel fetch of all manifests to warm up caches
-/// 2. **Build Phase**: Sequential BFS traversal reading from cache
+/// The most flexible entry point for dependency resolution: drives the
+/// demand-driven BFS loop, which schedules manifest fetches on demand.
 ///
 /// # Arguments
 /// * `graph` - The dependency graph (should have root node and initial edges)
 /// * `registry` - Registry client for fetching packages
-/// * `config` - Build configuration (concurrency, peer_deps, skip_preload)
+/// * `config` - Build configuration (concurrency, peer_deps, ...)
 /// * `receiver` - Event receiver for handling build events
 ///
 /// # Example
 /// ```ignore
-/// let config = BuildDepsConfig::default()
-///     .with_concurrency(50)
-///     .with_skip_preload(true); // Skip preload if cache is warm
+/// let config = BuildDepsConfig::default().with_concurrency(50);
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
-pub async fn build_deps_with_config<R: RegistryClient, E: EventReceiver>(
+pub async fn build_deps_with_config<R, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: BuildDepsConfig,
     receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
+) -> Result<(), ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
+    build_deps_with_config_output(graph, registry, config, receiver)
+        .await
+        .map(|_| ())
+}
+
+/// Demand-driven dependency resolution: a single BFS loop that schedules
+/// manifest jobs through the [`ManifestProvider`] while owning the per-run
+/// manifest cache, waiters, and in-flight de-duplication. Returns the
+/// manifests resolved this run for the host to persist.
+pub(crate) async fn build_deps_with_config_output<R, E>(
+    graph: &mut DependencyGraph,
+    registry: &R,
+    config: BuildDepsConfig,
+    receiver: &E,
+) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+    E: EventReceiver,
+{
     tracing::debug!(
-        "Starting dependency tree build, peer_deps: {:?}, concurrency: {}, skip_preload: {}",
+        "Starting demand dependency build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
-        config.concurrency,
-        config.skip_preload
+        config.concurrency
     );
 
-    // Phase 1: Preload manifests in parallel (unless skipped)
-    run_preload_phase(graph, registry, &config, receiver).await;
+    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
-    // Phase 2: BFS traversal to build the dependency tree
-    run_bfs_phase(graph, registry, &config, receiver).await?;
+    // The BFS only builds graph structure; assign all node types in one pass now
+    // that the tree is complete, so prod-ness reaches every transitive dep.
+    compute_node_types(graph);
 
     receiver.on_event(BuildEvent::Complete {
         total_nodes: graph.graph.node_count(),
     });
 
-    Ok(())
-}
-
-/// Run the preload phase to warm up the cache with manifests.
-async fn run_preload_phase<R: RegistryClient, E: EventReceiver>(
-    graph: &DependencyGraph,
-    registry: &R,
-    config: &BuildDepsConfig,
-    receiver: &E,
-) {
-    if config.skip_preload {
-        return;
-    }
-
-    let start = tokio::time::Instant::now();
-
-    let initial_deps = gather_preload_deps(graph, config.peer_deps);
-    if initial_deps.is_empty() {
-        return;
-    }
-
-    tracing::debug!("Preload phase: {} initial dependencies", initial_deps.len());
-    receiver.on_event(BuildEvent::PreloadStart {
-        count: initial_deps.len(),
-    });
-
-    let preload_config = PreloadConfig {
-        peer_deps: config.peer_deps,
-        concurrency: config.concurrency,
-    };
-
-    let stats = preload_manifests(
-        initial_deps,
-        registry,
-        preload_config,
-        receiver,
-        |_name, _manifest| {
-            // Registry client's resolve_package should cache the manifest
-        },
-    )
-    .await;
-
-    tracing::debug!(
-        "Preload phase completed: {} success, {} failed",
-        stats.success_count,
-        stats.failed_count
-    );
-    receiver.on_event(BuildEvent::PreloadComplete {
-        success: stats.success_count,
-        failed: stats.failed_count,
-    });
-
-    tracing::debug!("Preload phase: {:?}", start.elapsed());
-}
-
-/// Run the BFS traversal phase to build the dependency tree.
-async fn run_bfs_phase<R: RegistryClient, E: EventReceiver>(
-    graph: &mut DependencyGraph,
-    registry: &R,
-    config: &BuildDepsConfig,
-    receiver: &E,
-) -> Result<(), ResolveError<R::Error>> {
-    let start = tokio::time::Instant::now();
-
-    let mut current_level = vec![graph.root_index];
-
-    while !current_level.is_empty() {
-        receiver.on_event(BuildEvent::LevelStart {
-            node_count: current_level.len(),
-        });
-        let mut next_level = Vec::new();
-
-        for node_index in current_level {
-            // Add workspace nodes to next level
-            for (_, dep) in graph.get_dependency_edges(node_index) {
-                if dep.valid
-                    && let Some(to) = dep.to
-                    && let Some(n) = graph.get_node(to)
-                    && n.is_workspace()
-                    && node_index == graph.root_index
-                {
-                    next_level.push(to);
-                }
-            }
-
-            // Process unresolved dependencies
-            let unresolved = collect_unresolved_edges(graph, node_index);
-            receiver.on_event(BuildEvent::DependencyCount {
-                count: unresolved.len(),
-            });
-
-            for edge_info in unresolved {
-                receiver.on_event(BuildEvent::Resolving {
-                    name: &edge_info.name,
-                });
-                let result = process_dependency(graph, registry, node_index, &edge_info, config)
-                    .await
-                    .map_err(|inner| {
-                        let mut chain = graph.logical_ancestry(node_index);
-                        chain.push((edge_info.name.clone(), edge_info.spec.clone()));
-                        ResolveError::WithChain {
-                            chain,
-                            source: Box::new(inner),
-                        }
-                    });
-                match result? {
-                    ProcessResult::Created(idx) => {
-                        // Extract node info for events
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Resolved {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-
-                            // Send PackagePlaced for pipeline cloning
-                            if let NodeManifest::Registry(ref manifest) = node.manifest {
-                                // Get parent path for dependency ordering
-                                let parent_path = graph
-                                    .get_node(node_index)
-                                    .map(|parent| parent.path.as_path());
-                                receiver.on_event(BuildEvent::PackagePlaced {
-                                    package: manifest.as_ref().into(),
-                                    path: &node.path,
-                                    parent_path,
-                                });
-                            }
-                        }
-
-                        next_level.push(idx);
-                    }
-                    ProcessResult::Reused(idx) => {
-                        if let Some(node) = graph.get_node(idx) {
-                            receiver.on_event(BuildEvent::Reused {
-                                name: &edge_info.name,
-                                version: &node.version,
-                            });
-                        }
-                    }
-                    ProcessResult::Skipped => {
-                        receiver.on_event(BuildEvent::Skipped {
-                            name: &edge_info.name,
-                            spec: &edge_info.spec,
-                        });
-                    }
-                }
-            }
-        }
-
-        receiver.on_event(BuildEvent::LevelComplete {
-            next_level_count: next_level.len(),
-        });
-        current_level = next_level;
-    }
-
-    tracing::debug!("Build phase: {:?}", start.elapsed());
-    Ok(())
+    Ok(manifest_cache)
 }
 
 // ============================================================================
@@ -921,10 +846,14 @@ use std::path::Path;
 /// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
 /// let lock = resolve(&pkg, &registry).await?;
 /// ```
-pub async fn resolve<R: RegistryClient>(
+pub async fn resolve<R>(
     pkg: &PackageJson,
     registry: &R,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     resolve_with_options(pkg, registry, PeerDeps::Include, &NoopReceiver).await
 }
 
@@ -935,12 +864,16 @@ pub async fn resolve<R: RegistryClient>(
 /// * `registry` - Registry client for fetching packages
 /// * `peer_deps` - How to handle peer dependencies
 /// * `receiver` - Event receiver for progress tracking
-pub async fn resolve_with_options<R: RegistryClient, E: EventReceiver>(
+pub async fn resolve_with_options<R, E: EventReceiver>(
     pkg: &PackageJson,
     registry: &R,
     peer_deps: PeerDeps,
     receiver: &E,
-) -> Result<PackageLock, ResolveError<R::Error>> {
+) -> Result<PackageLock, ResolveError<R::Error>>
+where
+    R: ManifestProvider,
+    R::Error: Send,
+{
     // Create graph with root node
     let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg.clone());
 
@@ -968,6 +901,95 @@ fn graph_to_package_lock(
 ) -> PackageLock {
     let (packages, _total) = graph.serialize_to_packages(root_path);
     PackageLock::new(&pkg.name, &pkg.version, packages)
+}
+
+// ---- demand-resolver graph building (moved from demand::driver) ----
+
+/// Resolve `edge` onto an already-present compatible node by marking the edge
+/// resolved. Shared by the pre-fetch reuse probe ([`try_reuse_dependency`]) and
+/// the post-resolution placement ([`process_dependency_with_resolved`]), whose
+/// `FindResult::Reuse` arms are otherwise identical. Node types are assigned in
+/// a single pass after the tree is built (see [`compute_node_types`]).
+fn reuse_existing_node(
+    graph: &mut DependencyGraph,
+    edge: &DependencyEdgeInfo,
+    existing_index: NodeIndex,
+) -> ProcessResult {
+    graph.mark_dependency_resolved(edge.edge_id, existing_index);
+    ProcessResult::Reused(existing_index)
+}
+
+pub(crate) fn try_reuse_dependency(
+    graph: &mut DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+) -> Option<ProcessResult> {
+    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
+        FindResult::Reuse(existing_index) => Some(reuse_existing_node(graph, edge, existing_index)),
+        FindResult::Conflict(_) | FindResult::New(_) => None,
+    }
+}
+
+pub fn process_dependency_with_resolved(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    edge_info: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+        FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
+        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
+            let new_index = graph.add_node(new_node);
+            graph.add_physical_edge(conflict_parent, new_index);
+            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
+            add_edges_from(
+                graph,
+                new_index,
+                &*resolved.manifest,
+                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+            );
+            ProcessResult::Created(new_index)
+        }
+    }
+}
+
+pub(crate) fn chain_err<E>(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    inner: ResolveError<E>,
+) -> ResolveError<E> {
+    let mut chain = graph.logical_ancestry(parent);
+    chain.push((edge.name.clone(), edge.spec.clone()));
+    ResolveError::WithChain {
+        chain,
+        source: Box::new(inner),
+    }
+}
+
+/// Build the graph node for an already-resolved registry manifest (override
+/// resolution is applied upstream by the demand loop, which owns the per-run
+/// manifest cache). Emits the resolve event and links the node.
+pub(crate) fn handle_resolved_registry_manifest<E>(
+    graph: &mut DependencyGraph,
+    receiver: &E,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    manifest: Arc<CoreVersionManifest>,
+    config: &BuildDepsConfig,
+) -> ProcessResult
+where
+    E: EventReceiver,
+{
+    let resolved = ResolvedPackage {
+        name: edge.name.clone(),
+        version: manifest.version.clone(),
+        manifest,
+    };
+    receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
+    process_dependency_with_resolved(graph, parent, edge, &resolved, config)
 }
 
 #[cfg(test)]
@@ -1262,13 +1284,6 @@ mod tests {
         assert_eq!(edges.get("lodash"), Some(&"^4.17.0".to_string()));
         assert_eq!(edges.get("react"), Some(&"^18.0.0".to_string()));
         assert_eq!(edges.get("tslib"), Some(&"^2.0.0".to_string()));
-
-        // Since edges are now resolved, gather_preload_deps should find them
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        let deps_map: HashMap<String, String> = deps.into_iter().collect();
-        assert_eq!(deps_map.get("lodash"), Some(&"^4.17.0".to_string()));
-        assert_eq!(deps_map.get("react"), Some(&"^18.0.0".to_string()));
-        assert_eq!(deps_map.get("tslib"), Some(&"^2.0.0".to_string()));
     }
 
     #[test]
@@ -1296,9 +1311,5 @@ mod tests {
             .map(|(_, e)| (e.name.clone(), e.spec.clone()))
             .collect();
         assert_eq!(edges.get("missing-pkg"), Some(&"catalog:".to_string()));
-
-        // gather_preload_deps should NOT include it (not a registry spec)
-        let deps = gather_preload_deps(&graph, PeerDeps::Skip);
-        assert!(deps.is_empty());
     }
 }

@@ -9,6 +9,9 @@ jobs:
     if: startsWith(github.event.release.tag_name, 'utooweb-v')
     name: Publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Init git submodules
@@ -16,7 +19,8 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.14.0
+          registry-url: "https://registry.npmjs.org"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -44,11 +48,12 @@ jobs:
         id: get_version
         run: |
           echo "VERSION=${GITHUB_REF#refs/tags/utooweb-v}" >> $GITHUB_OUTPUT
+      - name: Bump npm CLI for OIDC trusted publisher
+        # Trusted publishing requires npm 11.5.1+.
+        run: npm install --global npm@11.6.2
       - name: NPM Publish
         run: |
-          # npm config set provenance true
-          echo "${VERSION}" &&
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+          echo "${VERSION}"
 
           TAG="latest"
           if [[ "$VERSION" == *"-"* ]]; then
@@ -58,7 +63,6 @@ jobs:
           echo "Publishing with tag: $TAG"
 
           npm version --workspace=@utoo/web "${VERSION}" &&
-          npm publish --workspace=@utoo/web --access public --tag "${TAG}"
+          npm publish --workspace=@utoo/web --access public --provenance --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

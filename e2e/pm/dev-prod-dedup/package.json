@@ -1,0 +1,12 @@
+{
+  "name": "dev-prod-dedup",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Regression fixture: a package that is both a root devDependency and a transitive prod dependency must be marked prod, not dev.",
+  "dependencies": {
+    "sdk-base": "4.2.1"
+  },
+  "devDependencies": {
+    "p-timeout": "^4.1.0"
+  }
+}

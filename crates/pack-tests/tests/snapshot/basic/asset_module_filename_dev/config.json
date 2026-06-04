@@ -1,0 +1,15 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "output": {
+      "assetModuleFilename": "assets/[name].[contenthash:8]"
+    },
+    "sourceMaps": false
+  }
+}

@@ -39,5 +39,9 @@
   },
   "author": "xusd320",
   "license": "MIT",
-  "repository": "git@github.com:utooland/utoo.git"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/utooland/utoo",
+    "directory": "packages/pack-shared"
+  }
 }

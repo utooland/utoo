@@ -2,11 +2,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
 use utoo_ruborist::service::{
     BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
 };
 
-use crate::service::pipeline::{PipelineChannels, PipelineReceiver};
+use crate::service::auth;
+use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};
 use crate::util::cache::get_cache_dir;
 use crate::util::logger::ProgressReceiver;
 use crate::util::manifest_store::DiskManifestStore;
@@ -50,49 +52,49 @@ impl Context {
         receiver: R,
     ) -> BuildDepsOptions<GlobImpl, R> {
         let catalogs = get_catalogs().await;
-        let warm_project_cache = Some(project_cache::load(&cwd).await);
+        let project_cache = Some(project_cache::load(&cwd).await);
         BuildDepsOptions {
             cwd,
-            registry_url: get_registry(),
+            registry: Self::registry().await,
             cache_dir: Some(get_cache_dir()),
-            manifest_store: Self::manifest_store(),
-            warm_project_cache,
+            project_cache,
             concurrency: get_manifests_concurrency_limit().await,
             peer_deps: get_peer_deps().await,
             glob: TokioGlob,
             receiver,
-            supports_semver: get_supports_semver(),
             catalogs,
         }
     }
 
-    /// Create BuildDepsOptions with PipelineReceiver for concurrent download/clone.
-    /// Returns (options, channels) where channels are used to start pipeline workers.
-    pub async fn pipeline_deps_options(
+    /// Create BuildDepsOptions that forwards package events to the install scheduler.
+    pub async fn install_deps_options(
         cwd: PathBuf,
-    ) -> (
-        BuildDepsOptions<GlobImpl, PipelineReceiver<ProgressReceiver>>,
-        PipelineChannels,
-    ) {
-        let (receiver, channels) = PipelineReceiver::new(ProgressReceiver);
-        let options = Self::deps_options(cwd, receiver).await;
-        (options, channels)
+        scheduler: InstallScheduler,
+    ) -> BuildDepsOptions<GlobImpl, InstallEventReceiver<ProgressReceiver>> {
+        let receiver = InstallEventReceiver::new(ProgressReceiver, scheduler);
+        Self::deps_options(cwd, receiver).await
     }
 
     /// Resolve dependency tree with plain ProgressReceiver. Returns
     /// [`BuildDepsOutput`] (lock + project cache); the project cache is
     /// persisted in the background.
     pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
-        let options = Self::deps_options(cwd.clone(), ProgressReceiver).await;
-        let output = utoo_ruborist::service::build_deps(options).await?;
-        spawn_save_project_cache(cwd, output.project_cache.clone());
+        let (root_path, pkg) =
+            utoo_ruborist::service::read_root_manifest(&cwd, Self::glob()).await?;
+        let options = Self::deps_options(root_path.clone(), ProgressReceiver).await;
+        let output = utoo_ruborist::service::build_deps(options, pkg).await?;
+        spawn_save_project_cache(root_path, output.project_cache.clone());
         Ok(output)
     }
 
-    /// Create a UnifiedRegistry with standard configuration.
-    pub fn registry() -> Registry {
+    /// Create a UnifiedRegistry with standard configuration, including the
+    /// private-registry auth token (resolved once, cached). This is the single
+    /// place registry config + credentials are assembled; `deps_options` reuses
+    /// it so install and `resolve_package` share one authenticated client.
+    pub async fn registry() -> Registry {
         let mut builder = UnifiedRegistry::builder()
             .registry(get_registry())
+            .auth_token(auth::cached_token().await)
             .store(Self::manifest_store());
         if let Some(semver) = get_supports_semver() {
             builder = builder.supports_semver(semver);
@@ -103,6 +105,13 @@ impl Context {
     /// Get the glob instance.
     pub fn glob() -> GlobImpl {
         TokioGlob
+    }
+
+    /// Workspace discovery wired to the native glob. The single entry point for
+    /// `find_workspaces` / `find_root_path` / `find_project_path`; callers
+    /// consume `WorkspacePackage` directly.
+    pub fn discovery() -> WorkspaceDiscovery<GlobImpl> {
+        WorkspaceDiscovery::new(Self::glob())
     }
 }
 

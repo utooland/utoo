@@ -112,6 +112,12 @@ impl LockPackage {
     pub fn has_install_scripts(&self) -> bool {
         self.has_install_script.unwrap_or(false)
     }
+
+    /// Whether this entry is a symlink node — a workspace `node_modules` link
+    /// or a `file:<dir>` dependency (both serialize as `"link": true`).
+    pub fn is_link(&self) -> bool {
+        self.link == Some(true)
+    }
 }
 
 /// A wrapper around LockPackage that includes the path.
@@ -354,17 +360,26 @@ fn create_non_root_lock_package(
     if node.is_optional {
         pkg.optional = Some(true);
     }
-    if manifest.has_install_script() {
-        pkg.has_install_script = Some(true);
-    }
 
-    // Package metadata
+    // Package metadata. `bin` is recorded even on link nodes because utoo's
+    // bin-linking reads it straight from the lock entry (the graph/target isn't
+    // available at rebuild time).
     pkg.bin = manifest.bin();
     pkg.license = manifest.license().map(License::String);
     pkg.engines = manifest.engines().cloned();
     pkg.os = manifest.os().cloned();
     pkg.cpu = manifest.cpu().cloned();
-    pkg.scripts = manifest.scripts().cloned();
+
+    // Script markers are NOT stamped on link nodes — npm keeps link entries
+    // minimal, and the link's source/target owns the lifecycle: a workspace runs
+    // via the workspace walk, and a `file:<dir>` dep is read from disk at collect
+    // time. Stamping them here is what produced the #3097 duplicate execution.
+    if !node.is_link() {
+        if manifest.has_install_script() {
+            pkg.has_install_script = Some(true);
+        }
+        pkg.scripts = manifest.scripts().cloned();
+    }
 
     // Dependencies from graph edges
     collect_edge_deps(graph, node_index, &mut pkg);
@@ -641,6 +656,48 @@ mod tests {
         assert_eq!(ws.name.as_deref(), Some("workspace-a"));
         assert_eq!(ws.version.as_deref(), Some("1.0.0"));
         assert!(ws.link.is_none(), "workspace node is not a link");
+    }
+
+    /// Regression for #3097: a link entry must stay npm-minimal — it keeps `bin`
+    /// (utoo's bin-linking reads it from the lock) but must NOT carry the script
+    /// markers (`has_install_script`/`scripts`). Stamping those on the link is
+    /// what made `collect` run a workspace's install scripts a second time.
+    #[test]
+    fn test_link_node_omits_script_markers() {
+        use super::super::graph::DependencyGraph;
+
+        let root_pkg = PackageJson::new("my-project", "1.0.0");
+        let root_path = PathBuf::from("/project");
+        let mut graph = DependencyGraph::from_package_json(root_path.clone(), root_pkg);
+
+        // A link node whose package declares a bin, scripts, and a literal
+        // hasInstallScript — none of the script markers should survive.
+        let mut link_pkg = PackageJson::new("linked", "1.0.0");
+        link_pkg.bin = Some(serde_json::json!({ "linked-cli": "cli.js" }));
+        link_pkg.scripts = Some(HashMap::from([(
+            "postinstall".to_string(),
+            "echo hi".to_string(),
+        )]));
+        link_pkg.has_install_script = Some(true);
+        let link_idx = graph.add_node(PackageNode::link_from_package_json(
+            PathBuf::from("/project/packages/linked"),
+            link_pkg,
+        ));
+        graph.add_physical_edge(graph.root_index, link_idx);
+
+        let (packages, _) = serialize_to_packages(&graph, &root_path);
+        let link = packages
+            .get("node_modules/linked")
+            .expect("link entry must exist");
+
+        assert_eq!(link.link, Some(true));
+        assert!(link.resolved.is_some(), "link records its resolved target");
+        assert!(link.bin.is_some(), "link keeps its bin for bin-linking");
+        assert!(
+            link.has_install_script.is_none(),
+            "link must not carry has_install_script"
+        );
+        assert!(link.scripts.is_none(), "link must not carry scripts");
     }
 
     #[test]

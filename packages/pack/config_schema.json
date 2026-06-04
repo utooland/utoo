@@ -1338,7 +1338,7 @@
           ]
         },
         "publicPath": {
-          "description": "URL prefix prepended to all chunk and asset URLs. Use 'runtime' for runtime-resolved public path.",
+          "description": "URL prefix prepended to all chunk and asset URLs. Use 'runtime' for globalThis.publicPath or 'auto' for current-script inference.",
           "type": [
             "string",
             "null"

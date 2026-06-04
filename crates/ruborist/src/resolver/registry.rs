@@ -9,11 +9,12 @@
 
 use std::sync::Arc;
 
-use crate::model::manifest::FullManifest;
+use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::model::node::EdgeType;
 use crate::resolver::semver::normalize_spec;
 use crate::resolver::version::resolve_target_version;
-use crate::traits::registry::{RegistryClient, ResolvedPackage};
+use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider};
+use crate::traits::registry::ResolvedPackage;
 
 /// Error type for package resolution.
 #[derive(Debug)]
@@ -114,20 +115,85 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
 /// let resolved = resolve_package(&registry, "lodash", "^4.0.0").await?;
 /// println!("Resolved to {}@{}", resolved.name, resolved.version);
 /// ```
-pub async fn resolve_package<R: RegistryClient>(
-    registry: &R,
+pub async fn resolve_package<P: ManifestProvider>(
+    provider: &P,
     name: &str,
     spec: &str,
-) -> Result<ResolvedPackage, ResolveError<R::Error>> {
-    // Normalize spec first to handle npm: alias and workspace: prefix
-    // This ensures correct behavior even if RegistryClient::resolve_package is overridden
-    // e.g., "wrap-ansi-cjs" + "npm:wrap-ansi@^7.0.0" -> fetch "wrap-ansi" @ "^7.0.0"
+) -> Result<ResolvedPackage, ResolveError<P::Error>> {
+    // Normalize spec first to handle npm: alias and workspace: prefix, e.g.
+    // "wrap-ansi-cjs" + "npm:wrap-ansi@^7.0.0" -> fetch "wrap-ansi" @ "^7.0.0".
     let (fetch_name, fetch_spec) = normalize_spec(name, spec);
 
-    registry
-        .resolve_package(&fetch_name, &fetch_spec)
+    if provider.supports_semver_resolution() {
+        // Semver registries resolve the range/tag server-side: one version job
+        // returns the matching version's manifest directly.
+        let manifest = version_manifest(provider, &fetch_name, &fetch_spec, &fetch_spec).await?;
+        return Ok(resolved_from_version(&fetch_name, manifest));
+    }
+
+    // Non-semver: fetch the full manifest, resolve the version client-side.
+    let done = provider
+        .execute_manifest_job(ManifestJob::Full {
+            name: fetch_name.clone(),
+            spec: Some(fetch_spec.clone()),
+        })
         .await
-        .map_err(ResolveError::Registry)
+        .map_err(ResolveError::Registry)?;
+    match done {
+        // The provider speculatively extracted the requested version already.
+        ManifestJobDone::Version { manifest, .. } => {
+            Ok(resolved_from_version(&fetch_name, manifest))
+        }
+        ManifestJobDone::Full { data, .. } => match data {
+            ManifestFullData::Full { manifest, .. } => {
+                let resolved = resolve_from_manifest::<P::Error>(&manifest, &fetch_spec)?;
+                Ok(ResolvedPackage {
+                    name: fetch_name,
+                    ..resolved
+                })
+            }
+            ManifestFullData::Versions(versions) => {
+                // 304 path: resolve a concrete version from the cached list, then
+                // fetch that exact version manifest.
+                let version = resolve_target_version((&*versions).into(), &fetch_spec)
+                    .map_err(|e| ResolveError::Version(format!("{name}@{fetch_spec}: {e}")))?;
+                let manifest =
+                    version_manifest(provider, &fetch_name, &version, &fetch_spec).await?;
+                Ok(resolved_from_version(&fetch_name, manifest))
+            }
+        },
+    }
+}
+
+/// Fetch a single version manifest job and unwrap it to the version manifest.
+async fn version_manifest<P: ManifestProvider>(
+    provider: &P,
+    name: &str,
+    fetch_spec: &str,
+    requested_spec: &str,
+) -> Result<Arc<CoreVersionManifest>, ResolveError<P::Error>> {
+    let done = provider
+        .execute_manifest_job(ManifestJob::Version {
+            name: name.to_string(),
+            spec: fetch_spec.to_string(),
+            fetch_spec: fetch_spec.to_string(),
+        })
+        .await
+        .map_err(ResolveError::Registry)?;
+    match done {
+        ManifestJobDone::Version { manifest, .. } => Ok(manifest),
+        ManifestJobDone::Full { .. } => Err(ResolveError::Version(format!(
+            "{name}@{requested_spec}: provider returned a full manifest for a version job"
+        ))),
+    }
+}
+
+fn resolved_from_version(name: &str, manifest: Arc<CoreVersionManifest>) -> ResolvedPackage {
+    ResolvedPackage {
+        name: name.to_string(),
+        version: manifest.version.clone(),
+        manifest,
+    }
 }
 
 /// Resolve a package from already-fetched manifest.
@@ -165,13 +231,13 @@ pub fn resolve_from_manifest<E: std::error::Error + 'static>(
 ///
 /// For optional dependencies, returns `Ok(None)` on resolution failure
 /// instead of propagating the error.
-pub async fn resolve_registry_dep<R: RegistryClient>(
-    registry: &R,
+pub async fn resolve_registry_dep<P: ManifestProvider>(
+    provider: &P,
     name: &str,
     spec: &str,
     edge_type: &EdgeType,
-) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>> {
-    match resolve_package(registry, name, spec).await {
+) -> Result<Option<ResolvedPackage>, ResolveError<P::Error>> {
+    match resolve_package(provider, name, spec).await {
         Ok(resolved) => Ok(Some(resolved)),
         Err(e) => {
             if *edge_type == EdgeType::Optional {

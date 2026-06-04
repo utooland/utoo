@@ -101,13 +101,28 @@ cd ../../..
 # Case 7: test global install
 echo -e "${YELLOW}Case 7: cowsay global install/uninstall${NC}"
 
-# Test global install
+# Test global install. The tool is installed as a *dependency* of a synthetic
+# root (never a root project), so it runs the install lifecycle but never
+# prepare/prepublish, and its devDependencies are not installed.
 utoo install -g cowsay || { echo -e "${RED}FAIL: global install cowsay failed${NC}"; exit 1; }
 if ! which cowsay >/dev/null 2>&1; then
     echo -e "${RED}FAIL: cowsay not found in PATH after global install${NC}"
     exit 1
 fi
 echo -e "${GREEN}PASS: cowsay global install successful${NC}"
+
+# Coexistence: a second global install must reify ADDITIVELY into the shared
+# global node_modules — installing semver must not prune cowsay.
+utoo install -g semver || { echo -e "${RED}FAIL: global install semver failed${NC}"; exit 1; }
+if ! which semver >/dev/null 2>&1; then
+    echo -e "${RED}FAIL: semver not found in PATH after global install${NC}"
+    exit 1
+fi
+if ! which cowsay >/dev/null 2>&1; then
+    echo -e "${RED}FAIL: cowsay pruned by second global install (coexistence broken)${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: global installs coexist (additive reify)${NC}"
 
 
 # Case 8: git dependency install
@@ -386,6 +401,37 @@ echo -e "${GREEN}PASS: catalog update flow successful${NC}"
 mv .utoo.toml.bak .utoo.toml
 cd ../../..
 
+# Case 10c: pm-pack rewrites workspace:/catalog: protocols in the packed manifest (#3094)
+# A workspace member depends on a sibling via workspace: and on a catalog: entry.
+# `utoo pm-pack` must emit a tarball whose package.json carries concrete versions,
+# otherwise downstream `npm install` of the tgz fails with EUNSUPPORTEDPROTOCOL.
+echo -e "${YELLOW}Case 10c: pm-pack workspace:/catalog: rewrite${NC}"
+cd e2e/pm/pack-protocols/packages/foo
+rm -f ./*.tgz
+utoo pm-pack || { echo -e "${RED}FAIL: utoo pm-pack failed${NC}"; cd ../../../../..; exit 1; }
+PACK_TGZ=$(ls ./*.tgz)
+PACKED_PKG=$(tar -xzOf "$PACK_TGZ" package/package.json)
+echo "$PACKED_PKG"
+# workspace:^ -> ^2.4.1 (dependencies), workspace:~ -> ~2.4.1 (peerDependencies),
+# workspace:* -> 2.4.1 (devDependencies), catalog: -> ^4.17.21
+echo "$PACKED_PKG" | grep -q '"@pack-protocols/bar": "\^2.4.1"' \
+  || { echo -e "${RED}FAIL: workspace:^ not rewritten to ^2.4.1${NC}"; cd ../../../../..; exit 1; }
+echo "$PACKED_PKG" | grep -q '"@pack-protocols/bar": "~2.4.1"' \
+  || { echo -e "${RED}FAIL: workspace:~ not rewritten to ~2.4.1${NC}"; cd ../../../../..; exit 1; }
+echo "$PACKED_PKG" | grep -q '"@pack-protocols/bar": "2.4.1"' \
+  || { echo -e "${RED}FAIL: workspace:* not rewritten to 2.4.1${NC}"; cd ../../../../..; exit 1; }
+echo "$PACKED_PKG" | grep -q '"lodash": "\^4.17.21"' \
+  || { echo -e "${RED}FAIL: catalog: not rewritten to ^4.17.21${NC}"; cd ../../../../..; exit 1; }
+if echo "$PACKED_PKG" | grep -qE 'workspace:|catalog:'; then
+    echo -e "${RED}FAIL: raw workspace:/catalog: protocol left in packed manifest${NC}"; cd ../../../../..; exit 1
+fi
+# The on-disk source manifest must be left untouched (still uses the protocols).
+grep -q 'workspace:' package.json \
+  || { echo -e "${RED}FAIL: source package.json was mutated by pack${NC}"; cd ../../../../..; exit 1; }
+rm -f "$PACK_TGZ"
+cd ../../../../..
+echo -e "${GREEN}PASS: pm-pack workspace:/catalog: rewrite successful${NC}"
+
 # Case 11: npm alias (npm: prefix) install
 echo -e "${YELLOW}Case 11: npm alias install${NC}"
 cd e2e/pm/npm-alias
@@ -657,12 +703,26 @@ if [ ! -f "lib-b/lib/index.js" ]; then
     echo -e "${RED}FAIL: lib-b/lib/index.js missing — topological order broken${NC}"
     exit 1
 fi
-# postinstall on a workspace package must also fire (not just prepare)
+# postinstall on a workspace package must also fire (not just prepare) —
+# and EXACTLY once. Regression guard for #3097: lib-a carries a `bin`, which
+# made the rebuild collector queue its scripts from both the workspace source
+# node and the node_modules link node, on top of the topological workspace
+# walk, running postinstall 3×. The counter must read exactly 1.
 if [ ! -f "lib-a/.markers/postinstall" ]; then
     echo -e "${RED}FAIL: lib-a postinstall did not run${NC}"
     exit 1
 fi
-echo -e "${GREEN}PASS: utoo install ran workspace prepare/postinstall in topo order${NC}"
+count=$(wc -l < lib-a/.markers/postinstall | tr -d ' ')
+if [ "$count" != "1" ]; then
+    echo -e "${RED}FAIL: lib-a postinstall ran ${count}× (expected 1) — #3097 regression${NC}"
+    exit 1
+fi
+# the workspace `bin` must still be linked into node_modules/.bin
+if [ ! -e "node_modules/.bin/lib-a-cli" ]; then
+    echo -e "${RED}FAIL: workspace bin lib-a-cli not linked into node_modules/.bin${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: utoo install ran workspace prepare/postinstall once in topo order${NC}"
 
 # ut rebuild must re-run the same hooks (per issue: rebuild was also broken)
 rm -rf lib-a/lib lib-a/.markers lib-b/lib
@@ -678,7 +738,12 @@ if [ ! -f "lib-a/.markers/postinstall" ]; then
     echo -e "${RED}FAIL: utoo rebuild did not run workspace postinstall${NC}"
     exit 1
 fi
-echo -e "${GREEN}PASS: utoo rebuild re-ran workspace prepare/postinstall${NC}"
+count=$(wc -l < lib-a/.markers/postinstall | tr -d ' ')
+if [ "$count" != "1" ]; then
+    echo -e "${RED}FAIL: utoo rebuild ran lib-a postinstall ${count}× (expected 1) — #3097 regression${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: utoo rebuild re-ran workspace prepare/postinstall once${NC}"
 
 # --ignore-scripts must skip workspace hooks too (no surprise side effects)
 rm -rf node_modules lib-a/lib lib-a/.markers lib-b/lib package-lock.json
@@ -1181,5 +1246,34 @@ utoo add -g cowsay --registry=https://registry.npmjs.org \
   || { echo -e "${RED}FAIL: utoo add -g cowsay${NC}"; exit 1; }
 which cowsay >/dev/null 2>&1 || { echo -e "${RED}FAIL: cowsay not in PATH after global add${NC}"; exit 1; }
 echo -e "${GREEN}  ✓ PASS: utoo add -g works${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+# Case: prod-reachable devDependency must not be marked `dev`
+# ═══════════════════════════════════════════════════════════════
+# `p-timeout` is declared as a root devDependency (shallow dev path) but is
+# also a prod dependency of `sdk-base` (a root prod dependency). Since it is
+# reachable through a prod chain it must be a prod node — no `"dev": true` —
+# matching npm. Regression test for the demand resolver leaving stale dev marks
+# on prod-reachable transitive deps.
+echo -e "${YELLOW}Case: prod-reachable devDependency is not marked dev${NC}"
+cd e2e/pm/dev-prod-dedup
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for dev-prod-dedup${NC}"; exit 1; }
+node -e '
+const lock = require("./package-lock.json");
+const sdkBase = lock.packages["node_modules/sdk-base"];
+const pTimeout = lock.packages["node_modules/p-timeout"];
+if (!sdkBase) { console.error("sdk-base missing from lockfile"); process.exit(1); }
+if (!pTimeout) { console.error("p-timeout missing from lockfile"); process.exit(1); }
+if (sdkBase.dev === true) { console.error("sdk-base wrongly marked dev"); process.exit(1); }
+if (pTimeout.dev === true) {
+  console.error("REGRESSION: p-timeout is prod-reachable via sdk-base but marked dev:true");
+  process.exit(1);
+}
+' || { echo -e "${RED}FAIL: prod-reachable dep marked dev in lockfile${NC}"; exit 1; }
+echo -e "${GREEN}PASS: prod-reachable devDependency correctly not marked dev${NC}"
+cd ../../../
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

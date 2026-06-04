@@ -12,6 +12,11 @@
     "pack.linux-arm64-musl.node"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/utooland/utoo",
+    "directory": "packages/pack"
+  },
   "engines": {
     "node": ">= 20"
   },

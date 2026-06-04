@@ -69,6 +69,7 @@ pub mod semver {
 /// Dependency resolution builder.
 pub mod builder {
     pub use crate::model::node::{DevDeps, PeerDeps};
+    pub use crate::resolver::builder::add_workspace_member;
     pub use crate::resolver::edges::{DependencySource, EdgeContext, add_edges_from};
 }
 

@@ -21,6 +21,7 @@ use super::LibraryChunkingContext;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
 pub struct LibraryChunkingContextOptions {
+    pub name: Vc<Option<RcStr>>,
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
     pub output_root: FileSystemPath,
@@ -50,6 +51,7 @@ pub async fn get_library_chunking_context(
     options: LibraryChunkingContextOptions,
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let LibraryChunkingContextOptions {
+        name,
         mode,
         root_path,
         output_root,
@@ -133,18 +135,20 @@ pub async fn get_library_chunking_context(
     .nested_async_availability(*nested_async_chunking.await?)
     .is_node_platform(matches!(&*platform, Platform::Node));
 
-    if !mode.is_development() {
-        if let Some(filename) = &output.filename {
-            builder = builder.filename(filename.clone());
-        }
+    if let Some(name) = (*name.await?).clone() {
+        builder = builder.name(name);
+    }
 
-        if let Some(css_filename) = &output.css_filename {
-            builder = builder.css_filename(css_filename.clone());
-        }
+    if let Some(filename) = &output.filename {
+        builder = builder.filename(filename.clone());
+    }
 
-        if let Some(asset_module_filename) = &output.asset_module_filename {
-            builder = builder.asset_module_filename(asset_module_filename.clone());
-        }
+    if let Some(css_filename) = &output.css_filename {
+        builder = builder.css_filename(css_filename.clone());
+    }
+
+    if let Some(asset_module_filename) = &output.asset_module_filename {
+        builder = builder.asset_module_filename(asset_module_filename.clone());
     }
 
     if mode.is_development() {

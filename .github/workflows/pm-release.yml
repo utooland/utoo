@@ -111,10 +111,19 @@ jobs:
           fi
 
       - name: Update Cargo.toml version
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" crates/pm/Cargo.toml
+          set -euo pipefail
+          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${VERSION}\"|}" crates/pm/Cargo.toml
           rm crates/pm/Cargo.toml.bak
+
+          ACTUAL=$(awk -F\" '/^version[[:space:]]*=/ { print $2; exit }' crates/pm/Cargo.toml)
+          if [ "$ACTUAL" != "$VERSION" ]; then
+            echo "Failed to update crates/pm/Cargo.toml to version $VERSION; found $ACTUAL" >&2
+            head -12 crates/pm/Cargo.toml >&2
+            exit 1
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -188,13 +197,17 @@ jobs:
         if: ${{ github.event_name == 'release' }}
         uses: actions/setup-node@v3
         with:
-          node-version: "18.x"
+          node-version: 22.14.0
           registry-url: "https://registry.npmjs.org"
+
+      - name: Bump npm CLI for OIDC trusted publisher
+        # Trusted publishing requires npm 11.5.1+.
+        if: ${{ github.event_name == 'release' }}
+        run: npm install --global npm@11.6.2
 
       - name: Publish Binary Packages
         if: ${{ github.event_name == 'release' }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           set -e
@@ -247,12 +260,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "18.x"
+          node-version: 22.14.0
           registry-url: "https://registry.npmjs.org"
+
+      - name: Bump npm CLI for OIDC trusted publisher
+        # Trusted publishing requires npm 11.5.1+.
+        run: npm install --global npm@11.6.2
 
       - name: Publish Main utoo Package
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.get_version.outputs.VERSION }}
           NPM_TAG: ${{ steps.get_version.outputs.NPM_TAG }}
         run: |

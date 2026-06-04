@@ -2,12 +2,12 @@
 
 pub mod builder;
 pub mod common;
+pub(crate) mod demand;
 pub mod edges;
 #[cfg(feature = "native-git")]
 pub mod git;
 #[cfg(feature = "http-tarball")]
 pub mod http;
-pub mod preload;
 pub mod registry;
 pub mod runtime;
 pub mod semver;

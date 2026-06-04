@@ -2,8 +2,11 @@
   "name": "lib-a",
   "version": "1.0.0",
   "main": "lib/index.js",
+  "bin": {
+    "lib-a-cli": "bin/cli.js"
+  },
   "scripts": {
     "prepare": "mkdir -p lib && printf 'module.exports=\"lib-a-built\";' > lib/index.js",
-    "postinstall": "mkdir -p .markers && touch .markers/postinstall"
+    "postinstall": "mkdir -p .markers && echo x >> .markers/postinstall"
   }
 }

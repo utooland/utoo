@@ -3,7 +3,7 @@ use colored::Colorize;
 use dialoguer::FuzzySelect;
 use std::path::Path;
 
-use crate::helper::workspace::find_workspaces;
+use crate::helper::ruborist_context::Context as FsContext;
 use crate::util::user_config::get_or_load_package_json;
 use utoo_ruborist::manifest::PackageJson;
 
@@ -87,12 +87,10 @@ pub async fn select_script(cwd: &Path, workspace_filter: Option<&str>) -> Result
         items.sort_by(|a, b| a.script_name.cmp(&b.script_name));
 
         // Collect scripts from all workspaces
-        let workspaces = find_workspaces(cwd).await?;
+        let workspaces = FsContext::discovery().find_workspaces(cwd).await?;
         let mut workspace_items: Vec<ScriptItem> = workspaces
             .into_iter()
-            .flat_map(|(workspace_name, _workspace_path, workspace_pkg)| {
-                collect_scripts_from_package(&workspace_pkg, Some(workspace_name))
-            })
+            .flat_map(|ws| collect_scripts_from_package(&ws.package_json, Some(ws.name)))
             .collect();
 
         // Sort workspace items by workspace name, then script name
@@ -107,14 +105,14 @@ pub async fn select_script(cwd: &Path, workspace_filter: Option<&str>) -> Result
         items
     } else if let Some(workspace_name) = workspace_filter {
         // Collect scripts from specific workspace
-        let workspaces = find_workspaces(cwd).await?;
-        let (_name, _path, workspace_pkg) = workspaces
+        let workspaces = FsContext::discovery().find_workspaces(cwd).await?;
+        let ws = workspaces
             .into_iter()
-            .find(|(name, _, _)| name == workspace_name)
+            .find(|ws| ws.name == workspace_name)
             .ok_or_else(|| anyhow::anyhow!("Workspace '{}' not found", workspace_name))?;
 
         // Don't show workspace prefix when filtering by workspace
-        let mut items = collect_scripts_from_package(&workspace_pkg, None);
+        let mut items = collect_scripts_from_package(&ws.package_json, None);
         items.sort_by(|a, b| a.script_name.cmp(&b.script_name));
         items
     } else {

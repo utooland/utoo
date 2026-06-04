@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "Webpack compatible example",
   "scripts": {
-    "build": "NODE_ENV=production up build --webpack",
-    "dev": "NODE_ENV=development up dev --webpack"
+    "build": "up build --webpack",
+    "dev": "up dev --webpack"
   },
   "dependencies": {
     "react": "^18.3.1",

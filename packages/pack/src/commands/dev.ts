@@ -87,6 +87,10 @@ function normalizedPublicPath(publicPath: string | undefined): string {
   return `/${escapedPublicPath}`;
 }
 
+function isRuntimeResolvedPublicPath(publicPath: string | undefined): boolean {
+  return publicPath === "runtime" || publicPath === "auto";
+}
+
 // --- Public types (match dev.ts for index switch) ---
 
 export interface SelfSignedCertificate {
@@ -244,9 +248,9 @@ async function runDev(
 
   const distRoot = getOutputPath(options.config, projectPathResolved);
   const publicPath = options.config?.output?.publicPath;
-  // Skip prefix stripping for "runtime" and when publicPath is absent (match dev.ts).
+  // Skip prefix stripping for runtime-resolved publicPath modes and when publicPath is absent.
   const normalizedPrefix =
-    publicPath && publicPath !== "runtime"
+    publicPath && !isRuntimeResolvedPublicPath(publicPath)
       ? normalizedPublicPath(publicPath)
       : "";
 

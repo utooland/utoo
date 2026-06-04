@@ -15,11 +15,58 @@ export interface ResultWithIssues {
   issues: Issue[];
 }
 
+type IssueKey = `${Issue["severity"]}-${Issue["filePath"]}-${string}-${string}`;
+export type IssuesMap = Map<IssueKey, Issue>;
+export type EntryIssuesMap = Map<string, IssuesMap>;
+
+export function getIssueKey(issue: Issue): IssueKey {
+  return `${issue.severity}-${issue.filePath}-${JSON.stringify(
+    issue.title,
+  )}-${JSON.stringify(issue.description)}`;
+}
+
 export function processIssues(
   result: ResultWithIssues,
   throwIssue: boolean,
   logErrors: boolean,
+): void;
+export function processIssues(
+  currentEntryIssues: EntryIssuesMap,
+  key: string,
+  result: ResultWithIssues,
+  throwIssue: boolean,
+  logErrors: boolean,
+): void;
+export function processIssues(
+  resultOrCurrentEntryIssues: ResultWithIssues | EntryIssuesMap,
+  throwIssueOrKey: boolean | string,
+  logErrorsOrResult: boolean | ResultWithIssues,
+  maybeThrowIssue?: boolean,
+  maybeLogErrors?: boolean,
 ) {
+  const currentEntryIssues =
+    resultOrCurrentEntryIssues instanceof Map
+      ? resultOrCurrentEntryIssues
+      : undefined;
+  const key =
+    resultOrCurrentEntryIssues instanceof Map
+      ? (throwIssueOrKey as string)
+      : undefined;
+  const result = currentEntryIssues
+    ? (logErrorsOrResult as ResultWithIssues)
+    : (resultOrCurrentEntryIssues as ResultWithIssues);
+  const throwIssue = currentEntryIssues
+    ? maybeThrowIssue!
+    : (throwIssueOrKey as boolean);
+  const logErrors = currentEntryIssues
+    ? maybeLogErrors!
+    : (logErrorsOrResult as boolean);
+  const newIssues = currentEntryIssues ? new Map<IssueKey, Issue>() : undefined;
+
+  if (currentEntryIssues && key) {
+    currentEntryIssues.set(key, newIssues!);
+  }
+
   const relevantIssues = new Set();
 
   for (const issue of result.issues) {
@@ -29,6 +76,8 @@ export function processIssues(
       issue.severity !== "warning"
     )
       continue;
+
+    newIssues?.set(getIssueKey(issue), issue);
 
     if (issue.severity !== "warning") {
       if (throwIssue) {

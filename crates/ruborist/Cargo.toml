@@ -6,7 +6,7 @@ description = "Rust arborist - dependency resolution core for utoo package manag
 homepage    = "https://github.com/utooland/utoo"
 repository  = "https://github.com/utooland/utoo"
 license     = "MIT"
-keywords    = ["arborist", "dependency-resolution", "npm", "package-manager"]
+keywords    = ["arborist", "npm", "package-manager", "resolver"]
 categories  = ["development-tools"]
 
 # tombi: format.rules.table-keys-order.disabled = true
@@ -22,7 +22,7 @@ futures      = "0.3"
 parking_lot  = { workspace = true }
 petgraph     = "0.6"
 serde        = { version = "1.0", features = ["derive"] }
-serde_json   = { workspace = true }
+serde_json   = { workspace = true, features = ["raw_value"] }
 simd-json    = "0.17"
 thiserror    = { workspace = true }
 tokio-fs-ext = { workspace = true }

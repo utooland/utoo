@@ -414,10 +414,10 @@ pub struct SchemaOutputConfig {
     pub copy: Option<Vec<SchemaCopyItem>>,
 
     /// URL prefix prepended to all chunk and asset URLs when loading them.
-    /// Examples: "/", "/assets/", "https://cdn.example.com/", "runtime"
+    /// Examples: "/", "/assets/", "https://cdn.example.com/", "runtime", "auto"
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
-        description = "URL prefix prepended to all chunk and asset URLs. Use 'runtime' for runtime-resolved public path."
+        description = "URL prefix prepended to all chunk and asset URLs. Use 'runtime' for globalThis.publicPath or 'auto' for current-script inference."
     )]
     pub public_path: Option<String>,
 

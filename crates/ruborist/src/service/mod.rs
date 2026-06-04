@@ -48,20 +48,20 @@ pub(crate) mod dns;
 pub(crate) mod fetch;
 mod fs;
 pub(crate) mod http;
-mod manifest;
+pub(crate) mod manifest;
+mod manifest_provider;
 mod registry;
 mod store;
 
-pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps};
-pub use cache::{
-    CacheStats, MemoryCache, PackageCache, ProjectCacheData, ProjectPackageCache, Versions,
-    VersionsInfo,
-};
+pub use api::{BuildDepsOptions, BuildDepsOutput, build_deps, read_root_manifest};
+pub use cache::{ProjectCacheData, ProjectPackageCache, Versions, VersionsInfo};
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{
-    FetchManifestOptions, FetchManifestResult, FetchVersionManifestOptions, MetadataFormat,
-    fetch_full_manifest, fetch_full_manifest_fresh, fetch_version_manifest,
+    FetchManifestBytesResult, FetchManifestOptions, FetchManifestResult,
+    FetchVersionManifestOptions, MetadataFormat, fetch_full_manifest, fetch_full_manifest_bytes,
+    fetch_full_manifest_fresh,
 };
+pub use manifest_provider::{ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider};
 pub use registry::UnifiedRegistry;
 pub use store::{ManifestStore, NoopStore};

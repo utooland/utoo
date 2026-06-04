@@ -107,11 +107,32 @@ jobs:
           UTOO_VERSION: ${{ steps.meta.outputs.version }}
           RUB_VERSION: ${{ steps.rub.outputs.version }}
         run: |
-          set -e
-          sed -i.bak "0,/^version *=.*/s|^version *=.*|version     = \"${RUB_VERSION}\"|" crates/ruborist/Cargo.toml
-          sed -i.bak "0,/^version *=.*/s|^version *=.*|version     = \"${UTOO_VERSION}\"|" crates/pm/Cargo.toml
-          sed -i.bak "s|^utoo-ruborist *=.*|utoo-ruborist      = { path = \"../ruborist\", version = \"${RUB_VERSION}\", features = [\"http-tarball\", \"native-git\"] }|" crates/pm/Cargo.toml
+          set -euo pipefail
+          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${RUB_VERSION}\"|}" crates/ruborist/Cargo.toml
+          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${UTOO_VERSION}\"|}" crates/pm/Cargo.toml
+          sed -i.bak "s|^utoo-ruborist[[:space:]]*=.*|utoo-ruborist      = { path = \"../ruborist\", version = \"${RUB_VERSION}\", features = [\"http-tarball\", \"native-git\"] }|" crates/pm/Cargo.toml
           rm -f crates/pm/Cargo.toml.bak crates/ruborist/Cargo.toml.bak
+
+          check_version() {
+            local file=$1
+            local expected=$2
+            local actual
+
+            actual=$(awk -F\" '/^version[[:space:]]*=/ { print $2; exit }' "$file")
+            if [ "$actual" != "$expected" ]; then
+              echo "Failed to update $file to version $expected; found $actual" >&2
+              head -12 "$file" >&2
+              exit 1
+            fi
+          }
+
+          check_version crates/ruborist/Cargo.toml "$RUB_VERSION"
+          check_version crates/pm/Cargo.toml "$UTOO_VERSION"
+          if ! grep -Fq "version = \"${RUB_VERSION}\"" crates/pm/Cargo.toml; then
+            echo "Failed to update utoo-ruborist dependency to version $RUB_VERSION" >&2
+            grep '^utoo-ruborist' crates/pm/Cargo.toml >&2 || true
+            exit 1
+          fi
 
           echo "----- crates/ruborist/Cargo.toml -----"
           head -12 crates/ruborist/Cargo.toml

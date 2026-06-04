@@ -63,6 +63,8 @@ export interface ProjectOptions extends BundleOptions {
 export interface Project {
   update(options: Partial<ProjectOptions>): Promise<void>;
 
+  writeAllEntrypointsToDisk(): Promise<TurbopackResult<RawEntrypoints>>;
+
   entrypointsSubscribe(): AsyncIterableIterator<
     TurbopackResult<RawEntrypoints>
   >;

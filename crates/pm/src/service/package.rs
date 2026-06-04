@@ -1,14 +1,14 @@
-use crate::helper::workspace::find_workspaces;
+use crate::helper::ruborist_context::Context as FsContext;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
 use futures;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
-use utoo_ruborist::lock::PackageLock;
+use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::ScriptsView;
 use utoo_ruborist::model::package_json::parse_bin_field;
 
@@ -18,6 +18,25 @@ use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 /// npm install lifecycle ordered by event chain, each expanding to
 /// `pre<event>` / `<event>` / `post<event>` via [`ScriptService::run_lifecycle`].
 const NPM_INSTALL_EVENTS: &[&str] = &["install", "prepublish", "prepare"];
+
+/// True if `path` contains `node_modules` as a distinct path segment — not just
+/// as a substring of some other segment (e.g. a workspace dir literally named
+/// `node_modules-utils`). Handles both `/` and `\` separators.
+fn has_node_modules_segment(path: &str) -> bool {
+    path.split(['/', '\\']).any(|seg| seg == "node_modules")
+}
+
+/// Whether `pkg` is a workspace's `node_modules` link — a link whose `resolved`
+/// target is one of the workspace source dirs. A `file:<dir>` dep is also a link
+/// but resolves to a non-workspace dir, so it returns `false` and keeps its own
+/// scripts. `resolved` is normalized to `/` to match the normalized source keys.
+fn links_to_workspace_source(pkg: &LockPackage, workspace_sources: &HashSet<String>) -> bool {
+    pkg.is_link()
+        && pkg
+            .resolved
+            .as_deref()
+            .is_some_and(|target| workspace_sources.contains(&target.replace('\\', "/")))
+}
 
 /// Execution queues for package scripts and binary linking
 /// Each entry is (PackageInfo, is_optional) where is_optional indicates if the package
@@ -48,13 +67,14 @@ impl PackageService {
             ResolvedWorkspaces::Current => return Ok(()),
         };
 
-        let mut by_name: HashMap<String, PackageInfo> = find_workspaces(root_path)
+        let mut by_name: HashMap<String, PackageInfo> = FsContext::discovery()
+            .find_workspaces(root_path)
             .await?
             .into_iter()
-            .map(|(name, path, pkg)| {
-                let info = PackageInfo::from_package_json(&path, &pkg)
-                    .with_context(|| format!("Failed to load workspace {name}"))?;
-                Ok((name, info))
+            .map(|ws| {
+                let info = PackageInfo::from_package_json(&ws.path, &ws.package_json)
+                    .with_context(|| format!("Failed to load workspace {}", ws.name))?;
+                Ok((ws.name, info))
             })
             .collect::<Result<_>>()?;
 
@@ -105,11 +125,55 @@ impl PackageService {
     ) -> Result<Vec<(PackageInfo, bool)>> {
         tracing::debug!("Collecting packages from memory lock...");
 
+        // This collector is utoo's equivalent of npm's `depNodes` rebuild set
+        // (`arborist/lib/arborist/rebuild.js` `#retrieveNodesByType`). npm keeps
+        // a workspace's install lifecycle out of that set with two operations,
+        // both reproduced below:
+        //   1. it splits `node.isLink` nodes out (links run in a separate build);
+        //   2. it then `depNodes.delete(node.target)` — drops each link's target
+        //      (the workspace source dir), citing npm/cli#2905 "lifecycle scripts
+        //      twice".
+        // utoo's "links build" is `process_workspace_install_hooks` (the
+        // topological workspace walk), which — unlike npm — covers only declared
+        // `workspaces`, NOT `file:<dir>` deps. So a workspace link is excluded
+        // here, but a `file:` link (no workspace-walk coverage) keeps running its
+        // scripts in this collector.
+        //
+        // Workspace source dirs are the only non-root lock entries keyed without
+        // a `node_modules` segment (deps/links all live under `node_modules/`);
+        // a workspace link is then any `link:true` entry whose `resolved` points
+        // back at one of those sources.
+        let workspace_source_paths: HashSet<String> = package_lock
+            .packages
+            .keys()
+            .filter(|p| !p.is_empty() && !has_node_modules_segment(p))
+            .map(|p| p.replace('\\', "/"))
+            .collect();
+
         let mut packages = Vec::new();
         for (path, lock_package) in &package_lock.packages {
             if path.is_empty() {
                 continue;
             }
+
+            // (2) Drop the workspace source dir (npm's `depNodes.delete(target)`).
+            // Its lifecycle runs via the workspace walk, and npm never bin-links
+            // the source dir — collecting it here re-runs its scripts on top of
+            // the walk.
+            if !has_node_modules_segment(path) {
+                continue;
+            }
+
+            // (1) Split out link nodes (npm's `node.isLink` branch). The
+            // serializer no longer stamps script markers on links (see #3097), so
+            // `has_scripts` is always false for them and their scripts are decided
+            // from disk instead. A *workspace* link has its scripts suppressed
+            // (owned by the workspace walk) and is kept only for bin linking — how
+            // a workspace `bin` lands in `node_modules/.bin` (npm's `#linkAllBins`);
+            // a `file:` link keeps running its own scripts here.
+            let is_link = lock_package.is_link();
+            let is_workspace_link =
+                links_to_workspace_source(lock_package, &workspace_source_paths);
 
             // Early filtering based on scripts parameter
             let has_scripts = lock_package.has_install_scripts();
@@ -121,11 +185,20 @@ impl PackageService {
                 .unwrap_or_default();
             let has_bin = !bin_files.is_empty();
 
-            // Skip packages that don't meet the filter criteria
+            // A workspace link contributes bin linking only — its install
+            // scripts run via `process_workspace_install_hooks`. With no bin it
+            // has nothing left to do here, so drop it.
+            if is_workspace_link && !has_bin {
+                continue;
+            }
+
+            // Skip packages that don't meet the filter criteria. A link node is
+            // never dropped here on the `has_scripts` test (it carries no script
+            // marker in the lock); its scripts are read from disk below.
             if scripts == ScriptPolicy::Ignore && !has_bin {
                 continue; // scripts mode: only process packages with binaries
             }
-            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin {
+            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin && !is_link {
                 continue; // full mode: process packages with scripts or binaries
             }
 
@@ -146,14 +219,29 @@ impl PackageService {
                 continue;
             }
 
-            // Read lifecycle scripts from package.json only if needed
-            let lifecycle_scripts = if has_scripts || scripts == ScriptPolicy::Run {
-                Self::read_lifecycle_scripts(&package_path)
-                    .await
-                    .with_context(|| format!("Failed to read scripts for package: {path}"))?
-            } else {
-                LifecycleScripts::default()
-            };
+            // Read lifecycle scripts from package.json only if needed. A
+            // workspace link contributes bin linking only — leave its scripts
+            // empty so `create_execution_queues` never queues them (owned by
+            // `process_workspace_install_hooks`).
+            let lifecycle_scripts =
+                if !is_workspace_link && (has_scripts || scripts == ScriptPolicy::Run) {
+                    match Self::read_lifecycle_scripts(&package_path).await {
+                        Ok(s) => s,
+                        // A `file:` link can resolve to a missing or degenerate
+                        // `package.json` (e.g. a conflict artifact keyed
+                        // `node_modules/` with an empty name). Treat that as "no
+                        // scripts" rather than failing the whole install; a real
+                        // dependency with an unreadable manifest still errors.
+                        Err(_) if is_link => LifecycleScripts::default(),
+                        Err(e) => {
+                            return Err(e).with_context(|| {
+                                format!("Failed to read scripts for package: {path}")
+                            });
+                        }
+                    }
+                } else {
+                    LifecycleScripts::default()
+                };
 
             // Check if this package is an optional dependency (based on edge type)
             let is_optional =
@@ -899,6 +987,196 @@ mod tests {
                 package_info.name
             );
         }
+    }
+
+    /// Regression for #3097: a workspace produces two lock entries that both
+    /// carry script/bin markers — the source node (`lib-a`) and the
+    /// `node_modules` link (`node_modules/lib-a`). Their install lifecycle is
+    /// owned by `process_workspace_install_hooks`, so `collect_packages_from_lock`
+    /// must not re-queue their scripts (the source + link + workspace-walk =
+    /// 3× run bug). The link is still collected for bin linking, and a plain
+    /// `file:` link (not a workspace) keeps running its scripts.
+    #[tokio::test]
+    async fn test_collect_packages_from_lock_skips_workspace_hooks() {
+        use crate::model::package::LifecycleHook;
+        use serde_json::json;
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+        use utoo_ruborist::lock::{LockPackage, PackageLock};
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut packages = HashMap::new();
+
+        // Workspace source node — keyed by its root-relative dir (no node_modules).
+        packages.insert(
+            "lib-a".to_string(),
+            LockPackage {
+                name: Some("lib-a".to_string()),
+                version: Some("1.0.0".to_string()),
+                bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
+                has_install_script: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
+        // Workspace `node_modules` link — resolves back to the source dir. Link
+        // nodes carry no script marker (the serializer omits has_install_script /
+        // scripts on links since #3097); only `bin` + `link` + `resolved`.
+        packages.insert(
+            "node_modules/lib-a".to_string(),
+            LockPackage {
+                name: Some("lib-a".to_string()),
+                link: Some(true),
+                resolved: Some("lib-a".to_string()),
+                bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
+                ..LockPackage::default()
+            },
+        );
+
+        // A plain `file:` link — NOT a workspace (resolved points outside, with
+        // no matching source entry). It carries no script marker either, so its
+        // scripts must still be collected via the `is_link` gate exception and
+        // read from disk.
+        packages.insert(
+            "node_modules/file-dep".to_string(),
+            LockPackage {
+                name: Some("file-dep".to_string()),
+                link: Some(true),
+                resolved: Some("../file-dep".to_string()),
+                ..LockPackage::default()
+            },
+        );
+
+        // A workspace whose dir name merely *contains* "node_modules" as a
+        // substring (not a path segment). It must still be treated as a source
+        // node and excluded — guards against a substring `contains` check.
+        packages.insert(
+            "node_modules-utils".to_string(),
+            LockPackage {
+                name: Some("node_modules-utils".to_string()),
+                version: Some("1.0.0".to_string()),
+                has_install_script: Some(true),
+                ..LockPackage::default()
+            },
+        );
+
+        let package_lock = PackageLock::new("ws".to_string(), "1.0.0".to_string(), packages);
+
+        // Materialize package.json for every entry's on-disk path.
+        for (rel, postinstall) in [
+            ("lib-a", "echo source"),
+            ("node_modules/lib-a", "echo link"),
+            ("node_modules/file-dep", "echo file"),
+            ("node_modules-utils", "echo substring-ws"),
+        ] {
+            let dir = temp_dir.path().join(rel);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("package.json"),
+                serde_json::to_string_pretty(&json!({
+                    "name": "x",
+                    "version": "1.0.0",
+                    "scripts": { "postinstall": postinstall }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+
+        let collected = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Run,
+        )
+        .await
+        .unwrap();
+
+        // The workspace source node (root-relative `lib-a`) is never collected.
+        assert!(
+            !collected
+                .iter()
+                .any(|(p, _)| p.path == temp_dir.path().join("lib-a")),
+            "workspace source node must be excluded"
+        );
+
+        // A workspace dir containing "node_modules" as a substring is still a
+        // source node and must be excluded (path-segment, not substring, check).
+        assert!(
+            !collected
+                .iter()
+                .any(|(p, _)| p.path == temp_dir.path().join("node_modules-utils")),
+            "substring-named workspace source must be excluded"
+        );
+
+        // The workspace link is collected for bin linking but with no scripts.
+        let link = collected
+            .iter()
+            .find(|(p, _)| p.path.to_string_lossy().contains("node_modules/lib-a"))
+            .expect("workspace link should be collected for bin linking");
+        assert!(
+            !link.0.bin_files.is_empty(),
+            "workspace link must keep its bin for node_modules/.bin"
+        );
+        assert!(
+            link.0
+                .lifecycle_scripts
+                .get_script(LifecycleHook::Postinstall)
+                .is_none(),
+            "workspace link must not carry install scripts (owned by workspace walk)"
+        );
+
+        // The plain file: link keeps its postinstall.
+        let file_dep = collected
+            .iter()
+            .find(|(p, _)| p.path.to_string_lossy().contains("file-dep"))
+            .expect("file: link should still be collected");
+        assert!(
+            file_dep
+                .0
+                .lifecycle_scripts
+                .get_script(LifecycleHook::Postinstall)
+                .is_some(),
+            "non-workspace file: link must keep running its scripts"
+        );
+    }
+
+    /// A `file:` dep can serialize to a degenerate link entry (empty name →
+    /// key `node_modules/`) whose path has no `package.json`. Reading scripts
+    /// for it must not fail the whole install — collect tolerates the missing
+    /// manifest for link nodes and yields no scripts. Regression for the
+    /// `conflict-bundle-file-dep` e2e crash.
+    #[tokio::test]
+    async fn test_collect_tolerates_link_with_missing_manifest() {
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+        use utoo_ruborist::lock::{LockPackage, PackageLock};
+
+        let temp_dir = TempDir::new().unwrap();
+        // The link's path resolves to the node_modules dir itself, which exists
+        // but holds no package.json.
+        std::fs::create_dir_all(temp_dir.path().join("node_modules")).unwrap();
+
+        let mut packages = HashMap::new();
+        packages.insert(
+            "node_modules/".to_string(),
+            LockPackage {
+                link: Some(true),
+                resolved: Some("some-file-dep".to_string()),
+                ..LockPackage::default()
+            },
+        );
+        let package_lock = PackageLock::new("p".to_string(), "1.0.0".to_string(), packages);
+
+        let result = PackageService::collect_packages_from_lock(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Run,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "degenerate link entry must not fail collect: {result:?}"
+        );
     }
 
     #[tokio::test]

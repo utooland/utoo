@@ -20,22 +20,19 @@
 //! ```
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::cache::{PackageCache, ProjectCacheData};
+use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
-use super::store::{ManifestStore, NoopStore};
-use crate::model::graph::{DependencyGraph, PackageNode};
-use crate::model::node::EdgeType;
+use crate::model::graph::DependencyGraph;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
-use crate::model::util::parse_package_spec;
 use crate::resolver::builder::{
-    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, build_deps_with_config,
+    BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, add_workspace_member,
+    build_deps_with_config_output,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -46,17 +43,17 @@ use crate::traits::progress::EventReceiver;
 pub struct BuildDepsOptions<G, R> {
     /// Current working directory (contains package.json)
     pub cwd: PathBuf,
-    /// Registry URL (e.g., "https://registry.npmmirror.com")
-    pub registry_url: String,
+    /// Pre-built registry client. The host (pm) constructs this with the
+    /// registry URL, manifest store, semver capability, and any private-registry
+    /// auth token — keeping all registry configuration (and credential
+    /// resolution) on the host side, out of ruborist.
+    pub registry: UnifiedRegistry,
     /// Tarball cache directory passed through to non-registry resolvers
     /// (http/tarball, native-git). Unrelated to manifest disk cache.
     pub cache_dir: Option<PathBuf>,
-    /// Persistence backend for manifest cache. Defaults to `NoopStore`
-    /// (everything is in-memory).
-    pub manifest_store: Arc<dyn ManifestStore>,
-    /// Project-level warm cache pre-loaded by the host. Pre-populates the
-    /// in-memory manifest cache to skip the preload phase on a warm install.
-    pub warm_project_cache: Option<ProjectCacheData>,
+    /// Project-level warm cache pre-loaded by the host. Seeds the demand
+    /// resolver's manifest cache so a warm install skips re-fetching.
+    pub project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
     /// How to handle peer dependencies.
@@ -65,8 +62,6 @@ pub struct BuildDepsOptions<G, R> {
     pub glob: G,
     /// Progress event receiver
     pub receiver: R,
-    /// Explicit semver support override (None = auto-detect from registry URL)
-    pub supports_semver: Option<bool>,
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
@@ -81,15 +76,15 @@ impl<G, R> BuildDepsOptions<G, R> {
     {
         Self {
             cwd,
-            registry_url: "https://registry.npmmirror.com".to_string(),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.npmmirror.com")
+                .build(),
             cache_dir: None,
-            manifest_store: Arc::new(NoopStore),
-            warm_project_cache: None,
+            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob,
             receiver,
-            supports_semver: None,
             catalogs: HashMap::new(),
         }
     }
@@ -106,45 +101,37 @@ pub struct BuildDepsOutput {
     pub project_cache: ProjectCacheData,
 }
 
-/// Build dependency tree and return [`BuildDepsOutput`].
-///
-/// This is the main entry point for dependency resolution. It:
-/// 1. Reads package.json from cwd (and finds workspace root if applicable)
-/// 2. Discovers and adds workspace packages
-/// 3. Injects runtime dependencies (node-bin packages from engines.install-node)
-/// 4. Initializes the dependency graph
-/// 5. Resolves all dependencies using the registry
-/// 6. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
-pub async fn build_deps<G, R>(options: BuildDepsOptions<G, R>) -> Result<BuildDepsOutput>
+/// Build dependency tree from an **in-memory root manifest** `pkg` and return
+/// [`BuildDepsOutput`]. `options.cwd` is the resolution root, already resolved by
+/// the caller — a normal install reads it via [`read_root_manifest`]; a global
+/// install (`utoo install -g`, `utoo x`) synthesizes a private root
+/// `{ dependencies: { <tool>: <spec> } }` so the tool resolves as a *dependency*
+/// (no `prepare`/`prepublish`, no `devDependencies`). It:
+/// 1. Injects runtime dependencies (node-bin packages from engines.install-node)
+/// 2. Builds the graph and adds root + workspace edges
+/// 3. Resolves all dependencies using the registry
+/// 4. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
+pub async fn build_deps<G, R>(
+    options: BuildDepsOptions<G, R>,
+    mut pkg: PackageJson,
+) -> Result<BuildDepsOutput>
 where
     G: Glob + Clone,
     R: EventReceiver,
 {
     let BuildDepsOptions {
-        cwd,
-        registry_url,
+        cwd: root_path,
+        registry,
         cache_dir,
-        manifest_store,
-        warm_project_cache,
+        project_cache,
         concurrency,
         peer_deps,
         glob,
         receiver,
-        supports_semver,
         catalogs,
     } = options;
 
-    // 1. Find root path (workspace root if applicable)
-    let discovery = WorkspaceDiscovery::new(glob.clone());
-    let root_path = discovery.find_root_path(&cwd).await?;
-
-    // 2. Read root package.json
-    let pkg_path = root_path.join("package.json");
-    let mut pkg: PackageJson = super::fs::read_json(&pkg_path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to read/parse package.json: {}", e))?;
-
-    // 3. Inject runtime dependencies (node-bin packages)
+    // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
         let runtime_deps = install_runtime_from_map(engines);
         if !runtime_deps.is_empty() {
@@ -158,119 +145,62 @@ where
         }
     }
 
-    // 4. Initialize dependency graph
+    // 2. Initialize dependency graph + root dependency edges (catalog: specs
+    //    resolved at edge creation).
     let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
-
-    // 5. Add root dependency edges (catalog: specs resolved at edge creation)
     let root_index = graph.root_index;
     let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
     add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
 
-    // 6. Discover and add workspace packages
+    // 3. Discover and add workspace packages. A synthetic global-install root has
+    //    no `workspaces` field, so this returns immediately without touching disk.
+    let discovery = WorkspaceDiscovery::new(glob);
     let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
-
     for workspace in workspaces {
-        let ws_pkg = workspace.package_json;
-
-        // Create workspace node
-        let workspace_node =
-            PackageNode::workspace_from_package_json(workspace.path.clone(), ws_pkg.clone());
-        let workspace_index = graph.add_node(workspace_node);
-
-        // Create link node
-        let link_node = PackageNode::link_from_package_json(workspace.path.clone(), ws_pkg.clone());
-        let link_index = graph.add_node(link_node);
-
-        // Add physical edges
-        graph.add_physical_edge(root_index, workspace_index);
-        graph.add_physical_edge(root_index, link_index);
-
-        // Create and mark dependency edge as resolved
-        let dep_edge_id = graph.add_dependency_edge(
-            root_index,
-            workspace.name.clone(),
-            &ws_pkg.version,
-            EdgeType::Prod,
-        );
-        graph.mark_dependency_resolved(dep_edge_id, workspace_index);
-
         tracing::debug!(
             "Added workspace: {} at {:?}",
             workspace.name,
             workspace.path
         );
-
-        // Add workspace dependencies (catalog: specs resolved at edge creation)
-        add_edges_from(&mut graph, workspace_index, &ws_pkg, &edge_ctx);
-    }
-
-    // 7. Create in-memory package cache and pre-populate from the warm
-    // project cache (host-supplied; `None` for cold runs).
-    let package_cache = Arc::new(PackageCache::default());
-    let (cache_count, missing_count) =
-        prepopulate_warm_cache(&package_cache, warm_project_cache.as_ref());
-    if missing_count > 0 {
-        tracing::warn!(
-            "Project cache has {missing_count} specs with missing manifests, will re-fetch from registry"
+        add_workspace_member(
+            &mut graph,
+            root_index,
+            &workspace.name,
+            workspace.path,
+            &workspace.package_json,
+            &edge_ctx,
         );
     }
-    if cache_count > 0 {
-        tracing::debug!("Loaded {cache_count} manifests from project cache");
-    }
 
-    // 8. Create registry client with shared cache and persistence backend.
-    let mut builder = UnifiedRegistry::builder()
-        .registry(&registry_url)
-        .cache(package_cache)
-        .store(Arc::clone(&manifest_store));
-    if let Some(semver) = supports_semver {
-        builder = builder.supports_semver(semver);
-    }
-    let registry = builder.build();
-
+    // 4. The host supplies the stateless registry client (URL, store, semver,
+    //    auth) pre-built. The warm `project_cache` seeds the demand resolver's
+    //    manifest cache directly via `BuildDepsConfig::project_cache` below.
     tracing::debug!(
         "Using registry: {} (semver: {})",
         registry.registry_url(),
         registry.supports_semver(),
     );
 
-    let skip_preload = cache_count > 0;
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
-        .with_skip_preload(skip_preload)
-        .with_catalogs(catalogs);
+        .with_catalogs(catalogs)
+        .with_project_cache(project_cache);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
-    }
-
-    if skip_preload {
-        tracing::debug!(
-            "Skipping preload phase (project cache has {} entries)",
-            cache_count
-        );
     }
 
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
-    build_deps_with_config(&mut graph, &registry, config, &receiver)
+    let manifest_cache = build_deps_with_config_output(&mut graph, &registry, config, &receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
     let (packages, _total) = graph.serialize_to_packages(&root_path);
 
-    // Export project cache from memory cache for the host to persist.
-    let mut project_cache = ProjectCacheData::default();
-    for (key, manifest) in registry.cache().export_version_manifests() {
-        // `parse_package_spec` rather than `split_once('@')` so scoped names
-        // (`@babel/core@^7.0.0`) parse to (`@babel/core`, `^7.0.0`).
-        let (name, spec) = parse_package_spec(&key);
-        let version = manifest.version.clone();
-        let pkg_cache = project_cache.cache.entry(name.to_string()).or_default();
-        pkg_cache.specs.insert(spec.to_string(), version.clone());
-        pkg_cache.manifests.insert(version, (*manifest).clone());
-    }
+    // Export the manifests resolved this run for the host to persist.
+    let project_cache = ProjectCacheData::from_resolved(manifest_cache.entries);
 
     Ok(BuildDepsOutput {
         lock: PackageLock::new(&pkg.name, &pkg.version, packages),
@@ -278,30 +208,25 @@ where
     })
 }
 
-/// Pre-populate `cache` from a warm project cache. Returns
-/// `(loaded, missing)` — `loaded` is the count of usable spec→manifest
-/// entries; `missing` counts specs whose resolved version had no manifest
-/// (corrupted cache, will be re-fetched).
-fn prepopulate_warm_cache(cache: &PackageCache, warm: Option<&ProjectCacheData>) -> (usize, usize) {
-    let Some(warm) = warm else {
-        return (0, 0);
-    };
-    let mut loaded = 0;
-    let mut missing = 0;
-    for (name, pkg_cache) in &warm.cache {
-        for (spec, version) in &pkg_cache.specs {
-            let Some(manifest) = pkg_cache.manifests.get(version) else {
-                tracing::debug!(
-                    "Project cache missing manifest: {name}@{spec} (version {version})"
-                );
-                missing += 1;
-                continue;
-            };
-            cache.set_version_manifest(name.clone(), spec.clone(), Arc::new(manifest.clone()));
-            loaded += 1;
-        }
-    }
-    (loaded, missing)
+/// Resolve the workspace root for `cwd` and read its `package.json`. The
+/// disk-side counterpart to [`build_deps`]: a normal install calls this to get
+/// the `(root_path, manifest)` pair, then passes the manifest to `build_deps`.
+/// (Global installs skip this and synthesize the manifest in memory.)
+pub async fn read_root_manifest<G: Glob + Clone>(
+    cwd: &Path,
+    glob: G,
+) -> Result<(PathBuf, PackageJson)> {
+    use anyhow::Context as _;
+    let discovery = WorkspaceDiscovery::new(glob);
+    let root_path = discovery.find_root_path(cwd).await?;
+    let pkg_path = root_path.join("package.json");
+    let pkg: PackageJson = super::fs::read_json(&pkg_path).await.with_context(|| {
+        format!(
+            "Failed to read/parse package.json at {}",
+            pkg_path.display()
+        )
+    })?;
+    Ok((root_path, pkg))
 }
 
 #[cfg(test)]
@@ -314,21 +239,53 @@ mod tests {
     async fn test_build_deps_options_creation() {
         let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
             cwd: PathBuf::from("."),
-            registry_url: "https://registry.npmmirror.com".to_string(),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.npmmirror.com")
+                .build(),
             cache_dir: None,
-            manifest_store: Arc::new(NoopStore),
-            warm_project_cache: None,
+            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
-            supports_semver: None,
             catalogs: HashMap::new(),
         };
 
         assert_eq!(options.concurrency, 20);
         assert_eq!(options.peer_deps, PeerDeps::Skip);
-        assert!(options.supports_semver.is_none());
+        assert_eq!(
+            options.registry.registry_url(),
+            "https://registry.npmmirror.com"
+        );
+    }
+
+    /// `build_deps` resolves an **in-memory** synthetic root (no disk
+    /// package.json, no workspace discovery) — the path global installs use. A
+    /// root with no dependencies resolves offline to a lock with only the root
+    /// entry.
+    #[tokio::test]
+    async fn test_build_deps_in_memory_root_no_deps() {
+        let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
+            cwd: PathBuf::from("/synthetic-root"),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.npmmirror.com")
+                .build(),
+            cache_dir: None,
+            project_cache: None,
+            concurrency: 20,
+            peer_deps: PeerDeps::Skip,
+            glob: NoopGlob,
+            receiver: NoopReceiver,
+            catalogs: HashMap::new(),
+        };
+        let mut pkg = PackageJson::new("utoo-global", "0.0.0");
+        pkg.private = Some(true);
+
+        let output = build_deps(options, pkg)
+            .await
+            .expect("in-memory synthetic root should resolve offline");
+        assert!(output.lock.packages.contains_key(""), "root entry present");
+        assert_eq!(output.lock.packages.len(), 1, "no deps → only the root");
     }
 
     #[test]

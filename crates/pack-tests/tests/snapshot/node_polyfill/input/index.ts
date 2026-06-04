@@ -4,6 +4,7 @@ const stream = require('stream');
 import { process } from 'browser-polyfill';
 import { urlToHttpOptions } from 'url';
 import timers from 'timers';
+import './empty';
 
 confirm;
 

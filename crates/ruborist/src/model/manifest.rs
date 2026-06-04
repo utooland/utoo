@@ -4,8 +4,9 @@
 //! Used by both PM (native) and WASM (browser) implementations.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -84,7 +85,15 @@ pub struct FullManifest {
     /// `FullManifest` compact — npm `versions` subtrees parsed to a typed
     /// tree expand to ~1.5–2.5x the raw size on real-world packages.
     #[serde(skip)]
-    pub raw: Arc<[u8]>,
+    pub raw: Bytes,
+
+    /// Per-version raw JSON text, lazily split from [`raw`](Self::raw) on the
+    /// first extraction and memoized. Splitting once turns N on-demand version
+    /// extractions from N full-document re-parses into a single structural pass
+    /// plus N cheap single-object parses — see [`extract_version`](Self::extract_version).
+    /// An internal cache, like [`raw`](Self::raw); construct via `..Default::default()`.
+    #[serde(skip)]
+    pub version_blobs: OnceLock<HashMap<String, Box<str>>>,
 
     pub time: HashMap<String, String>,
 
@@ -118,29 +127,58 @@ pub struct FullManifest {
 }
 
 impl FullManifest {
+    /// Lazily split [`raw`](Self::raw) into per-version JSON text, keyed by
+    /// version. The split is a single shallow structural pass — version objects
+    /// are captured as raw byte slices, not parsed — and is memoized so repeated
+    /// extractions reuse it instead of re-parsing the whole document each time.
+    fn version_blobs(&self) -> &HashMap<String, Box<str>> {
+        self.version_blobs.get_or_init(|| {
+            #[derive(Deserialize)]
+            struct VersionsOnly<'a> {
+                #[serde(borrow, default)]
+                versions: HashMap<String, &'a serde_json::value::RawValue>,
+            }
+            match serde_json::from_slice::<VersionsOnly>(&self.raw) {
+                Ok(parsed) => parsed
+                    .versions
+                    .into_iter()
+                    .map(|(version, raw)| (version, Box::from(raw.get())))
+                    .collect(),
+                Err(_) => HashMap::new(),
+            }
+        })
+    }
+
     /// Extract a single version from raw bytes on demand.
     ///
-    /// Parses the full manifest into a `simd_json::BorrowedValue` tree
-    /// (transient, dropped at end of call), navigates to the matching
-    /// version, and deserializes that subtree directly into `T`.
-    /// `&BorrowedValue` is itself a serde `Deserializer`, so the matched
-    /// subtree is visited in place — no intermediate `serde_json::Value`
-    /// allocation.
-    ///
-    /// `OnceMap` single-flight in `UnifiedRegistry` reduces the per-key
-    /// invocation count to one, so the per-call full-tree parse cost is
-    /// bounded.
+    /// Looks the version's raw JSON up in the memoized per-version split (see
+    /// [`version_blobs`](Self::version_blobs)) and deserializes only that small
+    /// object into `T`. The whole-document structural pass happens at most once
+    /// per manifest, so extracting K versions costs one split plus K small
+    /// parses rather than K full-document re-parses.
     fn extract_version<T: for<'de> Deserialize<'de>>(&self, version: &str) -> Option<T> {
+        let blob = self.version_blobs().get(version)?;
+        serde_json::from_str(blob).ok()
+    }
+
+    /// Parse a single version on demand into CoreVersionManifest (hot path).
+    ///
+    /// Goes through the memoized per-version split, so repeated extractions of
+    /// different versions from the same manifest share one structural pass.
+    pub fn get_core_version(&self, version: &str) -> Option<CoreVersionManifest> {
+        self.extract_version(version)
+    }
+
+    /// One-shot extraction for the single speculative extract performed while a
+    /// full manifest is first parsed. That call resolves exactly one version and
+    /// would never reuse the memoized split, so it parses the document directly
+    /// rather than paying to build (and retain) the per-version index.
+    pub fn get_core_version_oneshot(&self, version: &str) -> Option<CoreVersionManifest> {
         use simd_json::prelude::ValueObjectAccess;
         let mut buf = self.raw.to_vec();
         let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
         let version_obj = parsed.get("versions")?.get(version)?;
-        T::deserialize(version_obj).ok()
-    }
-
-    /// Parse a single version on demand into CoreVersionManifest (hot path).
-    pub fn get_core_version(&self, version: &str) -> Option<CoreVersionManifest> {
-        self.extract_version(version)
+        CoreVersionManifest::deserialize(version_obj).ok()
     }
 
     /// Parse a single version on demand into full VersionManifest (cold path, e.g. `ut view`).
@@ -553,85 +591,6 @@ pub struct Directories {
     pub test: Option<String>,
 }
 
-/// Simplified package manifest (for `npm view` output).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-#[allow(dead_code)]
-pub struct PackageManifest {
-    pub name: String,
-    pub version: String,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub description: Option<String>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub homepage: Option<String>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub license: Option<String>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub keywords: Option<Vec<String>>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dependencies: Option<HashMap<String, String>>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub author: Option<Author>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub repository: Option<Repository>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub bugs: Option<Bugs>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dist: Option<Dist>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub maintainers: Option<Vec<Maintainer>>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dist_tags: Option<HashMap<String, String>>,
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub versions: Option<HashMap<String, VersionInfo>>,
-    pub versions_count: usize,
-}
-
-/// Simplified version info.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct VersionInfo {
-    pub publish_time: Option<u64>,
-    #[serde(rename = "_npmUser")]
-    pub npm_user: Option<NpmUser>,
-}
-
 use super::package_json::PackageJson;
 
 /// Manifest for a node in the dependency graph.
@@ -805,6 +764,41 @@ impl From<Arc<CoreVersionManifest>> for NodeManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_version_from_memoized_split() {
+        // A full manifest with two distinct versions carrying different deps.
+        let raw = br#"{
+            "name": "pkg",
+            "dist-tags": { "latest": "2.0.0" },
+            "versions": {
+                "1.0.0": { "name": "pkg", "version": "1.0.0", "dependencies": { "a": "^1" } },
+                "2.0.0": { "name": "pkg", "version": "2.0.0", "dependencies": { "b": "^2" } }
+            }
+        }"#;
+        let mut manifest: FullManifest = serde_json::from_slice(raw).unwrap();
+        manifest.raw = Bytes::from_static(raw);
+
+        // Each version resolves to its own deps, and the memoized split is
+        // reused across the two extractions (only one structural pass).
+        let v1 = manifest.get_core_version("1.0.0").expect("1.0.0 present");
+        assert_eq!(v1.version, "1.0.0");
+        assert!(v1.dependencies.as_ref().unwrap().contains_key("a"));
+
+        let v2 = manifest.get_core_version("2.0.0").expect("2.0.0 present");
+        assert_eq!(v2.version, "2.0.0");
+        assert!(v2.dependencies.as_ref().unwrap().contains_key("b"));
+
+        // Missing version → None, not a panic.
+        assert!(manifest.get_core_version("9.9.9").is_none());
+
+        // The one-shot speculative path agrees with the memoized split.
+        let one = manifest
+            .get_core_version_oneshot("2.0.0")
+            .expect("2.0.0 present");
+        assert_eq!(one.version, v2.version);
+        assert_eq!(one.dependencies, v2.dependencies);
+    }
 
     #[test]
     fn test_author_string_deserialization() {

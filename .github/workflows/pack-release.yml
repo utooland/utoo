@@ -81,7 +81,7 @@ jobs:
               git config --system core.longpaths true &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
-    name: utoopack-release-${{ matrix.settings.target }} - node@20
+    name: utoopack-release-${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -105,7 +105,7 @@ jobs:
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 20
+          node-version: 22.14.0
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
@@ -166,6 +166,10 @@ jobs:
     if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'utoopack-v')
     name: Publish
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     needs:
       - build
     steps:
@@ -173,7 +177,8 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.14.0
+          registry-url: "https://registry.npmjs.org"
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
 
@@ -200,11 +205,13 @@ jobs:
           TAG_NAME="${{ github.event.release.tag_name }}"
           VERSION=${TAG_NAME#utoopack-v}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@11.6.2
       - name: NPM Publish
         run: |
-          # npm config set provenance true
-          echo "${VERSION}" &&
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc &&
+          set -euo pipefail
+
+          echo "${VERSION}"
 
           TAG="latest"
           if [[ "$VERSION" == *"-"* ]]; then
@@ -223,4 +230,3 @@ jobs:
           npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

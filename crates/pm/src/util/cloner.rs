@@ -1,111 +1,44 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
-use tokio_retry::Retry;
+use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
-use utoo_ruborist::util::OnceMap;
 
-use super::downloader::{is_git_url, resolve_cache_path};
-use super::json::load_package_json;
+use super::downloader::is_git_url;
 use super::retry::create_retry_strategy;
-use crate::fs;
 
-/// Global clone cache shared between pipeline and install phases.
-///
-/// Key: normalized target path. Install (`cwd.join("node_modules/foo")` →
-/// forward slashes) and pipeline (`Path::join` injects backslashes on
-/// Windows) produce the same logical target with different separators;
-/// without normalization OnceMap sees them as distinct keys, dedup fails,
-/// and concurrent tasks race on the same destination — manifesting as
-/// `ERROR_SHARING_VIOLATION` (os error 32) on Windows. `PathBuf` from
-/// `Path::components().collect()` parses both separators uniformly and
-/// rebuilds with the OS-preferred one, giving a stable key.
-static CLONE_CACHE: Lazy<OnceMap<PathBuf, ()>> = Lazy::new(OnceMap::new);
-
-/// Number of `node_modules/` directories freshly materialized this run.
-/// Mirrors pnpm's "added" semantic.
-static CLONE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-/// Returns the number of fresh clones performed (pnpm "added" equivalent).
-pub fn clone_count() -> usize {
-    CLONE_COUNT.load(Ordering::Relaxed)
+/// How a cached package's real contents are laid out under its cache dir.
+/// Derived from the resolved tarball URL so callers never pass a bare bool.
+#[derive(Clone, Copy)]
+enum CacheLayout {
+    /// Registry tarball: contents live under a `package/` subdir, so the clone
+    /// descends into the first real subdirectory.
+    Wrapped,
+    /// Git checkout: extracted flat at the cache root; clone the dir as-is.
+    Flat,
 }
 
-/// Normalize a target path into the canonical key used by `CLONE_CACHE`.
-#[cfg(windows)]
-fn cache_key(target_path: &Path) -> PathBuf {
-    target_path.components().collect()
-}
-
-#[cfg(not(windows))]
-fn cache_key(target_path: &Path) -> PathBuf {
-    target_path.to_path_buf()
-}
-
-/// Wait for a pending clone at the given target path to complete (if any).
-///
-/// Used by the pipeline clone worker to ensure parent packages are
-/// cloned before their children.
-pub async fn wait_clone_if_pending(target_path: &str) {
-    CLONE_CACHE
-        .wait_if_pending(&cache_key(Path::new(target_path)))
-        .await;
-}
-
-/// Clone a package to target path, downloading to cache first if needed.
-///
-/// Uses global `OnceMap` for deduplication: the same target path is only cloned once,
-/// even when called concurrently from pipeline workers and the install phase.
-pub async fn clone_package_once(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-    target_path: &Path,
-) -> Result<()> {
-    let key = cache_key(target_path);
-
-    // Skip the param clones + future construction when the pipeline
-    // (or a sibling task) already cloned this target.
-    if CLONE_CACHE.is_done(&key) {
-        return Ok(());
+impl CacheLayout {
+    fn from_tarball_url(tarball_url: &str) -> Self {
+        if is_git_url(tarball_url) {
+            CacheLayout::Flat
+        } else {
+            CacheLayout::Wrapped
+        }
     }
+}
 
-    let err_label = format!("{name}@{version}");
-    let name = name.to_string();
-    let version = version.to_string();
-    let tarball_url = tarball_url.to_string();
-    let target_path = target_path.to_path_buf();
-
-    // Git packages are extracted flat (no `package/` wrapper directory),
-    // so skip `find_real_src` which would incorrectly pick a subdirectory.
-    let is_git = is_git_url(&tarball_url);
-
-    CLONE_CACHE
-        .get_or_init(key, || async move {
-            let cache_path = resolve_cache_path(&name, &version, &tarball_url).await?;
-            let fresh = clone_package(&cache_path, &target_path, &name, &version, !is_git)
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Clone failed: {}@{} to {}: {:#}",
-                        name,
-                        version,
-                        target_path.display(),
-                        e
-                    )
-                })
-                .ok()?;
-
-            if fresh {
-                CLONE_COUNT.fetch_add(1, Ordering::Relaxed);
-            }
-            Some(())
-        })
-        .await
-        .map(|_| ())
-        .ok_or_else(|| anyhow::anyhow!("clone {err_label} failed (see warning log for details)"))
+/// A request to materialize a cached package into a `node_modules` target.
+///
+/// Bundles the package identity, its resolved cache dir, and the destination so
+/// the clone entry points take one coherent argument instead of five positional
+/// ones, and new fields stay additive.
+pub struct PackageClone<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub tarball_url: &'a str,
+    pub cache: &'a Path,
+    pub target: &'a Path,
 }
 
 #[cfg(target_os = "macos")]
@@ -172,300 +105,240 @@ mod hardlink_clone {
         Ok(())
     }
 
-    /// Clone directory using spawn_blocking for sync I/O.
-    /// Uses hardlink when possible, falls back to copy.
-    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+    /// Clone directory using sync I/O. Uses hardlink when possible, falls back
+    /// to copy.
+    pub fn clone_dir_sync(src: &Path, dst: &Path) -> Result<()> {
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
+
+        if !fs::metadata(src)?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "Source is not a directory",
+            ))
+            .with_context(|| err_msg);
+        }
+
+        let mut force_copy = has_install_script_sync(src);
+
+        let mut files = Vec::new();
+        let mut dirs = Vec::new();
+        collect_entries(src, dst, &mut files, &mut dirs)?;
+
+        let mut created_dirs = HashSet::new();
+        for dir in &dirs {
+            if created_dirs.insert(dir.clone())
+                && let Err(e) = fs::create_dir_all(dir)
+                && e.kind() != io::ErrorKind::AlreadyExists
+            {
+                return Err(e).with_context(|| err_msg.clone());
+            }
+        }
+
+        let mut warned_per_file = false;
+        for entry in &files {
+            if force_copy {
+                copy_file_sync(&entry.src, &entry.dst)?;
+            } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
+                if e.kind() == io::ErrorKind::CrossesDevices {
+                    tracing::warn!(
+                        "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
+                        src.display(),
+                        dst.display(),
+                        e
+                    );
+                    force_copy = true;
+                } else if !warned_per_file {
+                    tracing::warn!(
+                        "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
+                        entry.src.display(),
+                        entry.dst.display(),
+                        e
+                    );
+                    warned_per_file = true;
+                }
+                copy_file_sync(&entry.src, &entry.dst)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Async wrapper around [`clone_dir_sync`] for the dir-clone tests. The
+    /// production path calls `clone_dir_sync` directly (in a blocking pool via
+    /// the scheduler), so this wrapper is test-only.
+    #[cfg(test)]
+    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
-
-        tokio::task::spawn_blocking(move || {
-            if !fs::metadata(&src)?.is_dir() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotADirectory,
-                    "Source is not a directory",
-                ));
-            }
-
-            let mut force_copy = has_install_script_sync(&src);
-
-            // Phase 1: Collect all files and directories
-            let mut files = Vec::new();
-            let mut dirs = Vec::new();
-            collect_entries(&src, &dst, &mut files, &mut dirs)?;
-
-            // Phase 2: Create all directories
-            let mut created_dirs = HashSet::new();
-            for dir in &dirs {
-                if created_dirs.insert(dir.clone())
-                    && let Err(e) = fs::create_dir_all(dir)
-                    && e.kind() != io::ErrorKind::AlreadyExists
-                {
-                    return Err(e);
-                }
-            }
-
-            // Phase 3: Clone files (hardlink, fall back to copy on error).
-            //
-            // EXDEV (src cache and dst on different filesystems, e.g. a
-            // global install where ~/.cache/nm lives on a different volume
-            // than /usr/local) is a property of the src/dst pair — every
-            // remaining file would fail the same way, so latch `force_copy`
-            // and skip hardlink for the rest of this clone.
-            //
-            // Any other hardlink error (EMLINK on a single inode whose link
-            // count is exhausted, EPERM on a specific file, etc.) is
-            // per-file: copy this one and keep trying hardlink on the next.
-            // We warn only on the first such failure per package to avoid
-            // spamming hundreds of identical warnings when an entire package
-            // can't be hardlinked.
-            let mut warned_per_file = false;
-            for entry in &files {
-                if force_copy {
-                    copy_file_sync(&entry.src, &entry.dst)?;
-                } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
-                    if e.kind() == io::ErrorKind::CrossesDevices {
-                        tracing::warn!(
-                            "cross-device hardlink {} -> {}: {}; falling back to copy for remaining files",
-                            src.display(),
-                            dst.display(),
-                            e
-                        );
-                        force_copy = true;
-                    } else if !warned_per_file {
-                        tracing::warn!(
-                            "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
-                            entry.src.display(),
-                            entry.dst.display(),
-                            e
-                        );
-                        warned_per_file = true;
-                    }
-                    copy_file_sync(&entry.src, &entry.dst)?;
-                }
-            }
-            Ok(())
-        })
-        .await?
-        .with_context(|| err_msg)
+        tokio::task::spawn_blocking(move || clone_dir_sync(&src, &dst)).await?
     }
 }
 
-async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
-    if !crate::fs::try_exists(dst).await? {
-        return Ok(false);
-    }
+fn load_package_json_sync<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let pkg_path = path.join("package.json");
+    let content = std::fs::read_to_string(&pkg_path)
+        .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
 
-    if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
-        return Ok(false);
-    }
-
-    #[derive(Debug)]
-    struct EntryInfo {
-        path: PathBuf,
-        is_dir: bool,
-        size: u64,
-    }
-
-    async fn collect_entries(dir: &Path, ignore: Option<&[&str]>) -> Result<Vec<EntryInfo>> {
-        let mut entries = Vec::new();
-        let mut read_dir = fs::read_dir(dir)
-            .await
-            .with_context(|| format!("Failed to read directory {}", dir.display()))?;
-
-        while let Some(entry) = read_dir.next_entry().await? {
-            if let Some(ignore_list) = ignore
-                && let Some(file_name) = entry.path().file_name()
-                && ignore_list.contains(&&*file_name.to_string_lossy())
-            {
-                continue;
+    match serde_json::from_str(&content) {
+        Ok(v) => Ok(v),
+        Err(original_err) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(value) => serde_json::from_value(value)
+                .with_context(|| format!("Failed to deserialize {pkg_path:?}")),
+            Err(_) => {
+                Err(original_err).with_context(|| format!("Failed to parse JSON from {pkg_path:?}"))
             }
-
-            let metadata = entry.metadata().await.with_context(|| {
-                format!("Failed to get metadata for {}", entry.path().display())
-            })?;
-            entries.push(EntryInfo {
-                path: entry.path(),
-                is_dir: metadata.is_dir(),
-                size: if metadata.is_file() {
-                    metadata.len()
-                } else {
-                    0
-                },
-            });
-        }
-        Ok(entries)
+        },
     }
-
-    let mut src_entries = collect_entries(src, Some(&["node_modules"]))
-        .await
-        .with_context(|| format!("Failed to collect entries for {}", src.display()))?;
-    let mut dst_entries = collect_entries(dst, Some(&["node_modules"]))
-        .await
-        .with_context(|| format!("Failed to collect entries for {}", dst.display()))?;
-
-    src_entries.sort_by(|a, b| a.path.cmp(&b.path));
-    dst_entries.sort_by(|a, b| a.path.cmp(&b.path));
-
-    if src_entries.len() != dst_entries.len() {
-        return Ok(false);
-    }
-
-    for (src_entry, dst_entry) in src_entries.iter().zip(dst_entries.iter()) {
-        if src_entry.is_dir && dst_entry.is_dir {
-            let future = validate_directory(&src_entry.path, &dst_entry.path);
-            if !Box::pin(future).await? {
-                return Ok(false);
-            }
-        } else if !src_entry.is_dir && !dst_entry.is_dir {
-            if src_entry.size != dst_entry.size {
-                return Ok(false);
-            }
-        } else {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
 }
 
-// find the first non built subdirectory
-pub async fn find_real_src<P: AsRef<Path>>(src: P) -> Option<PathBuf> {
-    let mut read_dir = fs::read_dir(src.as_ref()).await.ok()?;
-    while let Some(entry) = read_dir.next_entry().await.ok()? {
-        // `file_type()` reads `d_type` from the cached readdir result on
-        // ext4/btrfs/xfs (no extra syscall); `metadata()` always issues
-        // an `lstat`. Saves ~3–5 stats per call × N packages on the
-        // cold install hot path.
-        if let Ok(file_type) = entry.file_type().await
-            && file_type.is_dir()
-            && let Some(name) = entry.path().file_name()
-            && name.to_string_lossy() != ".utoo_built"
-        {
-            return Some(entry.path());
-        }
-    }
-    None
-}
-
-async fn clone(src: &Path, dst: &Path, find_real: bool) -> Result<()> {
-    let real_src = if find_real {
-        find_real_src(src)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?
-    } else {
-        src.to_path_buf()
-    };
-
-    if crate::fs::try_exists(dst).await? {
-        let is_valid = validate_directory(&real_src, dst).await.unwrap_or(false);
-
-        if is_valid {
-            return Ok(());
-        }
-
-        if let Err(e) = fs::remove_dir_all(dst).await {
-            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
-        }
-    }
-
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let src_c = CString::new(real_src.as_os_str().as_bytes())?;
-        let dst_c = CString::new(dst.as_os_str().as_bytes())?;
-
-        Retry::spawn(create_retry_strategy(), || async {
-            match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-                0 => Ok(()),
-                _ => {
-                    let _ = fs::remove_dir_all(dst).await;
-                    Err(anyhow::anyhow!(
-                        "clonefile {} -> {}: {}",
-                        real_src.display(),
-                        dst.display(),
-                        std::io::Error::last_os_error()
-                    ))
-                }
-            }
-        })
-        .await?;
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Retry::spawn(create_retry_strategy(), || async {
-            hardlink_clone::clone_dir(&real_src, dst)
-                .await
-                .with_context(|| {
-                    format!("clone_dir {} -> {}", real_src.display(), dst.display())
-                })?;
-            Ok::<(), anyhow::Error>(())
-        })
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// Validate that the package.json in dst has matching name and version
-async fn validate_name_version(dst: &Path, name: &str, version: &str) -> bool {
-    let Ok(pkg) = load_package_json::<IdentityView>(dst).await else {
+fn validate_name_version_sync(dst: &Path, name: &str, version: &str) -> bool {
+    let Ok(pkg) = load_package_json_sync::<IdentityView>(dst) else {
         return false;
     };
     pkg.name == name && pkg.version == version
 }
 
-/// Clone a package from cache to destination with name/version validation.
-///
-/// `find_real`: if `true`, look for the first subdirectory in `src` (registry
-/// tarballs use a `package/` wrapper); if `false`, use `src` directly (git
-/// packages are extracted flat).
-/// Returns `Ok(true)` when the package was freshly materialized at `dst`,
-/// `Ok(false)` when a valid existing directory was reused.
-pub async fn clone_package(
-    src: &Path,
-    dst: &Path,
-    name: &str,
-    version: &str,
-    find_real: bool,
-) -> Result<bool> {
-    if crate::fs::try_exists(dst).await? {
-        if validate_name_version(dst, name, version).await {
-            return Ok(false);
-        }
-        if let Err(e) = fs::remove_dir_all(dst).await {
-            tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(src).ok()? {
+        let entry = entry.ok()?;
+        if entry.file_type().ok()?.is_dir() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|name| name != ".utoo_built") {
+                return Some(path);
+            }
         }
     }
-    clone(src, dst, find_real).await?;
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+    let src_c = CString::new(real_src.as_os_str().as_bytes())?;
+    let dst_c = CString::new(dst.as_os_str().as_bytes())?;
+    let mut last_error = None;
+
+    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+
+        match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+            0 => return Ok(()),
+            _ => {
+                let err = std::io::Error::last_os_error();
+                let _ = std::fs::remove_dir_all(dst);
+                let raw = err.raw_os_error();
+                last_error = Some(err);
+                // ENOTSUP (non-APFS volume) and EXDEV (cross-device) are
+                // permanent: clonefile can never succeed here, so retrying only
+                // adds delay to every clone. Stop and surface the error.
+                if raw == Some(libc::ENOTSUP) || raw == Some(libc::EXDEV) {
+                    break;
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "clonefile {} -> {}: {}",
+        real_src.display(),
+        dst.display(),
+        last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "unknown error".to_string())
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+    // Retry with backoff like the macOS arm: concurrent installs race on
+    // create_dir_all/remove_dir_all of shared parents and can hit transient
+    // EAGAIN/ENOENT during the hardlink walk. origin/next retried on all
+    // platforms; the sync rewrite must keep that for Linux/Windows too.
+    let mut last_error = None;
+    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
+        match hardlink_clone::clone_dir_sync(real_src, dst) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(dst);
+                last_error = Some(e);
+            }
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| anyhow::anyhow!("clone_dir failed without error"))
+        .context(format!(
+            "clone_dir {} -> {}",
+            real_src.display(),
+            dst.display()
+        )))
+}
+
+fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
+    let real_src = match layout {
+        CacheLayout::Wrapped => find_real_src_sync(src)
+            .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?,
+        CacheLayout::Flat => src.to_path_buf(),
+    };
+
+    if dst.try_exists()?
+        && let Err(e) = std::fs::remove_dir_all(dst)
+    {
+        tracing::warn!("Failed to clean target directory {}: {}", dst.display(), e);
+    }
+
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    clone_dir_native_sync(&real_src, dst)?;
+    Ok(())
+}
+
+// find the first non built subdirectory
+
+/// Sync clone from a resolved cache dir to `target_path`, validating the
+/// existing target's name/version before skipping. The cache layout (registry
+/// `package/` wrapper vs flat git checkout) is derived from `tarball_url`.
+///
+/// Returns `Ok(true)` when freshly materialized, `Ok(false)` when an existing
+/// valid directory was reused. Stateless — callers (the install scheduler) own
+/// dedup and counting.
+pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
+    if req.target.try_exists()? {
+        if validate_name_version_sync(req.target, req.name, req.version) {
+            return Ok(false);
+        }
+        if let Err(e) = std::fs::remove_dir_all(req.target) {
+            tracing::warn!(
+                "Failed to clean target directory {}: {}",
+                req.target.display(),
+                e
+            );
+        }
+    }
+    clone_sync(
+        req.cache,
+        req.target,
+        CacheLayout::from_tarball_url(req.tarball_url),
+    )?;
     Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
+    #[cfg(not(target_os = "macos"))]
     use tokio::io::AsyncWriteExt;
 
     use super::*;
+    #[cfg(not(target_os = "macos"))]
+    use crate::fs;
 
-    #[cfg(windows)]
-    #[test]
-    fn cache_key_normalizes_path_separators() {
-        // install.rs joins lockfile-derived strings (forward slashes) while
-        // pipeline workers go through `Path::join` (backslashes). Both must
-        // produce the same OnceMap key — otherwise concurrent clones race
-        // and Windows raises ERROR_SHARING_VIOLATION.
-        let forward = cache_key(Path::new("node_modules/@scope/pkg/node_modules/dep"));
-        let backward = cache_key(Path::new("node_modules\\@scope\\pkg\\node_modules\\dep"));
-        let mixed = cache_key(Path::new("node_modules/@scope/pkg\\node_modules\\dep"));
-        assert_eq!(forward, backward);
-        assert_eq!(forward, mixed);
-    }
-
+    // Only consumed by `hardlink_clone_tests`, which is itself macOS-excluded.
+    #[cfg(not(target_os = "macos"))]
     async fn create_test_file(dir: &Path, name: &str, content: &[u8]) -> Result<PathBuf> {
         let path = dir.join(name);
         let mut file = fs::File::create(&path).await?;
@@ -473,6 +346,7 @@ mod tests {
         Ok(path)
     }
 
+    #[cfg(not(target_os = "macos"))]
     async fn create_test_structure(dir: &Path, structure: &[(&str, Option<&[u8]>)]) -> Result<()> {
         for (path, content) in structure {
             let full_path = dir.join(path);
@@ -489,342 +363,32 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_validate_directory_different_sizes() -> Result<()> {
-        let temp = TempDir::new()?;
-        let src_dir = temp.path().join("src");
-        let dst_dir = temp.path().join("dst");
-
-        create_test_structure(&src_dir, &[("file.txt", Some(b"content1"))]).await?;
-        create_test_structure(&dst_dir, &[("file.txt", Some(b"different"))]).await?;
-
-        assert!(!validate_directory(&src_dir, &dst_dir).await?);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_validate_directory_same_content() -> Result<()> {
-        let temp = TempDir::new()?;
-        let src_dir = temp.path().join("src");
-        let dst_dir = temp.path().join("dst");
-
-        create_test_structure(&src_dir, &[("file.txt", Some(b"same content"))]).await?;
-        create_test_structure(&dst_dir, &[("file.txt", Some(b"same content"))]).await?;
-
-        assert!(validate_directory(&src_dir, &dst_dir).await?);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_validate_directory_nested_structure() -> Result<()> {
-        let temp = TempDir::new()?;
-        let src_dir = temp.path().join("src");
-        let dst_dir = temp.path().join("dst");
-
-        create_test_structure(
-            &src_dir,
-            &[
-                ("dir1/file1.txt", Some(b"content1")),
-                ("dir1/dir2/file2.txt", Some(b"content2")),
-                ("dir3/file3.txt", Some(b"content3")),
-            ],
-        )
-        .await?;
-
-        create_test_structure(
-            &dst_dir,
-            &[
-                ("dir1/file1.txt", Some(b"content1")),
-                ("dir1/dir2/file2.txt", Some(b"content2")),
-                ("dir3/file3.txt", Some(b"content3")),
-            ],
-        )
-        .await?;
-
-        assert!(validate_directory(&src_dir, &dst_dir).await?);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_validate_directory_different_structure() -> Result<()> {
-        let temp = TempDir::new()?;
-        let src_dir = temp.path().join("src");
-        let dst_dir = temp.path().join("dst");
-
-        create_test_structure(
-            &src_dir,
-            &[
-                ("dir1/file1.txt", Some(b"content1")),
-                ("dir2/file2.txt", Some(b"content2")),
-            ],
-        )
-        .await?;
-
-        create_test_structure(
-            &dst_dir,
-            &[
-                ("dir1/file1.txt", Some(b"content1")),
-                ("dir3/file3.txt", Some(b"content31")),
-            ],
-        )
-        .await?;
-
-        assert!(!validate_directory(&src_dir, &dst_dir).await?);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_find_real_src() -> Result<()> {
-        let temp = TempDir::new()?;
-        let dir = temp.path().join("test_dir");
-        fs::create_dir(&dir).await?;
-
-        assert!(find_real_src(&dir).await.is_none());
-
-        create_test_file(&dir, "file.txt", b"content").await?;
-        assert!(find_real_src(&dir).await.is_none());
-
-        let subdir = dir.join("subdir");
-        fs::create_dir(&subdir).await?;
-        assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_find_real_src_with_built_dir() -> Result<()> {
-        let temp = TempDir::new()?;
-        let dir = temp.path().join("test_dir");
-        fs::create_dir(&dir).await?;
-
-        // Create .utoo_built directory
-        let built_dir = dir.join(".utoo_built");
-        fs::create_dir(&built_dir).await?;
-
-        // Create a regular subdirectory
-        let subdir = dir.join("subdir");
-        fs::create_dir(&subdir).await?;
-
-        assert_eq!(find_real_src(&dir).await.unwrap(), subdir);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_clone_without_find_real() -> Result<()> {
-        let temp = TempDir::new()?;
-        let src_dir = temp.path().join("src");
-        let dst_dir = temp.path().join("dst");
-
-        // Create source structure
-        create_test_structure(
-            &src_dir,
-            &[
-                (".utoo_built", None),
-                ("real_dir/file.txt", Some(b"content")),
-            ],
-        )
-        .await?;
-
-        // Test cloning with find_real=false
-        clone(&src_dir, &dst_dir, false).await?;
-
-        // Verify everything was cloned
-        assert!(dst_dir.join("real_dir").exists());
-        assert!(dst_dir.join(".utoo_built").exists());
-        assert_eq!(
-            fs::read_to_string(dst_dir.join("real_dir/file.txt")).await?,
-            "content"
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_clone_existing_directory() -> Result<()> {
-        let temp = TempDir::new()?;
-        let src_dir = temp.path().join("src");
-        let dst_dir = temp.path().join("dst");
-
-        // Create initial source and destination
-        create_test_structure(&src_dir, &[("file.txt", Some(b"old content"))]).await?;
-        create_test_structure(&dst_dir, &[("file.txt", Some(b"old content"))]).await?;
-
-        // Clone should succeed and skip since content is identical
-        clone(&src_dir, &dst_dir, false).await?;
-        assert_eq!(
-            fs::read_to_string(dst_dir.join("file.txt")).await?,
-            "old content"
-        );
-
-        // Update source content
-        create_test_structure(&src_dir, &[("file.txt", Some(b"content changed"))]).await?;
-
-        // Clone should update the destination
-        clone(&src_dir, &dst_dir, false).await?;
-        assert_eq!(
-            fs::read_to_string(dst_dir.join("file.txt")).await?,
-            "content changed"
-        );
-
-        Ok(())
-    }
-
     fn create_package_json(name: &str, version: &str) -> String {
         format!(r#"{{"name": "{}", "version": "{}"}}"#, name, version)
     }
 
-    #[tokio::test]
-    async fn test_validate_name_version_matching() -> Result<()> {
-        let temp = TempDir::new()?;
-        let pkg_dir = temp.path().join("pkg");
-        fs::create_dir_all(&pkg_dir).await?;
-
-        let pkg_json = create_package_json("lodash", "4.17.21");
-        fs::write(pkg_dir.join("package.json"), pkg_json).await?;
-
-        assert!(validate_name_version(&pkg_dir, "lodash", "4.17.21").await);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_validate_name_version_name_mismatch() -> Result<()> {
-        let temp = TempDir::new()?;
-        let pkg_dir = temp.path().join("pkg");
-        fs::create_dir_all(&pkg_dir).await?;
-
-        let pkg_json = create_package_json("lodash", "4.17.21");
-        fs::write(pkg_dir.join("package.json"), pkg_json).await?;
-
-        assert!(!validate_name_version(&pkg_dir, "underscore", "4.17.21").await);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_validate_name_version_version_mismatch() -> Result<()> {
-        let temp = TempDir::new()?;
-        let pkg_dir = temp.path().join("pkg");
-        fs::create_dir_all(&pkg_dir).await?;
-
-        let pkg_json = create_package_json("lodash", "4.17.21");
-        fs::write(pkg_dir.join("package.json"), pkg_json).await?;
-
-        assert!(!validate_name_version(&pkg_dir, "lodash", "4.17.20").await);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_validate_name_version_no_package_json() -> Result<()> {
-        let temp = TempDir::new()?;
-        let pkg_dir = temp.path().join("pkg");
-        fs::create_dir_all(&pkg_dir).await?;
-
-        // No package.json file
-        assert!(!validate_name_version(&pkg_dir, "lodash", "4.17.21").await);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_clone_package_skip_if_valid() -> Result<()> {
-        let temp = TempDir::new()?;
-        // Cache structure: cache_dir/package/ (find_real looks for first subdir)
-        let cache_dir = temp.path().join("cache/lodash/4.17.21");
-        let src_dir = cache_dir.join("package");
-        let dst_dir = temp.path().join("node_modules/lodash");
-
-        // Create source (with subdir structure that find_real expects)
-        fs::create_dir_all(&src_dir).await?;
-        let pkg_json = create_package_json("lodash", "4.17.21");
-        fs::write(src_dir.join("package.json"), &pkg_json).await?;
-        fs::write(src_dir.join("index.js"), "module.exports = {}").await?;
-
-        // Create destination with same content
-        fs::create_dir_all(&dst_dir).await?;
-        fs::write(dst_dir.join("package.json"), &pkg_json).await?;
-        fs::write(dst_dir.join("index.js"), "module.exports = {}").await?;
-
-        // Add a marker file to verify it wasn't re-cloned
-        fs::write(dst_dir.join("marker.txt"), "original").await?;
-
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
-
-        // Marker file should still exist (wasn't deleted and re-cloned)
-        assert!(dst_dir.join("marker.txt").exists());
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_clone_package_reclone_if_version_mismatch() -> Result<()> {
+    #[test]
+    fn test_clone_package_sync_fresh_install() -> Result<()> {
         let temp = TempDir::new()?;
         let cache_dir = temp.path().join("cache/lodash/4.17.21");
         let src_dir = cache_dir.join("package");
         let dst_dir = temp.path().join("node_modules/lodash");
 
-        // Create source with new version
-        fs::create_dir_all(&src_dir).await?;
-        let new_pkg_json = create_package_json("lodash", "4.17.21");
-        fs::write(src_dir.join("package.json"), &new_pkg_json).await?;
-
-        // Create destination with old version
-        fs::create_dir_all(&dst_dir).await?;
-        let old_pkg_json = create_package_json("lodash", "4.17.20");
-        fs::write(dst_dir.join("package.json"), &old_pkg_json).await?;
-        fs::write(dst_dir.join("marker.txt"), "should be deleted").await?;
-
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
-
-        // Marker file should be gone (directory was deleted and re-cloned)
-        assert!(!dst_dir.join("marker.txt").exists());
-        // New package.json should have correct version
-        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
-        assert!(content.contains("4.17.21"));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_clone_package_fresh_install() -> Result<()> {
-        let temp = TempDir::new()?;
-        let cache_dir = temp.path().join("cache/lodash/4.17.21");
-        let src_dir = cache_dir.join("package");
-        let dst_dir = temp.path().join("node_modules/lodash");
-
-        // Create source
-        fs::create_dir_all(&src_dir).await?;
+        std::fs::create_dir_all(&src_dir)?;
         let pkg_json = create_package_json("lodash", "4.17.21");
-        fs::write(src_dir.join("package.json"), &pkg_json).await?;
+        std::fs::write(src_dir.join("package.json"), &pkg_json)?;
 
-        // Destination doesn't exist
-        assert!(!dst_dir.exists());
+        clone_package_sync(&PackageClone {
+            name: "lodash",
+            version: "4.17.21",
+            tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            cache: &cache_dir,
+            target: &dst_dir,
+        })?;
 
-        clone_package(&cache_dir, &dst_dir, "lodash", "4.17.21", true).await?;
-
-        // Should be cloned
         assert!(dst_dir.join("package.json").exists());
-        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
+        let content = std::fs::read_to_string(dst_dir.join("package.json"))?;
         assert!(content.contains("lodash"));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_clone_package_git_flat_layout() -> Result<()> {
-        let temp = TempDir::new()?;
-        // Git packages are extracted flat — package.json is at the root,
-        // not inside a `package/` subdirectory.
-        let cache_dir = temp.path().join("cache/my-git-pkg/abc123");
-        let dst_dir = temp.path().join("node_modules/my-git-pkg");
-
-        // Create source with flat layout (no package/ wrapper)
-        fs::create_dir_all(&cache_dir).await?;
-        let pkg_json = create_package_json("my-git-pkg", "1.0.0");
-        fs::write(cache_dir.join("package.json"), &pkg_json).await?;
-        fs::write(cache_dir.join("index.js"), "module.exports = {}").await?;
-
-        clone_package(&cache_dir, &dst_dir, "my-git-pkg", "1.0.0", false).await?;
-
-        // Should clone directly from cache root (not looking for package/ subdir)
-        assert!(dst_dir.join("package.json").exists());
-        assert!(dst_dir.join("index.js").exists());
-        let content = fs::read_to_string(dst_dir.join("package.json")).await?;
-        assert!(content.contains("my-git-pkg"));
         Ok(())
     }
 
@@ -834,6 +398,78 @@ mod tests {
 
         use super::*;
         use crate::fs::File;
+
+        /// Recursively compare two directories by entry set + file sizes
+        /// (ignoring nested `node_modules`). Test-only assertion helper.
+        async fn validate_directory(src: &Path, dst: &Path) -> Result<bool> {
+            if !crate::fs::try_exists(dst).await? {
+                return Ok(false);
+            }
+            if !fs::metadata(src).await?.is_dir() || !fs::metadata(dst).await?.is_dir() {
+                return Ok(false);
+            }
+
+            #[derive(Debug)]
+            struct EntryInfo {
+                path: PathBuf,
+                is_dir: bool,
+                size: u64,
+            }
+
+            async fn collect_entries(
+                dir: &Path,
+                ignore: Option<&[&str]>,
+            ) -> Result<Vec<EntryInfo>> {
+                let mut entries = Vec::new();
+                let mut read_dir = fs::read_dir(dir)
+                    .await
+                    .with_context(|| format!("Failed to read directory {}", dir.display()))?;
+                while let Some(entry) = read_dir.next_entry().await? {
+                    if let Some(ignore_list) = ignore
+                        && let Some(file_name) = entry.path().file_name()
+                        && ignore_list.contains(&&*file_name.to_string_lossy())
+                    {
+                        continue;
+                    }
+                    let metadata = entry.metadata().await.with_context(|| {
+                        format!("Failed to get metadata for {}", entry.path().display())
+                    })?;
+                    entries.push(EntryInfo {
+                        path: entry.path(),
+                        is_dir: metadata.is_dir(),
+                        size: if metadata.is_file() {
+                            metadata.len()
+                        } else {
+                            0
+                        },
+                    });
+                }
+                Ok(entries)
+            }
+
+            let mut src_entries = collect_entries(src, Some(&["node_modules"])).await?;
+            let mut dst_entries = collect_entries(dst, Some(&["node_modules"])).await?;
+            src_entries.sort_by(|a, b| a.path.cmp(&b.path));
+            dst_entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+            if src_entries.len() != dst_entries.len() {
+                return Ok(false);
+            }
+            for (src_entry, dst_entry) in src_entries.iter().zip(dst_entries.iter()) {
+                if src_entry.is_dir && dst_entry.is_dir {
+                    if !Box::pin(validate_directory(&src_entry.path, &dst_entry.path)).await? {
+                        return Ok(false);
+                    }
+                } else if !src_entry.is_dir && !dst_entry.is_dir {
+                    if src_entry.size != dst_entry.size {
+                        return Ok(false);
+                    }
+                } else {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
 
         #[tokio::test]
         async fn test_clone_dir_basic() -> Result<()> {

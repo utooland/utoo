@@ -12,6 +12,11 @@
     "pack.darwin-x64.node"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/utooland/utoo",
+    "directory": "packages/pack"
+  },
   "engines": {
     "node": ">= 20"
   }

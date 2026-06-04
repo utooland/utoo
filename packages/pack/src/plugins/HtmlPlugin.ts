@@ -3,6 +3,12 @@ import fs from "fs";
 import path from "path";
 import { HtmlConfig } from "../config/types";
 
+function normalizeHtmlPublicPath(globalPublicPath: string | undefined): string {
+  return globalPublicPath === "runtime" || globalPublicPath === "auto"
+    ? ""
+    : (globalPublicPath ?? "");
+}
+
 export class HtmlPlugin {
   constructor(private config: HtmlConfig) {}
 
@@ -15,7 +21,7 @@ export class HtmlPlugin {
       ? path.resolve(process.cwd(), this.config.template)
       : undefined;
 
-    const publicPath = globalPublicPath || "";
+    const publicPath = normalizeHtmlPublicPath(globalPublicPath);
 
     let htmlContent = "";
     if (this.config.templateContent) {

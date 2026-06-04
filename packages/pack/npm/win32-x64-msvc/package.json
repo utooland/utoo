@@ -12,6 +12,11 @@
     "pack.win32-x64-msvc.node"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/utooland/utoo",
+    "directory": "packages/pack"
+  },
   "engines": {
     "node": ">= 20"
   }
