@@ -227,6 +227,9 @@ function compatEntry(
               entry.push({ name: k, import: v, html });
               break;
             case "object":
+              if (v === null) {
+                break;
+              }
               if (!Array.isArray(v)) {
                 switch (typeof v.import) {
                   case "string":
@@ -546,9 +549,7 @@ function compatFunctionalExternal(
   externalRequests: WebpackCompatOptions["externalRequests"],
 ): ExternalConfigMap {
   if (!externalRequests || externalRequests.length === 0) {
-    throw new Error(
-      "functional external requires external request candidates to be provided",
-    );
+    return {};
   }
 
   const externals: ExternalConfigMap = {};

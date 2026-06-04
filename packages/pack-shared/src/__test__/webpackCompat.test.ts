@@ -72,4 +72,16 @@ describe("webpack externals compatibility", () => {
       react: "React",
     });
   });
+
+  it("returns an empty externals map when no external requests are available", () => {
+    const result = compatOptionsFromWebpack({
+      webpackMode: true,
+      entry: "./src/index.ts",
+      externals({ request }, callback) {
+        callback(null, request, "commonjs");
+      },
+    });
+
+    expect(result.config.externals).toEqual({});
+  });
 });

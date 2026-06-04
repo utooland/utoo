@@ -113,17 +113,23 @@ function collectWebpackEntryImports(entry: WebpackEntry | undefined): string[] {
     return [entry];
   }
   if (Array.isArray(entry)) {
-    return entry;
+    return filterStringEntries(entry);
   }
   return Object.values(entry).flatMap((value) => {
     if (typeof value === "string") {
       return [value];
     }
     if (Array.isArray(value)) {
-      return value;
+      return filterStringEntries(value);
     }
-    return [value.import];
+    return value?.import ? [value.import] : [];
   });
+}
+
+function filterStringEntries(entries: unknown[]): string[] {
+  return entries.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0,
+  );
 }
 
 const SOURCE_EXTENSIONS = [
@@ -158,10 +164,14 @@ function collectExternalRequestCandidates(
     context: string,
     dependencyType?: string,
   ) => {
-    if (!request || candidates.has(request)) {
+    if (!request) {
       return;
     }
-    candidates.set(request, { request, context, dependencyType });
+    const key = getExternalRequestCandidateKey(request, context);
+    if (candidates.has(key)) {
+      return;
+    }
+    candidates.set(key, { request, context, dependencyType });
   };
 
   for (const request of readPackageDependencyNames(projectDir)) {
@@ -227,8 +237,9 @@ function scanSourceFile(
     if (!request) {
       continue;
     }
-    if (!candidates.has(request)) {
-      candidates.set(request, { request, context, dependencyType });
+    const key = getExternalRequestCandidateKey(request, context);
+    if (!candidates.has(key)) {
+      candidates.set(key, { request, context, dependencyType });
     }
     if (isRelativeOrAbsoluteRequest(request)) {
       const resolved = resolveSourceFile(request, context);
@@ -237,6 +248,13 @@ function scanSourceFile(
       }
     }
   }
+}
+
+function getExternalRequestCandidateKey(
+  request: string,
+  context: string,
+): string {
+  return `${context}::${request}`;
 }
 
 function isRelativeOrAbsoluteRequest(request: string): boolean {
