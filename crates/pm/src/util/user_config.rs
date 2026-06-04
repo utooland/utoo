@@ -22,13 +22,19 @@ static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
 static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
-    let default_cache = dirs::home_dir()
+    ConfigValue::new(
+        "cache-dir",
+        default_cache_dir().to_string_lossy().to_string(),
+    )
+});
+
+/// The built-in default cache location (`~/.cache/nm`), used when no
+/// `--cache-dir`/`UTOO_CACHE_DIR`/config value is set.
+fn default_cache_dir() -> PathBuf {
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".cache/nm")
-        .to_string_lossy()
-        .to_string();
-    ConfigValue::new("cache-dir", default_cache)
-});
+}
 
 pub async fn init_registry(registry: Option<String>) {
     // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
@@ -157,8 +163,11 @@ pub fn get_manifests_concurrency_limit_sync() -> usize {
 }
 
 pub async fn set_cache_dir(cache_dir: Option<String>) {
-    // Priority: CLI argument > UTOO_CACHE_DIR env > config > default
-    let final_cache_dir = if let Some(dir) = cache_dir {
+    // Priority: CLI argument > UTOO_CACHE_DIR env > config > default.
+    // `Some` means the user picked the cache dir explicitly; `None` means we
+    // fall back to the built-in default. The distinction drives how a
+    // cross-device cache is handled (see `resolve_cache_dir`).
+    let explicit = if let Some(dir) = cache_dir {
         Some(dir)
     } else if let Ok(env_dir) = std::env::var("UTOO_CACHE_DIR")
         && !env_dir.is_empty()
@@ -172,22 +181,122 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
             .and_then(|config| config.get("cache-dir").ok().flatten())
     };
 
-    CACHE_DIR.set(final_cache_dir);
+    let resolved = match std::env::current_dir() {
+        Ok(project) => resolve_cache_dir(explicit, &project),
+        Err(_) => explicit,
+    };
+    CACHE_DIR.set(resolved);
+}
+
+/// Resolve the cache dir, accounting for the case where it lands on a different
+/// filesystem/drive than the project (where `node_modules` is created).
+/// Hardlink/clonefile cannot cross devices, so a cross-device cache forces the
+/// cloner to fall back to copying every file.
+///
+/// This only covers the common "one cache, one project volume" case — it picks
+/// a good cache location up front. It is *not* a substitute for the cloner's
+/// per-package cross-device detection: in a multi-volume layout (e.g. monorepo
+/// members on different mounts) some targets can still be cross-device with the
+/// resolved cache, and the cloner must keep falling back to copy per package.
+///
+/// - default cache on a different device → relocate to a project-local cache so
+///   linking keeps working (logged at INFO).
+/// - explicitly configured cache on a different device → keep the user's choice
+///   but WARN that installs will fall back to copying.
+///
+/// `explicit` is `Some` when the user set the cache dir, `None` for the default.
+/// Returning `None` keeps the lazy built-in default.
+fn resolve_cache_dir(explicit: Option<String>, project: &Path) -> Option<String> {
+    let effective = explicit
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_cache_dir);
+
+    if !is_cross_device(&effective, project) {
+        return explicit;
+    }
+
+    if explicit.is_some() {
+        tracing::warn!(
+            "configured cache-dir {} is on a different filesystem than the project at {}; \
+             installs will fall back to copying files instead of hardlink/clone. Point \
+             cache-dir/UTOO_CACHE_DIR at a path on the same filesystem to avoid the copy.",
+            effective.display(),
+            project.display(),
+        );
+        return explicit;
+    }
+
+    let relocated = relocated_cache_dir(project);
+    tracing::info!(
+        "default cache dir {} is on a different filesystem than the project at {}; \
+         relocating cache to {} so packages can be hardlinked/cloned instead of copied. \
+         Set cache-dir/UTOO_CACHE_DIR to override.",
+        effective.display(),
+        project.display(),
+        relocated.display(),
+    );
+    Some(relocated.to_string_lossy().to_string())
+}
+
+/// Whether `cache` and `project` live on different filesystems, so links
+/// between them are impossible. Defaults to `false` (assume same device) when
+/// the device can't be determined, to avoid relocating on transient errors.
+#[cfg(unix)]
+fn is_cross_device(cache: &Path, project: &Path) -> bool {
+    match (nearest_device(cache), nearest_device(project)) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    }
+}
+
+/// `st_dev` of `path`, walking up to the nearest existing ancestor since the
+/// cache dir itself may not exist yet.
+#[cfg(unix)]
+fn nearest_device(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let mut current = Some(path);
+    while let Some(p) = current {
+        if let Ok(meta) = std::fs::metadata(p) {
+            return Some(meta.dev());
+        }
+        current = p.parent();
+    }
+    None
+}
+
+/// A project-local cache on the same device as `node_modules`. Lives under
+/// `node_modules` so it is gitignored by convention and stays on the project's
+/// filesystem.
+#[cfg(unix)]
+fn relocated_cache_dir(project: &Path) -> PathBuf {
+    project.join("node_modules/.cache/nm")
+}
+
+#[cfg(windows)]
+fn is_cross_device(cache: &Path, project: &Path) -> bool {
+    use super::platform_const::drive_root;
+    match (drive_root(cache), drive_root(project)) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    }
+}
+
+/// On Windows, hardlinks cannot cross drive boundaries (e.g. cache on C:,
+/// project on D:). Put the cache at the project drive's root so it stays on the
+/// same drive and is reusable across projects on that drive.
+#[cfg(windows)]
+fn relocated_cache_dir(project: &Path) -> PathBuf {
+    project
+        .ancestors()
+        .last()
+        .unwrap_or(project)
+        .join(".cache/nm")
 }
 
 pub fn get_cache_dir() -> PathBuf {
-    let cache = PathBuf::from(CACHE_DIR.get_sync());
-
-    // On Windows, hardlinks cannot cross drive boundaries (e.g. cache on C:, project on D:).
-    // Fall back to a cache dir on the project's drive.
-    #[cfg(windows)]
-    if let Ok(cwd) = std::env::current_dir()
-        && super::platform_const::drive_root(&cache) != super::platform_const::drive_root(&cwd)
-    {
-        return cwd.ancestors().last().unwrap_or(&cwd).join(".cache/nm");
-    }
-
-    cache
+    // Cross-device relocation is resolved once in `set_cache_dir`.
+    PathBuf::from(CACHE_DIR.get_sync())
 }
 
 // Package.json cache — keyed by directory path, covers root + workspace members.
@@ -386,5 +495,43 @@ cache-dir = "{}"
 
         assert_eq!(cache_dir, custom_path);
         Ok(())
+    }
+
+    // Two paths under the same temp dir share a device, so the resolver must
+    // treat them as same-device regardless of platform.
+    #[test]
+    fn test_resolve_cache_dir_same_device_passthrough() -> Result<()> {
+        let temp = TempDir::new()?;
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(&project)?;
+        let cache = temp.path().join("cache").to_string_lossy().to_string();
+
+        // Explicit, same device → returned unchanged.
+        assert_eq!(
+            resolve_cache_dir(Some(cache.clone()), &project),
+            Some(cache)
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_nearest_device_walks_to_existing_ancestor() -> Result<()> {
+        let temp = TempDir::new()?;
+        // A not-yet-created nested cache path resolves to its existing ancestor's device.
+        let missing = temp.path().join("a/b/c/nm");
+        assert_eq!(nearest_device(&missing), nearest_device(temp.path()));
+        assert!(!is_cross_device(&missing, temp.path()));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_relocated_cache_dir_is_project_local() {
+        let project = PathBuf::from("/work/repo");
+        assert_eq!(
+            relocated_cache_dir(&project),
+            PathBuf::from("/work/repo/node_modules/.cache/nm")
+        );
     }
 }

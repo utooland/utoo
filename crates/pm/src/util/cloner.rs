@@ -49,7 +49,9 @@ use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "macos")]
 use libc::clonefile;
 
-#[cfg(not(target_os = "macos"))]
+/// Hardlink-first directory clone with a copy fallback. Used directly on
+/// Linux/Windows, and on macOS as the fallback when `clonefile` can't run
+/// (non-APFS volume or cross-device).
 mod hardlink_clone {
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
@@ -164,8 +166,9 @@ mod hardlink_clone {
 
     /// Async wrapper around [`clone_dir_sync`] for the dir-clone tests. The
     /// production path calls `clone_dir_sync` directly (in a blocking pool via
-    /// the scheduler), so this wrapper is test-only.
-    #[cfg(test)]
+    /// the scheduler), so this wrapper is test-only. The tests that use it are
+    /// macOS-excluded, so gate it the same way to avoid a dead-code warning.
+    #[cfg(all(test, not(target_os = "macos")))]
     pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
@@ -230,9 +233,10 @@ fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
                 last_error = Some(err);
                 // ENOTSUP (non-APFS volume) and EXDEV (cross-device) are
                 // permanent: clonefile can never succeed here, so retrying only
-                // adds delay to every clone. Stop and surface the error.
+                // adds delay to every clone. Fall back to hardlink/copy, which
+                // hardlinks within a device and copies across one.
                 if raw == Some(libc::ENOTSUP) || raw == Some(libc::EXDEV) {
-                    break;
+                    return hardlink_clone::clone_dir_sync(real_src, dst);
                 }
             }
         }
