@@ -42,6 +42,7 @@ use turbopack_core::{
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
+    paths::initial_paths_in_root,
     project::Project,
 };
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
@@ -138,10 +139,14 @@ impl AppEntrypoint {
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
-        Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(), ty)
-            .await?
-            .primary_modules())
+        Ok(Vc::cell(
+            origin
+                .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
+                .await?
+                .primary_modules()
+                .await?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -205,7 +210,8 @@ impl AppEntrypoint {
                     AssetIdent::from_path(
                         project.project_path().await?.join(this.import.as_str())?,
                     )
-                    .with_query(query.into()),
+                    .with_query(query.into())
+                    .into_vc(),
                     ChunkGroup::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?
@@ -214,6 +220,7 @@ impl AppEntrypoint {
                             .collect(),
                     ),
                     module_graph,
+                    OutputAssets::empty(),
                     AvailabilityInfo::root(),
                 );
 
@@ -495,12 +502,18 @@ impl Endpoint for AppEndpoint {
                 None
             };
 
-            let dist_root = this.project.dist_root().await?;
+            let dist_root_vc = this.project.dist_root();
+            let dist_root = dist_root_vc.await?;
+            let client_paths = initial_paths_in_root(output_assets, dist_root_vc)
+                .await?
+                .iter()
+                .cloned()
+                .collect();
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 server_entry_path: dist_root.path.clone(),
                 server_paths: vec![],
-                client_paths: vec![],
+                client_paths,
             };
 
             let mut output_assets = output_assets;
@@ -644,6 +657,7 @@ impl AppEndpoint {
             let modules = origin
                 .resolve_asset(entry_request, origin.resolve_options(), ty)
                 .await?
+                .await?
                 .primary_modules()
                 .await?;
             for &module in &*modules {
@@ -674,12 +688,14 @@ impl AppEndpoint {
         let chunk_query = "?name=index";
 
         let ident = AssetIdent::from_path(project.project_path().await?.join(chunk_name)?)
-            .with_query(chunk_query.into());
+            .with_query(chunk_query.into())
+            .into_vc();
         let chunk_group_result = server_chunking_context
             .evaluated_chunk_group(
                 ident,
                 ChunkGroup::Entry(all_evaluatables),
                 server_module_graph,
+                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             )
             .await?;

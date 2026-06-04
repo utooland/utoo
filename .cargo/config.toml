@@ -29,6 +29,7 @@ rustflags = [
   "-Clink-arg=--initial-memory=67108864",
   "-Clink-arg=--max-memory=4294967296",
   "-Clink-arg=--export=__wasm_init_tls",
+  "-Clink-arg=--export=__heap_base",
   "-Clink-arg=--export=__tls_size",
   "-Clink-arg=--export=__tls_align",
   "-Clink-arg=--export=__tls_base",

@@ -54,19 +54,26 @@ pub async fn cached_token() -> Option<String> {
         .clone()
 }
 
+/// Parse a registry/URL that may be configured as a bare host (no scheme, e.g.
+/// `registry.npmjs.org` or `localhost:4873`), defaulting to `https://`.
+///
+/// Detect a scheme by the `://` separator rather than `Url::parse(..).is_ok()`:
+/// a bare `host:port` parses "successfully" with the host read as the scheme
+/// (`localhost:4873` → scheme `localhost`), which would misclassify it.
+pub(crate) fn parse_registry(registry: &str) -> Option<Url> {
+    if registry.contains("://") {
+        Url::parse(registry).ok()
+    } else {
+        Url::parse(&format!("https://{registry}")).ok()
+    }
+}
+
 /// Whether `url` targets the same host as `registry`. The leak guard for
 /// attaching a token to a tarball download: credentials go to the registry
 /// host only, never to a third-party CDN a manifest's `dist.tarball` points at.
 fn same_host(url: &str, registry: &str) -> bool {
     fn host(s: &str) -> Option<String> {
-        // The registry may be configured as a bare host (no scheme), e.g.
-        // `registry.npmjs.org` or `localhost:4873`; give it one so it parses.
-        let parsed = if s.contains("://") {
-            Url::parse(s)
-        } else {
-            Url::parse(&format!("https://{s}"))
-        };
-        parsed.ok()?.host_str().map(str::to_ascii_lowercase)
+        parse_registry(s)?.host_str().map(str::to_ascii_lowercase)
     }
     matches!((host(url), host(registry)), (Some(a), Some(b)) if a == b)
 }

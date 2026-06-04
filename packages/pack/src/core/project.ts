@@ -654,13 +654,16 @@ export function projectFactory() {
     entrypoints: TurbopackResult<{
       apps?: { __napiType: "Endpoint" }[];
       libraries?: { __napiType: "Endpoint" }[];
+      appPaths?: NapiWrittenEndpoint[];
+      libraryPaths?: NapiWrittenEndpoint[];
     }>,
   ) {
     return {
       apps: (entrypoints.apps || []).map((e) => new EndpointImpl(e)),
       libraries: (entrypoints.libraries || []).map((e) => new EndpointImpl(e)),
+      appPaths: entrypoints.appPaths,
+      libraryPaths: entrypoints.libraryPaths,
       issues: entrypoints.issues,
-      diagnostics: entrypoints.diagnostics,
     };
   }
 

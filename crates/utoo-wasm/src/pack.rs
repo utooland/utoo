@@ -11,7 +11,6 @@ use pack_api::{
     utils::StyledStringSerialize,
 };
 use parking_lot::RwLock;
-use rustc_hash::FxHashMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
@@ -27,7 +26,6 @@ use turbo_tasks_backend::{
 };
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
-    diagnostics::PlainDiagnostic,
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos as SourcePosInner,
     version::{PartialUpdate, TotalUpdate, Update, VersionState},
@@ -242,30 +240,8 @@ impl From<SourcePosInner> for SourcePos {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Diagnostic {
-    pub category: String,
-    pub name: String,
-    pub payload: FxHashMap<String, String>,
-}
-
-impl Diagnostic {
-    pub fn from(diagnostic: &PlainDiagnostic) -> Self {
-        Self {
-            category: diagnostic.category.to_string(),
-            name: diagnostic.name.to_string(),
-            payload: diagnostic
-                .payload
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
 pub struct TurbopackResult {
     pub issues: Vec<Issue>,
-    pub diagnostics: Vec<Diagnostic>,
 }
 
 #[cfg(feature = "utoopack")]
@@ -401,7 +377,7 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
             let start = Instant::now();
             let turbo_tasks = pack_project.turbo_tasks.clone();
             let container = pack_project.container;
-            let (entrypoints, issues, diags) = turbo_tasks
+            let (entrypoints, issues) = turbo_tasks
                 .run(async move {
                     let entrypoints_with_issues_op =
                         get_all_written_entrypoints_with_issues_operation(container);
@@ -409,14 +385,13 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
                     let EntrypointsWithIssues {
                         entrypoints,
                         issues,
-                        diagnostics,
                         effects,
                     } = &*entrypoints_with_issues_op
                         .read_strongly_consistent()
                         .await?;
                     effects.apply().await?;
 
-                    Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
+                    Ok((entrypoints.clone(), issues.clone()))
                 })
                 .await?;
 
@@ -424,7 +399,6 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
 
             let result = TurbopackResult {
                 issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-                diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
             };
             let json_str =
                 serde_json::to_string(&result).map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -481,7 +455,6 @@ pub async fn project_entrypoints_subscribe(
                     let EntrypointsWithIssues {
                         entrypoints: _,
                         issues,
-                        diagnostics,
                         effects,
                     } = &*entrypoints_with_issues_op
                         .read_strongly_consistent()
@@ -492,7 +465,6 @@ pub async fn project_entrypoints_subscribe(
 
                     let turbopack_result = TurbopackResult {
                         issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-                        diagnostics: diagnostics.iter().map(|d| Diagnostic::from(d)).collect(),
                     };
 
                     // Send result through channel
@@ -552,14 +524,13 @@ pub fn project_write_all_to_disk(callback: js_sys::Function) {
                         let EntrypointsWithIssues {
                             entrypoints: _,
                             issues,
-                            diagnostics,
                             effects,
                         } = &*entrypoints_with_issues_op
                             .read_strongly_consistent()
                             .await?;
                         effects.apply().await?;
 
-                        Ok::<_, anyhow::Error>((issues.clone(), diagnostics.clone()))
+                        Ok::<_, anyhow::Error>(issues.clone())
                     })
                     .await
             })
@@ -574,10 +545,9 @@ pub fn project_write_all_to_disk(callback: js_sys::Function) {
         };
 
         match result {
-            Ok((issues, diags)) => {
+            Ok(issues) => {
                 let turbopack_result = TurbopackResult {
                     issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-                    diagnostics: diags.iter().map(|d| Diagnostic::from(d)).collect(),
                 };
 
                 if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
@@ -640,7 +610,6 @@ pub async fn project_hmr_events(
                         let HmrUpdateWithIssues {
                             update,
                             issues,
-                            diagnostics,
                             effects,
                         } = &*update;
                         effects.apply().await?;
@@ -659,9 +628,6 @@ pub async fn project_hmr_events(
                         // Convert issues to JSON (matching NAPI's NapiIssue format)
                         let issues_json: Vec<_> =
                             issues.iter().map(|issue| Issue::from(&**issue)).collect();
-
-                        let diagnostics_json: Vec<_> =
-                            diagnostics.iter().map(|d| Diagnostic::from(d)).collect();
 
                         let result_json = match &**update {
                             Update::Missing => serde_json::json!({
@@ -689,16 +655,8 @@ pub async fn project_hmr_events(
                             }
                         };
 
-                        let mut turbopack_result = result_json;
-                        if let Some(obj) = turbopack_result.as_object_mut() {
-                            obj.insert(
-                                "diagnostics".to_string(),
-                                serde_json::to_value(diagnostics_json).unwrap(),
-                            );
-                        }
-
                         tracing::debug!("hmrSubscribe sending update for {}", identifier);
-                        if let Ok(json_str) = serde_json::to_string(&turbopack_result) {
+                        if let Ok(json_str) = serde_json::to_string(&result_json) {
                             let _ = tx.send(json_str);
                         }
 

@@ -320,6 +320,8 @@ pub struct ExternalsPlugin {
     root: FileSystemPath,
     externals_config: ResolvedVc<ExternalsConfig>,
     processed_config: ResolvedVc<ProcessedExternalsConfig>,
+    before_condition: ResolvedVc<BeforeResolvePluginCondition>,
+    after_condition: ResolvedVc<AfterResolvePluginCondition>,
 }
 
 #[turbo_tasks::value_impl]
@@ -333,11 +335,81 @@ impl ExternalsPlugin {
         let processed_config = pre_process_externals_config(*externals_config)
             .to_resolved()
             .await?;
+        let externals_config_ref = externals_config.await?;
+        let before_condition = match externals_config_ref.is_empty() {
+            true => BeforeResolvePluginCondition::Never.cell(),
+            false => {
+                // Extract all possible module names from external keys
+                // For "react" -> ["react"]
+                // For "@ant/bigfish/antd" -> ["@ant/bigfish/antd", "@ant/bigfish"]
+                let mut modules = Vec::new();
+                for key in externals_config_ref.keys() {
+                    modules.push(key.clone());
+                    // Extract scoped package name if key contains additional path
+                    if key.starts_with('@')
+                        && let (Some(pos), Some(first_pos)) = (key.rfind('/'), key.find('/'))
+                        && pos > first_pos
+                    {
+                        modules.push(key[..pos].into());
+                    }
+                }
+
+                BeforeResolvePluginCondition::from_modules(Vc::cell(modules))
+            }
+        };
+        let before_condition = before_condition.to_resolved().await?;
+
+        let after_condition = {
+            // Optimization: Instead of matching all node_modules, only match packages listed in externals.
+            // This significantly reduces the number of AfterResolve tasks (Tier 1: Task Explosion).
+            let mut packages = Vec::new();
+            for (key, config) in externals_config_ref.iter() {
+                // Only need after_resolve for Advanced config with sub_path rules
+                if let ExternalConfig::Advanced(advanced) = config
+                    && advanced.sub_path.is_some()
+                {
+                    // Extract the base package name (e.g., "antd/lib" -> "antd", "@scope/pkg/sub" -> "@scope/pkg")
+                    let pkg_name = if key.starts_with('@') {
+                        let parts: Vec<&str> = key.splitn(3, '/').collect();
+                        if parts.len() >= 2 {
+                            format!("{}/{}", parts[0], parts[1])
+                        } else {
+                            key.to_string()
+                        }
+                    } else {
+                        key.split('/').next().unwrap_or(key).to_string()
+                    };
+                    packages.push(pkg_name);
+                }
+            }
+
+            match packages.is_empty() {
+                true => AfterResolvePluginCondition::Never.cell(),
+                false => {
+                    packages.sort();
+                    packages.dedup();
+
+                    let glob_str = if packages.len() == 1 {
+                        format!("**/node_modules/{}/**", packages[0]).into()
+                    } else {
+                        format!("**/node_modules/{{{}}}/**", packages.join(",")).into()
+                    };
+
+                    AfterResolvePluginCondition::new_with_glob(
+                        root.clone(),
+                        Glob::new(glob_str, GlobOptions::default()),
+                    )
+                }
+            }
+        };
+        let after_condition = after_condition.to_resolved().await?;
         Ok(ExternalsPlugin {
             project_path,
             root,
             externals_config,
             processed_config,
+            before_condition,
+            after_condition,
         }
         .cell())
     }
@@ -345,32 +417,8 @@ impl ExternalsPlugin {
 
 #[turbo_tasks::value_impl]
 impl BeforeResolvePlugin for ExternalsPlugin {
-    #[turbo_tasks::function]
-    async fn before_resolve_condition(&self) -> Result<Vc<BeforeResolvePluginCondition>> {
-        let externals_config = self.externals_config.await?;
-
-        if externals_config.is_empty() {
-            return Ok(BeforeResolvePluginCondition::Never.cell());
-        }
-
-        // Extract all possible module names from external keys
-        // For "react" -> ["react"]
-        // For "@ant/bigfish/antd" -> ["@ant/bigfish/antd", "@ant/bigfish"]
-        let mut modules = Vec::new();
-        for key in externals_config.keys() {
-            modules.push(key.clone());
-            // Extract scoped package name if key contains additional path
-            if key.starts_with('@')
-                && let (Some(pos), Some(first_pos)) = (key.rfind('/'), key.find('/'))
-                && pos > first_pos
-            {
-                modules.push(key[..pos].into());
-            }
-        }
-
-        Ok(BeforeResolvePluginCondition::from_modules(Vc::cell(
-            modules,
-        )))
+    fn before_resolve_condition(&self) -> Vc<BeforeResolvePluginCondition> {
+        *self.before_condition
     }
 
     #[turbo_tasks::function]
@@ -417,51 +465,8 @@ impl BeforeResolvePlugin for ExternalsPlugin {
 
 #[turbo_tasks::value_impl]
 impl AfterResolvePlugin for ExternalsPlugin {
-    #[turbo_tasks::function]
-    async fn after_resolve_condition(&self) -> Result<Vc<AfterResolvePluginCondition>> {
-        let externals_config = self.externals_config.await?;
-
-        // Optimization: Instead of matching all node_modules, only match packages listed in externals.
-        // This significantly reduces the number of AfterResolve tasks (Tier 1: Task Explosion).
-        let mut packages = Vec::new();
-        for (key, config) in externals_config.iter() {
-            // Only need after_resolve for Advanced config with sub_path rules
-            if let ExternalConfig::Advanced(advanced) = config
-                && advanced.sub_path.is_some()
-            {
-                // Extract the base package name (e.g., "antd/lib" -> "antd", "@scope/pkg/sub" -> "@scope/pkg")
-                let pkg_name = if key.starts_with('@') {
-                    let parts: Vec<&str> = key.splitn(3, '/').collect();
-                    if parts.len() >= 2 {
-                        format!("{}/{}", parts[0], parts[1])
-                    } else {
-                        key.to_string()
-                    }
-                } else {
-                    key.split('/').next().unwrap_or(key).to_string()
-                };
-                packages.push(pkg_name);
-            }
-        }
-
-        if packages.is_empty() {
-            return Ok(AfterResolvePluginCondition::Never.cell());
-        }
-
-        // Sort and dedup for cache stability
-        packages.sort();
-        packages.dedup();
-
-        let glob_str = if packages.len() == 1 {
-            format!("**/node_modules/{}/**", packages[0]).into()
-        } else {
-            format!("**/node_modules/{{{}}}/**", packages.join(",")).into()
-        };
-
-        Ok(AfterResolvePluginCondition::new_with_glob(
-            self.root.clone(),
-            Glob::new(glob_str, GlobOptions::default()),
-        ))
+    fn after_resolve_condition(&self) -> Vc<AfterResolvePluginCondition> {
+        *self.after_condition
     }
 
     #[turbo_tasks::function]

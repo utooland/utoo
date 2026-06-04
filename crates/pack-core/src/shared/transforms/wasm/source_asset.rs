@@ -20,11 +20,16 @@ pub struct StaticWasmFileSource {
 #[turbo_tasks::value_impl]
 impl Source for StaticWasmFileSource {
     #[turbo_tasks::function]
-    fn ident(&self) -> Vc<AssetIdent> {
-        self.wasm
+    async fn ident(&self) -> Result<Vc<AssetIdent>> {
+        let ident = self
+            .wasm
             .ident()
+            .owned()
+            .await?
             .with_modifier(rcstr!("static wasm url"))
-            .rename_as("*.mjs".into())
+            .rename_as("*.mjs");
+
+        Ok(ident.into_vc())
     }
 
     #[turbo_tasks::function]

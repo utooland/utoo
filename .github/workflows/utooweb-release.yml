@@ -24,7 +24,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-04-02
+          toolchain: nightly-2026-05-15
           targets: wasm32-unknown-unknown
           components: rust-src
       # - name: Cache cargo

@@ -1,6 +1,6 @@
 use anyhow::Result;
-use turbo_tasks::{CollectiblesSource, OperationVc, Vc, take_effects};
-use turbopack_core::{diagnostics::Diagnostic, issue::CollectibleIssuesExt};
+use turbo_tasks::{OperationVc, Vc, take_effects};
+use turbopack_core::issue::CollectibleIssuesExt;
 
 use crate::{endpoint::OptionEndpoint, entrypoint::Entrypoints};
 
@@ -19,19 +19,18 @@ pub struct EntrypointsOperation {
 }
 
 /// HACK: Wraps an `OperationVc<Entrypoints>` inside of a second `OperationVc`.
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn entrypoints_wrapper(entrypoints: OperationVc<Entrypoints>) -> Vc<Entrypoints> {
     entrypoints.connect()
 }
 
-/// Removes diagnostics, issues, and effects from the top-level `entrypoints` operation so that
-/// they're not duplicated across many different individual entrypoints or routes.
-#[turbo_tasks::function(operation)]
+/// Removes issues and effects from the top-level `entrypoints` operation so that they're not
+/// duplicated across many different individual entrypoints or routes.
+#[turbo_tasks::function(operation, root)]
 async fn entrypoints_without_collectibles_operation(
     entrypoints: OperationVc<Entrypoints>,
 ) -> Result<Vc<Entrypoints>> {
     let _ = entrypoints.read_strongly_consistent().await?;
-    entrypoints.drop_collectibles::<Box<dyn Diagnostic>>();
     entrypoints.drop_issues();
     let _ = take_effects(entrypoints).await?;
     Ok(entrypoints.connect())
@@ -39,7 +38,7 @@ async fn entrypoints_without_collectibles_operation(
 
 #[turbo_tasks::value_impl]
 impl EntrypointsOperation {
-    #[turbo_tasks::function(operation)]
+    #[turbo_tasks::function(operation, root)]
     pub async fn new(entrypoints: OperationVc<Entrypoints>) -> Result<Vc<Self>> {
         let e = entrypoints.connect().await?;
         let entrypoints = entrypoints_without_collectibles_operation(entrypoints);
@@ -62,7 +61,7 @@ impl EntrypointsOperation {
 }
 
 /// Selects an app endpoint from the original [`Entrypoints`] operation.
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn pick_app_endpoint(
     op: OperationVc<Entrypoints>,
     index: usize,
@@ -76,7 +75,7 @@ async fn pick_app_endpoint(
 }
 
 /// Selects a library endpoint from the original [`Entrypoints`] operation.
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn pick_library_endpoint(
     op: OperationVc<Entrypoints>,
     index: usize,

@@ -433,7 +433,7 @@ pub async fn generate_webpack_stats(
         .into_iter()
         .map(|(chunk_item, chunk_ids)| async move {
             let content_ident = chunk_item.content_ident().await?;
-            let asset_path = chunk_item.asset_ident().path().await?;
+            let asset_path = chunk_item.asset_ident().await?.path.clone();
             let size = content_ident
                 .path
                 .read()

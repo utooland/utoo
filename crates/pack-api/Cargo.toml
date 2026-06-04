@@ -28,6 +28,7 @@ turbo-tasks         = { workspace = true }
 turbo-tasks-backend = { workspace = true }
 turbo-tasks-env     = { workspace = true }
 turbo-tasks-fs      = { workspace = true }
+turbo-tasks-hash    = { workspace = true }
 turbo-unix-path     = { workspace = true }
 turbopack           = { workspace = true }
 turbopack-browser   = { workspace = true }

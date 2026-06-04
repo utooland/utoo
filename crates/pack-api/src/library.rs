@@ -38,6 +38,7 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
     endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
+    paths::initial_paths_in_root,
     project::Project,
 };
 
@@ -239,10 +240,14 @@ impl LibraryEndpoint {
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
-        Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(), ty)
-            .await?
-            .primary_modules())
+        Ok(Vc::cell(
+            origin
+                .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
+                .await?
+                .primary_modules()
+                .await?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -321,9 +326,11 @@ impl LibraryEndpoint {
 
             let library_chunk_group = library_chunking_context.evaluated_chunk_group(
                 AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
-                    .with_query(query.into()),
+                    .with_query(query.into())
+                    .into_vc(),
                 ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,
+                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             );
 
@@ -363,13 +370,19 @@ impl Endpoint for LibraryEndpoint {
             let output_assets = self.output_assets();
             let output_assets = output_assets.concatenate(self.project().copy_output_assets());
 
-            let dist_root = self.project().dist_root().await?;
+            let dist_root_vc = self.project().dist_root();
+            let dist_root = dist_root_vc.await?;
+            let client_paths = initial_paths_in_root(output_assets, dist_root_vc)
+                .await?
+                .iter()
+                .cloned()
+                .collect();
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 // FIXME: No server path when bundling library
                 server_entry_path: dist_root.path.clone(),
                 server_paths: vec![],
-                client_paths: vec![],
+                client_paths,
             };
 
             Ok(EndpointOutput {

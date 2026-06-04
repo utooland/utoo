@@ -2,19 +2,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use serde::Serialize;
-use turbo_tasks::{
-    Completion, Effects, OperationVc, ReadRef, TryJoinIterExt, Vc, VcValueType, take_effects,
-};
-use turbopack_core::{
-    diagnostics::{Diagnostic, DiagnosticContextExt, PlainDiagnostic},
-    issue::{CollectibleIssuesExt, IssueFilter, IssueSeverity, PlainIssue, StyledString},
+use turbo_tasks::{Completion, Effects, OperationVc, ReadRef, Vc, VcValueType, take_effects};
+use turbopack_core::issue::{
+    CollectibleIssuesExt, IssueFilter, IssueSeverity, PlainIssue, StyledString,
 };
 
 use crate::endpoint::{
     Endpoint, EndpointIssuesAndDiags, OptionEndpoint, endpoint_server_changed_operation,
 };
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn subscribe_issues_and_diags_operation(
     endpoint_op: OperationVc<OptionEndpoint>,
     should_include_issues: bool,
@@ -22,12 +19,11 @@ pub async fn subscribe_issues_and_diags_operation(
     let changed_op = endpoint_server_changed_operation(endpoint_op);
 
     if should_include_issues {
-        let (changed_value, issues, diagnostics, effects) =
+        let (changed_value, issues, effects) =
             strongly_consistent_catch_collectables(changed_op).await?;
         Ok(EndpointIssuesAndDiags {
             changed: changed_value,
             issues,
-            diagnostics,
             effects,
         }
         .cell())
@@ -36,14 +32,13 @@ pub async fn subscribe_issues_and_diags_operation(
         Ok(EndpointIssuesAndDiags {
             changed: Some(changed_value),
             issues: Arc::new(vec![]),
-            diagnostics: Arc::new(vec![]),
             effects: Arc::new(Effects::default()),
         }
         .cell())
     }
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn endpoint_client_changed_operation(
     endpoint: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<Completion>> {
@@ -61,12 +56,10 @@ pub async fn strongly_consistent_catch_collectables<R: VcValueType + Send>(
 ) -> Result<(
     Option<ReadRef<R>>,
     Arc<Vec<ReadRef<PlainIssue>>>,
-    Arc<Vec<ReadRef<PlainDiagnostic>>>,
     Arc<Effects>,
 )> {
     let result = source_op.read_strongly_consistent().await;
     let issues = get_issues(source_op).await?;
-    let diagnostics = get_diagnostics(source_op).await?;
     let effects = Arc::new(take_effects(source_op).await?);
 
     let result = if result.is_err() && issues.iter().any(|i| i.severity <= IssueSeverity::Error) {
@@ -75,7 +68,7 @@ pub async fn strongly_consistent_catch_collectables<R: VcValueType + Send>(
         Some(result?)
     };
 
-    Ok((result, issues, diagnostics, effects))
+    Ok((result, issues, effects))
 }
 
 pub async fn get_issues<T: Send>(source: OperationVc<T>) -> Result<Arc<Vec<ReadRef<PlainIssue>>>> {
@@ -83,26 +76,6 @@ pub async fn get_issues<T: Send>(source: OperationVc<T>) -> Result<Arc<Vec<ReadR
     Ok(Arc::new(
         issues.get_plain_issues(IssueFilter::everything()).await?,
     ))
-}
-
-/// Reads the [turbopack_core::diagnostics::Diagnostic] held
-/// by the given source and returns it as a
-/// [turbopack_core::diagnostics::PlainDiagnostic]. It does
-/// not consume any Diagnostics held by the source.
-pub async fn get_diagnostics<T: Send>(
-    source: OperationVc<T>,
-) -> Result<Arc<Vec<ReadRef<PlainDiagnostic>>>> {
-    let captured_diags = source.peek_diagnostics().await?;
-    let mut diags = captured_diags
-        .diagnostics
-        .iter()
-        .map(|d| d.into_plain())
-        .try_join()
-        .await?;
-
-    diags.sort();
-
-    Ok(Arc::new(diags))
 }
 
 #[derive(Serialize)]

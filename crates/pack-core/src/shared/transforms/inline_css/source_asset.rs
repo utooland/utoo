@@ -31,11 +31,16 @@ pub struct InlineCssFileSource {
 #[turbo_tasks::value_impl]
 impl Source for InlineCssFileSource {
     #[turbo_tasks::function]
-    fn ident(&self) -> Vc<AssetIdent> {
-        self.css
+    async fn ident(&self) -> Result<Vc<AssetIdent>> {
+        let ident = self
+            .css
             .ident()
+            .owned()
+            .await?
             .with_modifier(rcstr!("inline css"))
-            .rename_as("*.js".into())
+            .rename_as("*.js");
+
+        Ok(ident.into_vc())
     }
 
     #[turbo_tasks::function]
