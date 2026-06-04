@@ -676,6 +676,22 @@ rm -rf "$ENV_PREFIX"
 popd
 rm -rf "$PACK_DIR" "$INSTALL_PREFIX"
 
+# Case: `utoo link` must put the package's bins in <prefix>/bin (on PATH), not in
+# the linked package's own bin dir. Use an isolated --prefix so we don't touch
+# the runner's real global bin.
+echo -e "${YELLOW}Case: utoo link puts bins in <prefix>/bin${NC}"
+LINK_PREFIX=$(mktemp -d)
+pushd "$REPO_ROOT/e2e/pm/link-with-bin"
+utoo link --prefix "$LINK_PREFIX" \
+    || { echo -e "${RED}FAIL: utoo link --prefix failed${NC}"; exit 1; }
+popd
+[ -e "$LINK_PREFIX/bin/link-bin-test" ] \
+    || { echo -e "${RED}FAIL: linked bin not in <prefix>/bin${NC}"; ls -R "$LINK_PREFIX" | head -40; exit 1; }
+[ -e "$LINK_PREFIX/lib/node_modules/link-bin-test" ] \
+    || { echo -e "${RED}FAIL: linked package not in <prefix>/lib/node_modules${NC}"; exit 1; }
+echo -e "${GREEN}PASS: utoo link puts bins in <prefix>/bin${NC}"
+rm -rf "$LINK_PREFIX"
+
 # Case: Verify ant-design-x install + build
 echo -e "${YELLOW}Case: ant-design-x install and build${NC}"
 ANTDX_DIR=$(mktemp -d)
