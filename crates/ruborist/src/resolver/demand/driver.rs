@@ -689,6 +689,153 @@ mod tests {
         assert_eq!(shared_version_jobs.load(Ordering::Relaxed), 1);
     }
 
+    #[tokio::test]
+    async fn prod_flip_propagates_through_already_resolved_subtree() {
+        // root.devDeps: shared (shallow dev path) -> leaf
+        // root.deps: prod1 -> prod2 -> prod3 -> shared (deep prod path)
+        // `shared` is created dev first; its edge shared->leaf is resolved while
+        // shared is still dev (=> leaf dev). The deep prod path later flips
+        // `shared` to prod; the finalize fixpoint must re-propagate prod-ness so
+        // `leaf` (shared's prod child) is no longer marked dev, matching npm.
+        let mut inner = MockRegistryClient::new();
+        inner.add_package(
+            "prod1",
+            "1.0.0",
+            create_version_manifest_with_deps("prod1", "1.0.0", vec![("prod2", "^1.0.0")]),
+        );
+        inner.add_package(
+            "prod2",
+            "1.0.0",
+            create_version_manifest_with_deps("prod2", "1.0.0", vec![("prod3", "^1.0.0")]),
+        );
+        inner.add_package(
+            "prod3",
+            "1.0.0",
+            create_version_manifest_with_deps("prod3", "1.0.0", vec![("shared", "^1.0.0")]),
+        );
+        inner.add_package(
+            "shared",
+            "1.0.0",
+            create_version_manifest_with_deps("shared", "1.0.0", vec![("leaf", "^1.0.0")]),
+        );
+        inner.add_package("leaf", "1.0.0", create_version_manifest("leaf", "1.0.0"));
+
+        let registry = inner;
+        let pkg = PackageJson {
+            dependencies: Some(HashMap::from([("prod1".to_string(), "1.0.0".to_string())])),
+            dev_dependencies: Some(HashMap::from([("shared".to_string(), "1.0.0".to_string())])),
+            ..PackageJson::new("test-project", "1.0.0")
+        };
+
+        let lock = resolve(&pkg, &registry).await.unwrap();
+        let shared = lock
+            .packages
+            .get("node_modules/shared")
+            .expect("shared present");
+        let leaf = lock
+            .packages
+            .get("node_modules/leaf")
+            .expect("leaf present");
+        assert_ne!(
+            shared.dev,
+            Some(true),
+            "shared reached via prod, must not be dev"
+        );
+        assert_ne!(
+            leaf.dev,
+            Some(true),
+            "leaf is prod child of prod shared, must not be dev"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_prod_chain_overrides_root_dev_mark() {
+        // root.devDeps: shared (shallow dev via the root importer => shared.is_dev),
+        //               rdev   (pure dev leaf, sanity check)
+        // workspace `app`.deps: mid -> deep -> shared (deep prod via a workspace)
+        // `shared` is reachable through a workspace's prod chain, so it must be
+        // prod, not dev — the cross-workspace analog of the resolve-order bug.
+        use crate::model::graph::DependencyGraph;
+        use crate::model::node::DevDeps;
+        use crate::resolver::builder::{
+            BuildDepsConfig, add_edges_from, add_workspace_member, build_deps_with_config_output,
+        };
+        use crate::resolver::edges::EdgeContext;
+        use crate::traits::progress::NoopReceiver;
+        use std::path::PathBuf;
+
+        let mut inner = MockRegistryClient::new();
+        inner.add_package(
+            "mid",
+            "1.0.0",
+            create_version_manifest_with_deps("mid", "1.0.0", vec![("deep", "^1.0.0")]),
+        );
+        inner.add_package(
+            "deep",
+            "1.0.0",
+            create_version_manifest_with_deps("deep", "1.0.0", vec![("shared", "^1.0.0")]),
+        );
+        inner.add_package(
+            "shared",
+            "1.0.0",
+            create_version_manifest("shared", "1.0.0"),
+        );
+        inner.add_package("rdev", "1.0.0", create_version_manifest("rdev", "1.0.0"));
+        let registry = inner;
+
+        let root_pkg = PackageJson {
+            dev_dependencies: Some(HashMap::from([
+                ("shared".to_string(), "^1.0.0".to_string()),
+                ("rdev".to_string(), "^1.0.0".to_string()),
+            ])),
+            ..PackageJson::new("root", "1.0.0")
+        };
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        let edge_ctx = EdgeContext::new(PeerDeps::Skip, DevDeps::Include);
+        add_edges_from(&mut graph, root_index, &root_pkg, &edge_ctx);
+
+        let app = PackageJson {
+            dependencies: Some(HashMap::from([("mid".to_string(), "^1.0.0".to_string())])),
+            ..PackageJson::new("app", "1.0.0")
+        };
+        add_workspace_member(
+            &mut graph,
+            root_index,
+            "app",
+            PathBuf::from("packages/app"),
+            &app,
+            &edge_ctx,
+        );
+
+        let config = BuildDepsConfig::default().with_peer_deps(PeerDeps::Skip);
+        build_deps_with_config_output(&mut graph, &registry, config, &NoopReceiver)
+            .await
+            .unwrap();
+        let (packages, _) = graph.serialize_to_packages(&PathBuf::from("."));
+
+        let dev_of = |k: &str| packages.get(k).unwrap_or_else(|| panic!("{k} present")).dev;
+        // workspace prod subtree is prod
+        assert_ne!(dev_of("node_modules/mid"), Some(true), "workspace prod dep");
+        assert_ne!(
+            dev_of("node_modules/deep"),
+            Some(true),
+            "workspace prod transitive"
+        );
+        // shared: dev via root, but prod via the workspace chain => prod wins
+        assert_ne!(
+            dev_of("node_modules/shared"),
+            Some(true),
+            "shared reached via workspace prod chain must not be dev"
+        );
+        // sanity: a pure root devDep leaf is still dev
+        assert_eq!(
+            dev_of("node_modules/rdev"),
+            Some(true),
+            "pure dev leaf stays dev"
+        );
+    }
+
     #[test]
     fn apply_version_success_caches_and_wakes_waiter() {
         let mut state = ManifestState::seeded(Vec::new());
