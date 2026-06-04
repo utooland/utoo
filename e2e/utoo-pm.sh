@@ -680,7 +680,11 @@ rm -rf "$PACK_DIR" "$INSTALL_PREFIX"
 # the linked package's own bin dir. Use an isolated --prefix so we don't touch
 # the runner's real global bin.
 echo -e "${YELLOW}Case: utoo link puts bins in <prefix>/bin${NC}"
-LINK_PREFIX=$(mktemp -d)
+# Resolve to the physical path: on macOS `mktemp -d` lives under the /var ->
+# /private/var symlink, which would make the relative bin symlink (pointing at
+# the dev project on a different root) dangling — a test artifact, not a real
+# prefix (real prefixes like /usr/local aren't symlinked).
+LINK_PREFIX=$(cd "$(mktemp -d)" && pwd -P)
 pushd "$REPO_ROOT/e2e/pm/link-with-bin"
 utoo link --prefix "$LINK_PREFIX" \
     || { echo -e "${RED}FAIL: utoo link --prefix failed${NC}"; exit 1; }
