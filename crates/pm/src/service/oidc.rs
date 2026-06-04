@@ -21,6 +21,7 @@ use anyhow::{Context, Result};
 use reqwest::Url;
 use serde_json::Value;
 
+use crate::service::auth;
 use crate::util::http::client;
 
 /// Try to mint a publish token via OIDC trusted publishing.
@@ -29,6 +30,10 @@ use crate::util::http::client;
 /// configured token instead. Never errors: a misconfigured or unsupported
 /// registry simply yields `None`.
 pub async fn try_mint_publish_token(registry: &str, package_name: &str) -> Option<String> {
+    // Normalize a bare-host registry to a scheme'd URL once, so audience
+    // derivation and the exchange endpoint both parse.
+    let registry = auth::parse_registry(registry)?;
+    let registry = registry.as_str();
     let id_token = ci_id_token(registry).await?;
     match exchange(registry, package_name, &id_token).await {
         Ok(token) => {
@@ -47,7 +52,7 @@ pub async fn try_mint_publish_token(registry: &str, package_name: &str) -> Optio
 /// The OIDC audience for `registry`, e.g. `npm:registry.npmjs.org`. Matches
 /// npm's `npm:${new URL(registry).hostname}` (host only, no port or path).
 fn audience(registry: &str) -> Option<String> {
-    let host = Url::parse(registry).ok()?.host_str()?.to_owned();
+    let host = auth::parse_registry(registry)?.host_str()?.to_owned();
     Some(format!("npm:{host}"))
 }
 
@@ -144,6 +149,12 @@ mod tests {
             audience("https://registry.npmjs.org").as_deref(),
             Some("npm:registry.npmjs.org")
         );
+        // Bare host (no scheme) is normalized before parsing.
+        assert_eq!(
+            audience("registry.npmjs.org").as_deref(),
+            Some("npm:registry.npmjs.org")
+        );
+        assert_eq!(audience("localhost:4873").as_deref(), Some("npm:localhost"));
         // Path and port are dropped — host only.
         assert_eq!(
             audience("https://packages.example.com:8443/org/npm-registry/").as_deref(),
