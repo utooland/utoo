@@ -21,7 +21,7 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
 
     let (turbo_tasks, project_container) = initialize_project_container(options, dev).await?;
 
-    let (_entrypoints, _issues, _diagnostics) = turbo_tasks
+    let (_entrypoints, _issues) = turbo_tasks
         .run(async move {
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(project_container);
@@ -29,14 +29,13 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
             let EntrypointsWithIssues {
                 entrypoints,
                 issues,
-                diagnostics,
                 effects,
             } = &*entrypoints_with_issues_op
                 .read_strongly_consistent()
                 .await?;
             effects.apply().await?;
 
-            Ok((entrypoints.clone(), issues.clone(), diagnostics.clone()))
+            Ok((entrypoints.clone(), issues.clone()))
         })
         .await?;
 

@@ -124,7 +124,7 @@ async fn run(resource: PathBuf) -> Result<()> {
         let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
         ProjectContainer::initialize(container_op, project_options).await?;
 
-        #[turbo_tasks::function(operation)]
+        #[turbo_tasks::function(operation, root)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
             let out_path = out_op
                 .resolve()
@@ -142,7 +142,7 @@ async fn run(resource: PathBuf) -> Result<()> {
             Ok(Default::default())
         }
 
-        #[turbo_tasks::function(operation)]
+        #[turbo_tasks::function(operation, root)]
         async fn snapshot_effects_operation(
             out_op: OperationVc<FileSystemPath>,
         ) -> Result<Vc<Effects>> {
@@ -151,7 +151,7 @@ async fn run(resource: PathBuf) -> Result<()> {
             Ok(take_effects(snap_op).await?.cell())
         }
 
-        #[turbo_tasks::function(operation)]
+        #[turbo_tasks::function(operation, root)]
         async fn output_effects_operation(
             out_op: OperationVc<FileSystemPath>,
         ) -> Result<Vc<Effects>> {
@@ -294,7 +294,7 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
     })
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn run_test_operation(
     container_op: OperationVc<ProjectContainer>,
 ) -> Result<Vc<FileSystemPath>> {
@@ -306,7 +306,6 @@ async fn run_test_operation(
     let EntrypointsWithIssues {
         entrypoints: _,
         issues: _,
-        diagnostics: _,
         effects: _,
     } = &*entrypoints_with_issues_op
         .read_strongly_consistent()

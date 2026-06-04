@@ -59,9 +59,10 @@ pub async fn assert_can_resolve_react_refresh(
         request,
         resolve_options,
     )
+    .await?
     .first_source();
 
-    if result.await?.is_some() {
+    if result.is_some() {
         return Ok(ResolveReactRefreshResult::Found(request.to_resolved().await?).cell());
     }
     ReactRefreshResolvingIssue { path }.resolved_cell().emit();

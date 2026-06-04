@@ -146,6 +146,8 @@ export declare function projectShutdown(project: { __napiType: "Project" }): Pro
 export interface NapiEntrypoints {
   apps?: Array<ExternalObject<ExternalEndpoint>>
   libraries?: Array<ExternalObject<ExternalEndpoint>>
+  appPaths?: Array<NapiWrittenEndpoint>
+  libraryPaths?: Array<NapiWrittenEndpoint>
 }
 export declare function projectWriteAllEntrypointsToDisk(project: { __napiType: "Project" }): Promise<TurbopackResult>
 export declare function projectEntrypointsSubscribe(project: { __napiType: "Project" }, func: (...args: any[]) => any): { __napiType: "RootTask" }
@@ -240,11 +242,6 @@ export interface NapiSource {
 export interface NapiSourcePos {
   line: number
   column: number
-}
-export interface NapiDiagnostic {
-  category: string
-  name: string
-  payload: Record<string, string>
 }
 /**
  * Initialize tracing subscriber to emit traces. This configures subscribers

@@ -322,9 +322,9 @@ impl LibraryChunkingContext {
                 let content_hash = self.ecmascript_chunk_content_hash(ecmascript_chunk).await?;
                 filename = replace_content_hash_placeholder(&filename, &content_hash);
             };
-            Ok(AssetIdent::from_path(root.join(&filename)?))
+            Ok(AssetIdent::from_path(root.join(&filename)?).into_vc())
         } else {
-            Ok(AssetIdent::from_path(root.join(name)?))
+            Ok(AssetIdent::from_path(root.join(name)?).into_vc())
         }
     }
 
@@ -355,7 +355,7 @@ impl LibraryChunkingContext {
         hasher.write_value(chunk_items.len());
 
         for item in &chunk_items {
-            for (module_id, code) in item {
+            for (module_id, code) in &**item {
                 hasher.write_value((module_id, code.source_code()));
             }
         }
@@ -550,7 +550,7 @@ impl ChunkingContext for LibraryChunkingContext {
         _tag: Option<RcStr>,
     ) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
-        let source_path = original_asset_ident.path().await?;
+        let source_path = original_asset_ident.await?.path.clone();
         let basename = source_path.file_name();
         let content_hash = content
             .content_hash(no_hash_salt(), HashAlgorithm::Xxh3Hash64Hex)
@@ -644,6 +644,7 @@ impl ChunkingContext for LibraryChunkingContext {
         ident: Vc<AssetIdent>,
         chunk_group: ChunkGroup,
         module_graph: Vc<ModuleGraph>,
+        _extra_chunks: Vc<OutputAssets>,
         availability_info: AvailabilityInfo,
     ) -> Result<Vc<ChunkGroupResult>> {
         let span = {
@@ -651,15 +652,14 @@ impl ChunkingContext for LibraryChunkingContext {
             tracing::trace_span!("chunking", chunking_type = "evaluated", ident = ident)
         };
         async move {
-            let entries = chunk_group.entries();
+            let module_graph = module_graph.to_resolved().await?;
 
             let MakeChunkGroupResult {
                 chunks,
                 references,
-                referenced_output_assets,
                 availability_info,
             } = make_chunk_group(
-                entries,
+                chunk_group.clone(),
                 module_graph,
                 ResolvedVc::upcast(self),
                 availability_info,
@@ -708,7 +708,7 @@ impl ChunkingContext for LibraryChunkingContext {
                                 *ecmascript_chunk,
                                 Vc::cell(other_chunks),
                                 evaluatable_assets,
-                                module_graph,
+                                *module_graph,
                             )
                             .to_resolved()
                             .await?,
@@ -727,7 +727,7 @@ impl ChunkingContext for LibraryChunkingContext {
             Ok(ChunkGroupResult {
                 assets: ResolvedVc::cell(assets),
                 references: ResolvedVc::cell(references),
-                referenced_assets: ResolvedVc::cell(referenced_output_assets),
+                referenced_assets: OutputAssets::empty_resolved(),
                 availability_info,
             }
             .cell())

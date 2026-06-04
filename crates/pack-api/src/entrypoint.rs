@@ -4,7 +4,6 @@ use turbo_tasks::{Effects, FxIndexSet, ReadRef, ResolvedVc, TryJoinIterExt, Vc, 
 use turbo_tasks_fs::{File, FileContent, FileSystemPath};
 use turbopack_core::{
     asset::AssetContent,
-    diagnostics::PlainDiagnostic,
     issue::PlainIssue,
     output::{OutputAsset, OutputAssets},
     virtual_output::VirtualOutputAsset,
@@ -14,7 +13,7 @@ use crate::{
     endpoint::{Endpoint, Endpoints},
     operation::EntrypointsOperation,
     project::ProjectContainer,
-    utils::{get_diagnostics, get_issues},
+    utils::get_issues,
     webpack_stats::generate_webpack_stats,
 };
 
@@ -24,7 +23,7 @@ pub struct Entrypoints {
     pub libraries: Option<ResolvedVc<Endpoints>>,
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_all_written_entrypoints_with_issues_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<EntrypointsWithIssues>> {
@@ -32,18 +31,16 @@ pub async fn get_all_written_entrypoints_with_issues_operation(
         EntrypointsOperation::new(all_entrypoints_write_to_disk_operation(container));
     let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
     let issues = get_issues(entrypoints_operation).await?;
-    let diagnostics = get_diagnostics(entrypoints_operation).await?;
     let effects = Arc::new(take_effects(entrypoints_operation).await?);
     Ok(EntrypointsWithIssues {
         entrypoints,
         issues,
-        diagnostics,
         effects,
     }
     .cell())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn all_entrypoints_write_to_disk_operation(
     project: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<Entrypoints>> {
@@ -56,7 +53,7 @@ pub async fn all_entrypoints_write_to_disk_operation(
     Ok(project.entrypoints())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn all_output_assets_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<OutputAssets>> {
@@ -130,11 +127,10 @@ async fn make_stats_output(
 pub struct EntrypointsWithIssues {
     pub entrypoints: ReadRef<EntrypointsOperation>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
-    pub diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     pub effects: Arc<Effects>,
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_entrypoints_with_issues_operation(
     container: ResolvedVc<ProjectContainer>,
 ) -> Result<Vc<EntrypointsWithIssues>> {
@@ -142,18 +138,16 @@ pub async fn get_entrypoints_with_issues_operation(
         EntrypointsOperation::new(project_container_entrypoints_operation(container));
     let entrypoints = entrypoints_operation.read_strongly_consistent().await?;
     let issues = get_issues(entrypoints_operation).await?;
-    let diagnostics = get_diagnostics(entrypoints_operation).await?;
     let effects = Arc::new(take_effects(entrypoints_operation).await?);
     Ok(EntrypointsWithIssues {
         entrypoints,
         issues,
-        diagnostics,
         effects,
     }
     .cell())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn project_container_entrypoints_operation(
     // the container is a long-lived object with internally mutable state, there's no risk of it
     // becoming stale

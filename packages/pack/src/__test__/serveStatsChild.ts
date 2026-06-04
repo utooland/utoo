@@ -78,6 +78,7 @@ async function main() {
         entry: [{ import: "./src/index.js", name: "main" }],
         html: { title: "Serve Stats Snapshot" },
         output: { path: "./dist", clean: true },
+        stats: true,
       },
     },
     projectPath,

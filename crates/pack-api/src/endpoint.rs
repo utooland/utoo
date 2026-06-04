@@ -4,7 +4,6 @@ use anyhow::Result;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{Completion, Effects, OperationVc, ReadRef, ResolvedVc, Vc};
 use turbopack_core::{
-    diagnostics::PlainDiagnostic,
     issue::PlainIssue,
     module_graph::{GraphEntries, ModuleGraph},
     output::OutputAssets,
@@ -60,7 +59,7 @@ pub enum EndpointOutputPaths {
 #[turbo_tasks::value(transparent)]
 pub struct Endpoints(pub Vec<ResolvedVc<Box<dyn Endpoint>>>);
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn endpoint_server_changed_operation(
     endpoint: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<Completion>> {
@@ -71,7 +70,7 @@ pub async fn endpoint_server_changed_operation(
     })
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn endpoint_write_to_disk_operation(
     endpoint: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<EndpointOutputPaths>> {
@@ -101,13 +100,13 @@ pub async fn endpoint_write_to_disk(
     Ok(*output_paths)
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 #[tracing::instrument(name = "output_assets_operation", skip_all)]
 fn output_assets_operation(endpoint: ResolvedVc<Box<dyn Endpoint>>) -> Vc<EndpointOutput> {
     endpoint.output()
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn endpoint_output_assets_operation(
     output: OperationVc<EndpointOutput>,
 ) -> Result<Vc<OutputAssets>> {
@@ -118,24 +117,22 @@ async fn endpoint_output_assets_operation(
 pub struct WrittenEndpointWithIssues {
     pub written: Option<ReadRef<EndpointOutputPaths>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
-    pub diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     pub effects: Arc<Effects>,
 }
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionEndpoint(pub Option<ResolvedVc<Box<dyn Endpoint>>>);
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 pub async fn get_written_endpoint_with_issues_operation(
     endpoint_op: OperationVc<OptionEndpoint>,
 ) -> Result<Vc<WrittenEndpointWithIssues>> {
     let write_to_disk_op = endpoint_write_to_disk_operation(endpoint_op);
-    let (written, issues, diagnostics, effects) =
+    let (written, issues, effects) =
         strongly_consistent_catch_collectables(write_to_disk_op).await?;
     Ok(WrittenEndpointWithIssues {
         written,
         issues,
-        diagnostics,
         effects,
     }
     .cell())
@@ -145,7 +142,6 @@ pub async fn get_written_endpoint_with_issues_operation(
 pub struct EndpointIssuesAndDiags {
     pub changed: Option<ReadRef<Completion>>,
     pub issues: Arc<Vec<ReadRef<PlainIssue>>>,
-    pub diagnostics: Arc<Vec<ReadRef<PlainDiagnostic>>>,
     pub effects: Arc<Effects>,
 }
 
@@ -156,7 +152,6 @@ impl PartialEq for EndpointIssuesAndDiags {
             (None, None) => true,
             (None, Some(_)) | (Some(_), None) => false,
         }) && self.issues == other.issues
-            && self.diagnostics == other.diagnostics
     }
 }
 
