@@ -4,13 +4,14 @@ use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::linker::link;
+use crate::util::user_config::resolve_global_prefix;
 use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Link current package to global (equivalent to npm link without args)
 pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<String> {
     // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
-    let prefix = crate::util::user_config::resolve_global_prefix(prefix).await;
+    let prefix = resolve_global_prefix(prefix).await;
     let prefix = prefix.as_deref();
 
     let project_path = update_cwd_to_project(cwd).await?;
@@ -64,7 +65,7 @@ pub async fn link_global_to_local(
     prefix: Option<&str>,
 ) -> Result<()> {
     // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
-    let prefix = crate::util::user_config::resolve_global_prefix(prefix).await;
+    let prefix = resolve_global_prefix(prefix).await;
     let prefix = prefix.as_deref();
 
     let project_path = update_cwd_to_project(cwd).await?;

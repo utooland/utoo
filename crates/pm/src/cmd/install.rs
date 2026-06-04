@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::service::install::InstallService;
 use crate::util::cli_enum::{PackageAction, SaveType};
-use crate::util::user_config::get_omit;
+use crate::util::user_config::{get_omit, resolve_global_prefix};
 
 pub async fn update_packages(
     action: PackageAction,
@@ -34,7 +34,7 @@ pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Res
     }
 
     // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
-    let prefix = crate::util::user_config::resolve_global_prefix(prefix).await;
+    let prefix = resolve_global_prefix(prefix).await;
 
     // Dispatch to service
     InstallService::install_global_package(npm_spec, prefix.as_deref()).await

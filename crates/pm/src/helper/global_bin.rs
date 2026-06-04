@@ -1,6 +1,7 @@
 use crate::util::platform_const::GLOBAL_NODE_MODULES;
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::env;
+use std::path::{Path, PathBuf, absolute};
 
 // Global install layout helpers.
 //
@@ -31,7 +32,7 @@ pub fn get_global_bin_dir(prefix: Option<&str>) -> Result<PathBuf> {
     match prefix {
         Some(prefix) => Ok(prefixed_bin_dir(&to_absolute(PathBuf::from(prefix)))),
         None => {
-            let exe = std::env::current_exe().context("Failed to get current executable path")?;
+            let exe = env::current_exe().context("Failed to get current executable path")?;
             Ok(bin_dir_from_exe(&exe))
         }
     }
@@ -42,7 +43,7 @@ pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
     match prefix {
         Some(prefix) => Ok(to_absolute(PathBuf::from(prefix)).join(GLOBAL_NODE_MODULES)),
         None => {
-            let exe = std::env::current_exe().context("Failed to get current executable path")?;
+            let exe = env::current_exe().context("Failed to get current executable path")?;
             Ok(package_dir_from_exe(&exe))
         }
     }
@@ -64,7 +65,7 @@ fn to_absolute(prefix: PathBuf) -> PathBuf {
     if prefix.is_absolute() {
         prefix
     } else {
-        std::path::absolute(&prefix).unwrap_or(prefix)
+        absolute(&prefix).unwrap_or(prefix)
     }
 }
 
@@ -93,6 +94,10 @@ fn npm_style_prefix(exe: &Path) -> Option<PathBuf> {
 fn bin_dir_from_exe(exe: &Path) -> PathBuf {
     match npm_style_prefix(exe) {
         Some(prefix) => prefixed_bin_dir(&prefix),
+        // Flat layout: the binary's own dir. `current_exe()` is always an
+        // absolute path on real platforms, so `parent()` is `Some`;
+        // `unwrap_or_default()` is only a non-panicking guard for the
+        // impossible parentless case.
         None => exe.parent().map(Path::to_path_buf).unwrap_or_default(),
     }
 }
@@ -206,6 +211,20 @@ mod tests {
         assert_eq!(
             package_dir_from_exe(&exe),
             PathBuf::from("/usr/local/lib/node_modules")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_npm_style_windows() {
+        // npm-style global on Windows: GLOBAL_NODE_MODULES is `node_modules`
+        // (no `lib`), and the global bin dir is the prefix root. Exercises the
+        // Component -> PathBuf rebuild reproducing the `C:\` drive prefix.
+        let exe = PathBuf::from("C:\\npm\\node_modules\\utoo\\bin\\ut.exe");
+        assert_eq!(bin_dir_from_exe(&exe), PathBuf::from("C:\\npm"));
+        assert_eq!(
+            package_dir_from_exe(&exe),
+            PathBuf::from("C:\\npm").join(GLOBAL_NODE_MODULES)
         );
     }
 }
