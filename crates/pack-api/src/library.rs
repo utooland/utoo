@@ -239,10 +239,14 @@ impl LibraryEndpoint {
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
-        Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(), ty)
-            .await?
-            .primary_modules())
+        Ok(Vc::cell(
+            origin
+                .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
+                .await?
+                .primary_modules()
+                .await?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -321,9 +325,11 @@ impl LibraryEndpoint {
 
             let library_chunk_group = library_chunking_context.evaluated_chunk_group(
                 AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
-                    .with_query(query.into()),
+                    .with_query(query.into())
+                    .into_vc(),
                 ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,
+                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             );
 

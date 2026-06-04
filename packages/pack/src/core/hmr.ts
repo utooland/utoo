@@ -284,7 +284,6 @@ export async function createHotReloader(
   const sendEnqueuedMessagesDebounce = debounce(sendEnqueuedMessages, 2);
 
   function sendTurbopackMessage(payload: TurbopackUpdate) {
-    payload.diagnostics = [];
     payload.issues = [];
 
     for (const client of clients) {

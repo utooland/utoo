@@ -138,10 +138,14 @@ impl AppEntrypoint {
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
-        Ok(origin
-            .resolve_asset(entry_request, origin.resolve_options(), ty)
-            .await?
-            .primary_modules())
+        Ok(Vc::cell(
+            origin
+                .resolve_asset(entry_request, origin.resolve_options(), ty)
+                .await?
+                .await?
+                .primary_modules()
+                .await?,
+        ))
     }
 
     #[turbo_tasks::function]
@@ -205,7 +209,8 @@ impl AppEntrypoint {
                     AssetIdent::from_path(
                         project.project_path().await?.join(this.import.as_str())?,
                     )
-                    .with_query(query.into()),
+                    .with_query(query.into())
+                    .into_vc(),
                     ChunkGroup::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?
@@ -214,6 +219,7 @@ impl AppEntrypoint {
                             .collect(),
                     ),
                     module_graph,
+                    OutputAssets::empty(),
                     AvailabilityInfo::root(),
                 );
 
@@ -644,6 +650,7 @@ impl AppEndpoint {
             let modules = origin
                 .resolve_asset(entry_request, origin.resolve_options(), ty)
                 .await?
+                .await?
                 .primary_modules()
                 .await?;
             for &module in &*modules {
@@ -674,12 +681,14 @@ impl AppEndpoint {
         let chunk_query = "?name=index";
 
         let ident = AssetIdent::from_path(project.project_path().await?.join(chunk_name)?)
-            .with_query(chunk_query.into());
+            .with_query(chunk_query.into())
+            .into_vc();
         let chunk_group_result = server_chunking_context
             .evaluated_chunk_group(
                 ident,
                 ChunkGroup::Entry(all_evaluatables),
                 server_module_graph,
+                OutputAssets::empty(),
                 AvailabilityInfo::root(),
             )
             .await?;

@@ -290,7 +290,7 @@ pub struct ProjectContainer {
 
 #[turbo_tasks::value_impl]
 impl ProjectContainer {
-    #[turbo_tasks::function(operation)]
+    #[turbo_tasks::function(operation, root)]
     pub fn new_operation(name: RcStr, dev: bool) -> Result<Vc<Self>> {
         Ok(ProjectContainer {
             name,
@@ -307,17 +307,17 @@ impl ProjectContainer {
     }
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn project_operation(project: ResolvedVc<ProjectContainer>) -> Vc<Project> {
     project.project()
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn project_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
     project.project_fs(project.dist_dir())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
     project.output_fs()
 }
@@ -346,7 +346,7 @@ impl ProjectContainer {
 
             this.options_state.set(Some(options));
 
-            #[turbo_tasks::function(operation)]
+            #[turbo_tasks::function(operation, root)]
             fn project_from_container_operation(
                 container: OperationVc<ProjectContainer>,
             ) -> Vc<Project> {
@@ -394,7 +394,7 @@ impl ProjectContainer {
             // to upgrade the `ResolvedVc` to an `OperationVc`. This is mostly okay
             // because we can assume the `ProjectContainer` was originally resolved with
             // strong consistency, and is rarely updated.
-            #[turbo_tasks::function(operation)]
+            #[turbo_tasks::function(operation, root)]
             fn project_container_operation_hack(
                 container: ResolvedVc<ProjectContainer>,
             ) -> Vc<ProjectContainer> {
@@ -744,7 +744,7 @@ impl Project {
         let watched_ignored = self.watch.ignored.clone();
 
         Ok(DiskFileSystem::new_with_denied_paths_and_watched_ignored(
-            PROJECT_FILESYSTEM_NAME.into(),
+            PROJECT_FILESYSTEM_NAME,
             Vc::cell(self.root_path.clone()),
             denied_paths,
             watched_ignored,
@@ -1353,7 +1353,7 @@ impl Project {
                         .await?
                         .into_iter()
                         .map(|l| async move {
-                            let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(**l);
+                            let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(*l);
                             endpoint.to_resolved().await
                         })
                         .try_join()
@@ -1438,7 +1438,7 @@ impl Project {
         // sessions.
         let _ = session;
 
-        #[turbo_tasks::function(operation)]
+        #[turbo_tasks::function(operation, root)]
         async fn hmr_version_operation(
             this: ResolvedVc<Project>,
             identifier: RcStr,
@@ -1689,7 +1689,7 @@ async fn copy_directory_recursive_helper(
 
 // This is a performance optimization. This function is a root aggregation function that
 // aggregates over the whole subgraph.
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn whole_app_module_graph_operation(
     project: ResolvedVc<Project>,
 ) -> Result<Vc<BaseAndFullModuleGraph>> {
@@ -1768,10 +1768,7 @@ async fn any_output_changed(
     server: bool,
 ) -> Result<Vc<Completion>> {
     let all_assets = expand_output_assets(
-        roots
-            .await?
-            .into_iter()
-            .map(|&a| ExpandOutputAssetsInput::Asset(a)),
+        roots.await?.into_iter().map(ExpandOutputAssetsInput::Asset),
         true,
     )
     .await?;
@@ -1802,7 +1799,7 @@ async fn any_output_changed(
     Ok(Vc::<Completions>::cell(completions).completed())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn all_assets_from_entries_operation(
     operation: OperationVc<OutputAssets>,
 ) -> Result<Vc<ExpandedOutputAssets>> {

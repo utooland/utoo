@@ -47,7 +47,6 @@ export interface EcmascriptMergedUpdate {
 
 export interface BaseUpdate {
   resource: ResourceIdentifier;
-  diagnostics: unknown[];
   issues: HmrIssue[];
 }
 
