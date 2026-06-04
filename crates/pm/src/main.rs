@@ -255,7 +255,14 @@ enum Commands {
     /// Execute packages similar to npx
     #[command(name = EXECUTE_NAME, alias = EXECUTE_ALIAS, about = EXECUTE_ABOUT)]
     Execute {
-        /// Command to execute
+        /// Command (package) to execute, or `--version` for `x` itself.
+        ///
+        /// `allow_hyphen_values` lets a leading `--version`/`-v` reach here
+        /// (handled in `main`) instead of clap rejecting it; a real package name
+        /// never starts with `-`, and known global flags (e.g. `--registry`) are
+        /// still parsed before this positional. (`--help`/`-h` is handled by
+        /// clap's built-in help for the subcommand.)
+        #[arg(allow_hyphen_values = true)]
         command: String,
 
         /// Arguments to pass to the command
@@ -384,6 +391,19 @@ async fn async_main() -> Result<()> {
 
     // Check for version flag
     if cli.version {
+        println!("{APP_VERSION}");
+        return Ok(());
+    }
+
+    // `utx --version` (= `utoo x --version`): the version flag is disabled at
+    // the top level, so a leading `--version`/`-v` lands in the Execute
+    // `command` (see its doc) instead of being rejected. Handle it here —
+    // before registry selection and auto-update — so it behaves like `npx
+    // --version` rather than being treated as a package to run. (`--help`/`-h`
+    // is intercepted by clap's built-in help for the `x` subcommand.)
+    if let Some(Commands::Execute { command, .. }) = &cli.command
+        && matches!(command.as_str(), "--version" | "-v")
+    {
         println!("{APP_VERSION}");
         return Ok(());
     }
@@ -770,5 +790,38 @@ mod tests {
             result.is_ok(),
             "Should parse 'utoo install' as valid Install command"
         );
+    }
+
+    /// `utx --version` (= `utoo x --version`) must parse — the leading
+    /// `--version`/`-v` lands in `command` rather than being rejected by clap —
+    /// so `main` can print the version instead of erroring. (`--help`/`-h` is
+    /// intercepted by clap's built-in help and is not exercised here.)
+    #[test]
+    fn test_execute_captures_leading_version_flag() {
+        for flag in ["--version", "-v"] {
+            let cli = Cli::try_parse_from(["utoo", "x", flag])
+                .unwrap_or_else(|e| panic!("`utoo x {flag}` should parse, got: {e}"));
+            match cli.command {
+                Some(Commands::Execute { command, args }) => {
+                    assert_eq!(command, flag);
+                    assert!(args.is_empty());
+                }
+                _ => panic!("expected Execute subcommand"),
+            }
+        }
+    }
+
+    /// A flag after the package name is passed through to the package, not
+    /// consumed as `x`'s own flag.
+    #[test]
+    fn test_execute_passes_through_package_flags() {
+        let cli = Cli::try_parse_from(["utoo", "x", "cowsay", "--version"]).unwrap();
+        match cli.command {
+            Some(Commands::Execute { command, args }) => {
+                assert_eq!(command, "cowsay");
+                assert_eq!(args, vec!["--version".to_string()]);
+            }
+            _ => panic!("expected Execute subcommand"),
+        }
     }
 }
