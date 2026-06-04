@@ -744,7 +744,7 @@ impl Project {
         let watched_ignored = self.watch.ignored.clone();
 
         Ok(DiskFileSystem::new_with_denied_paths_and_watched_ignored(
-            PROJECT_FILESYSTEM_NAME.into(),
+            PROJECT_FILESYSTEM_NAME,
             Vc::cell(self.root_path.clone()),
             denied_paths,
             watched_ignored,
