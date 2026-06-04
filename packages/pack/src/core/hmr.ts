@@ -84,7 +84,7 @@ export interface HotReloaderInterface {
   /** Handle a message from a client (JSON string). */
   handleClientMessage(ws: WSLike, data: string): void;
   buildFallbackError(): Promise<void>;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export type ChangeSubscriptions = Map<
@@ -759,11 +759,11 @@ export async function createHotReloader(
       // Not implemented yet.
     },
 
-    close() {
+    async close() {
       closed = true;
-      void disposeBackgroundWatchSubscriptions();
+      const disposePromise = disposeBackgroundWatchSubscriptions();
       closePromise ??= project
-        .onExit()
+        .shutdown()
         .catch((err) => {
           console.error(err);
         })
@@ -775,6 +775,8 @@ export async function createHotReloader(
         wsClient.close();
       }
       clients.clear();
+
+      await Promise.all([disposePromise, closePromise]);
     },
   };
 
