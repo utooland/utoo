@@ -7,6 +7,7 @@ use utoo_ruborist::service::{
     BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
 };
 
+use crate::service::auth;
 use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};
 use crate::util::cache::get_cache_dir;
 use crate::util::logger::ProgressReceiver;
@@ -54,15 +55,13 @@ impl Context {
         let project_cache = Some(project_cache::load(&cwd).await);
         BuildDepsOptions {
             cwd,
-            registry_url: get_registry(),
+            registry: Self::registry().await,
             cache_dir: Some(get_cache_dir()),
-            manifest_store: Self::manifest_store(),
             project_cache,
             concurrency: get_manifests_concurrency_limit().await,
             peer_deps: get_peer_deps().await,
             glob: TokioGlob,
             receiver,
-            supports_semver: get_supports_semver(),
             catalogs,
         }
     }
@@ -88,10 +87,14 @@ impl Context {
         Ok(output)
     }
 
-    /// Create a UnifiedRegistry with standard configuration.
-    pub fn registry() -> Registry {
+    /// Create a UnifiedRegistry with standard configuration, including the
+    /// private-registry auth token (resolved once, cached). This is the single
+    /// place registry config + credentials are assembled; `deps_options` reuses
+    /// it so install and `resolve_package` share one authenticated client.
+    pub async fn registry() -> Registry {
         let mut builder = UnifiedRegistry::builder()
             .registry(get_registry())
+            .auth_token(auth::cached_token().await)
             .store(Self::manifest_store());
         if let Some(semver) = get_supports_semver() {
             builder = builder.supports_semver(semver);

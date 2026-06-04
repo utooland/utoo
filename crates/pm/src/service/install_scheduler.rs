@@ -7,6 +7,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
 
+use crate::service::auth;
 use crate::util::cloner::{PackageClone, clone_package_sync};
 use crate::util::downloader::{download_bytes, is_registry_tarball_url};
 use crate::util::package_cache::{
@@ -446,10 +447,13 @@ impl SchedulerState {
             self.async_ops.push(tokio::spawn(async move {
                 let result = match registry_cache_lookup(&package.name, &package.version).await {
                     Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
-                    Ok(None) => download_bytes(&package.tarball_url)
-                        .await
-                        .map(DownloadOutcome::Bytes)
-                        .map_err(|e| format!("{e:#}")),
+                    Ok(None) => {
+                        let token = auth::token_for_url(&package.tarball_url).await;
+                        download_bytes(&package.tarball_url, token.as_deref())
+                            .await
+                            .map(DownloadOutcome::Bytes)
+                            .map_err(|e| format!("{e:#}"))
+                    }
                     Err(e) => Err(format!("{e:#}")),
                 };
                 StageReport::Download { package, result }
