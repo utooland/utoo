@@ -1,4 +1,7 @@
+use std::iter::once;
 use std::path::{Path, PathBuf};
+use std::thread::sleep;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
@@ -220,9 +223,9 @@ fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
 /// as the macOS fallback when `clonefile` can't run.
 fn hardlink_clone_retry(real_src: &Path, dst: &Path) -> Result<()> {
     let mut last_error = None;
-    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
+    for delay in once(Duration::ZERO).chain(create_retry_strategy()) {
         if !delay.is_zero() {
-            std::thread::sleep(delay);
+            sleep(delay);
         }
         match hardlink_clone::clone_dir_sync(real_src, dst) {
             Ok(()) => return Ok(()),
@@ -247,9 +250,9 @@ fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
     let dst_c = CString::new(dst.as_os_str().as_bytes())?;
     let mut last_error = None;
 
-    for delay in std::iter::once(std::time::Duration::ZERO).chain(create_retry_strategy()) {
+    for delay in once(Duration::ZERO).chain(create_retry_strategy()) {
         if !delay.is_zero() {
-            std::thread::sleep(delay);
+            sleep(delay);
         }
 
         match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
