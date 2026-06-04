@@ -212,10 +212,11 @@ pub async fn set_cache_dir(cache_dir: Option<String>) {
 /// `explicit` is `Some` when the user set the cache dir, `None` for the default.
 /// Returning `None` keeps the lazy built-in default.
 fn resolve_cache_dir(explicit: Option<String>, project: &Path) -> Option<String> {
-    let effective = explicit
-        .clone()
-        .map(PathBuf::from)
-        .unwrap_or_else(default_cache_dir);
+    // Borrow to derive the effective path; `explicit` is still returned by value below.
+    let effective = match explicit.as_deref() {
+        Some(dir) => PathBuf::from(dir),
+        None => default_cache_dir(),
+    };
 
     if !is_cross_device(&effective, project) {
         return explicit;
