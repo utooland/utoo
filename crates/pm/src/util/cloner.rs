@@ -1,14 +1,10 @@
-use std::iter::once;
 use std::path::{Path, PathBuf};
-use std::thread::sleep;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
 
 use super::downloader::is_git_url;
-use super::retry::create_retry_strategy;
 
 /// How a cached package's real contents are laid out under its cache dir.
 /// Derived from the resolved tarball URL so callers never pass a bare bool.
@@ -216,86 +212,39 @@ fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Hardlink/copy clone with retry+backoff. Concurrent installs race on
-/// create_dir_all/remove_dir_all of shared parents and can hit transient
-/// EAGAIN/ENOENT during the hardlink walk, so a failed attempt is retried after
-/// clearing the partial destination. Used as the Linux/Windows clone path and
-/// as the macOS fallback when `clonefile` can't run.
-fn hardlink_clone_retry(real_src: &Path, dst: &Path) -> Result<()> {
-    let mut last_error = None;
-    for delay in once(Duration::ZERO).chain(create_retry_strategy()) {
-        if !delay.is_zero() {
-            sleep(delay);
-        }
-        match hardlink_clone::clone_dir_sync(real_src, dst) {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                // TEMP PROBE: is the concurrency-race retry still needed after
-                // #3093's lock-authoritative clone rework? Logged at error! so
-                // it surfaces in e2e/bench output. If this never fires across a
-                // full concurrent install, the retry is stale defensive code.
-                tracing::error!(
-                    "RETRY-PROBE hardlink_clone_retry: clone_dir_sync failed {} -> {}: {e:#}",
-                    real_src.display(),
-                    dst.display()
-                );
-                let _ = std::fs::remove_dir_all(dst);
-                last_error = Some(e);
-            }
-        }
-    }
-    Err(last_error
-        .unwrap_or_else(|| anyhow::anyhow!("clone_dir failed without error"))
-        .context(format!(
-            "clone_dir {} -> {}",
-            real_src.display(),
-            dst.display()
-        )))
-}
-
 #[cfg(target_os = "macos")]
 fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
     let src_c = CString::new(real_src.as_os_str().as_bytes())?;
     let dst_c = CString::new(dst.as_os_str().as_bytes())?;
-    let mut last_error = None;
 
-    for delay in once(Duration::ZERO).chain(create_retry_strategy()) {
-        if !delay.is_zero() {
-            sleep(delay);
-        }
-
-        match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
-            0 => return Ok(()),
-            _ => {
-                let err = std::io::Error::last_os_error();
-                let _ = std::fs::remove_dir_all(dst);
-                let raw = err.raw_os_error();
-                last_error = Some(err);
-                // ENOTSUP (non-APFS volume) and EXDEV (cross-device) are
-                // permanent: clonefile can never succeed here, so retrying it
-                // only adds delay. Fall back to the hardlink/copy path (which
-                // hardlinks within a device and copies across one), keeping the
-                // same retry-on-transient behavior as Linux/Windows.
-                if raw == Some(libc::ENOTSUP) || raw == Some(libc::EXDEV) {
-                    return hardlink_clone_retry(real_src, dst);
+    match unsafe { clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) } {
+        0 => Ok(()),
+        _ => {
+            let err = std::io::Error::last_os_error();
+            // ENOTSUP (non-APFS volume) / EXDEV (cross-device): clonefile can
+            // never succeed here, so fall back to the hardlink/copy path (which
+            // hardlinks within a device and copies across one). Any other error
+            // is a real failure and is propagated as-is, not swallowed or
+            // worked around by mutating the destination.
+            match err.raw_os_error() {
+                Some(libc::ENOTSUP) | Some(libc::EXDEV) => {
+                    hardlink_clone::clone_dir_sync(real_src, dst)
                 }
+                _ => Err(anyhow::anyhow!(
+                    "clonefile {} -> {}: {}",
+                    real_src.display(),
+                    dst.display(),
+                    err
+                )),
             }
         }
     }
-
-    Err(anyhow::anyhow!(
-        "clonefile {} -> {}: {}",
-        real_src.display(),
-        dst.display(),
-        last_error
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "unknown error".to_string())
-    ))
 }
 
 #[cfg(not(target_os = "macos"))]
 fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
-    hardlink_clone_retry(real_src, dst)
+    hardlink_clone::clone_dir_sync(real_src, dst)
+        .with_context(|| format!("clone_dir {} -> {}", real_src.display(), dst.display()))
 }
 
 fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
