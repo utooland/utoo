@@ -1,14 +1,19 @@
 use crate::cmd::install::install;
-use crate::helper::global_bin::get_global_package_dir;
+use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::linker::link;
+use crate::util::user_config::resolve_global_prefix;
 use anyhow::{Context, Result};
 use std::path::Path;
 
 /// Link current package to global (equivalent to npm link without args)
 pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<String> {
+    // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
+    let prefix = resolve_global_prefix(prefix).await;
+    let prefix = prefix.as_deref();
+
     let project_path = update_cwd_to_project(cwd).await?;
     let package_info = PackageInfo::load(&project_path).await.with_context(|| {
         format!(
@@ -34,11 +39,13 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
         .await
         .with_context(|| format!("Failed to link {project_path:?} => {global_package_path:?}"))?;
 
-    // If the package has binary files, also link them to global bin directory
+    // If the package has binary files, link them into the global prefix bin dir
+    // (`<prefix>/bin`, on PATH) — not the package's own bin dir.
     if package_info.has_bin_files() {
-        let global_bin_dir = global_package_path.join("bin");
+        let global_bin_dir =
+            get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
         package_info
-            .link_to_target(&global_bin_dir)
+            .link_to_global(&global_bin_dir)
             .await
             .with_context(|| {
                 format!(
@@ -57,6 +64,10 @@ pub async fn link_global_to_local(
     package_name: &str,
     prefix: Option<&str>,
 ) -> Result<()> {
+    // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
+    let prefix = resolve_global_prefix(prefix).await;
+    let prefix = prefix.as_deref();
+
     let project_path = update_cwd_to_project(cwd).await?;
 
     let global_package_path = get_global_package_dir(prefix)?.join(package_name);

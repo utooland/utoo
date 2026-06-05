@@ -4,7 +4,6 @@ import {
   registerWorkerScheduler,
   WebWorkerCreation,
   WebWorkerTermination,
-  workerCreated,
 } from "../utoo";
 import { createWorkerFromDataUri } from "../workers/inline";
 import { LoaderRunnerMeta } from "./types";
@@ -79,8 +78,6 @@ export const runLoaderWorkerPool = async (
       const workers =
         loaderWorkers[filename] || (loaderWorkers[filename] = new Map());
       workers.set(workerId, worker);
-
-      workerCreated(workerId);
     },
     (termination: WebWorkerTermination) => {
       const { workerId, options } = termination;

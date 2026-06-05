@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use utoo_ruborist::manifest::{PackageInstallView, PackageJson, PublishConfig};
 
 use crate::util::json::load_package_json;
+use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_or_load_package_json;
 use crate::{service::script::ScriptService, util::linker::link};
 
@@ -228,7 +229,7 @@ impl PackageInfo {
         if let Ok(current_path) = env::var("PATH") {
             let global_bin_str = global_bin_dir.to_string_lossy().into_owned();
             if !current_path.contains(&global_bin_str) {
-                let new_path = format!("{global_bin_str}:{current_path}");
+                let new_path = format!("{global_bin_str}{PATH_SEPARATOR}{current_path}");
                 unsafe { env::set_var("PATH", new_path) };
                 tracing::debug!("Updated PATH environment variable");
             }
