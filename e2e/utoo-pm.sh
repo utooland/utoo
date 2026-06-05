@@ -302,6 +302,49 @@ if (!deps.abbrev || !deps.ini) {
 echo -e "${GREEN}PASS: stale lockfile detected + regenerated${NC}"
 cd ../../..
 
+# Case 8.7: cross-device cache handling (Linux only).
+# /dev/shm is tmpfs — a separate device from the workspace disk, writable
+# without sudo — so it forces a genuine cross-filesystem cache/node_modules
+# split (EXDEV). Covers both paths: an explicitly configured cross-device cache
+# must still install (copy fallback), and the default cache must relocate next
+# to node_modules so packages can be hardlinked.
+echo -e "${YELLOW}Case 8.7: cross-device cache (Linux tmpfs)${NC}"
+if [ "$(uname -s)" = "Linux" ] && [ -d /dev/shm ]; then
+  XDEV_SHM="/dev/shm/utoo-xdev-$$"
+  XDEV_DISK="$(mktemp -d)"
+  xdev_cleanup() { rm -rf "$XDEV_SHM" "$XDEV_DISK" 2>/dev/null || true; }
+
+  # 8.7a: explicit cross-device cache-dir (cache on tmpfs, project on disk) ->
+  # respected with a WARN, install falls back to copy and still succeeds.
+  mkdir -p "$XDEV_DISK/proj"
+  printf '{"name":"xdev-explicit","version":"1.0.0","dependencies":{"is-odd":"3.0.1"}}\n' \
+    > "$XDEV_DISK/proj/package.json"
+  ( cd "$XDEV_DISK/proj" && UTOO_CACHE_DIR="$XDEV_SHM/cache" utoo install ) \
+    || { echo -e "${RED}FAIL: explicit cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_DISK/proj/node_modules/is-odd" ] \
+    || { echo -e "${RED}FAIL: is-odd missing (explicit xdev)${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_SHM/cache" ] \
+    || { echo -e "${RED}FAIL: explicit cache dir not used at $XDEV_SHM/cache${NC}"; xdev_cleanup; exit 1; }
+  echo -e "${GREEN}PASS: explicit cross-device cache copies, install OK${NC}"
+
+  # 8.7b: default cache (~/.cache/nm on disk) cross-device with a project on
+  # tmpfs -> cache is relocated under the project's node_modules so links work.
+  mkdir -p "$XDEV_SHM/proj"
+  printf '{"name":"xdev-default","version":"1.0.0","dependencies":{"is-odd":"3.0.1"}}\n' \
+    > "$XDEV_SHM/proj/package.json"
+  ( cd "$XDEV_SHM/proj" && env -u UTOO_CACHE_DIR utoo install ) \
+    || { echo -e "${RED}FAIL: default cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_SHM/proj/node_modules/is-odd" ] \
+    || { echo -e "${RED}FAIL: is-odd missing (default xdev)${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_SHM/proj/node_modules/.cache/nm" ] \
+    || { echo -e "${RED}FAIL: default cache not relocated to project node_modules/.cache/nm${NC}"; xdev_cleanup; exit 1; }
+  echo -e "${GREEN}PASS: default cross-device cache relocated to project, install OK${NC}"
+
+  xdev_cleanup
+else
+  echo -e "${YELLOW}SKIP: cross-device cache case (non-Linux or no /dev/shm)${NC}"
+fi
+
 # Case 9: reinstall ant-design by npmjs.org
 echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
