@@ -1,0 +1,7 @@
+{
+  "name": "link-bin-test",
+  "version": "1.0.0",
+  "bin": {
+    "link-bin-test": "./cli.js"
+  }
+}

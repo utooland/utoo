@@ -102,11 +102,39 @@ try {
     
     utoo link
     if ($LASTEXITCODE -ne 0) { throw "utoo link failed for local-package" }
-    
+
     Write-Green "PASS: local-package link successful"
 }
 finally {
     Pop-Location
+}
+
+# Case: `utoo link` must put the package's bin shim in the prefix bin dir (the
+# prefix ROOT on Windows), not in the linked package's own bin dir. Use an
+# isolated --prefix so we don't touch the runner's real global bin.
+Write-Yellow "Case: utoo link puts bins in prefix bin dir"
+$linkPrefix = Join-Path $env:TEMP "utoo-e2e-linkprefix-$(Get-Random)"
+try {
+    Push-Location e2e/pm/link-with-bin
+    utoo link --prefix $linkPrefix
+    if ($LASTEXITCODE -ne 0) { throw "utoo link --prefix failed" }
+
+    $linkShim = @(
+        (Join-Path $linkPrefix "link-bin-test.cmd"),
+        (Join-Path $linkPrefix "link-bin-test")
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $linkShim) {
+        Get-ChildItem -Recurse $linkPrefix | Select-Object FullName | Format-Table
+        throw "linked bin shim not found in <prefix> root"
+    }
+    if (-not (Test-Path (Join-Path $linkPrefix "node_modules\link-bin-test"))) {
+        throw "linked package not in <prefix>\node_modules"
+    }
+    Write-Green "PASS: utoo link puts bins in prefix bin dir"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $linkPrefix -ErrorAction SilentlyContinue
 }
 
 # Case 5: antd-test secondary install
@@ -282,6 +310,55 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "utoo --version failed" }
 
     Write-Green "PASS: npm pack + install -g works correctly"
+
+    # Regression: a global install run THROUGH the npm-installed binary must
+    # resolve the prefix to $installPrefix. On Windows npm places executable
+    # shims directly in the prefix ROOT (not a bin subdir) and packages under
+    # <prefix>\node_modules; a naive parent-dir inference would drop them under
+    # utoo's own package dir instead.
+    Write-Yellow "  Subtest: global install resolves npm-style prefix (Windows)"
+    & $installedUtoo install -g cowsay --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "global install cowsay via npm-installed utoo failed" }
+
+    $cowsayShim = @(
+        (Join-Path $installPrefix "cowsay.cmd"),
+        (Join-Path $installPrefix "cowsay")
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $cowsayShim) {
+        Write-Host "Contents of install prefix:"
+        Get-ChildItem -Recurse $installPrefix | Select-Object FullName | Format-Table
+        throw "cowsay shim not found in <prefix> root"
+    }
+    if (-not (Test-Path (Join-Path $installPrefix "node_modules\cowsay"))) {
+        throw "cowsay package not in <prefix>\node_modules"
+    }
+    # Must NOT leak into utoo's own package dir (the pre-fix bug).
+    if (Test-Path (Join-Path $installPrefix "node_modules\utoo\node_modules\cowsay")) {
+        throw "cowsay leaked into utoo's package node_modules"
+    }
+    Write-Green "  PASS: npm-style prefix inference correct (Windows)"
+
+    # UTOO_PREFIX env var overrides inference.
+    Write-Yellow "  Subtest: UTOO_PREFIX env override (Windows)"
+    $envPrefix = Join-Path $env:TEMP "utoo-e2e-envprefix-$(Get-Random)"
+    try {
+        $env:UTOO_PREFIX = $envPrefix
+        & $installedUtoo install -g semver --registry=https://registry.npmjs.org
+        if ($LASTEXITCODE -ne 0) { throw "global install semver with UTOO_PREFIX failed" }
+        $semverShim = @(
+            (Join-Path $envPrefix "semver.cmd"),
+            (Join-Path $envPrefix "semver")
+        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $semverShim) { throw "semver shim not found in UTOO_PREFIX root" }
+        if (-not (Test-Path (Join-Path $envPrefix "node_modules\semver"))) {
+            throw "semver not in UTOO_PREFIX\node_modules"
+        }
+        Write-Green "  PASS: UTOO_PREFIX override works (Windows)"
+    }
+    finally {
+        Remove-Item Env:\UTOO_PREFIX -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $envPrefix -ErrorAction SilentlyContinue
+    }
 }
 finally {
     Pop-Location
