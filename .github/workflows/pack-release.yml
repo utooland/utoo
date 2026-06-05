@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'utoopack-v')
@@ -84,7 +88,7 @@ jobs:
     name: utoopack-release-${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
       - name: Free disk space
@@ -100,9 +104,9 @@ jobs:
           sudo docker image prune --all --force
       - name: Set up QEMU
         if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 22.14.0
@@ -136,7 +140,7 @@ jobs:
       - name: Install dependencies
         run: utoo install
       - name: Setup node x86
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
       - name: Build in docker
         if: ${{ matrix.settings.docker }}
         run: |
@@ -157,7 +161,7 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         shell: bash
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pack-${{ matrix.settings.target }}
           path: ./packages/pack/src/pack.*.node
@@ -173,9 +177,9 @@ jobs:
     needs:
       - build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22.14.0
           registry-url: "https://registry.npmjs.org"
@@ -185,7 +189,7 @@ jobs:
       - name: Install dependencies
         run: utoo install
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ./packages/pack/src
       - name: Move artifacts

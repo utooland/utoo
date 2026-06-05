@@ -51,7 +51,7 @@ jobs:
           echo "linux_x64=$(sha256sum utoo-linux-x64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: utooland/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
