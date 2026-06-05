@@ -11,7 +11,7 @@ describe("serializeConfig", () => {
     const serialized = JSON.parse(await serializeConfig(baseConfig, false));
 
     expect(serialized.optimization.packageImports).toContain("lodash-es");
-    expect(serialized.optimization.packageImports).toContain("antd");
+    expect(serialized.optimization.packageImports).not.toContain("antd");
     expect(serialized.optimization.packageImports).toContain("react-icons/fa");
     expect(serialized.optimization.packageImports).toContain(
       "@effect/platform-node",
