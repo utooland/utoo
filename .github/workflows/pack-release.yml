@@ -110,6 +110,7 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 22.14.0
+          package-manager-cache: false
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
@@ -141,6 +142,8 @@ jobs:
         run: utoo install
       - name: Setup node x86
         uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
       - name: Build in docker
         if: ${{ matrix.settings.docker }}
         run: |
@@ -182,6 +185,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.14.0
+          package-manager-cache: false
           registry-url: "https://registry.npmjs.org"
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
