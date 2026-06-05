@@ -33,7 +33,7 @@ use turbo_tasks_fs::{
     DirectoryContent, DirectoryEntry, DiskFileSystem, FileContent, FileSystem, FileSystemEntryType,
     FileSystemPath, VirtualFileSystem, invalidation,
 };
-use turbo_unix_path::{join_path, normalize_path, sys_to_unix, unix_to_sys};
+use turbo_unix_path::{join_path, unix_to_sys};
 use turbopack::global_module_ids::get_global_module_id_strategy;
 use turbopack_core::{
     chunk::{UnusedReferences, chunk_id_strategy::ModuleIdFallback},
@@ -174,6 +174,14 @@ fn strip_root_prefix(path: &str, root: &str) -> Option<String> {
         .strip_prefix(root_sys.as_ref())
         .ok()
         .map(|relative| trim_leading_path_separators(&relative.to_string_lossy()).to_owned())
+}
+
+fn to_file_system_path(path: &str) -> String {
+    trim_leading_path_separators(&path.replace('\\', "/")).to_owned()
+}
+
+fn strip_root_prefix_for_file_system(path: &str, root: &str) -> Option<String> {
+    strip_root_prefix(path, root).map(|relative| to_file_system_path(&relative))
 }
 
 fn extend_client_define_env_with_socket_server(
@@ -707,13 +715,13 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
         let mut denied_paths = Vec::new();
-        let unix_relative_project = strip_root_prefix(&self.project_path, &self.root_path)
-            .map(|relative| sys_to_unix(&relative).into_owned())
-            .unwrap_or_default();
+        let unix_relative_project =
+            strip_root_prefix_for_file_system(&self.project_path, &self.root_path)
+                .unwrap_or_default();
 
         let denied_path = denied_path.await?;
         if !denied_path.is_empty() {
-            let unix_denied = sys_to_unix(&denied_path);
+            let unix_denied = to_file_system_path(&denied_path);
             if let Some(normalized) = join_path(&unix_relative_project, &unix_denied)
                 && !normalized.is_empty()
             {
@@ -721,14 +729,14 @@ impl Project {
             }
         }
 
-        if let Some(relative_pack_path) = strip_root_prefix(&self.pack_path, &self.root_path) {
-            let turbopack_path = Path::new(&relative_pack_path).join(".turbopack");
-            if let Some(path_str) = turbopack_path.to_str() {
-                let turbopack_path_normalized =
-                    normalize_path(path_str).map_or_else(|| path_str.into(), RcStr::from);
-                if !turbopack_path_normalized.is_empty()
-                    && !denied_paths.contains(&turbopack_path_normalized)
-                {
+        if let Some(relative_pack_path) =
+            strip_root_prefix_for_file_system(&self.pack_path, &self.root_path)
+        {
+            if let Some(turbopack_path_normalized) = join_path(&relative_pack_path, ".turbopack")
+                && !turbopack_path_normalized.is_empty()
+            {
+                let turbopack_path_normalized = RcStr::from(turbopack_path_normalized);
+                if !denied_paths.contains(&turbopack_path_normalized) {
                     denied_paths.push(turbopack_path_normalized);
                 }
             }
@@ -797,7 +805,7 @@ impl Project {
             .unwrap_or("dist".into());
 
         let relative_dist_path = convert_to_project_relative(&dist_path, &this.project_path)?;
-        let relative_dist_path = unix_to_sys(
+        let relative_dist_path = to_file_system_path(
             relative_dist_path
                 .strip_prefix("./")
                 .unwrap_or(&relative_dist_path),
@@ -813,7 +821,7 @@ impl Project {
             Some(relative) if !relative.is_empty() => relative,
             _ => ".".to_string(),
         };
-        let pack_relative = unix_to_sys(trim_leading_path_separators(&pack_relative));
+        let pack_relative = to_file_system_path(&pack_relative);
 
         Ok(self
             .output_fs()
@@ -829,14 +837,15 @@ impl Project {
         let this = self.await?;
         let dist_dir = self.dist_dir().await?;
 
-        let project_relative = strip_root_prefix(&this.project_path, &this.root_path)
-            .with_context(|| {
-                format!(
-                    "project_path `{}` is not inside root_path `{}`",
-                    this.project_path, this.root_path
-                )
-            })?;
-        let project_relative = unix_to_sys(trim_leading_path_separators(&project_relative));
+        let project_relative =
+            strip_root_prefix_for_file_system(&this.project_path, &this.root_path).with_context(
+                || {
+                    format!(
+                        "project_path `{}` is not inside root_path `{}`",
+                        this.project_path, this.root_path
+                    )
+                },
+            )?;
 
         Ok(self
             .output_fs()
@@ -880,7 +889,7 @@ impl Project {
         };
 
         let relative = convert_to_project_relative(&server_dir, &this.project_path)?;
-        let relative = unix_to_sys(relative.strip_prefix("./").unwrap_or(&relative));
+        let relative = to_file_system_path(relative.strip_prefix("./").unwrap_or(&relative));
 
         Ok(Vc::cell(relative.into()))
     }
@@ -891,14 +900,15 @@ impl Project {
         let this = self.await?;
         let server_dist_dir = self.server_dist_dir().await?;
 
-        let project_relative = strip_root_prefix(&this.project_path, &this.root_path)
-            .with_context(|| {
-                format!(
-                    "project_path `{}` is not inside root_path `{}`",
-                    this.project_path, this.root_path
-                )
-            })?;
-        let project_relative = unix_to_sys(trim_leading_path_separators(&project_relative));
+        let project_relative =
+            strip_root_prefix_for_file_system(&this.project_path, &this.root_path).with_context(
+                || {
+                    format!(
+                        "project_path `{}` is not inside root_path `{}`",
+                        this.project_path, this.root_path
+                    )
+                },
+            )?;
 
         Ok(self
             .output_fs()
@@ -923,14 +933,15 @@ impl Project {
     pub async fn project_path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
         let root = self.project_root().await?;
-        let project_relative = strip_root_prefix(&this.project_path, &this.root_path)
-            .with_context(|| {
-                format!(
-                    "project_path `{}` is not inside root_path `{}`",
-                    this.project_path, this.root_path
-                )
-            })?;
-        let project_relative = unix_to_sys(trim_leading_path_separators(&project_relative));
+        let project_relative =
+            strip_root_prefix_for_file_system(&this.project_path, &this.root_path).with_context(
+                || {
+                    format!(
+                        "project_path `{}` is not inside root_path `{}`",
+                        this.project_path, this.root_path
+                    )
+                },
+            )?;
         Ok(root.join(&project_relative)?.cell())
     }
 
@@ -939,8 +950,8 @@ impl Project {
         let this = self.await?;
         let root = self.project_root().await?;
 
-        let project_relative = strip_root_prefix(&this.pack_path, &this.root_path)
-            .unwrap_or_else(|| this.pack_path.to_string());
+        let project_relative = strip_root_prefix_for_file_system(&this.pack_path, &this.root_path)
+            .unwrap_or_else(|| to_file_system_path(&this.pack_path));
         Ok(root.join(&project_relative)?.cell())
     }
 
@@ -1809,7 +1820,7 @@ async fn all_assets_from_entries_operation(
 
 #[cfg(test)]
 mod tests {
-    use super::strip_root_prefix;
+    use super::{strip_root_prefix, strip_root_prefix_for_file_system, to_file_system_path};
     use turbo_unix_path::unix_to_sys;
 
     #[test]
@@ -1830,6 +1841,26 @@ mod tests {
         assert_eq!(
             strip_root_prefix("/repo/app", "/repo/").as_deref(),
             Some("app")
+        );
+    }
+
+    #[test]
+    fn file_system_paths_use_unix_separators() {
+        assert_eq!(
+            to_file_system_path(r"\examples\with-use-model\.umi\plugin-model\index.tsx"),
+            "examples/with-use-model/.umi/plugin-model/index.tsx"
+        );
+    }
+
+    #[test]
+    fn strip_root_prefix_for_file_system_normalizes_windows_relative_path() {
+        assert_eq!(
+            strip_root_prefix_for_file_system(
+                r"D:\a\umi\umi\examples\with-use-model",
+                r"D:\a\umi\umi"
+            )
+            .as_deref(),
+            Some("examples/with-use-model")
         );
     }
 
