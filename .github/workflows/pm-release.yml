@@ -91,7 +91,7 @@ jobs:
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           apt-get update && apt-get install -y gh
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure git safe directory
         run: |
@@ -115,8 +115,11 @@ jobs:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           set -euo pipefail
-          sed -i.bak "0,/^version[[:space:]]*=/{s|^version[[:space:]]*=.*|version     = \"${VERSION}\"|}" crates/pm/Cargo.toml
-          rm crates/pm/Cargo.toml.bak
+          awk -v ver="$VERSION" '
+            !done && /^version[[:space:]]*=/ { print "version     = \"" ver "\""; done=1; next }
+            { print }
+          ' crates/pm/Cargo.toml > crates/pm/Cargo.toml.tmp
+          mv crates/pm/Cargo.toml.tmp crates/pm/Cargo.toml
 
           ACTUAL=$(awk -F\" '/^version[[:space:]]*=/ { print $2; exit }' crates/pm/Cargo.toml)
           if [ "$ACTUAL" != "$VERSION" ]; then
@@ -157,7 +160,7 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}
           path: utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz
@@ -195,7 +198,7 @@ jobs:
 
       - name: Setup Node.js
         if: ${{ github.event_name == 'release' }}
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 22.14.0
           registry-url: "https://registry.npmjs.org"
@@ -235,7 +238,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - name: Get version and tag from release
         id: get_version
@@ -258,7 +261,7 @@ jobs:
           fi
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 22.14.0
           registry-url: "https://registry.npmjs.org"
