@@ -166,6 +166,19 @@ jobs:
           path: utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz
           retention-days: 7
 
+      - name: Setup Node.js
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.14.0
+          package-manager-cache: false
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Bump npm CLI for OIDC trusted publisher
+        # Trusted publishing requires npm 11.5.1+.
+        if: ${{ github.event_name == 'release' }}
+        run: npm install --global npm@11.6.2
+
       - name: Verify npm package (dry-run)
         if: ${{ github.event_name == 'release' }}
         env:
@@ -195,19 +208,6 @@ jobs:
           ls -la
           gh release upload "${GITHUB_REF#refs/tags/}" \
             utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz --clobber
-
-      - name: Setup Node.js
-        if: ${{ github.event_name == 'release' }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.14.0
-          package-manager-cache: false
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Bump npm CLI for OIDC trusted publisher
-        # Trusted publishing requires npm 11.5.1+.
-        if: ${{ github.event_name == 'release' }}
-        run: npm install --global npm@11.6.2
 
       - name: Publish Binary Packages
         if: ${{ github.event_name == 'release' }}
