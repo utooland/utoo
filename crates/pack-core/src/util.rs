@@ -23,6 +23,41 @@ pub fn is_absolute_path(path: &str) -> bool {
     WINDOWS_PATH.is_match(path)
 }
 
+fn normalized_path_for_suffix_match(path: &str) -> String {
+    let mut normalized = path.replace('\\', "/");
+    while normalized.ends_with('/') && normalized.len() > 1 {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn path_ends_with_segment_path(path: &str, segment_path: &str) -> bool {
+    let path = normalized_path_for_suffix_match(path);
+    let segment_path = normalized_path_for_suffix_match(segment_path);
+    let mut segment_ref = segment_path.as_str();
+
+    while let Some(stripped) = segment_ref.strip_prefix("./") {
+        segment_ref = stripped;
+    }
+
+    if segment_ref.is_empty() || segment_ref == "." {
+        return true;
+    }
+
+    if path == segment_ref {
+        return true;
+    }
+
+    if path.ends_with(segment_ref) {
+        let prefix_len = path.len() - segment_ref.len();
+        if let Some(prefix) = path.get(..prefix_len) {
+            return prefix.ends_with('/');
+        }
+    }
+
+    false
+}
+
 #[derive(
     Default,
     PartialEq,
@@ -115,11 +150,7 @@ pub fn convert_to_project_relative(project_inside_path: &str, project_path: &str
                 let project_path = simplified(Path::new(project_path))
                     .to_string_lossy()
                     .to_string();
-                if current_dir
-                    .to_string_lossy()
-                    .rfind(&project_path)
-                    .is_some_and(|index| index > 0)
-                {
+                if path_ends_with_segment_path(&current_dir.to_string_lossy(), &project_path) {
                     current_dir
                 } else {
                     current_dir.join(project_path)
@@ -187,7 +218,7 @@ pub fn module_styles_rule_condition() -> RuleCondition {
 
 #[cfg(test)]
 mod tests {
-    use super::{convert_to_project_relative, is_absolute_path};
+    use super::{convert_to_project_relative, is_absolute_path, path_ends_with_segment_path};
 
     #[test]
     fn windows_style_path_is_recognized_as_absolute() {
@@ -199,5 +230,17 @@ mod tests {
     fn relative_windows_style_path_is_normalized_for_requests() {
         let relative = convert_to_project_relative(r".\src\.umi-production\umi.ts", ".").unwrap();
         assert_eq!(relative.to_string(), "./src/.umi-production/umi.ts");
+    }
+
+    #[test]
+    fn windows_current_dir_matches_unix_style_relative_project_path() {
+        assert!(path_ends_with_segment_path(
+            r"D:\a\umi\umi\examples\with-use-model",
+            "examples/with-use-model",
+        ));
+        assert!(path_ends_with_segment_path(
+            r"D:\a\umi\umi\examples\with-use-model",
+            "./examples/with-use-model",
+        ));
     }
 }

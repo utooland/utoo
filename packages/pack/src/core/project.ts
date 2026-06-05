@@ -109,7 +109,6 @@ const DEFAULT_OPTIMIZE_PACKAGE_IMPORTS = [
   "date-fns",
   "lodash-es",
   "ramda",
-  "antd",
   "react-bootstrap",
   "ahooks",
   "@ant-design/icons",

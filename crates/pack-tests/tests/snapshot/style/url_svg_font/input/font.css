@@ -1,0 +1,15 @@
+@font-face {
+  font-family: 'UtooSvgFont';
+  src: url('./font.svg') format('svg');
+}
+
+.icon {
+  font-family: 'UtooSvgFont';
+}
+
+.backgroundImg {
+  background: url('./bg.img.svg');
+  background-repeat: no-repeat;
+  background-size: cover;
+  height: 120px;
+}
