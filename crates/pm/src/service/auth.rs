@@ -1,4 +1,6 @@
 use anyhow::{Context, Result, bail};
+use reqwest::Url;
+use tokio::sync::OnceCell;
 
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
@@ -37,6 +39,55 @@ pub async fn resolve_token(registry: &str) -> Option<String> {
     let config = Config::load(ConfigScope::Global).await.ok()?;
     let token = config.get(&token_key(registry)).ok().flatten()?;
     if token.is_empty() { None } else { Some(token) }
+}
+
+/// Token for the configured registry, resolved once and cached for the process.
+///
+/// Install decides per request whether to attach auth; resolving env/config on
+/// every fetch would be wasteful, so the lookup runs at most once (npm/bun both
+/// load credentials once at startup, then do in-memory lookups).
+pub async fn cached_token() -> Option<String> {
+    static CACHED_TOKEN: OnceCell<Option<String>> = OnceCell::const_new();
+    CACHED_TOKEN
+        .get_or_init(|| async { resolve_token(&crate::util::user_config::get_registry()).await })
+        .await
+        .clone()
+}
+
+/// Parse a registry/URL that may be configured as a bare host (no scheme, e.g.
+/// `registry.npmjs.org` or `localhost:4873`), defaulting to `https://`.
+///
+/// Detect a scheme by the `://` separator rather than `Url::parse(..).is_ok()`:
+/// a bare `host:port` parses "successfully" with the host read as the scheme
+/// (`localhost:4873` → scheme `localhost`), which would misclassify it.
+pub(crate) fn parse_registry(registry: &str) -> Option<Url> {
+    if registry.contains("://") {
+        Url::parse(registry).ok()
+    } else {
+        Url::parse(&format!("https://{registry}")).ok()
+    }
+}
+
+/// Whether `url` targets the same host as `registry`. The leak guard for
+/// attaching a token to a tarball download: credentials go to the registry
+/// host only, never to a third-party CDN a manifest's `dist.tarball` points at.
+fn same_host(url: &str, registry: &str) -> bool {
+    fn host(s: &str) -> Option<String> {
+        parse_registry(s)?.host_str().map(str::to_ascii_lowercase)
+    }
+    matches!((host(url), host(registry)), (Some(a), Some(b)) if a == b)
+}
+
+/// The Bearer token to attach when fetching `url`, or `None` when there is no
+/// configured token or `url` does not target the registry host (leak guard).
+/// Use for downloads whose host is not guaranteed to be the registry (e.g. a
+/// tarball URL that a manifest may point at a CDN).
+pub async fn token_for_url(url: &str) -> Option<String> {
+    if same_host(url, &crate::util::user_config::get_registry()) {
+        cached_token().await
+    } else {
+        None
+    }
 }
 
 /// Resolve token or bail with a login hint.
@@ -209,6 +260,42 @@ mod tests {
             registry_host("https://registry.npmjs.org/"),
             "registry.npmjs.org"
         );
+    }
+
+    #[test]
+    fn test_same_host_leak_guard() {
+        let registry = "https://registry.npmjs.org";
+        // A tarball served by the registry itself → attach token.
+        assert!(same_host(
+            "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            registry
+        ));
+        // Scheme differs but host matches → still the registry.
+        assert!(same_host(
+            "http://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz",
+            registry
+        ));
+        // Registry configured as a bare host (no scheme) → still matches.
+        assert!(same_host(
+            "https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz",
+            "registry.npmjs.org"
+        ));
+        // Bare host with a port (e.g. a local Verdaccio) → matches by host.
+        assert!(same_host(
+            "http://localhost:4873/pkg/-/pkg-1.0.0.tgz",
+            "localhost:4873"
+        ));
+        // Host case is normalized.
+        assert!(same_host("https://REGISTRY.npmjs.org/pkg.tgz", registry));
+        // A third-party CDN → never leak the token.
+        assert!(!same_host(
+            "https://cdn.jsdelivr.net/npm/pkg/-/pkg-1.0.0.tgz",
+            registry
+        ));
+        // A sibling subdomain is still a different host.
+        assert!(!same_host("https://cdn.npmjs.org/pkg.tgz", registry));
+        // Unparsable URLs are treated as non-matching (fail closed).
+        assert!(!same_host("not a url", registry));
     }
 
     #[test]

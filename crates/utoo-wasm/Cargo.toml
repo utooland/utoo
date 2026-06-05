@@ -37,7 +37,7 @@ pack-api                 = { workspace = true, default-features = false, feature
 pack-core                = { workspace = true, default-features = false, optional = true }
 parking_lot              = { workspace = true, features = ["nightly"] }
 swc_core                 = { workspace = true, features = ["base", "ecma_ast"] }
-turbo-rcstr              = { workspace = true, optional = true }
+turbo-rcstr              = { workspace = true, features = ["atom_size_128"], optional = true }
 turbo-tasks              = { workspace = true, optional = true }
 turbo-tasks-backend      = { workspace = true, optional = true }
 turbo-tasks-fs           = { workspace = true, optional = true }

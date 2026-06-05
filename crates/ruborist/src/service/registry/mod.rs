@@ -33,6 +33,7 @@ fn current_timestamp_secs() -> u64 {
 
 use dashmap::DashSet;
 
+use super::manifest;
 use super::store::{ManifestStore, NoopStore};
 use crate::traits::registry::{RegistryClient, RegistryError, is_npm_registry};
 
@@ -59,6 +60,9 @@ mod provider;
 /// ```
 pub struct UnifiedRegistry {
     registry_url: String,
+    /// Bearer token for a private registry, attached to manifest requests
+    /// against `registry_url`. `None` for public registries.
+    auth_token: Option<String>,
     store: Arc<dyn ManifestStore>,
     supports_semver: bool,
     /// Dedup set for `store_version_manifest` disk writes keyed by
@@ -72,6 +76,7 @@ pub struct UnifiedRegistry {
 /// Builder for `UnifiedRegistry`.
 pub struct UnifiedRegistryBuilder {
     registry_url: Option<String>,
+    auth_token: Option<String>,
     store: Option<Arc<dyn ManifestStore>>,
     supports_semver: Option<bool>,
 }
@@ -81,6 +86,7 @@ impl UnifiedRegistryBuilder {
     pub fn new() -> Self {
         Self {
             registry_url: None,
+            auth_token: None,
             store: None,
             supports_semver: None,
         }
@@ -89,6 +95,14 @@ impl UnifiedRegistryBuilder {
     /// Set the registry URL.
     pub fn registry(mut self, url: impl Into<String>) -> Self {
         self.registry_url = Some(url.into());
+        self
+    }
+
+    /// Set the Bearer token for a private registry. `None` leaves requests
+    /// unauthenticated. ruborist never resolves the token itself — the host
+    /// (pm) reads it from env/config and injects it here.
+    pub fn auth_token(mut self, token: Option<String>) -> Self {
+        self.auth_token = token;
         self
     }
 
@@ -119,6 +133,7 @@ impl UnifiedRegistryBuilder {
 
         UnifiedRegistry {
             registry_url,
+            auth_token: self.auth_token,
             store,
             supports_semver,
             stored_version: Arc::new(DashSet::new()),
@@ -136,6 +151,7 @@ impl Clone for UnifiedRegistry {
     fn clone(&self) -> Self {
         Self {
             registry_url: self.registry_url.clone(),
+            auth_token: self.auth_token.clone(),
             store: Arc::clone(&self.store),
             supports_semver: self.supports_semver,
             stored_version: Arc::clone(&self.stored_version),
@@ -157,6 +173,25 @@ impl UnifiedRegistry {
     /// Check if this registry supports semver resolution.
     pub fn supports_semver(&self) -> bool {
         self.supports_semver
+    }
+
+    /// Fetch the raw version-manifest JSON for `name@spec` through this
+    /// registry — URL construction and auth are applied here, not by the
+    /// caller. Returns the complete document so custom fields the typed model
+    /// omits are preserved (e.g. `binary-mirror-config`'s `mirrors`).
+    pub async fn fetch_version_manifest_bytes(
+        &self,
+        name: &str,
+        spec: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        manifest::fetch_version_manifest_vec(manifest::FetchVersionManifestOptions {
+            registry_url: &self.registry_url,
+            name,
+            spec,
+            format: manifest::MetadataFormat::Complete,
+            auth_token: self.auth_token.as_deref(),
+        })
+        .await
     }
 }
 

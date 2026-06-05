@@ -8,7 +8,9 @@ use anyhow::Result;
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::progress::NoopReceiver;
-use utoo_ruborist::service::{build_deps, read_root_manifest, BuildDepsOptions, NoopStore};
+use utoo_ruborist::service::{
+    build_deps, read_root_manifest, BuildDepsOptions, NoopStore, UnifiedRegistry,
+};
 
 use crate::fs::OpfsGlob;
 
@@ -35,17 +37,20 @@ pub async fn build_deps_from_file(
 ) -> Result<PackageLock> {
     // Resolve the workspace root + read its manifest from OPFS, then resolve.
     let (root_path, pkg) = read_root_manifest(cwd, OpfsGlob).await?;
+    // Browser builds have no private-registry auth (no env/config token source),
+    // so the registry is constructed without a token.
     let options = BuildDepsOptions {
         cwd: root_path,
-        registry_url: registry_url.unwrap_or(DEFAULT_REGISTRY).to_string(),
+        registry: UnifiedRegistry::builder()
+            .registry(registry_url.unwrap_or(DEFAULT_REGISTRY))
+            .store(Arc::new(NoopStore))
+            .build(),
         cache_dir: None,
-        manifest_store: Arc::new(NoopStore),
         project_cache: None,
         concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENCY),
         peer_deps: PeerDeps::Skip,
         glob: OpfsGlob,
         receiver: NoopReceiver,
-        supports_semver: None,
         catalogs: std::collections::HashMap::new(),
     };
 

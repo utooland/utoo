@@ -21,14 +21,12 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use anyhow::Result;
 
 use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
-use super::store::{ManifestStore, NoopStore};
 use crate::model::graph::DependencyGraph;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
@@ -45,14 +43,14 @@ use crate::traits::progress::EventReceiver;
 pub struct BuildDepsOptions<G, R> {
     /// Current working directory (contains package.json)
     pub cwd: PathBuf,
-    /// Registry URL (e.g., "https://registry.npmmirror.com")
-    pub registry_url: String,
+    /// Pre-built registry client. The host (pm) constructs this with the
+    /// registry URL, manifest store, semver capability, and any private-registry
+    /// auth token — keeping all registry configuration (and credential
+    /// resolution) on the host side, out of ruborist.
+    pub registry: UnifiedRegistry,
     /// Tarball cache directory passed through to non-registry resolvers
     /// (http/tarball, native-git). Unrelated to manifest disk cache.
     pub cache_dir: Option<PathBuf>,
-    /// Persistence backend for manifest cache. Defaults to `NoopStore`
-    /// (everything is in-memory).
-    pub manifest_store: Arc<dyn ManifestStore>,
     /// Project-level warm cache pre-loaded by the host. Seeds the demand
     /// resolver's manifest cache so a warm install skips re-fetching.
     pub project_cache: Option<ProjectCacheData>,
@@ -64,8 +62,6 @@ pub struct BuildDepsOptions<G, R> {
     pub glob: G,
     /// Progress event receiver
     pub receiver: R,
-    /// Explicit semver support override (None = auto-detect from registry URL)
-    pub supports_semver: Option<bool>,
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
@@ -80,15 +76,15 @@ impl<G, R> BuildDepsOptions<G, R> {
     {
         Self {
             cwd,
-            registry_url: "https://registry.npmmirror.com".to_string(),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.npmmirror.com")
+                .build(),
             cache_dir: None,
-            manifest_store: Arc::new(NoopStore),
             project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob,
             receiver,
-            supports_semver: None,
             catalogs: HashMap::new(),
         }
     }
@@ -125,15 +121,13 @@ where
 {
     let BuildDepsOptions {
         cwd: root_path,
-        registry_url,
+        registry,
         cache_dir,
-        manifest_store,
         project_cache,
         concurrency,
         peer_deps,
         glob,
         receiver,
-        supports_semver,
         catalogs,
     } = options;
 
@@ -178,17 +172,9 @@ where
         );
     }
 
-    // 4. Create the stateless registry client (persistence backend only).
-    //    The warm `project_cache` seeds the demand resolver's manifest cache
-    //    directly via `BuildDepsConfig::project_cache` below.
-    let mut builder = UnifiedRegistry::builder()
-        .registry(&registry_url)
-        .store(Arc::clone(&manifest_store));
-    if let Some(semver) = supports_semver {
-        builder = builder.supports_semver(semver);
-    }
-    let registry = builder.build();
-
+    // 4. The host supplies the stateless registry client (URL, store, semver,
+    //    auth) pre-built. The warm `project_cache` seeds the demand resolver's
+    //    manifest cache directly via `BuildDepsConfig::project_cache` below.
     tracing::debug!(
         "Using registry: {} (semver: {})",
         registry.registry_url(),
@@ -253,21 +239,24 @@ mod tests {
     async fn test_build_deps_options_creation() {
         let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
             cwd: PathBuf::from("."),
-            registry_url: "https://registry.npmmirror.com".to_string(),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.npmmirror.com")
+                .build(),
             cache_dir: None,
-            manifest_store: Arc::new(NoopStore),
             project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
-            supports_semver: None,
             catalogs: HashMap::new(),
         };
 
         assert_eq!(options.concurrency, 20);
         assert_eq!(options.peer_deps, PeerDeps::Skip);
-        assert!(options.supports_semver.is_none());
+        assert_eq!(
+            options.registry.registry_url(),
+            "https://registry.npmmirror.com"
+        );
     }
 
     /// `build_deps` resolves an **in-memory** synthetic root (no disk
@@ -278,15 +267,15 @@ mod tests {
     async fn test_build_deps_in_memory_root_no_deps() {
         let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
             cwd: PathBuf::from("/synthetic-root"),
-            registry_url: "https://registry.npmmirror.com".to_string(),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.npmmirror.com")
+                .build(),
             cache_dir: None,
-            manifest_store: Arc::new(NoopStore),
             project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
-            supports_semver: None,
             catalogs: HashMap::new(),
         };
         let mut pkg = PackageJson::new("utoo-global", "0.0.0");

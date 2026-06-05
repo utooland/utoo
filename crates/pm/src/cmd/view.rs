@@ -5,6 +5,7 @@ use utoo_ruborist::manifest::{FullManifest, VersionManifest};
 use utoo_ruborist::service::{MetadataFormat, fetch_full_manifest_fresh};
 use utoo_ruborist::util::parse_package_spec;
 
+use crate::service::auth;
 use crate::util::format_print::print_grid;
 use crate::util::user_config::get_registry;
 
@@ -22,11 +23,18 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
 
     tracing::debug!("Resolved package: {name} (spec: {version_spec})");
 
-    // Fetch full manifest directly from registry (Complete format for display, no ETag)
-    let (full_manifest, _etag) =
-        fetch_full_manifest_fresh(registry_url, name, MetadataFormat::Complete)
-            .await
-            .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
+    // Fetch full manifest directly from registry (Complete format for display, no ETag).
+    // token_for_url applies the leak guard: a token only when registry_url is
+    // the configured registry host.
+    let token = auth::token_for_url(registry_url).await;
+    let (full_manifest, _etag) = fetch_full_manifest_fresh(
+        registry_url,
+        name,
+        MetadataFormat::Complete,
+        token.as_deref(),
+    )
+    .await
+    .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 

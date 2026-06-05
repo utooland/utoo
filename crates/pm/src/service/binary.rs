@@ -1,5 +1,5 @@
 use crate::fs;
-use crate::util::http::client;
+use crate::helper::ruborist_context::Context as RuboristContext;
 use crate::util::json::read_json_file;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
@@ -18,22 +18,16 @@ static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 async fn load_config() -> Result<&'static Value> {
     CONFIG
         .get_or_try_init(|| async {
-            let registry = get_registry();
-            let url = format!("{registry}/binary-mirror-config/latest");
-            let response = client()
-                .get(&url)
-                .send()
+            // Go through the registry client so URL construction and private-
+            // registry auth are handled in one place rather than hand-rolled.
+            // `binary-mirror-config@latest` is a normal version manifest whose
+            // `mirrors` field carries the config.
+            let bytes = RuboristContext::registry()
+                .await
+                .fetch_version_manifest_bytes("binary-mirror-config", "latest")
                 .await
                 .context("Failed to fetch binary mirror config")?;
-
-            if !response.status().is_success() {
-                return Err(anyhow::anyhow!("HTTP status: {}", response.status()));
-            }
-
-            response
-                .json()
-                .await
-                .context("Failed to parse binary mirror config")
+            serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")
         })
         .await
 }
@@ -238,7 +232,16 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
         return Ok(());
     }
 
-    let config = load_config().await?;
+    // A missing/unreachable binary-mirror-config (e.g. a private registry that
+    // doesn't host it) must not fail the install — the china-mirror rewrite is
+    // an optimization. Skip gracefully, matching `get_envs`.
+    let config = match load_config().await {
+        Ok(config) => config,
+        Err(e) => {
+            tracing::debug!("Binary mirror config unavailable, skipping: {e}");
+            return Ok(());
+        }
+    };
 
     let mirrors = config["mirrors"]["china"]
         .as_object()

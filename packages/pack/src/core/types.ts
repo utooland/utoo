@@ -1,6 +1,5 @@
 import {
   HmrIdentifiers,
-  NapiDiagnostic,
   NapiIssue,
   NapiUpdateMessage,
   NapiWrittenEndpoint,
@@ -11,7 +10,6 @@ import { BundleOptions } from "../config/types";
 declare global {
   export type TurbopackResult<T = {}> = T & {
     issues: NapiIssue[];
-    diagnostics: NapiDiagnostic[];
   };
   export type RefCell = { readonly __tag: unique symbol };
   export type ExternalEndpoint = { readonly __tag: unique symbol };
@@ -23,7 +21,6 @@ export interface BaseUpdate {
     headers: unknown;
     path: string;
   };
-  diagnostics: unknown[];
   issues: NapiIssue[];
 }
 
@@ -97,6 +94,8 @@ export interface Project {
 export interface RawEntrypoints {
   apps?: Endpoint[];
   libraries?: Endpoint[];
+  appPaths?: NapiWrittenEndpoint[];
+  libraryPaths?: NapiWrittenEndpoint[];
 }
 
 export interface Endpoint {

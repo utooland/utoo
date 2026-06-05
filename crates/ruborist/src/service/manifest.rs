@@ -160,6 +160,9 @@ pub struct FetchManifestOptions<'a> {
     pub name: &'a str,
     pub format: MetadataFormat,
     pub etag: Option<&'a str>,
+    /// Bearer token for a private registry. Attached only to requests against
+    /// `registry_url`, which these manifest URLs are by construction.
+    pub auth_token: Option<&'a str>,
 }
 
 /// Fetch full manifest bytes with retry and ETag support, without parsing.
@@ -168,6 +171,7 @@ pub async fn fetch_full_manifest_bytes(
 ) -> Result<FetchManifestBytesResult> {
     let url = format!("{}/{}", opts.registry_url, opts.name);
     let etag_owned = opts.etag.map(|s| s.to_string());
+    let auth_owned = opts.auth_token.map(|s| s.to_string());
     let accept = match opts.format {
         MetadataFormat::Abbreviated => "application/vnd.npm.install-v1+json",
         MetadataFormat::Complete => "application/json",
@@ -178,6 +182,7 @@ pub async fn fetch_full_manifest_bytes(
         || {
             let url = url.clone();
             let etag = etag_owned.clone();
+            let auth = auth_owned.clone();
             async move {
                 let mut request = get_client()
                     .map_err(FetchError::Permanent)?
@@ -185,6 +190,9 @@ pub async fn fetch_full_manifest_bytes(
                     .header("Accept", accept);
                 if let Some(etag_value) = &etag {
                     request = request.header("If-None-Match", etag_value);
+                }
+                if let Some(token) = &auth {
+                    request = request.bearer_auth(token);
                 }
 
                 let response = request.send().await.map_err(classify_reqwest_error)?;
@@ -245,12 +253,14 @@ pub async fn fetch_full_manifest_fresh(
     registry_url: &str,
     name: &str,
     format: MetadataFormat,
+    auth_token: Option<&str>,
 ) -> Result<(FullManifest, Option<String>)> {
     match fetch_full_manifest(FetchManifestOptions {
         registry_url,
         name,
         format,
         etag: None,
+        auth_token,
     })
     .await?
     {
@@ -291,6 +301,9 @@ pub struct FetchVersionManifestOptions<'a> {
     pub name: &'a str,
     pub spec: &'a str,
     pub format: MetadataFormat,
+    /// Bearer token for a private registry. Attached only to requests against
+    /// `registry_url`, which these manifest URLs are by construction.
+    pub auth_token: Option<&'a str>,
 }
 
 /// Fetch version manifest into a mutable parse buffer with retry.
@@ -302,6 +315,7 @@ pub(crate) async fn fetch_version_manifest_vec(
     opts: FetchVersionManifestOptions<'_>,
 ) -> Result<Vec<u8>> {
     let url = format!("{}/{}/{}", opts.registry_url, opts.name, opts.spec);
+    let auth_owned = opts.auth_token.map(|s| s.to_string());
 
     let accept = match opts.format {
         MetadataFormat::Abbreviated => "application/vnd.npm.install-v1+json",
@@ -312,14 +326,16 @@ pub(crate) async fn fetch_version_manifest_vec(
         retry_strategy(),
         || {
             let url = url.clone();
+            let auth = auth_owned.clone();
             async move {
-                let response = get_client()
+                let mut request = get_client()
                     .map_err(FetchError::Permanent)?
                     .get(&url)
-                    .header("Accept", accept)
-                    .send()
-                    .await
-                    .map_err(classify_reqwest_error)?;
+                    .header("Accept", accept);
+                if let Some(token) = &auth {
+                    request = request.bearer_auth(token);
+                }
+                let response = request.send().await.map_err(classify_reqwest_error)?;
 
                 if response.status().is_success() {
                     read_body_vec(response).await

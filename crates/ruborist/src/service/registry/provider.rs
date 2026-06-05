@@ -65,6 +65,7 @@ impl UnifiedRegistry {
             name,
             format: manifest::MetadataFormat::Abbreviated,
             etag: etag.as_deref(),
+            auth_token: self.auth_token.as_deref(),
         })
         .await
         .map_err(RegistryError)?
@@ -149,6 +150,7 @@ impl ManifestProvider for UnifiedRegistry {
                         name: &name,
                         spec: &fetch_spec,
                         format: self.version_fetch_format(),
+                        auth_token: self.auth_token.as_deref(),
                     })
                     .await
                     .map_err(RegistryError)?;

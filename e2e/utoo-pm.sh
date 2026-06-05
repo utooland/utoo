@@ -302,6 +302,49 @@ if (!deps.abbrev || !deps.ini) {
 echo -e "${GREEN}PASS: stale lockfile detected + regenerated${NC}"
 cd ../../..
 
+# Case 8.7: cross-device cache handling (Linux only).
+# /dev/shm is tmpfs — a separate device from the workspace disk, writable
+# without sudo — so it forces a genuine cross-filesystem cache/node_modules
+# split (EXDEV). Covers both paths: an explicitly configured cross-device cache
+# must still install (copy fallback), and the default cache must relocate next
+# to node_modules so packages can be hardlinked.
+echo -e "${YELLOW}Case 8.7: cross-device cache (Linux tmpfs)${NC}"
+if [ "$(uname -s)" = "Linux" ] && [ -d /dev/shm ]; then
+  XDEV_SHM="/dev/shm/utoo-xdev-$$"
+  XDEV_DISK="$(mktemp -d)"
+  xdev_cleanup() { rm -rf "$XDEV_SHM" "$XDEV_DISK" 2>/dev/null || true; }
+
+  # 8.7a: explicit cross-device cache-dir (cache on tmpfs, project on disk) ->
+  # respected with a WARN, install falls back to copy and still succeeds.
+  mkdir -p "$XDEV_DISK/proj"
+  printf '{"name":"xdev-explicit","version":"1.0.0","dependencies":{"is-odd":"3.0.1"}}\n' \
+    > "$XDEV_DISK/proj/package.json"
+  ( cd "$XDEV_DISK/proj" && UTOO_CACHE_DIR="$XDEV_SHM/cache" utoo install ) \
+    || { echo -e "${RED}FAIL: explicit cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_DISK/proj/node_modules/is-odd" ] \
+    || { echo -e "${RED}FAIL: is-odd missing (explicit xdev)${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_SHM/cache" ] \
+    || { echo -e "${RED}FAIL: explicit cache dir not used at $XDEV_SHM/cache${NC}"; xdev_cleanup; exit 1; }
+  echo -e "${GREEN}PASS: explicit cross-device cache copies, install OK${NC}"
+
+  # 8.7b: default cache (~/.cache/nm on disk) cross-device with a project on
+  # tmpfs -> cache is relocated under the project's node_modules so links work.
+  mkdir -p "$XDEV_SHM/proj"
+  printf '{"name":"xdev-default","version":"1.0.0","dependencies":{"is-odd":"3.0.1"}}\n' \
+    > "$XDEV_SHM/proj/package.json"
+  ( cd "$XDEV_SHM/proj" && env -u UTOO_CACHE_DIR utoo install ) \
+    || { echo -e "${RED}FAIL: default cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_SHM/proj/node_modules/is-odd" ] \
+    || { echo -e "${RED}FAIL: is-odd missing (default xdev)${NC}"; xdev_cleanup; exit 1; }
+  [ -d "$XDEV_SHM/proj/node_modules/.cache/nm" ] \
+    || { echo -e "${RED}FAIL: default cache not relocated to project node_modules/.cache/nm${NC}"; xdev_cleanup; exit 1; }
+  echo -e "${GREEN}PASS: default cross-device cache relocated to project, install OK${NC}"
+
+  xdev_cleanup
+else
+  echo -e "${YELLOW}SKIP: cross-device cache case (non-Linux or no /dev/shm)${NC}"
+fi
+
 # Case 9: reinstall ant-design by npmjs.org
 echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
@@ -634,8 +677,67 @@ fi
 "$INSTALLED_UTOO" --version
 echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
 
+# Regression: a global install run THROUGH the npm-style bin symlink must resolve
+# the prefix to $INSTALL_PREFIX, NOT to utoo's own package dir. current_exe()
+# resolves the symlink to <prefix>/lib/node_modules/utoo/bin/utoo, so a naive
+# parent-dir inference would drop bins into utoo's package bin / node_modules
+# instead of <prefix>/bin and <prefix>/lib/node_modules.
+echo -e "${YELLOW}  Subtest: global install resolves npm-style prefix${NC}"
+SYMLINK_UTOO="$INSTALL_PREFIX/bin/utoo"
+if [ ! -L "$SYMLINK_UTOO" ] && [ ! -f "$SYMLINK_UTOO" ]; then
+    echo -e "${RED}FAIL: expected npm bin entry at $SYMLINK_UTOO${NC}"
+    exit 1
+fi
+
+"$SYMLINK_UTOO" install -g cowsay --registry=https://registry.npmjs.org \
+    || { echo -e "${RED}FAIL: global install cowsay via npm-installed utoo${NC}"; exit 1; }
+
+# Bin must land in <prefix>/bin (on PATH); package in <prefix>/lib/node_modules.
+[ -e "$INSTALL_PREFIX/bin/cowsay" ] \
+    || { echo -e "${RED}FAIL: cowsay bin not in <prefix>/bin${NC}"; ls -R "$INSTALL_PREFIX" | head -40; exit 1; }
+[ -d "$INSTALL_PREFIX/lib/node_modules/cowsay" ] \
+    || { echo -e "${RED}FAIL: cowsay not in <prefix>/lib/node_modules${NC}"; exit 1; }
+# Must NOT leak into utoo's own package dir (the pre-fix bug).
+[ ! -e "$INSTALL_PREFIX/lib/node_modules/utoo/bin/cowsay" ] \
+    || { echo -e "${RED}FAIL: cowsay bin leaked into utoo's package bin dir${NC}"; exit 1; }
+[ ! -e "$INSTALL_PREFIX/lib/node_modules/utoo/lib/node_modules/cowsay" ] \
+    || { echo -e "${RED}FAIL: cowsay pkg leaked into utoo's package node_modules${NC}"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: npm-style prefix inference correct${NC}"
+
+# UTOO_PREFIX env var overrides inference.
+echo -e "${YELLOW}  Subtest: UTOO_PREFIX env override${NC}"
+ENV_PREFIX=$(mktemp -d)
+UTOO_PREFIX="$ENV_PREFIX" "$SYMLINK_UTOO" install -g semver --registry=https://registry.npmjs.org \
+    || { echo -e "${RED}FAIL: global install semver with UTOO_PREFIX${NC}"; exit 1; }
+[ -e "$ENV_PREFIX/bin/semver" ] \
+    || { echo -e "${RED}FAIL: semver bin not in UTOO_PREFIX/bin${NC}"; ls -R "$ENV_PREFIX" | head -20; exit 1; }
+[ -d "$ENV_PREFIX/lib/node_modules/semver" ] \
+    || { echo -e "${RED}FAIL: semver not in UTOO_PREFIX/lib/node_modules${NC}"; exit 1; }
+echo -e "${GREEN}  ✓ PASS: UTOO_PREFIX override works${NC}"
+rm -rf "$ENV_PREFIX"
+
 popd
 rm -rf "$PACK_DIR" "$INSTALL_PREFIX"
+
+# Case: `utoo link` must put the package's bins in <prefix>/bin (on PATH), not in
+# the linked package's own bin dir. Use an isolated --prefix so we don't touch
+# the runner's real global bin.
+echo -e "${YELLOW}Case: utoo link puts bins in <prefix>/bin${NC}"
+# Resolve to the physical path: on macOS `mktemp -d` lives under the /var ->
+# /private/var symlink, which would make the relative bin symlink (pointing at
+# the dev project on a different root) dangling — a test artifact, not a real
+# prefix (real prefixes like /usr/local aren't symlinked).
+LINK_PREFIX=$(cd "$(mktemp -d)" && pwd -P)
+pushd "$REPO_ROOT/e2e/pm/link-with-bin"
+utoo link --prefix "$LINK_PREFIX" \
+    || { echo -e "${RED}FAIL: utoo link --prefix failed${NC}"; exit 1; }
+popd
+[ -e "$LINK_PREFIX/bin/link-bin-test" ] \
+    || { echo -e "${RED}FAIL: linked bin not in <prefix>/bin${NC}"; ls -R "$LINK_PREFIX" | head -40; exit 1; }
+[ -e "$LINK_PREFIX/lib/node_modules/link-bin-test" ] \
+    || { echo -e "${RED}FAIL: linked package not in <prefix>/lib/node_modules${NC}"; exit 1; }
+echo -e "${GREEN}PASS: utoo link puts bins in <prefix>/bin${NC}"
+rm -rf "$LINK_PREFIX"
 
 # Case: Verify ant-design-x install + build
 echo -e "${YELLOW}Case: ant-design-x install and build${NC}"
@@ -1246,5 +1348,34 @@ utoo add -g cowsay --registry=https://registry.npmjs.org \
   || { echo -e "${RED}FAIL: utoo add -g cowsay${NC}"; exit 1; }
 which cowsay >/dev/null 2>&1 || { echo -e "${RED}FAIL: cowsay not in PATH after global add${NC}"; exit 1; }
 echo -e "${GREEN}  ✓ PASS: utoo add -g works${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+# Case: prod-reachable devDependency must not be marked `dev`
+# ═══════════════════════════════════════════════════════════════
+# `p-timeout` is declared as a root devDependency (shallow dev path) but is
+# also a prod dependency of `sdk-base` (a root prod dependency). Since it is
+# reachable through a prod chain it must be a prod node — no `"dev": true` —
+# matching npm. Regression test for the demand resolver leaving stale dev marks
+# on prod-reachable transitive deps.
+echo -e "${YELLOW}Case: prod-reachable devDependency is not marked dev${NC}"
+cd e2e/pm/dev-prod-dedup
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: utoo install failed for dev-prod-dedup${NC}"; exit 1; }
+node -e '
+const lock = require("./package-lock.json");
+const sdkBase = lock.packages["node_modules/sdk-base"];
+const pTimeout = lock.packages["node_modules/p-timeout"];
+if (!sdkBase) { console.error("sdk-base missing from lockfile"); process.exit(1); }
+if (!pTimeout) { console.error("p-timeout missing from lockfile"); process.exit(1); }
+if (sdkBase.dev === true) { console.error("sdk-base wrongly marked dev"); process.exit(1); }
+if (pTimeout.dev === true) {
+  console.error("REGRESSION: p-timeout is prod-reachable via sdk-base but marked dev:true");
+  process.exit(1);
+}
+' || { echo -e "${RED}FAIL: prod-reachable dep marked dev in lockfile${NC}"; exit 1; }
+echo -e "${GREEN}PASS: prod-reachable devDependency correctly not marked dev${NC}"
+cd ../../../
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

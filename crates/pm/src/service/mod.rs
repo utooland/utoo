@@ -7,6 +7,7 @@ pub mod execute;
 pub mod init;
 pub mod install;
 pub mod install_scheduler;
+pub mod oidc;
 pub mod package;
 pub mod package_management;
 pub mod pm_pack;
