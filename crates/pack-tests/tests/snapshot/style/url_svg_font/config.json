@@ -1,0 +1,25 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "./input/index.js",
+        "name": "main"
+      }
+    ],
+    "module": {
+      "rules": {
+        "*.svg": {
+          "loaders": [
+            "test-file-loader"
+          ],
+          "as": "*.js"
+        }
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false
+  }
+}
