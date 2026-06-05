@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # args check
-if [ "$#" -ne 5 ]; then
-    echo "Usage: $0 <package-name> <version> <binary-path> <os> <cpu>"
+if [ "$#" -lt 5 ] || [ "$#" -gt 6 ]; then
+    echo "Usage: $0 <package-name> <version> <binary-path> <os> <cpu> [--dry-run]"
     exit 1
 fi
 
@@ -13,9 +13,17 @@ VERSION=$2
 BINARY=$3
 OS=$4
 CPU=$5
+MODE=${6:-}
+
+if [ -n "$MODE" ] && [ "$MODE" != "--dry-run" ]; then
+    echo "Unsupported option: $MODE"
+    echo "Usage: $0 <package-name> <version> <binary-path> <os> <cpu> [--dry-run]"
+    exit 1
+fi
 
 # create temporary dir
 WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
 echo "Working in temporary directory: $WORK_DIR"
 
 # create vendor dir
@@ -42,10 +50,14 @@ cat ../templates/binary.package.json.template | \
 cp "$BINARY" "$PLATFORM_DIR/bin/$NAME"
 chmod +x "$PLATFORM_DIR/bin/$NAME"
 
-# do publish, --dry-run for test
+# Dry-run validates package contents only; provenance/OIDC applies to real publish.
 cd "$PLATFORM_DIR"
-npm publish --provenance --access public
-cat package.json
+PUBLISH_ARGS=(--access public)
+if [ "$MODE" = "--dry-run" ]; then
+    PUBLISH_ARGS+=(--dry-run)
+else
+    PUBLISH_ARGS+=(--provenance)
+fi
 
-# clean up
-rm -rf "$WORK_DIR"
+npm publish "${PUBLISH_ARGS[@]}"
+cat package.json
