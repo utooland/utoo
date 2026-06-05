@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <font id="UtooSvgFont" horiz-adv-x="512">
+      <font-face font-family="UtooSvgFont" units-per-em="512" />
+      <glyph unicode="a" d="M0 0h512v512H0z" />
+    </font>
+  </defs>
+</svg>
