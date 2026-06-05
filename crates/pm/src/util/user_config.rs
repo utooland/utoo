@@ -289,6 +289,30 @@ fn relocated_cache_dir(project: &Path) -> PathBuf {
     project.join("node_modules/.cache/nm")
 }
 
+/// Resolve the global install/link prefix (npm's `prefix`).
+///
+/// Priority: `--prefix` CLI flag > `UTOO_PREFIX` env > persisted `prefix` config
+/// key. Returns `None` when none is set, leaving `global_bin` to infer the
+/// prefix from the running executable. Set persistently with
+/// `ut config set prefix <path> --global`.
+pub async fn resolve_global_prefix(cli_prefix: Option<&str>) -> Option<String> {
+    if let Some(p) = cli_prefix
+        && !p.is_empty()
+    {
+        return Some(p.to_string());
+    }
+    if let Ok(env_prefix) = std::env::var("UTOO_PREFIX")
+        && !env_prefix.is_empty()
+    {
+        return Some(env_prefix);
+    }
+    Config::load(ConfigScope::Local)
+        .await
+        .ok()
+        .and_then(|c| c.get("prefix").ok().flatten())
+        .filter(|p| !p.is_empty())
+}
+
 pub fn get_cache_dir() -> PathBuf {
     // Cross-device relocation is resolved once in `set_cache_dir`.
     PathBuf::from(CACHE_DIR.get_sync())
@@ -468,6 +492,13 @@ mod tests {
         assert!(config.parse_config_value("True"));
         assert!(!config.parse_config_value("false"));
         assert!(!config.parse_config_value("anything"));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_global_prefix_cli_wins() {
+        // A non-empty CLI prefix short-circuits before env/config are consulted.
+        let resolved = resolve_global_prefix(Some("/opt/utoo")).await;
+        assert_eq!(resolved.as_deref(), Some("/opt/utoo"));
     }
 
     #[tokio::test]
