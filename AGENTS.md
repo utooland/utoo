@@ -94,6 +94,12 @@ Agent definitions live in `agents/` and are symlinked to `.claude/agents/` for C
 | **rust-code-guard** | `agents/rust-code-guard.md` | Rust idiom & style review agent. Enforces idiomatic patterns and project conventions based on real PR review cases. |
 | **utoopack-performance** | `agents/utoopack-performance-agent.md` | Turbopack performance diagnostics via Chrome Trace analysis across a 5-tier priority matrix. |
 
+## Project Skills
+
+Project skills live in `.agents/skills/` and are exposed to Claude Code via `.claude/skills/` and Codex via `.codex/skills/`.
+
+- `$utoo-upstream-sync` - Use when syncing upstream `vercel/next.js` `canary` into the `next.js` submodule branch `utoo`, planning rebase breakpoints, resolving Turbopack/TurboTasks conflicts, adapting local Pack crates, updating snapshots, or validating `utoo-web` wasm builds.
+
 ## Post-Edit Verification
 
 After modifying Rust code, **always** run these checks before considering the task done:
