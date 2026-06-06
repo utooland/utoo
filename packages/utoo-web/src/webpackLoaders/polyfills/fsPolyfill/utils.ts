@@ -25,12 +25,6 @@ export function getFs() {
   return fs;
 }
 
-const preserveOriginalError = (fsError: Error, error: any, message: string) => {
-  (fsError as any).originalMessage = message;
-  (fsError as any).cause = error;
-  return fsError;
-};
-
 export function translateError(error: any, path: string, syscall: string) {
   const message = error.message || String(error);
 
@@ -44,7 +38,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "ENOENT";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   // 2. Directory error (Mapped to EISDIR)
@@ -57,7 +51,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "EISDIR";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   // 3. Locking/Concurrency (Mapped to EAGAIN/EBUSY)
@@ -70,7 +64,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "EAGAIN";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   // 4. Permission Denied (EACCES)
@@ -81,7 +75,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "EACCES";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   // 5. Storage Full (ENOSPC)
@@ -94,7 +88,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "ENOSPC";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   // 6. Invalid Argument (EINVAL)
@@ -105,7 +99,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "EINVAL";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   // 7. Interrupted (EINTR)
@@ -116,7 +110,7 @@ export function translateError(error: any, path: string, syscall: string) {
     (e as any).code = "EINTR";
     (e as any).syscall = syscall;
     (e as any).path = path;
-    return preserveOriginalError(e, error, message);
+    return e;
   }
 
   return error;

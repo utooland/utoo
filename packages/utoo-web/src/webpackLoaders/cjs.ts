@@ -20,60 +20,26 @@ const RESOLUTION_EXTENSIONS = [
   "/index.json",
 ];
 
-type ResolutionFailure = {
-  candidate: string;
-  error: string;
-};
-
-const formatReadFileError = (error: unknown) => {
-  if (error && typeof error === "object") {
-    const { code, name, message } = error as {
-      code?: string;
-      name?: string;
-      message?: string;
-    };
-    const { originalMessage } = error as { originalMessage?: string };
-    const details = [code, name, message];
-    if (originalMessage && originalMessage !== message) {
-      details.push(`original: ${originalMessage}`);
-    }
-    return details.filter(Boolean).join(": ");
-  }
-  return String(error);
-};
-
-const tryReadFileWithError = (
-  p: string,
-): { ok: true; code: string } | { ok: false; error: string } => {
-  try {
-    return { ok: true, code: fs.readFileSync(p, "utf8") as string };
-  } catch (error) {
-    return { ok: false, error: formatReadFileError(error) };
-  }
-};
-
 const tryReadFile = (p: string): string | null => {
-  const result = tryReadFileWithError(p);
-  return result.ok ? result.code : null;
+  try {
+    return fs.readFileSync(p, "utf8") as string;
+  } catch {
+    return null;
+  }
 };
 
 const resolveWithExtensions = (
   p: string,
   skipIndexJsIfJs = false,
-  failures?: ResolutionFailure[],
 ): { code: string; id: string } | null => {
   for (const ext of RESOLUTION_EXTENSIONS) {
     if (skipIndexJsIfJs && ext === "/index.js" && p.endsWith(".js")) continue;
     const candidate = p + ext;
-    const result = tryReadFileWithError(candidate);
-    if (result.ok) return { code: result.code, id: candidate };
-    failures?.push({ candidate, error: result.error });
+    const code = tryReadFile(candidate);
+    if (code !== null) return { code, id: candidate };
   }
   return null;
 };
-
-const formatResolutionFailures = (failures: ResolutionFailure[]) =>
-  failures.map(({ candidate, error }) => `${candidate} (${error})`).join("; ");
 
 const executeModule = (
   moduleId: string,
@@ -168,7 +134,6 @@ const loadModule = (
   // 4. Check importMaps
   let moduleCode = importMaps[id];
   let moduleId = moduleCode ? id : resolvedId;
-  let pathResolutionFailures: ResolutionFailure[] | undefined;
 
   // Fallback: Try resolving from node_modules
   if (!moduleCode && !id.startsWith(".") && !id.startsWith("/")) {
@@ -226,24 +191,10 @@ const loadModule = (
 
   // Fallback: Try resolving absolute or relative path
   if (!moduleCode && (id.startsWith("/") || id.startsWith("."))) {
-    pathResolutionFailures = [];
-    const res = resolveWithExtensions(
-      resolvedId,
-      id.endsWith(".js"),
-      pathResolutionFailures,
-    );
+    const res = resolveWithExtensions(resolvedId, id.endsWith(".js"));
     if (res) {
       moduleCode = res.code;
       moduleId = res.id;
-    } else {
-      console.error("Worker: Failed to resolve path dependency", {
-        id,
-        resolvedId,
-        context,
-        entrypoint,
-        skippedIndexJs: id.endsWith(".js"),
-        attempts: pathResolutionFailures,
-      });
     }
   }
 
@@ -256,10 +207,7 @@ const loadModule = (
     `Worker: Dependency ${id} (resolved: ${moduleId}) not found. Context: ${context}. ` +
       `ImportMaps count: ${Object.keys(importMaps).length}. ` +
       `CWD: ${nodePolyFills.process.cwd()}. ` +
-      `Sample ImportMaps keys: ${Object.keys(importMaps).slice(0, 5).join(", ")}` +
-      (pathResolutionFailures?.length
-        ? `. Path resolution attempts: ${formatResolutionFailures(pathResolutionFailures)}`
-        : ""),
+      `Sample ImportMaps keys: ${Object.keys(importMaps).slice(0, 5).join(", ")}`,
   );
   console.error(error);
   throw error;
