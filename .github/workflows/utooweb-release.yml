@@ -50,13 +50,17 @@ jobs:
         run: npx turbo run build --filter=@utoo/web
       - name: Get version from release or use alpha version
         id: get_version
+        shell: bash
         run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/utooweb-v}" >> $GITHUB_OUTPUT
-      - name: Bump npm CLI for OIDC trusted publisher
-        # Trusted publishing requires npm 11.5.1+.
-        run: npm install --global npm@11.6.2
+          TAG_NAME="${{ github.event.release.tag_name }}"
+          VERSION=${TAG_NAME#utooweb-v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@11.6.2
       - name: NPM Publish
         run: |
+          set -euo pipefail
+
           echo "${VERSION}"
 
           TAG="latest"
@@ -66,7 +70,7 @@ jobs:
           fi
           echo "Publishing with tag: $TAG"
 
-          npm version --workspace=@utoo/web "${VERSION}" &&
-          npm publish --workspace=@utoo/web --access public --provenance --tag "${TAG}"
+          npm version --workspace=@utoo/web "${VERSION}" --no-git-tag-version --workspaces-update=false &&
+          npm publish --workspace=@utoo/web --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
