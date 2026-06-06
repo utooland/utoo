@@ -268,6 +268,7 @@ const loadModule = (
 export async function cjs(
   entrypoint: string,
   importMaps: Record<string, string>,
+  loadersImportMapFetchCache?: RequestCache,
 ) {
   [pkgJsonCache, resolutionCache, searchPathsCache].forEach((c) => {
     for (const key in c) delete c[key];
@@ -277,7 +278,12 @@ export async function cjs(
     Object.entries(importMaps).map(async ([k, v]) => {
       if (v.startsWith("https://")) {
         try {
-          const response = await fetch(v);
+          const response = await fetch(
+            v,
+            loadersImportMapFetchCache
+              ? { cache: loadersImportMapFetchCache }
+              : undefined,
+          );
           if (response.ok) {
             importMaps[k] = await response.text();
           } else {

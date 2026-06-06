@@ -55,6 +55,7 @@ export class Project implements ProjectEndpoint {
       serviceWorker,
       logFilter,
       loadersImportMap,
+      loadersImportMapFetchCache,
     } = options;
 
     this.cwd = cwd;
@@ -87,6 +88,7 @@ export class Project implements ProjectEndpoint {
       threadWorkerUrl,
       loaderWorkerUrl: this.options.loaderWorkerUrl,
       loadersImportMap,
+      loadersImportMapFetchCache,
       logFilter,
     });
   }
