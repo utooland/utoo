@@ -1,17 +1,18 @@
 import * as fs from "./fsPolyfill";
 import * as workerThreads from "./workerThreadsPolyfill";
 
-const buffer = require("buffer");
-self.Buffer = buffer.Buffer;
-const process = require("process");
-const originalCwd = process.cwd;
-process.cwd = () => {
+const bufferPolyfilled = require("buffer");
+self.Buffer = bufferPolyfilled.Buffer;
+const processPolyfilled = require("process");
+const originalCwd = processPolyfilled.cwd;
+processPolyfilled.cwd = () => {
   // @ts-ignore
   return workerThreads.workerData?.cwd || originalCwd?.() || "/";
 };
-if (!process.versions) process.versions = {};
-if (!process.versions.node) process.versions.node = "24.0.0";
-self.process = process;
+if (!processPolyfilled.versions) processPolyfilled.versions = {};
+if (!processPolyfilled.versions.node)
+  processPolyfilled.versions.node = "24.0.0";
+self.process = processPolyfilled;
 self.global = self;
 
 const path = require("path");
@@ -41,8 +42,8 @@ export default {
     return require("assert");
   },
 
-  buffer,
-  "node:buffer": buffer,
+  buffer: bufferPolyfilled,
+  "node:buffer": bufferPolyfilled,
 
   get child_process() {
     return require("child_process");
@@ -243,8 +244,8 @@ export default {
   path,
   "node:path": path,
 
-  process,
-  "node:process": process,
+  process: processPolyfilled,
+  "node:process": processPolyfilled,
 
   get url() {
     return require("url");
