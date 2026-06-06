@@ -93,7 +93,11 @@ const handleLoaderWorkerMessage = async (event: MessageEvent) => {
   };
 
   await waitForEntrypointReadable(meta.loaderAssets.entrypoint);
-  await cjs(meta.loaderAssets.entrypoint, meta.loaderAssets.importMaps);
+  await cjs(
+    meta.loaderAssets.entrypoint,
+    meta.loaderAssets.importMaps,
+    meta.loaderAssets.loadersImportMapFetchCache,
+  );
 };
 
 declare let self: DedicatedWorkerGlobalScope & {

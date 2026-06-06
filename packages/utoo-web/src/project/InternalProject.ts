@@ -72,6 +72,7 @@ class InternalEndpoint implements ProjectEndpoint {
         this.options.cwd,
         this.options!.loaderWorkerUrl,
         this.options?.loadersImportMap,
+        this.options?.loadersImportMapFetchCache,
       );
       this.loaderWorkerPoolInitialized = true;
     }
@@ -91,6 +92,7 @@ class InternalEndpoint implements ProjectEndpoint {
         this.options.cwd,
         this.options!.loaderWorkerUrl,
         this.options?.loadersImportMap,
+        this.options?.loadersImportMapFetchCache,
       );
       this.loaderWorkerPoolInitialized = true;
     }

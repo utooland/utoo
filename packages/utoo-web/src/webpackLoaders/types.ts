@@ -7,5 +7,6 @@ export interface LoaderRunnerMeta {
   loaderAssets: {
     importMaps: Record<string, string>;
     entrypoint: string;
+    loadersImportMapFetchCache?: RequestCache;
   };
 }

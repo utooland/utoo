@@ -16,6 +16,7 @@ export const runLoaderWorkerPool = async (
   projectCwd: string,
   loaderWorkerUrl: string,
   loadersImportMap?: Record<string, string>,
+  loadersImportMapFetchCache?: RequestCache,
 ) => {
   registerWorkerScheduler(
     async (creation: WebWorkerCreation) => {
@@ -72,6 +73,7 @@ export const runLoaderWorkerPool = async (
           loaderAssets: {
             importMaps: loadersImportMap ?? {},
             entrypoint: finalFilename,
+            loadersImportMapFetchCache,
           },
         } as LoaderRunnerMeta,
       ]);
