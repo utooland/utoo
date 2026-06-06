@@ -6,6 +6,7 @@ interface PanelProps {
   actions?: React.ReactNode;
   style?: React.CSSProperties;
   contentStyle?: React.CSSProperties;
+  testId?: string;
 }
 
 export const Panel: React.FC<PanelProps> = ({
@@ -14,9 +15,11 @@ export const Panel: React.FC<PanelProps> = ({
   actions,
   style,
   contentStyle,
+  testId,
 }) => {
   return (
     <div
+      data-testid={testId}
       style={{
         backgroundColor: "#ffffff",
         display: "flex",
@@ -26,6 +29,7 @@ export const Panel: React.FC<PanelProps> = ({
       }}
     >
       <div
+        data-testid={testId ? `${testId}-header` : undefined}
         style={{
           padding: "0.5rem 1rem",
           borderBottom: "1px solid #e5e7eb",
@@ -43,6 +47,7 @@ export const Panel: React.FC<PanelProps> = ({
         {actions && <div>{actions}</div>}
       </div>
       <div
+        data-testid={testId ? `${testId}-content` : undefined}
         style={{
           flex: 1,
           overflow: "auto",
