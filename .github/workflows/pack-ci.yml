@@ -33,8 +33,8 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             test: |
               apt-get update &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
+              rustup install nightly-2026-04-02 &&
+              rustup default nightly-2026-04-02 &&
               rustup target add x86_64-unknown-linux-gnu &&
               cargo test -p pack-tests --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
@@ -47,8 +47,8 @@ jobs:
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
+              rustup install nightly-2026-04-02 &&
+              rustup default nightly-2026-04-02 &&
               rustup target add x86_64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
               cargo test -p pack-tests --target x86_64-unknown-linux-musl
@@ -57,8 +57,8 @@ jobs:
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             test: |
               apt-get update && apt-get install -y libc6-dev-arm64-cross libgcc-s1-arm64-cross &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
+              rustup install nightly-2026-04-02 &&
+              rustup default nightly-2026-04-02 &&
               rustup target add aarch64-unknown-linux-gnu &&
               export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
               cargo test -p pack-tests --target aarch64-unknown-linux-gnu
@@ -72,8 +72,8 @@ jobs:
               echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
               apk update &&
               apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
+              rustup install nightly-2026-04-02 &&
+              rustup default nightly-2026-04-02 &&
               rustup target add aarch64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
               cargo test -p pack-tests --target aarch64-unknown-linux-musl
@@ -118,7 +118,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-04-02
           targets: ${{ matrix.settings.target }}
       # - name: Cache cargo
       #   uses: Swatinem/rust-cache@v2
