@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # args check
-if [ "$#" -ne 5 ]; then
-    echo "Usage: $0 <package-name> <version> <binary-path> <os> <cpu>"
+if [ "$#" -lt 5 ] || [ "$#" -gt 6 ]; then
+    echo "Usage: $0 <package-name> <version> <binary-path> <os> <cpu> [--dry-run]"
     exit 1
 fi
 
@@ -13,6 +13,7 @@ VERSION=$2
 BINARY=$3
 OS=$4
 CPU=$5
+DRY_RUN=${6:-""}
 
 # create temporary dir
 WORK_DIR=$(mktemp -d)
@@ -42,9 +43,13 @@ cat ../templates/binary.package.json.template | \
 cp "$BINARY" "$PLATFORM_DIR/bin/$NAME"
 chmod +x "$PLATFORM_DIR/bin/$NAME"
 
-# do publish, --dry-run for test
+# do publish; pass --dry-run for verification without publishing
 cd "$PLATFORM_DIR"
-npm publish --provenance --access public
+if [ "$DRY_RUN" = "--dry-run" ]; then
+  npm publish --provenance --access public --dry-run
+else
+  npm publish --provenance --access public
+fi
 cat package.json
 
 # clean up

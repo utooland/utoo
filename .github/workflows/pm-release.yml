@@ -196,7 +196,7 @@ jobs:
               BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}"
             fi
 
-            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
+            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}" --dry-run
           done
 
       - name: Upload Release Asset
