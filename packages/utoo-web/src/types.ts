@@ -170,6 +170,7 @@ export interface ProjectOptions {
   serviceWorker?: ServiceWorkerOptions;
   logFilter?: string;
   loadersImportMap?: Record<string, string>;
+  loadersImportMapFetchCache?: RequestCache;
 }
 
 export interface ServiceWorkerOptions {

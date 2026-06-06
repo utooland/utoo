@@ -61,7 +61,10 @@ const project = new UtooProject({
     loadersImportMap: {
       // accept an umd script url or a script content string
       "xyzLoader": "https://x.y.z.js"
-    }
+    },
+
+    // Set the fetch cache mode for loader import map URLs.
+    loadersImportMapFetchCache: "reload"
 });
 ```
 
@@ -134,6 +137,7 @@ Creates a new project instance.
   * `url` (string, required): The URL to the service worker script.
   * `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
 * `loadersImportMap` (object, optional): A map for configuring Webpack loader imports. This is an optional advanced configuration. Typically, you can simply declare loader dependencies in `package.json` to install and use them. Configuring `loadersImportMap` allows you to provide pre-bundled, single files that adhere to the CommonJS specification (as a URL string or content string). This avoids file system I/O overhead caused by `require` operations during loader execution, thereby significantly improving build performance. The key is the loader's name, and the value is the URL or content string of the UMD/CommonJS module. Loaders will be executed in parallel in a web worker pool.
+* `loadersImportMapFetchCache` (RequestCache, optional): The [`fetch` cache mode](https://developer.mozilla.org/en-US/docs/Web/API/Request/cache) used when fetching loader import map URLs. Set it to `"reload"` to bypass the browser cache. Inline script content values are unaffected.
 
 ### File System Methods
 

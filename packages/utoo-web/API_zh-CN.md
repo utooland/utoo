@@ -61,7 +61,10 @@ const project = new UtooProject({
     loadersImportMap: {
       // 接受 umd 脚本 url 或脚本内容字符串
       "xyzLoader": "https://x.y.z.js"
-    }
+    },
+
+    // 设置 loader import map URL 的 fetch cache mode。
+    loadersImportMapFetchCache: "reload"
 });
 ```
 
@@ -134,6 +137,7 @@ await project.build({
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
 * `loadersImportMap`（对象，可选）：用于配置 webpack Loader 的导入映射。这是一个可选的高级配置。通常情况下，您只需在 `package.json` 中声明 loader 依赖并安装，即可让它工作。配置 `loadersImportMap` 允许您直接提供预构建好的、满足 CommonJS 规范的单一文件（作为 URL 字符串或内容字符串）。这样做可以避免 loader 执行过程中因 `require` 操作产生的文件系统 I/O 开销，从而显著提升构建性能。键是 loader 的名称，值是 UMD/CommonJS 模块的 URL 或内容字符串。loader 将在 Web Worker 池中并行执行。
+* `loadersImportMapFetchCache`（RequestCache，可选）：拉取 loader import map URL 时使用的 [`fetch` cache mode](https://developer.mozilla.org/en-US/docs/Web/API/Request/cache)。设置为 `"reload"` 可绕过浏览器缓存。内联脚本内容字符串不受影响。
 
 ### 文件系统方法
 
@@ -460,4 +464,3 @@ import "@utoo/web/esm/serviceWorker";
 
 * 由于当前 Rust 上默认的内存分配器 [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs) 在多线程 `wasm` 上性能不够理想，我们将 [`mimalloc`](https://github.com/microsoft/mimalloc) 移植到了 wasm32-unknown-unknown 平台，以支持开启 CPU 核心数量的线程来运行构建。因此在浏览器环境和在操作系统环境，构建的性能差异十分微小。
 * turbopack 的部分高级功能如[`持久化缓存`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching)，目前也在计划之中，未来会在浏览器内直接支持。
-
