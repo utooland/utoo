@@ -7,6 +7,8 @@
 //! and does not depend on it.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::model::manifest::CoreVersionManifest;
@@ -52,10 +54,11 @@ impl FetchDone {
     }
 }
 
-/// A spawned fetch job. On native it's a `tokio::spawn` task (multi-threaded
-/// runtime → fetch + parse for independent manifests run in parallel); on wasm
-/// it's a `spawn_local` task. Either way the driver awaits the `JoinHandle`.
-pub(crate) type FetchFuture = tokio::task::JoinHandle<FetchDone>;
+/// A fetch job owned by the demand driver. Native wraps a `tokio::spawn`
+/// handle so independent fetch + parse jobs progress on the multi-threaded
+/// runtime; wasm keeps the provider future local and lets `FuturesUnordered`
+/// poll browser-backed I/O without requiring a Tokio `LocalSet`.
+pub(crate) type FetchFuture = Pin<Box<dyn Future<Output = Result<FetchDone, String>>>>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FetchPriority {

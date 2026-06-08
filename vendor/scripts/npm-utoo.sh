@@ -6,12 +6,23 @@ set -euo pipefail
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
     echo "Usage: $0 <version> [tag]"
     echo "  version: npm package version (e.g., 1.0.0, 1.0.0-beta)"
-    echo "  tag: npm dist-tag (default: latest)"
+    echo "  tag: npm dist-tag (default: latest, or prerelease identifier for prerelease versions)"
     exit 1
 fi
 
 VERSION=$1
-NPM_TAG=${2:-latest}
+
+default_npm_tag() {
+  local version=$1
+  if [[ "$version" == *"-"* ]]; then
+    local prerelease="${version#*-}"
+    echo "${prerelease%%.*}"
+  else
+    echo "latest"
+  fi
+}
+
+NPM_TAG=${2:-$(default_npm_tag "$VERSION")}
 
 # create temp dir
 WORK_DIR=$(mktemp -d)

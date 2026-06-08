@@ -491,20 +491,29 @@ async fn fetch_registry_manifest_inner<R: ManifestProvider>(
     }
 }
 
-/// Spawn a fetch job. Native runs it on the multi-threaded runtime so
-/// independent fetch + parse jobs progress in parallel; wasm has no threads, so
-/// it runs on the current local set.
+/// Create a fetch job. Native runs it on the multi-threaded runtime so
+/// independent fetch + parse jobs progress in parallel; wasm has no Tokio
+/// `LocalSet`, so it stays as a local future driven by `FuturesUnordered`.
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_registry_manifest<R: ManifestProvider>(registry: R, request: ManifestJob) -> FetchFuture
 where
     R::Error: Send,
 {
-    tokio::spawn(fetch_registry_manifest_inner(registry, request))
+    Box::pin(async move {
+        tokio::spawn(fetch_registry_manifest_inner(registry, request))
+            .await
+            .map_err(|error| {
+                if error.is_panic() {
+                    std::panic::resume_unwind(error.into_panic());
+                }
+                error.to_string()
+            })
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
 fn fetch_registry_manifest<R: ManifestProvider>(registry: R, request: ManifestJob) -> FetchFuture {
-    tokio::task::spawn_local(fetch_registry_manifest_inner(registry, request))
+    Box::pin(async move { Ok(fetch_registry_manifest_inner(registry, request).await) })
 }
 
 /// Apply one completed fetch to the store: cache it, wake parked edges, and

@@ -97,7 +97,7 @@ jobs:
         run: |
           git config --global --add safe.directory /__w/utoo/utoo
 
-      - name: Get version from release
+      - name: Get version and npm tag from release
         id: get_version
         run: |
           if [[ "$GITHUB_REF" == refs/tags/utoo-v* ]]; then
@@ -109,6 +109,17 @@ jobs:
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
             echo "Using version: $VERSION"
           fi
+
+          if [[ "$VERSION" == *"-"* ]]; then
+            PRERELEASE="${VERSION#*-}"
+            NPM_TAG="${PRERELEASE%%.*}"
+          elif [[ "${{ github.event_name }}" == "release" && "${{ github.event.release.prerelease }}" == "true" ]]; then
+            NPM_TAG="beta"
+          else
+            NPM_TAG="latest"
+          fi
+          echo "NPM_TAG=$NPM_TAG" >> $GITHUB_OUTPUT
+          echo "Using npm tag: $NPM_TAG"
 
       - name: Update Cargo.toml version
         env:
@@ -166,36 +177,6 @@ jobs:
           path: utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz
           retention-days: 7
 
-      - name: Verify npm package (dry-run)
-        if: ${{ github.event_name == 'release' }}
-        env:
-          VERSION: ${{ steps.get_version.outputs.VERSION }}
-        run: |
-          cd vendor/scripts
-
-          BINS=("utoo")
-          for BIN in "${BINS[@]}"; do
-            PACKAGE_NAME="$BIN"
-
-            if [ "${{ matrix.platform_os }}" = "win32" ]; then
-              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}.exe"
-            else
-              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}"
-            fi
-
-            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
-          done
-
-      - name: Upload Release Asset
-        if: ${{ github.event_name == 'release' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pwd
-          ls -la
-          gh release upload "${GITHUB_REF#refs/tags/}" \
-            utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz --clobber
-
       - name: Setup Node.js
         if: ${{ github.event_name == 'release' }}
         uses: actions/setup-node@v6
@@ -209,10 +190,42 @@ jobs:
         if: ${{ github.event_name == 'release' }}
         run: npm install --global npm@11.6.2
 
+      - name: Verify npm package (dry-run)
+        if: ${{ github.event_name == 'release' }}
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          NPM_TAG: ${{ steps.get_version.outputs.NPM_TAG }}
+        run: |
+          cd vendor/scripts
+
+          BINS=("utoo")
+          for BIN in "${BINS[@]}"; do
+            PACKAGE_NAME="$BIN"
+
+            if [ "${{ matrix.platform_os }}" = "win32" ]; then
+              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}.exe"
+            else
+              BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}"
+            fi
+
+            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}" "$NPM_TAG" --dry-run
+          done
+
+      - name: Upload Release Asset
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pwd
+          ls -la
+          gh release upload "${GITHUB_REF#refs/tags/}" \
+            utoo-${{ matrix.platform_os }}-${{ matrix.platform_cpu }}.tar.gz --clobber
+
       - name: Publish Binary Packages
         if: ${{ github.event_name == 'release' }}
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
+          NPM_TAG: ${{ steps.get_version.outputs.NPM_TAG }}
         run: |
           set -e
           cd vendor/scripts
@@ -227,7 +240,7 @@ jobs:
               BINARY_PATH="../../target/${{ matrix.target }}/release/${BIN}"
             fi
 
-            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}"
+            ./npm-binary.sh "$PACKAGE_NAME" "$VERSION" "$BINARY_PATH" "${{ matrix.platform_os }}" "${{ matrix.platform_cpu }}" "$NPM_TAG"
           done
 
   publish-main:
@@ -248,8 +261,14 @@ jobs:
             VERSION="${GITHUB_REF#refs/tags/utoo-v}"
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-            # Determine npm tag based on GitHub Release prerelease flag
-            if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+            # Derive the npm tag from the semver prerelease first; fall back to
+            # the GitHub Release prerelease flag for manually marked releases.
+            if [[ "$VERSION" == *"-"* ]]; then
+              PRERELEASE="${VERSION#*-}"
+              NPM_TAG="${PRERELEASE%%.*}"
+              echo "NPM_TAG=$NPM_TAG" >> $GITHUB_OUTPUT
+              echo "Version is prerelease, will publish to '$NPM_TAG' tag"
+            elif [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
               echo "NPM_TAG=beta" >> $GITHUB_OUTPUT
               echo "GitHub Release marked as prerelease, will publish to 'beta' tag"
             else
