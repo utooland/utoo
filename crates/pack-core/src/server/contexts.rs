@@ -203,13 +203,16 @@ pub async fn get_server_module_options_context(
     }
 
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
-
-    let postcss_transform_options = Some(PostCssTransformOptions {
-        postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
-        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
-        config_content: postcss_config_content,
-        ..Default::default()
-    });
+    let postcss_transform_options = if let Some(postcss_config_content) = postcss_config_content {
+        Some(PostCssTransformOptions {
+            postcss_package: Some(get_postcss_package_mapping().to_resolved().await?),
+            config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+            config_content: Some(postcss_config_content),
+            ..Default::default()
+        })
+    } else {
+        None
+    };
 
     let postcss_foreign_transform_options =
         postcss_transform_options
