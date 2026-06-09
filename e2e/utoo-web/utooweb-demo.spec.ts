@@ -39,7 +39,15 @@ const expandDirectory = async (directory: Locator) => {
 const collectConsoleMessages = (page: Page) => {
   const messages: string[] = [];
   page.on("console", (message) => {
-    messages.push(message.text());
+    const text = message.text();
+    const output = `[browser:${message.type()}] ${text}`;
+    messages.push(text);
+
+    if (message.type() === "error") {
+      console.error(output);
+    } else {
+      console.log(output);
+    }
   });
   return messages;
 };
