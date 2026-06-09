@@ -22,6 +22,33 @@ function resolveOptionalPath(
   return typeof value === "string" ? path.resolve(baseDir, value) : undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function applyCliConfigDefaults(
+  config: Record<string, unknown>,
+  dev: unknown,
+): Record<string, unknown> {
+  const isProduction = config.mode !== "development" && dev !== true;
+  const optimization = isRecord(config.optimization) ? config.optimization : {};
+
+  return {
+    ...config,
+    persistentCaching: config.persistentCaching ?? true,
+    ...(isProduction
+      ? {
+          optimization: {
+            ...optimization,
+            concatenateModules: optimization.concatenateModules ?? true,
+            removeUnusedExports: optimization.removeUnusedExports ?? true,
+            removeUnusedImports: optimization.removeUnusedImports ?? true,
+          },
+        }
+      : {}),
+  };
+}
+
 export async function resolveFromConfigFile(
   configDir: string,
 ): Promise<Record<string, unknown>> {
@@ -95,7 +122,7 @@ export async function resolveBuildOptions(flags: {
     rootPath = rootPath || resolveOptionalPath(configDir, configRootPath);
 
     projectOptions = {
-      config,
+      config: applyCliConfigDefaults(config, dev),
       processEnv,
       watch,
       dev,

@@ -45,7 +45,7 @@ async function buildInternal(
 
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
-  const persistentCaching = bundleOptions.config.persistentCaching ?? false;
+  const persistentCaching = bundleOptions.config.persistentCaching ?? true;
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
