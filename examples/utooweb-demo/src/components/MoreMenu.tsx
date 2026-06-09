@@ -5,14 +5,20 @@ export interface MenuItem {
   onClick: () => void;
   disabled?: boolean;
   danger?: boolean;
+  testId?: string;
 }
 
 interface MoreMenuProps {
   items: MenuItem[];
   disabled?: boolean;
+  testId?: string;
 }
 
-export const MoreMenu: React.FC<MoreMenuProps> = ({ items, disabled }) => {
+export const MoreMenu: React.FC<MoreMenuProps> = ({
+  items,
+  disabled,
+  testId,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -33,10 +39,12 @@ export const MoreMenu: React.FC<MoreMenuProps> = ({ items, disabled }) => {
 
   return (
     <div
+      data-testid={testId}
       ref={menuRef}
       style={{ position: "relative", display: "inline-block" }}
     >
       <button
+        data-testid={testId ? `${testId}-button` : undefined}
         onClick={() => setIsOpen(!isOpen)}
         disabled={disabled}
         style={{
@@ -57,6 +65,7 @@ export const MoreMenu: React.FC<MoreMenuProps> = ({ items, disabled }) => {
 
       {isOpen && (
         <div
+          data-testid={testId ? `${testId}-menu` : undefined}
           style={{
             position: "absolute",
             top: "100%",
@@ -73,6 +82,7 @@ export const MoreMenu: React.FC<MoreMenuProps> = ({ items, disabled }) => {
           {items.map((item, index) => (
             <button
               key={index}
+              data-testid={item.testId}
               onClick={() => {
                 item.onClick();
                 setIsOpen(false);

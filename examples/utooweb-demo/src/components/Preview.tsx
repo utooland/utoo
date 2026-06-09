@@ -57,6 +57,7 @@ export const Preview = forwardRef(
 
     return url ? (
       <iframe
+        data-testid="preview-iframe"
         ref={iframeRef}
         src={url}
         title="preview"
@@ -69,7 +70,10 @@ export const Preview = forwardRef(
         }}
       />
     ) : (
-      <div style={{ color: "#9ca3af", textAlign: "center", marginTop: "2rem" }}>
+      <div
+        data-testid="preview-empty-state"
+        style={{ color: "#9ca3af", textAlign: "center", marginTop: "2rem" }}
+      >
         No index.html to preview
       </div>
     );

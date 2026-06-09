@@ -14,4 +14,6 @@ trace-*.json.gz
 *.heapprofile
 .trace/
 *.tsbuildinfo
+playwright-report
+test-results
 .claude/settings.local.json

@@ -7,6 +7,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:e2e:utooweb": "playwright test -c e2e/utoo-web/playwright.config.ts",
     "vitest:all": "turbo run test --filter=@utoo/pack --filter=@utoo/pack-shared",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
@@ -19,6 +20,7 @@
   "license": "ISC",
   "devDependencies": {
     "@biomejs/biome": "2.1.2",
+    "@playwright/test": "1.60.0",
     "husky": "^9.1.7",
     "tombi": "^0.7.32",
     "turbo": "^2.6.3",
