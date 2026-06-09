@@ -53,7 +53,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-04-02
           components: rustfmt, clippy
 
       # - name: Rust Cache

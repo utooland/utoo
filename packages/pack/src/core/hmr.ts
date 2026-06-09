@@ -164,7 +164,7 @@ export async function createHotReloader(
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
-  const persistentCaching = bundleOptions.config.persistentCaching ?? false;
+  const persistentCaching = bundleOptions.config.persistentCaching ?? true;
   const persistentCacheLock = await acquirePersistentCacheLock(
     resolvedProjectPath,
     "utoo pack dev",

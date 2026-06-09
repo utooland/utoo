@@ -132,6 +132,7 @@ const Project = () => {
   const isWorking = isInstalling || isUpdating;
   const installButton = (
     <button
+      data-testid="install-dependencies-button"
       onClick={hasLock ? handleUpdate : handleInstall}
       disabled={isWorking || !project}
       style={{
@@ -158,6 +159,7 @@ const Project = () => {
 
   const buildButton = (
     <button
+      data-testid="build-project-button"
       onClick={handleBuild}
       disabled={isBuilding || !project}
       style={{
@@ -179,6 +181,7 @@ const Project = () => {
 
   const devButton = (
     <button
+      data-testid="dev-project-button"
       onClick={isDevMode ? stopDev : startDev}
       disabled={isBuilding || !project}
       style={{
@@ -207,6 +210,7 @@ const Project = () => {
       label: isUploading ? "Uploading..." : "Upload Demo",
       onClick: handleUpload,
       disabled: isUploading || !project || isBuilding,
+      testId: "upload-demo-menu-item",
     },
     {
       label: isGzipping
@@ -216,22 +220,26 @@ const Project = () => {
           : "Download",
       onClick: handleGzip,
       disabled: isGzipping || !project || isBuilding,
+      testId: "download-project-menu-item",
     },
     {
       label: "Settings",
       onClick: () => setIsConfigOpen(true),
       disabled: !project,
+      testId: "settings-menu-item",
     },
     {
       label: isDeleting ? "Resetting..." : "Reset Project",
       onClick: handleDeleteProject,
       disabled: isDeleting || !project || isInstalling || isBuilding,
       danger: true,
+      testId: "reset-project-menu-item",
     },
   ];
 
   const saveButton = (
     <button
+      data-testid="save-file-button"
       onClick={saveFile}
       disabled={isSaving || !hasUnsavedChanges || !project}
       style={{
@@ -267,6 +275,7 @@ const Project = () => {
 
   return (
     <div
+      data-testid="utooweb-demo"
       style={{
         height: "100vh",
         display: "flex",
@@ -282,13 +291,18 @@ const Project = () => {
       />
 
       <Panel
+        testId="project-panel"
         title="Project"
         actions={
           <>
             {installButton}
             {buildButton}
             {devButton}
-            <MoreMenu items={moreMenuItems} disabled={!project} />
+            <MoreMenu
+              testId="project-more-menu"
+              items={moreMenuItems}
+              disabled={!project}
+            />
           </>
         }
         style={{
@@ -299,15 +313,24 @@ const Project = () => {
         contentStyle={{ padding: "0.5rem 1rem" }}
       >
         {isLoading && (
-          <p style={{ textAlign: "center", color: "#22c55e", fontWeight: 500 }}>
+          <p
+            data-testid="project-initializing"
+            style={{ textAlign: "center", color: "#22c55e", fontWeight: 500 }}
+          >
             Initializing project...
           </p>
         )}
         {error && (
-          <p style={{ textAlign: "center", color: "#ef4444" }}>{error}</p>
+          <p
+            data-testid="project-error"
+            style={{ textAlign: "center", color: "#ef4444" }}
+          >
+            {error}
+          </p>
         )}
         {!isLoading && !error && (
           <ul
+            data-testid="project-file-tree"
             style={{
               display: "flex",
               flexDirection: "column",
@@ -335,6 +358,7 @@ const Project = () => {
       </Panel>
 
       <Panel
+        testId="editor-panel"
         title={`Editor${hasUnsavedChanges ? " *" : ""}`}
         actions={saveButton}
         style={{
@@ -354,6 +378,7 @@ const Project = () => {
       </Panel>
 
       <Panel
+        testId="preview-panel"
         title="Preview"
         style={{ width: "35%", minWidth: "320px" }}
         contentStyle={{ padding: "1rem" }}

@@ -7,6 +7,16 @@ interface ExtendedFileTreeItemProps extends FileTreeItemProps {
   onDelete?: (item: FileTreeNode) => Promise<boolean>;
 }
 
+const getFileTreeTestIdPart = (fullName: string): string => {
+  const path = fullName === "." ? "root" : fullName.replace(/^\.\//, "");
+  return (
+    path
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "root"
+  );
+};
+
 export const FileTreeItem = React.memo(
   ({
     item,
@@ -83,6 +93,8 @@ export const FileTreeItem = React.memo(
 
     const isSelected = selectedFile === item.fullName;
     const isRootDir = item.fullName === ".";
+    const testIdPart = getFileTreeTestIdPart(item.fullName);
+    const nodeTestId = `file-tree-${item.type}-${testIdPart}`;
 
     const actionButtonStyle: React.CSSProperties = {
       color: "#fff",
@@ -97,6 +109,10 @@ export const FileTreeItem = React.memo(
     return (
       <li style={{ listStyleType: "none" }}>
         <div
+          data-testid={nodeTestId}
+          data-file-path={item.fullName}
+          data-file-type={item.type}
+          aria-expanded={item.type === "directory" ? !isCollapsed : undefined}
           style={{
             display: "flex",
             alignItems: "center",
@@ -135,6 +151,7 @@ export const FileTreeItem = React.memo(
               {item.type === "directory" && (
                 <>
                   <button
+                    data-testid={`file-tree-refresh-${testIdPart}`}
                     onClick={handleRefresh}
                     style={{ ...actionButtonStyle, background: "#3b82f6" }}
                     title="Refresh"
@@ -142,6 +159,7 @@ export const FileTreeItem = React.memo(
                     🔄
                   </button>
                   <button
+                    data-testid={`file-tree-new-file-${testIdPart}`}
                     onClick={handleNewFile}
                     style={{ ...actionButtonStyle, background: "#10b981" }}
                     title="New File"
@@ -149,6 +167,7 @@ export const FileTreeItem = React.memo(
                     +📄
                   </button>
                   <button
+                    data-testid={`file-tree-new-folder-${testIdPart}`}
                     onClick={handleNewFolder}
                     style={{ ...actionButtonStyle, background: "#8b5cf6" }}
                     title="New Folder"
@@ -159,6 +178,7 @@ export const FileTreeItem = React.memo(
               )}
               {!isRootDir && (
                 <button
+                  data-testid={`file-tree-delete-${testIdPart}`}
                   onClick={handleDelete}
                   style={{ ...actionButtonStyle, background: "#ef4444" }}
                   title="Delete"

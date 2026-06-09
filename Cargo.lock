@@ -4751,7 +4751,7 @@ dependencies = [
 [[package]]
 name = "lightningcss"
 version = "1.0.0-alpha.71"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#be0b793e5853ca8cd3e340edcdef99ea1d8f2b49"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#528670c67e3c93a6760acee265c929a3a1102e3c"
 dependencies = [
  "ahash 0.8.12",
  "bitflags 2.9.4",
@@ -4780,7 +4780,7 @@ dependencies = [
 [[package]]
 name = "lightningcss-derive"
 version = "1.0.0-alpha.43"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#be0b793e5853ca8cd3e340edcdef99ea1d8f2b49"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#528670c67e3c93a6760acee265c929a3a1102e3c"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -5985,7 +5985,7 @@ dependencies = [
 [[package]]
 name = "parcel_selectors"
 version = "0.28.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#be0b793e5853ca8cd3e340edcdef99ea1d8f2b49"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#528670c67e3c93a6760acee265c929a3a1102e3c"
 dependencies = [
  "bitflags 2.9.4",
  "cssparser",
@@ -8050,7 +8050,7 @@ dependencies = [
 [[package]]
 name = "static-self"
 version = "0.1.2"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#be0b793e5853ca8cd3e340edcdef99ea1d8f2b49"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#528670c67e3c93a6760acee265c929a3a1102e3c"
 dependencies = [
  "indexmap 2.13.0",
  "smallvec",
@@ -8060,7 +8060,7 @@ dependencies = [
 [[package]]
 name = "static-self-derive"
 version = "0.1.1"
-source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#be0b793e5853ca8cd3e340edcdef99ea1d8f2b49"
+source = "git+https://github.com/utooland/lightningcss?branch=support-css-module-global#528670c67e3c93a6760acee265c929a3a1102e3c"
 dependencies = [
  "proc-macro2",
  "quote",

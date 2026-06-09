@@ -2,11 +2,13 @@
 "[project]/style/global_scoped/input/style.module.less [client] (css module)", ((__turbopack_context__) => {
 
 __turbopack_context__.v({
+  "case-root": "style-module-less-module__VPl8sq__case-root",
   "img": "style-module-less-module__VPl8sq__img",
   "list": "style-module-less-module__VPl8sq__list",
   "message": "style-module-less-module__VPl8sq__message",
   "message-context": "style-module-less-module__VPl8sq__message-context",
   "message-main": "style-module-less-module__VPl8sq__message-main",
+  "operation": "style-module-less-module__VPl8sq__operation",
 });
 }),
 "[project]/style/global_scoped/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {

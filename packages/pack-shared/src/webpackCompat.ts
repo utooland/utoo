@@ -164,11 +164,12 @@ export function compatOptionsFromWebpack(
   if (outputCompat && copy) {
     (outputCompat as any).copy = copy;
   }
+  const modeCompat = compatMode(mode);
 
   return {
     config: {
       entry: compatEntry(entry, html),
-      mode: compatMode(mode),
+      mode: modeCompat,
       module: compatModule(module),
       resolve: compatResolve(resolve),
       externals: compatExternals(
@@ -179,7 +180,7 @@ export function compatOptionsFromWebpack(
       output: outputCompat,
       target: compatTarget(target),
       sourceMaps: compatSourceMaps(devtool),
-      optimization: compatOptimization(optimization),
+      optimization: compatOptimization(optimization, modeCompat),
       define: compatFromWebpackPlugin(plugins, compatDefine),
       provider: compatFromWebpackPlugin(plugins, compatProvider),
       stats: compatStats(stats),
@@ -881,8 +882,18 @@ function compatSourceMaps(
 
 function compatOptimization(
   webpackOptimization: WebpackOptimization | undefined,
+  mode: ConfigComplete["mode"],
 ): ConfigComplete["optimization"] {
+  const productionDefault = mode === "production" ? true : undefined;
+
   if (!webpackOptimization) {
+    if (mode === "production") {
+      return {
+        concatenateModules: true,
+        removeUnusedExports: true,
+        removeUnusedImports: true,
+      };
+    }
     return;
   }
   const { moduleIds, minimize, concatenateModules, usedExports } =
@@ -898,10 +909,10 @@ function compatOptimization(
           : undefined,
     noMangling: webpackOptimization.mangleExports === false,
     minify: minimize,
-    concatenateModules,
+    concatenateModules: concatenateModules ?? productionDefault,
     treeShaking: false,
-    removeUnusedExports: enableWebpackUsedExports,
-    removeUnusedImports: enableWebpackUsedExports,
+    removeUnusedExports: enableWebpackUsedExports ?? productionDefault,
+    removeUnusedImports: enableWebpackUsedExports ?? productionDefault,
   };
 }
 

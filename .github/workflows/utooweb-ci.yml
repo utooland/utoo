@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    name: utooweb-ci-build-wasm
+    name: utooweb-ci-build-and-e2e
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-04-02
           targets: wasm32-unknown-unknown
           components: rust-src
       # - name: Cache cargo
@@ -46,11 +46,63 @@ jobs:
         uses: jetli/wasm-bindgen-action@v0.2.0
         with:
           version: '0.2.108'
-      - name: Build WASM
+      - name: Build @utoo/web
         run: |
-          npm run build --workspace=@utoo/pack-shared
-          npm run build:local --workspace=@utoo/web
+          npm run build:local --workspace @utoo/web
           ls packages/utoo-web/esm/utoo
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run utooweb demo e2e
+        run: |
+          set -euo pipefail
+
+          DEMO_URL="http://127.0.0.1:8081"
+          DEMO_LOG="/tmp/utooweb-demo.log"
+
+          npm run start --workspace utooweb-demo > "$DEMO_LOG" 2>&1 &
+          SERVER_PID=$!
+
+          cleanup() {
+            kill "$SERVER_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          wait_for_demo() {
+            local timeout_seconds=120
+            local deadline=$((SECONDS + timeout_seconds))
+
+            echo "Waiting for utooweb-demo at $DEMO_URL"
+            until curl -fsS "$DEMO_URL" >/dev/null 2>&1; do
+              if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+                echo "utooweb-demo exited before it became ready"
+                cat "$DEMO_LOG"
+                exit 1
+              fi
+
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "Timed out waiting for utooweb-demo after ${timeout_seconds}s"
+                cat "$DEMO_LOG"
+                exit 1
+              fi
+
+              sleep 1
+            done
+
+            echo "utooweb-demo is ready"
+          }
+
+          wait_for_demo
+
+          UTOOWEB_DEMO_URL="$DEMO_URL" npm run test:e2e:utooweb
+      - name: Upload e2e artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: utooweb-e2e-artifacts
+          path: |
+            playwright-report
+            test-results
+            /tmp/utooweb-demo.log
 
   success:
     name: utooweb-ci-success
