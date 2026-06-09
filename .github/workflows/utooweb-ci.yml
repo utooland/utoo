@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    name: utooweb-ci-build-wasm
+    name: utooweb-ci-build-and-e2e
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
