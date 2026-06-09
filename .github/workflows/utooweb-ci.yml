@@ -56,7 +56,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          npm run start --workspace utooweb-demo > /tmp/utooweb-demo.log 2>&1 &
+          DEMO_URL="http://127.0.0.1:8081"
+          DEMO_LOG="/tmp/utooweb-demo.log"
+
+          npm run start --workspace utooweb-demo > "$DEMO_LOG" 2>&1 &
           SERVER_PID=$!
 
           cleanup() {
@@ -64,26 +67,33 @@ jobs:
           }
           trap cleanup EXIT
 
-          for i in {1..120}; do
-            if curl -fsS http://127.0.0.1:8081 >/dev/null 2>&1; then
-              break
-            fi
+          wait_for_demo() {
+            local timeout_seconds=120
+            local deadline=$((SECONDS + timeout_seconds))
 
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-              cat /tmp/utooweb-demo.log
-              exit 1
-            fi
+            echo "Waiting for utooweb-demo at $DEMO_URL"
+            until curl -fsS "$DEMO_URL" >/dev/null 2>&1; do
+              if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+                echo "utooweb-demo exited before it became ready"
+                cat "$DEMO_LOG"
+                exit 1
+              fi
 
-            if [ "$i" -eq 120 ]; then
-              cat /tmp/utooweb-demo.log
-              echo "Timed out waiting for utooweb-demo"
-              exit 1
-            fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "Timed out waiting for utooweb-demo after ${timeout_seconds}s"
+                cat "$DEMO_LOG"
+                exit 1
+              fi
 
-            sleep 1
-          done
+              sleep 1
+            done
 
-          npm run test:e2e:utooweb
+            echo "utooweb-demo is ready"
+          }
+
+          wait_for_demo
+
+          UTOOWEB_DEMO_URL="$DEMO_URL" npm run test:e2e:utooweb
       - name: Upload e2e artifacts
         if: failure()
         uses: actions/upload-artifact@v4
