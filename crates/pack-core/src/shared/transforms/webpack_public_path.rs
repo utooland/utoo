@@ -5,7 +5,7 @@ use swc_core::{
     common::SyntaxContext,
     ecma::{
         ast::*,
-        visit::{VisitMut, VisitMutWith},
+        visit::{Visit, VisitMut, VisitMutWith, VisitWith},
     },
 };
 use turbopack::module_options::ModuleRule;
@@ -31,8 +31,60 @@ impl CustomTransformer for WebpackPublicPathTransformer {
     #[tracing::instrument(level = "trace", name = "webpack_public_path", skip_all)]
     async fn transform(&self, program: &mut Program, ctx: &TransformContext<'_>) -> Result<()> {
         let unresolved_ctxt = SyntaxContext::empty().apply_mark(ctx.unresolved_mark);
+        let mut checker = WebpackPublicPathChecker {
+            unresolved_ctxt,
+            should_work: false,
+        };
+        program.visit_with(&mut checker);
+        if !checker.should_work {
+            return Ok(());
+        }
+
         program.visit_mut_with(&mut WebpackPublicPathVisitor { unresolved_ctxt });
         Ok(())
+    }
+}
+
+struct WebpackPublicPathChecker {
+    unresolved_ctxt: SyntaxContext,
+    should_work: bool,
+}
+
+impl WebpackPublicPathChecker {
+    fn is_webpack_public_path(&self, ident: &Ident) -> bool {
+        ident.sym == atom!("__webpack_public_path__") && ident.ctxt == self.unresolved_ctxt
+    }
+}
+
+impl Visit for WebpackPublicPathChecker {
+    fn visit_ident(&mut self, ident: &Ident) {
+        if self.is_webpack_public_path(ident) {
+            self.should_work = true;
+        }
+    }
+
+    fn visit_program(&mut self, program: &Program) {
+        if !self.should_work {
+            program.visit_children_with(self);
+        }
+    }
+
+    fn visit_module_item(&mut self, item: &ModuleItem) {
+        if !self.should_work {
+            item.visit_children_with(self);
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &Stmt) {
+        if !self.should_work {
+            stmt.visit_children_with(self);
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &Expr) {
+        if !self.should_work {
+            expr.visit_children_with(self);
+        }
     }
 }
 
