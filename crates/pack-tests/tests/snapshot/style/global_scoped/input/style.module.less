@@ -49,3 +49,23 @@
         font-size: 16px;
     }
 }
+
+.case-root {
+    :global {
+        .tree-node {
+            &:hover {
+                :local {
+                    .operation {
+                        display: inline-block;
+                    }
+                }
+            }
+
+            :local {
+                .operation {
+                    display: none;
+                }
+            }
+        }
+    }
+}

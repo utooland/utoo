@@ -76,4 +76,12 @@
   font-size: 16px;
 }
 
+.style-module-less-module__VPl8sq__case-root  .tree-node:hover  .style-module-less-module__VPl8sq__operation {
+  display: inline-block;
+}
+
+.style-module-less-module__VPl8sq__case-root  .tree-node  .style-module-less-module__VPl8sq__operation {
+  display: none;
+}
+
 /*# sourceMappingURL=input_b49c0d7d.css.map*/
