@@ -65,7 +65,7 @@ jobs:
           trap cleanup EXIT
 
           for i in {1..120}; do
-            if curl -fsS http://127.0.0.1:8081 >/dev/null; then
+            if curl -fsS http://127.0.0.1:8081 >/dev/null 2>&1; then
               break
             fi
 
