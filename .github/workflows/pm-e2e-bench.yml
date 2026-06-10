@@ -326,10 +326,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
       - uses: ./.github/actions/setup-utoo-bin
         with:
           artifact: utoo-linux-x64
@@ -339,9 +345,9 @@ jobs:
           ut --version
       - name: Run e2e tests
         run: |
-          chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
-          bash e2e/utoo-pm.sh
-          bash e2e/pm-arborist.sh
+          UTOO_RUN_PM_E2E=1 \
+          UTOO_E2E_BIN="$(command -v utoo)" \
+          cargo test -p utoo-pm --test e2e --test arborist -- --nocapture
       - name: Upload e2e artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -359,10 +365,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
       - uses: ./.github/actions/setup-utoo-bin
         with:
           artifact: utoo-mac-arm64
@@ -372,9 +384,9 @@ jobs:
           ut --version
       - name: Run e2e tests
         run: |
-          chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
-          bash e2e/utoo-pm.sh
-          bash e2e/pm-arborist.sh
+          UTOO_RUN_PM_E2E=1 \
+          UTOO_E2E_BIN="$(command -v utoo)" \
+          cargo test -p utoo-pm --test e2e --test arborist -- --nocapture
       - name: Upload e2e artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -392,6 +404,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
       - name: Install x86_64 Node.js via nvm
         run: |
           arch -x86_64 bash -c '
@@ -407,6 +421,10 @@ jobs:
           node -p process.arch
           npm -v
           '
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
       - uses: ./.github/actions/setup-utoo-bin
         with:
           artifact: utoo-mac-x64
@@ -414,17 +432,16 @@ jobs:
         run: |
           utoo --version
           ut --version
-      - name: Run e2e tests (under arch -x86_64)
+      - name: Run e2e tests against x64 artifact
         shell: bash
         run: |
-          chmod +x e2e/utoo-pm.sh e2e/pm-arborist.sh
-          arch -x86_64 bash -c '
           export NVM_DIR="$HOME/.nvm"
           [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
           nvm use 22
-          bash e2e/utoo-pm.sh
-          bash e2e/pm-arborist.sh
-          '
+          node -p process.arch
+          UTOO_RUN_PM_E2E=1 \
+          UTOO_E2E_BIN="$(command -v utoo)" \
+          cargo test -p utoo-pm --test e2e --test arborist -- --nocapture
       - name: Upload e2e artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -442,6 +459,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
       - name: Disable Windows Defender
         shell: powershell
         run: |
@@ -454,6 +473,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
       - name: Download utoo binary
         uses: actions/download-artifact@v4
         with:
@@ -481,7 +504,9 @@ jobs:
           git config --system core.longpaths true
           $binPath = "${{ github.workspace }}\dist"
           $env:PATH = "$binPath;$env:PATH"
-          pwsh -File e2e/utoo-pm.ps1 --verbose
+          $env:UTOO_RUN_PM_E2E = "1"
+          $env:UTOO_E2E_BIN = "$binPath\utoo.exe"
+          cargo test -p utoo-pm --test e2e --test arborist -- --nocapture
       - name: Upload e2e artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4

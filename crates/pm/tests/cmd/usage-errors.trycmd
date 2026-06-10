@@ -1,0 +1,10 @@
+Invalid enum values are rejected by clap before installer initialization.
+
+```console
+$ utoo install --omit definitely-not-valid
+? 2
+error: invalid value 'definitely-not-valid' for '--omit <OMIT>'
+...
+For more information, try '--help'.
+
+```

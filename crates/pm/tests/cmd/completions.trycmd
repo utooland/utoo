@@ -1,0 +1,22 @@
+Completion generation is an early command path and should not initialize the
+installer or registry.
+
+```console
+$ utoo completions bash
+_utoo() {
+...
+            utoo,install)
+                cmd="utoo__install"
+...
+
+```
+
+If no shell is provided and auto-detection fails, completions exits with a usage
+error code.
+
+```console
+$ SHELL=/bin/definitely-not-a-shell utoo completions
+? 2
+Could not detect shell. Usage: utoo completions <bash|zsh|fish|powershell|elvish>
+
+```

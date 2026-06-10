@@ -1,0 +1,36 @@
+Root help is rendered through utoo's config-aware help view, not clap's default
+template. Pin only the stable command list and option labels.
+
+```console
+$ utoo --help
+...
+Usage:
+  ut <COMMAND>
+...
+Commands:
+  install          Install project dependencies (i, add)
+...
+  completions      Generate shell completion scripts (cmp)
+...
+Options:
+  -h, --help       Print help information
+  -v, --version    Print version information
+...
+
+```
+
+`add` is an alias for `install`, so clap renders the install command help.
+
+```console
+$ utoo add --help
+Install project dependencies
+
+Usage: utoo[EXE] install [OPTIONS] [SPECS]...
+...
+      --save-peer
+          Save as peer dependency
+...
+  -h, --help
+          Print help
+
+```

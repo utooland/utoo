@@ -1,0 +1,18 @@
+The source build uses a `0.0.0` placeholder while release artifacts are stamped,
+so the exact version is deliberately elided.
+
+```console
+$ utoo --version
+[..]
+
+```
+
+`utoo x --version` is handled before registry setup and should behave like an
+`npx --version` equivalent rather than trying to execute a package named
+`--version`.
+
+```console
+$ utoo x --version
+[..]
+
+```
