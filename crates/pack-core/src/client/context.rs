@@ -245,18 +245,13 @@ pub async fn get_client_module_options_context(
         SourceMapsType::None
     };
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
-    let postcss_package_mapping = if postcss_config_content.is_some() {
-        Some(get_postcss_package_mapping().to_resolved().await?)
-    } else {
-        None
-    };
-    let postcss_transform_options =
-        postcss_config_content.map(|postcss_config_content| PostCssTransformOptions {
-            postcss_package: postcss_package_mapping,
-            config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
-            config_content: Some(postcss_config_content),
-            ..Default::default()
-        });
+    let postcss_package_mapping = get_postcss_package_mapping().to_resolved().await?;
+    let postcss_transform_options = Some(PostCssTransformOptions {
+        postcss_package: Some(postcss_package_mapping),
+        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+        config_content: postcss_config_content,
+        ..Default::default()
+    });
 
     let postcss_foreign_transform_options =
         postcss_transform_options
@@ -268,12 +263,12 @@ pub async fn get_client_module_options_context(
                 ..postcss_transform_options.clone()
             });
 
-    let postcss_import_map = postcss_package_mapping.map(|mapping| postcss_import_map(*mapping));
+    let postcss_import_map = postcss_import_map(*postcss_package_mapping);
     let create_inline_postcss_transform = |options: &PostCssTransformOptions| {
         PostCssTransform::new(
             node_evaluate_asset_context(
                 *execution_context,
-                postcss_import_map,
+                Some(postcss_import_map),
                 None,
                 Layer::new(rcstr!("webpack_loaders")),
                 cfg!(all(target_family = "wasm", target_os = "unknown")),
