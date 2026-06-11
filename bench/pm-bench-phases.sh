@@ -402,31 +402,45 @@ run_phase() {
   capture_footprint "$phase" "$pm" "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_footprint.json"
 }
 
+# Optional phase filter: PHASES="p3,p4" runs only those phases — ablation
+# runs targeting one subsystem (e.g. clone concurrency) don't need the full
+# matrix. Default runs everything.
+PHASES=${PHASES:-p0,p1,p3,p4}
+phase_enabled() { [[ ",$PHASES," == *",$1,"* ]]; }
+
 # === PHASE 0: full cold install (clean slate + full install) ===
 # Matches the end-to-end user scenario: no lockfile, no cache, no node_modules.
 # Directly comparable to `bun install` / `utoo install` on a freshly cloned repo.
-banner "Phase 0 · full cold install (lockfile + cache + node_modules all wiped)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p0_full_cold" "$pm" "$(install_cmd "$pm")"
-done
+if phase_enabled p0; then
+  banner "Phase 0 · full cold install (lockfile + cache + node_modules all wiped)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p0_full_cold" "$pm" "$(install_cmd "$pm")"
+  done
+fi
 
 # === PHASE 1: resolve only (clean slate) ===
-banner "Phase 1 · resolve (lockfile only, cold cache)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p1_resolve" "$pm" "$(resolve_cmd "$pm")"
-done
+if phase_enabled p1; then
+  banner "Phase 1 · resolve (lockfile only, cold cache)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p1_resolve" "$pm" "$(resolve_cmd "$pm")"
+  done
+fi
 
 # === PHASE 3: cold install (lockfile exists, cache empty) ===
-banner "Phase 3 · cold install (lockfile present, empty cache, empty node_modules)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p3_cold_install" "$pm" "$(install_cmd "$pm")"
-done
+if phase_enabled p3; then
+  banner "Phase 3 · cold install (lockfile present, empty cache, empty node_modules)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p3_cold_install" "$pm" "$(install_cmd "$pm")"
+  done
+fi
 
 # === PHASE 4: warm link (cache populated, lockfile exists) ===
-banner "Phase 4 · warm link (lockfile present, populated cache, empty node_modules)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p4_warm_link" "$pm" "$(install_cmd "$pm")"
-done
+if phase_enabled p4; then
+  banner "Phase 4 · warm link (lockfile present, populated cache, empty node_modules)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p4_warm_link" "$pm" "$(install_cmd "$pm")"
+  done
+fi
 
 # === SUMMARY ===
 banner "Summary"
