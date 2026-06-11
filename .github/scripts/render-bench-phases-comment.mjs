@@ -113,6 +113,7 @@ for (const { reg, dir } of resultDirs) {
         min: r.min,
         max: r.max,
         runs: r.times?.length ?? 0,
+        times: r.times ?? [],
       };
     }
   }
@@ -129,21 +130,41 @@ const fmtB = (b) =>
         : Math.round(b) + "B";
 const fmtPct = (d) => (d > 0 ? "+" : "") + (d * 100).toFixed(1) + "%";
 
-// Welch-style 2-sigma gate on the difference of means; with 3-7 runs this is
-// a coarse filter, which is exactly the point — only flag what the sample
-// can actually support.
+// Preferred gate: PAIRED per-round deltas. The interleaved bench runs each
+// PM once per round, so times[i] across PMs share the same weather window —
+// the median paired delta cancels drift that a means comparison can't. A
+// null test (identical binaries) under the old per-PM-block shape read
+// "p3 -27.9%" off one weather spike; pairing is what makes verdicts mean
+// something. Flag only when the median is past the threshold AND ≥80% of
+// rounds agree on the sign.
+//
+// Fallback (legacy non-interleaved data): Welch-style 2-sigma gate on the
+// difference of means.
 function compare(utoo, next) {
   if (!utoo?.timing || !next?.timing) return null;
   const a = utoo.timing;
   const b = next.timing;
   if (!b.mean) return null;
+
+  if (a.times.length >= 3 && a.times.length === b.times.length) {
+    const deltas = a.times.map((t, i) => (t - b.times[i]) / b.times[i]);
+    const sorted = [...deltas].sort((x, y) => x - y);
+    const mid = sorted.length >> 1;
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    const agreeing = deltas.filter((d) => Math.sign(d) === Math.sign(median)).length;
+    const significant =
+      Math.abs(median) > FLAG_THRESHOLD && agreeing >= Math.ceil(deltas.length * 0.8);
+    const verdict = !significant ? "✅" : median < 0 ? "🚀" : "⚠️";
+    return { delta: median, significant, verdict, paired: true };
+  }
+
   const delta = (a.mean - b.mean) / b.mean;
   const se = Math.sqrt(
     (a.stddev * a.stddev) / Math.max(a.runs, 1) + (b.stddev * b.stddev) / Math.max(b.runs, 1),
   );
   const significant = Math.abs(delta) > FLAG_THRESHOLD && Math.abs(a.mean - b.mean) > 2 * se;
   const verdict = !significant ? "✅" : delta < 0 ? "🚀" : "⚠️";
-  return { delta, significant, verdict };
+  return { delta, significant, verdict, paired: false };
 }
 
 const sha = (process.env.GITHUB_SHA || "").slice(0, 7);
@@ -175,7 +196,7 @@ if (!resultDirs.length) {
       lines.push(`**utoo (PR) vs utoo-next (baseline):** ${verdicts.join(" · ")}`);
       lines.push("");
       lines.push(
-        "_✅ within noise · 🚀 faster · ⚠️ slower (|Δ| > 5% and beyond 2σ of the run spread)_",
+        "_✅ within noise · 🚀 faster · ⚠️ slower — Δ is the median of per-round paired deltas (interleaved rounds share weather windows); flagged when |Δ| > 5% and ≥80% of rounds agree on sign_",
       );
       lines.push("");
     }
