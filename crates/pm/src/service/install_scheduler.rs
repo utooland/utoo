@@ -642,7 +642,16 @@ impl SchedulerState {
     }
 }
 
+/// Numeric override from env — lets CI A/B concurrency settings with one
+/// binary (e.g. `UTOO_CLONE_CONCURRENCY=8` to replay the old effective limit).
+fn env_limit(name: &str) -> Option<usize> {
+    std::env::var(name).ok()?.parse().ok()
+}
+
 fn clone_concurrency_limit() -> usize {
+    if let Some(n) = env_limit("UTOO_CLONE_CONCURRENCY") {
+        return n.max(1);
+    }
     // Clone jobs are kernel-blocked metadata syscalls (hardlink farms), not
     // CPU work, and they run on tokio's blocking pool — wider than cores is
     // what keeps a 4-vCPU CI runner's disk queue fed. One serial walk per
@@ -653,6 +662,9 @@ fn clone_concurrency_limit() -> usize {
 }
 
 fn extract_concurrency_limit() -> usize {
+    if let Some(n) = env_limit("UTOO_EXTRACT_CONCURRENCY") {
+        return n.max(1);
+    }
     std::thread::available_parallelism()
         .map(|n| n.get().clamp(2, 8))
         .unwrap_or(4)

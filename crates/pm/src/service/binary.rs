@@ -18,8 +18,9 @@ static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 /// On-disk cache TTL for `binary-mirror-config`. The config changes rarely;
 /// without this cache every warm install on a non-npmjs registry pays a
 /// network round trip (TLS + manifest fetch) before the first mirror-matched
-/// package can finish cloning.
-const DISK_CACHE_TTL_SECS: u64 = 86400; // 24 hours
+/// package can finish cloning. 6h keeps worst-case staleness of a new mirror
+/// entry within the same workday.
+const DISK_CACHE_TTL_SECS: u64 = 21600; // 6 hours
 
 fn disk_cache_path() -> std::path::PathBuf {
     crate::util::cache::get_cache_dir().join("_binary-mirror-config.json")

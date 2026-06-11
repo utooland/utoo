@@ -26,9 +26,10 @@ const PHASES = [
   ["p3_cold_install", "p3 · cold install"],
   ["p4_warm_link", "p4 · warm link"],
 ];
-const PM_ORDER = ["utoo", "utoo-next", "utoo-npm", "bun"];
+const PM_ORDER = ["utoo", "utoo-alt", "utoo-next", "utoo-npm", "bun"];
 const PM_LABEL = {
   utoo: "utoo (PR)",
+  "utoo-alt": "utoo-alt (PR + alt env)",
   "utoo-next": "utoo-next (baseline)",
   "utoo-npm": "utoo-npm (published)",
   bun: "bun",

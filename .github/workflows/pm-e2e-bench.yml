@@ -75,6 +75,11 @@ on:
         required: false
         default: '3'
         type: string
+      utoo_alt_env:
+        description: '[phases] Extra env for a second utoo variant (ablation A/B), e.g. "UTOO_TARBALL_HTTP=h2" or "UTOO_CLONE_CONCURRENCY=8"'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -557,7 +562,7 @@ jobs:
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
-                 /tmp/utoo-next-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-next-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -572,6 +577,7 @@ jobs:
           # p1/p4 cells finish in seconds — extra runs there sharpen the
           # significance gate of the PR comment at negligible cost.
           BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
           BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: ${{ github.event_name == 'workflow_dispatch' && 'utoo,utoo-next,utoo-npm,bun' || 'utoo,utoo-next,bun' }}
         run: |
@@ -594,6 +600,7 @@ jobs:
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
           BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
           BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
@@ -653,7 +660,7 @@ jobs:
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -666,6 +673,7 @@ jobs:
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
           BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
           BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
@@ -684,6 +692,7 @@ jobs:
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
           BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
           BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
