@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde_json::{Value, json};
-use utoo_ruborist::builder::{DevDeps, EdgeContext, add_edges_from, add_workspace_member};
+use utoo_ruborist::builder::{
+    DevDeps, EdgeContext, add_edges_from, add_workspace_member, resolve_workspace_member_edges,
+};
 use utoo_ruborist::graph::{DependencyGraph, EdgeType};
 use utoo_ruborist::resolver::runtime::install_runtime;
 
@@ -101,6 +103,9 @@ impl TreeBuilder {
                 &edge_ctx,
             );
         }
+        // Settle importer-declared workspace: edges so topology consumers see
+        // resolved member edges, matching the install graph's init shape.
+        resolve_workspace_member_edges(graph);
 
         Ok(())
     }

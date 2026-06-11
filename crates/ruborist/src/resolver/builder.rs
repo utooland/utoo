@@ -12,7 +12,7 @@
 //! demand (no separate preload phase), overlapping network I/O with graph
 //! construction.
 
-use petgraph::graph::NodeIndex;
+use petgraph::graph::{EdgeIndex, NodeIndex};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -232,6 +232,52 @@ pub fn add_workspace_member(
     graph.mark_dependency_resolved(dep_edge_id, workspace_index);
 
     add_edges_from(graph, workspace_index, pkg, edge_ctx);
+}
+
+/// Resolve every importer-declared `workspace:` edge against the attached
+/// workspace members — to run AFTER all members are added (member→member
+/// edges can reference members attached later) and BEFORE the BFS.
+///
+/// `workspace:` specs only legally come from source-declared manifests (root
+/// and workspace members), and all of those edges exist by the end of graph
+/// initialisation — so they can be settled here in one pass and the resolver
+/// driver never sees a `workspace:` edge at all. Any `workspace:` spec that
+/// still reaches the BFS afterwards is a declaration anomaly (importer naming
+/// a missing member, or a spec leaked inside a published manifest), handled
+/// by the optional-skip / prod-error policy in `process_dependency`.
+pub fn resolve_workspace_member_edges(graph: &mut DependencyGraph) {
+    let root_index = graph.root_index;
+    let members: HashMap<String, NodeIndex> = graph
+        .get_physical_children(root_index)
+        .into_iter()
+        .filter_map(|idx| {
+            let node = graph.get_node(idx)?;
+            node.is_workspace().then(|| (node.name.clone(), idx))
+        })
+        .collect();
+    if members.is_empty() {
+        return;
+    }
+
+    let importers: Vec<NodeIndex> = std::iter::once(root_index)
+        .chain(members.values().copied())
+        .collect();
+    for importer in importers {
+        let pending: Vec<(EdgeIndex, String)> = graph
+            .get_dependency_edges(importer)
+            .into_iter()
+            .filter(|(_, dep)| !dep.valid && dep.spec.starts_with("workspace:"))
+            .map(|(edge_id, dep)| (edge_id, dep.name.clone()))
+            .collect();
+        for (edge_id, name) in pending {
+            if let Some(&target) = members.get(&name) {
+                graph.mark_dependency_resolved(edge_id, target);
+            }
+            // Missing member: leave the edge unresolved — the BFS terminal
+            // arm applies the optional-skip / prod-error policy with the
+            // dependency chain attached.
+        }
+    }
 }
 
 /// Update target node type based on source node and edge type.
@@ -561,24 +607,14 @@ pub async fn process_dependency<R: ManifestProvider>(
                     protocol: Protocol::Workspace,
                     ..
                 } => {
-                    // Workspace members are linked during graph initialisation
-                    // via a synthetic, pre-resolved edge — the importer's
-                    // original `workspace:` edge still flows through the BFS
-                    // and terminates here. When the member exists this edge is
-                    // already physically satisfied: nothing to do.
-                    if graph.find_workspace_member(&edge_info.name).is_some() {
-                        tracing::debug!(
-                            "workspace dependency {}@{} already linked at graph init",
-                            edge_info.name,
-                            edge_info.spec
-                        );
-                        return Ok(ProcessResult::Skipped);
-                    }
-                    // No such member: a misspelled name in an importer, or a
-                    // workspace: spec that leaked into a published manifest
-                    // (transitive deps must never declare it). Optional edges
-                    // skip with a warning; anything load-bearing fails with
-                    // the dependency chain attached (via `chain_err`) so the
+                    // Importer-declared workspace: edges are fully settled by
+                    // `resolve_workspace_member_edges` before the BFS starts,
+                    // so reaching this arm means a declaration anomaly: an
+                    // importer naming a missing member, or a workspace: spec
+                    // leaked inside a published manifest (transitive deps
+                    // must never declare it). Optional edges skip with a
+                    // warning; anything load-bearing fails with the
+                    // dependency chain attached (via `chain_err`) so the
                     // offending package is identifiable.
                     if edge_info.edge_type == EdgeType::Optional {
                         tracing::warn!(
@@ -590,11 +626,7 @@ pub async fn process_dependency<R: ManifestProvider>(
                     }
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),
-                        reason: if graph.has_workspace_members() {
-                            "workspace: dependency does not match any workspace member"
-                        } else {
-                            "workspace: dependency in a project that declares no workspaces"
-                        },
+                        reason: "workspace: dependency does not match any workspace member of this project",
                     });
                 }
                 PackageSpec::Local {
@@ -1072,6 +1104,73 @@ mod tests {
             version: version.to_string(),
             dependencies: Some(dependencies),
             ..Default::default()
+        }
+    }
+
+    /// Importer-declared workspace: edges (root → member and member → member)
+    /// are settled by `resolve_workspace_member_edges` before the BFS — the
+    /// build must succeed without the resolver ever seeing a workspace: spec.
+    #[tokio::test]
+    async fn test_workspace_member_edges_settled_before_bfs() {
+        let registry = MockRegistryClient::new();
+
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([(
+                "lib-a".to_string(),
+                "workspace:*".to_string(),
+            )])),
+            workspaces: Some(crate::model::package_json::WorkspacesConfig::Array(vec![
+                "packages/*".to_string(),
+            ])),
+            ..PackageJson::new("ws-root", "1.0.0")
+        };
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        let edge_ctx = EdgeContext::new(PeerDeps::Include, DevDeps::Include);
+        add_edges_from(&mut graph, root_index, &root_pkg, &edge_ctx);
+
+        // lib-b depends on lib-a via workspace:^1.0.0 — member→member edge.
+        let lib_a = PackageJson::new("lib-a", "1.0.0");
+        let lib_b = PackageJson {
+            dependencies: Some(HashMap::from([(
+                "lib-a".to_string(),
+                "workspace:^1.0.0".to_string(),
+            )])),
+            ..PackageJson::new("lib-b", "1.0.0")
+        };
+        add_workspace_member(
+            &mut graph,
+            root_index,
+            "lib-b",
+            PathBuf::from("packages/lib-b"),
+            &lib_b,
+            &edge_ctx,
+        );
+        add_workspace_member(
+            &mut graph,
+            root_index,
+            "lib-a",
+            PathBuf::from("packages/lib-a"),
+            &lib_a,
+            &edge_ctx,
+        );
+
+        resolve_workspace_member_edges(&mut graph);
+
+        build_deps(&mut graph, &registry, PeerDeps::Include)
+            .await
+            .expect("workspace edges must be settled before the BFS");
+
+        // Every workspace: edge is resolved — none left for the BFS.
+        for node in graph.graph.node_indices() {
+            for (_, dep) in graph.get_dependency_edges(node) {
+                assert!(
+                    !dep.spec.starts_with("workspace:") || dep.valid,
+                    "unresolved workspace edge survived: {}@{}",
+                    dep.name,
+                    dep.spec
+                );
+            }
         }
     }
 
