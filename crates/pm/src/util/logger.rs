@@ -43,6 +43,38 @@ pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     pb
 });
 
+/// Console writer for the tracing fmt layer that cooperates with the spinner.
+///
+/// The bar redraws in place on stderr; a raw stdout write while it is active
+/// lands at the cursor position and glues the log line onto a stale bar
+/// frame. Buffering the event and flushing inside `suspend` lets indicatif
+/// clear the bar, print the line, and redraw below it. With the bar hidden
+/// (non-TTY, or outside a progress phase) `suspend` just runs the closure.
+struct ProgressConsoleWriter(Vec<u8>);
+
+impl std::io::Write for ProgressConsoleWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for ProgressConsoleWriter {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        PROGRESS_BAR.suspend(|| {
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(&self.0);
+        });
+    }
+}
+
 // Global state for tracing
 static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
 
@@ -80,7 +112,7 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     Registry::default()
         .with(
             fmt::layer()
-                .with_writer(std::io::stdout)
+                .with_writer(|| ProgressConsoleWriter(Vec::new()))
                 .with_target(verbose) // Show module path only in verbose mode
                 .without_time() // No timestamp on console
                 .compact()
