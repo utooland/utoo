@@ -13,7 +13,7 @@ use super::fetch::{
 };
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
-use crate::resolver::version::resolve_target_version;
+use crate::resolver::version::resolve_target_version_lazy;
 
 /// Parse a JSON buffer on rayon's CPU thread pool (native) or inline
 /// (wasm32). The buffer is consumed because `simd_json` mutates it in-place.
@@ -68,8 +68,17 @@ fn parse_full_manifest_with_core_sync(
         .map_err(|e| anyhow!("JSON parse error: {e}"))?;
     manifest.raw = raw_bytes;
 
+    // Lazy + selective pre-warm: when the dist-tag / latest shortcuts settle
+    // the spec, no version is ever parsed; when they don't, the closure builds
+    // the package's sorted parsed-version cache HERE — on the rayon worker —
+    // so the resolver driver only ever sees a warm OnceLock for the packages
+    // that actually need full semver matching.
     let speculative = match spec {
-        Some(spec) => match resolve_target_version((&manifest).into(), &spec) {
+        Some(spec) => match resolve_target_version_lazy(
+            (&manifest).into(),
+            || manifest.sorted_parsed_versions(),
+            &spec,
+        ) {
             Ok(version) => match manifest.get_core_version_oneshot(&version) {
                 Some(core) => Some((spec, core)),
                 None => {

@@ -202,6 +202,20 @@ pub struct DependencyGraph {
     overrides: Option<Overrides>,
     /// Fast lookup set for override names
     override_names: HashSet<String>,
+    /// Per-parent `name → child` index over physical edges, maintained by
+    /// [`add_physical_edge`](Self::add_physical_edge) (the graph is
+    /// append-only — no edge ever gets removed). Hoisting parks most packages
+    /// directly under root, so the parent-chain search would otherwise scan
+    /// every root child (string compare each) for every edge — tens of
+    /// millions of comparisons on large trees, all inside the single-threaded
+    /// resolver driver.
+    child_index: HashMap<NodeIndex, HashMap<String, NodeIndex>>,
+    /// Workspace members by package name, registered in
+    /// [`add_node`](Self::add_node) — the single node-creation chokepoint —
+    /// so `workspace:` edge settlement never re-derives the member set from
+    /// physical children (which would also have to dodge the same-name link
+    /// node `add_workspace_member` attaches alongside each member).
+    workspace_members: HashMap<String, NodeIndex>,
 }
 
 impl DependencyGraph {
@@ -241,19 +255,52 @@ impl DependencyGraph {
             root_index,
             overrides,
             override_names,
+            child_index: HashMap::new(),
+            workspace_members: HashMap::new(),
         }
     }
 
     /// Add a package node to the graph.
     pub fn add_node(&mut self, node: PackageNode) -> NodeIndex {
-        self.graph.add_node(node)
+        let is_workspace = node.is_workspace();
+        let name = is_workspace.then(|| node.name.clone());
+        let idx = self.graph.add_node(node);
+        // Register workspace members at the single node-creation chokepoint,
+        // so `workspace_members` is correct for every construction path
+        // (install graph init, lockfile load, tests) with no rebuild pass.
+        if let Some(name) = name {
+            self.workspace_members.insert(name, idx);
+        }
+        idx
+    }
+
+    /// Workspace members by package name, maintained by [`add_node`](Self::add_node).
+    pub fn workspace_members(&self) -> &HashMap<String, NodeIndex> {
+        &self.workspace_members
     }
 
     /// Add a physical parent-child edge.
     pub fn add_physical_edge(&mut self, parent: NodeIndex, child: NodeIndex) -> EdgeIndex {
+        // `insert` (last wins) mirrors petgraph's reverse-insertion edge
+        // iteration the linear scan used to see first. Duplicate names under
+        // one parent DO occur: `add_workspace_member` attaches a workspace
+        // node and its link node under root with the same name — last-wins
+        // keeps the link node, exactly what the old scan found first.
+        let name = self.graph[child].name.clone();
+        self.child_index
+            .entry(parent)
+            .or_default()
+            .insert(name, child);
         self.graph.add_edge(parent, child, GraphEdge::Physical)
     }
 
+    /// O(1) lookup of a physical child by name (see `child_index`).
+    fn find_physical_child(&self, parent: NodeIndex, name: &str) -> Option<NodeIndex> {
+        self.child_index.get(&parent)?.get(name).copied()
+    }
+
+    /// Whether any workspace member is attached under root — `workspace:`
+    /// specs are only meaningful between members of a workspace project.
     /// Add a dependency edge (self-loop for tracking).
     pub fn add_dependency_edge(
         &mut self,
@@ -454,23 +501,21 @@ impl DependencyGraph {
         spec: &str,
         requester: NodeIndex,
     ) -> FindResult {
-        // Check all physical children of current node
-        for child_idx in self.get_physical_children(current) {
+        // Probe the per-parent name index — O(depth) total instead of a
+        // linear scan over every physical child per ancestor level.
+        if let Some(child_idx) = self.find_physical_child(current, name) {
             let child = &self.graph[child_idx];
-            if child.name == name {
-                if matches(spec, &child.version) {
-                    return FindResult::Reuse(child_idx);
-                } else {
-                    tracing::debug!(
-                        "found conflict deps {}@{} got {}, conflict at {:?}",
-                        name,
-                        spec,
-                        child.version,
-                        child_idx
-                    );
-                    return FindResult::Conflict(requester);
-                }
+            if matches(spec, &child.version) {
+                return FindResult::Reuse(child_idx);
             }
+            tracing::debug!(
+                "found conflict deps {}@{} got {}, conflict at {:?}",
+                name,
+                spec,
+                child.version,
+                child_idx
+            );
+            return FindResult::Conflict(requester);
         }
 
         // Recurse to parent

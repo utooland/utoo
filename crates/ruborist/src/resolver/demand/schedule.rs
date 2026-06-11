@@ -74,6 +74,7 @@ fn schedule_registry_fetch(
     priority: FetchPriority,
 ) {
     let (real_name, real_spec) = normalize_spec(&name, &spec);
+    let (real_name, real_spec) = (real_name.into_owned(), real_spec.into_owned());
     if matches!(supports_semver, ResolutionMode::Semver) {
         if state.is_version_settled(&real_name, &real_spec) {
             return;

@@ -296,7 +296,28 @@ impl SpecStr for str {
     }
 
     fn is_registry_spec(&self) -> bool {
-        self.parse_spec().is_registry()
+        // Allocation-free mirror of `PackageSpec::from(..).is_registry()` —
+        // this runs once per dependency edge on the resolver driver, where the
+        // full parse built (and threw away) two `String`s per call. The
+        // `spec_str_registry_check_matches_full_parse` test pins equivalence.
+        match Protocol::strip_prefix(self) {
+            Some((Protocol::NpmAlias, _)) => true,
+            Some(_) => false,
+            None => {
+                // Bare GitHub shorthand (`user/repo`, optionally `#ref`) is the
+                // only prefix-less non-registry form.
+                if !self.is_scoped() {
+                    let (path, _) = split_fragment(self);
+                    if let Some((owner, repo)) = path.split_once('/')
+                        && !owner.is_empty()
+                        && !repo.is_empty()
+                    {
+                        return false;
+                    }
+                }
+                true
+            }
+        }
     }
 }
 
@@ -378,6 +399,49 @@ mod tests {
 
     fn spec(s: &str) -> PackageSpec {
         s.parse_spec()
+    }
+
+    /// The allocation-free `is_registry_spec` must agree with the full parse
+    /// for every spec shape the resolver can see.
+    #[test]
+    fn spec_str_registry_check_matches_full_parse() {
+        let cases = [
+            "^1.0.0",
+            "~2.3.4",
+            "*",
+            "",
+            "latest",
+            "1.2.3-beta.1",
+            ">=1 <2",
+            "npm:lodash@^4.17.0",
+            "npm:@scope/pkg",
+            "@scope/pkg",
+            "@scope/pkg@^1.0.0",
+            "workspace:*",
+            "workspace:^1.0.0",
+            "catalog:",
+            "catalog:react",
+            "file:../local-pkg",
+            "link:../tool",
+            "portal:../portal",
+            "git+https://github.com/user/repo.git#main",
+            "git://github.com/user/repo.git",
+            "github:user/repo#v1",
+            "github:bare",
+            "user/repo",
+            "user/repo#branch",
+            "https://example.com/pkg.tgz",
+            "http://example.com/pkg.tgz",
+            "not-a-repo/",
+            "/leading-slash",
+        ];
+        for case in cases {
+            assert_eq!(
+                case.is_registry_spec(),
+                PackageSpec::from(case).is_registry(),
+                "is_registry_spec divergence for {case:?}"
+            );
+        }
     }
 
     // -- Protocol --

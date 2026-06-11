@@ -388,11 +388,20 @@ fn create_non_root_lock_package(
 }
 
 /// Populate dependency fields on LockPackage from graph edges.
-/// For root nodes, edges resolved to workspace nodes are excluded.
+///
+/// For root nodes, the SYNTHETIC workspace edge added by
+/// `add_workspace_member` (spec = the member's version) is excluded — a
+/// member only appears in root `dependencies` when the user declared it.
+/// A user-declared `workspace:` edge is kept even though it now also
+/// resolves to the workspace node (settled at graph init by
+/// `resolve_workspace_member_edges`).
 fn collect_edge_deps(graph: &DependencyGraph, node_index: NodeIndex, pkg: &mut LockPackage) {
     let is_root = graph.get_node(node_index).is_some_and(|n| n.is_root());
     for (_, dep_edge) in graph.get_dependency_edges(node_index) {
-        if is_root && graph.is_workspace_target(dep_edge) {
+        if is_root
+            && graph.is_workspace_target(dep_edge)
+            && !dep_edge.spec.starts_with("workspace:")
+        {
             continue;
         }
         let map = match dep_edge.edge_type {
