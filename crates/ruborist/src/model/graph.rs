@@ -210,6 +210,12 @@ pub struct DependencyGraph {
     /// millions of comparisons on large trees, all inside the single-threaded
     /// resolver driver.
     child_index: HashMap<NodeIndex, HashMap<String, NodeIndex>>,
+    /// Workspace members by package name, registered in
+    /// [`add_node`](Self::add_node) — the single node-creation chokepoint —
+    /// so `workspace:` edge settlement never re-derives the member set from
+    /// physical children (which would also have to dodge the same-name link
+    /// node `add_workspace_member` attaches alongside each member).
+    workspace_members: HashMap<String, NodeIndex>,
 }
 
 impl DependencyGraph {
@@ -250,12 +256,27 @@ impl DependencyGraph {
             overrides,
             override_names,
             child_index: HashMap::new(),
+            workspace_members: HashMap::new(),
         }
     }
 
     /// Add a package node to the graph.
     pub fn add_node(&mut self, node: PackageNode) -> NodeIndex {
-        self.graph.add_node(node)
+        let is_workspace = node.is_workspace();
+        let name = is_workspace.then(|| node.name.clone());
+        let idx = self.graph.add_node(node);
+        // Register workspace members at the single node-creation chokepoint,
+        // so `workspace_members` is correct for every construction path
+        // (install graph init, lockfile load, tests) with no rebuild pass.
+        if let Some(name) = name {
+            self.workspace_members.insert(name, idx);
+        }
+        idx
+    }
+
+    /// Workspace members by package name, maintained by [`add_node`](Self::add_node).
+    pub fn workspace_members(&self) -> &HashMap<String, NodeIndex> {
+        &self.workspace_members
     }
 
     /// Add a physical parent-child edge.

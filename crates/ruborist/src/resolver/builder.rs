@@ -247,14 +247,8 @@ pub fn add_workspace_member(
 /// by the optional-skip / prod-error policy in `process_dependency`.
 pub fn resolve_workspace_member_edges(graph: &mut DependencyGraph) {
     let root_index = graph.root_index;
-    let members: HashMap<String, NodeIndex> = graph
-        .get_physical_children(root_index)
-        .into_iter()
-        .filter_map(|idx| {
-            let node = graph.get_node(idx)?;
-            node.is_workspace().then(|| (node.name.clone(), idx))
-        })
-        .collect();
+    // Maintained by `DependencyGraph::add_node` — no member-set rebuild here.
+    let members = graph.workspace_members().clone();
     if members.is_empty() {
         return;
     }
