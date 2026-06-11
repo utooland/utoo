@@ -36,7 +36,12 @@ const PM_LABEL = {
 };
 
 // Relative delta below this is never flagged, whatever the sigmas say.
+// p4 carries a ~5% cache-identity systematic even between identical
+// binaries (each utoo variant hardlinks from its own cache dir, whose
+// physical layout differs — measured by the #3147 null test at -4..-12%
+// per round, median -5.4%), so its bar sits at 2x the measured bias.
 const FLAG_THRESHOLD = 0.05;
+const PHASE_FLAG_THRESHOLD = { p4_warm_link: 0.1 };
 
 const parseKey = (file, suffix) => {
   const base = file.slice(0, -suffix.length);
@@ -140,7 +145,8 @@ const fmtPct = (d) => (d > 0 ? "+" : "") + (d * 100).toFixed(1) + "%";
 //
 // Fallback (legacy non-interleaved data): Welch-style 2-sigma gate on the
 // difference of means.
-function compare(utoo, next) {
+function compare(utoo, next, phase) {
+  const threshold = PHASE_FLAG_THRESHOLD[phase] ?? FLAG_THRESHOLD;
   if (!utoo?.timing || !next?.timing) return null;
   const a = utoo.timing;
   const b = next.timing;
@@ -153,7 +159,7 @@ function compare(utoo, next) {
     const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     const agreeing = deltas.filter((d) => Math.sign(d) === Math.sign(median)).length;
     const significant =
-      Math.abs(median) > FLAG_THRESHOLD && agreeing >= Math.ceil(deltas.length * 0.8);
+      Math.abs(median) > threshold && agreeing >= Math.ceil(deltas.length * 0.8);
     const verdict = !significant ? "✅" : median < 0 ? "🚀" : "⚠️";
     return { delta: median, significant, verdict, paired: true };
   }
@@ -162,7 +168,7 @@ function compare(utoo, next) {
   const se = Math.sqrt(
     (a.stddev * a.stddev) / Math.max(a.runs, 1) + (b.stddev * b.stddev) / Math.max(b.runs, 1),
   );
-  const significant = Math.abs(delta) > FLAG_THRESHOLD && Math.abs(a.mean - b.mean) > 2 * se;
+  const significant = Math.abs(delta) > threshold && Math.abs(a.mean - b.mean) > 2 * se;
   const verdict = !significant ? "✅" : delta < 0 ? "🚀" : "⚠️";
   return { delta, significant, verdict, paired: false };
 }
@@ -187,7 +193,7 @@ if (!resultDirs.length) {
     for (const [phase, label] of PHASES) {
       const pms = phases[phase];
       if (!pms) continue;
-      const cmp = compare(pms["utoo"], pms["utoo-next"]);
+      const cmp = compare(pms["utoo"], pms["utoo-next"], phase);
       if (cmp) verdicts.push(`${cmp.verdict} ${label.split(" · ")[0]} ${fmtPct(cmp.delta)}`);
     }
     lines.push(`### ${reg}`);
@@ -219,7 +225,7 @@ if (!resultDirs.length) {
         }
         const t = c.timing;
         const m = c.metrics || {};
-        const cmp = pm === "utoo-next" ? null : compare(c, pms["utoo-next"]);
+        const cmp = pm === "utoo-next" ? null : compare(c, pms["utoo-next"], phase);
         lines.push(
           `| ${PM_LABEL[pm] ?? pm} | ${t ? `${fmtS(t.mean)} ± ${fmtS(t.stddev)}` : "—"} | ${t ? fmtS(t.min) : "—"} | ${m.user_s != null ? fmtS(m.user_s) : "—"} | ${m.sys_s != null ? fmtS(m.sys_s) : "—"} | ${m.rss ? fmtB(m.rss) : "—"} | ${cmp ? `${fmtPct(cmp.delta)} ${cmp.verdict}` : "—"} |`,
         );
