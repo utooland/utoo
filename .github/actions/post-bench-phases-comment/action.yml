@@ -8,6 +8,10 @@ inputs:
   os:
     description: Runner OS string (ubuntu-latest / macos-latest) — shown in the comment title
     required: true
+  project:
+    description: Project the bench ran against (matches the bench script's PROJECT env)
+    required: false
+    default: ant-design
   github-token:
     description: GitHub token for `gh` CLI lookups + sticky-comment posting
     required: true
@@ -17,6 +21,8 @@ runs:
   steps:
     - name: Build PR comment body
       shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
       run: bash .github/scripts/render-bench-phases-comment.sh ${{ inputs.platform }} ${{ inputs.os }}
     - name: Find Current PR
       id: findPr
