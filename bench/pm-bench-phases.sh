@@ -7,6 +7,18 @@ set -eo pipefail
 PROJECT=${PROJECT:-ant-design}
 REGISTRY=${REGISTRY:-https://registry.npmjs.org}
 RUNS=${BENCH_RUNS:-3}
+# Cheap phases (p1 resolve / p4 warm link) finish in seconds; more runs there
+# buys statistical power exactly where it's affordable.
+RUNS_CHEAP=${BENCH_RUNS_CHEAP:-$RUNS}
+# Ablation variant: `utoo-alt` runs the SAME utoo binary with the extra env
+# from UTOO_ALT_ENV (e.g. "UTOO_TARBALL_HTTP=h2" or
+# "UTOO_CLONE_CONCURRENCY=8") and its own cache dir. Benching utoo vs
+# utoo-alt on one runner isolates a single knob from network/runner weather
+# — the way to validate protocol/concurrency choices instead of trusting
+# cross-run deltas. Auto-appended to PM_LIST when UTOO_ALT_ENV is set.
+if [ -n "${UTOO_ALT_ENV:-}" ] && [[ ",${PM_LIST:-}," != *",utoo-alt,"* ]]; then
+  PM_LIST="${PM_LIST:+$PM_LIST,}utoo-alt"
+fi
 IFS=',' read -ra PACKAGE_MANAGERS <<< "${PM_LIST:-utoo,bun}"
 
 BENCH_DIR=${BENCH_DIR:-/tmp/pm-bench}
@@ -19,6 +31,7 @@ mkdir -p "$BENCH_DIR" "$RESULTS_DIR"
 UTOO_CACHE="${UTOO_CACHE:-/tmp/utoo-bench-cache}"
 UTOO_NPM_CACHE="${UTOO_NPM_CACHE:-/tmp/utoo-npm-bench-cache}"
 UTOO_NEXT_CACHE="${UTOO_NEXT_CACHE:-/tmp/utoo-next-bench-cache}"
+UTOO_ALT_CACHE="${UTOO_ALT_CACHE:-/tmp/utoo-alt-bench-cache}"
 BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
 export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
 
@@ -41,6 +54,12 @@ for pm in "${PACKAGE_MANAGERS[@]}"; do
         continue
       fi
       ;;
+    utoo-alt)
+      if [ -z "${UTOO_ALT_ENV:-}" ]; then
+        echo "skip utoo-alt: UTOO_ALT_ENV not set" >&2
+        continue
+      fi
+      ;;
   esac
   FILTERED+=("$pm")
 done
@@ -53,6 +72,20 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 banner() { echo -e "${YELLOW}=== $* ===${NC}"; }
+
+# Retry a command a few times with a short pause — registry/network hiccups
+# during the (untimed) seed installs were the dominant CI flake mode, and a
+# single blip used to abort the whole bench via `set -e`.
+retry() {
+  local attempts=$1 i
+  shift
+  for ((i = 1; i <= attempts; i++)); do
+    "$@" && return 0
+    echo -e "  ${RED}attempt $i/$attempts failed:${NC} $*" >&2
+    [ "$i" -lt "$attempts" ] && sleep 5
+  done
+  return 1
+}
 
 # --- metrics wrapper ---
 # Keeps the hot path fast: only /usr/bin/time + counter snapshots inside the
@@ -135,6 +168,7 @@ capture_footprint() {
     utoo)      cache=$UTOO_CACHE ;;
     utoo-npm)  cache=$UTOO_NPM_CACHE ;;
     utoo-next) cache=$UTOO_NEXT_CACHE ;;
+    utoo-alt)  cache=$UTOO_ALT_CACHE ;;
     bun)       cache=$BUN_CACHE ;;
   esac
   printf '{"cache":%d,"node_modules":%d,"lockfile":%d}\n' \
@@ -148,7 +182,7 @@ capture_footprint() {
 banner "Preparing $PROJECT"
 cd "$BENCH_DIR"
 if [ ! -d "$PROJECT" ]; then
-  git clone --depth=1 "https://github.com/ant-design/${PROJECT}.git" "$PROJECT"
+  retry 3 git clone --depth=1 "https://github.com/ant-design/${PROJECT}.git" "$PROJECT"
 fi
 PROJECT_DIR="$BENCH_DIR/$PROJECT"
 
@@ -162,6 +196,7 @@ write_prepare() {
     utoo)      cache=$UTOO_CACHE ;;
     utoo-npm)  cache=$UTOO_NPM_CACHE ;;
     utoo-next) cache=$UTOO_NEXT_CACHE ;;
+    utoo-alt)  cache=$UTOO_ALT_CACHE ;;
     bun)       cache=$BUN_CACHE ;;
   esac
 
@@ -184,7 +219,7 @@ EOF
       # Phase 0: full cold install — nothing reused. Lockfile + all caches wiped.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$BUN_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE"
 echo "[prep] phase 0 $pm: full cold (lockfile + caches + node_modules wiped)"
 EOF
       ;;
@@ -192,37 +227,25 @@ EOF
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$BUN_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE"
 echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
     p3_*)
-      # Phase 3: cold install — keep THIS pm's lockfile, wipe THIS pm's cache.
-      # Delete the other pm's lockfile so bun doesn't try to migrate utoo's
-      # package-lock.json (and vice versa).
+      # Phase 3: cold install — keep THIS pm's lockfile, wipe THIS pm's cache
+      # (the $cache resolved above). Delete the other pm's lockfile so bun
+      # doesn't try to migrate utoo's package-lock.json (and vice versa).
       case "$pm" in
-        utoo) cat >> "$path" <<EOF
-rm -f bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE"
-echo "[prep] phase 3 utoo: kept package-lock.json, wiped $UTOO_CACHE"
-EOF
-          ;;
-        utoo-npm) cat >> "$path" <<EOF
-rm -f bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_NPM_CACHE"
-echo "[prep] phase 3 utoo-npm: kept package-lock.json, wiped $UTOO_NPM_CACHE"
-EOF
-          ;;
-        utoo-next) cat >> "$path" <<EOF
-rm -f bun.lock yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_NEXT_CACHE"
-echo "[prep] phase 3 utoo-next: kept package-lock.json, wiped $UTOO_NEXT_CACHE"
-EOF
-          ;;
         bun) cat >> "$path" <<EOF
 rm -f package-lock.json yarn.lock pnpm-lock.yaml
 rm -rf "$BUN_CACHE"
 echo "[prep] phase 3 bun: kept bun.lock, wiped $BUN_CACHE"
+EOF
+          ;;
+        *) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+rm -rf "$cache"
+echo "[prep] phase 3 $pm: kept package-lock.json, wiped $cache"
 EOF
           ;;
       esac
@@ -230,24 +253,14 @@ EOF
     p4_*)
       # Phase 4: warm link — keep lockfile AND cache, only drop node_modules.
       case "$pm" in
-        utoo) cat >> "$path" <<EOF
-rm -f bun.lock yarn.lock pnpm-lock.yaml
-echo "[prep] phase 4 utoo: kept package-lock.json + cache"
-EOF
-          ;;
-        utoo-npm) cat >> "$path" <<EOF
-rm -f bun.lock yarn.lock pnpm-lock.yaml
-echo "[prep] phase 4 utoo-npm: kept package-lock.json + cache"
-EOF
-          ;;
-        utoo-next) cat >> "$path" <<EOF
-rm -f bun.lock yarn.lock pnpm-lock.yaml
-echo "[prep] phase 4 utoo-next: kept package-lock.json + cache"
-EOF
-          ;;
         bun) cat >> "$path" <<EOF
 rm -f package-lock.json yarn.lock pnpm-lock.yaml
 echo "[prep] phase 4 bun: kept bun.lock + cache"
+EOF
+          ;;
+        *) cat >> "$path" <<EOF
+rm -f bun.lock yarn.lock pnpm-lock.yaml
+echo "[prep] phase 4 $pm: kept package-lock.json + cache"
 EOF
           ;;
       esac
@@ -258,34 +271,44 @@ EOF
 }
 
 # Seed PM-specific state before a phase runs (lockfile + cache where needed).
-# This runs ONCE before hyperfine starts, not per-iteration.
+# This runs ONCE before hyperfine starts, not per-iteration. Returns non-zero
+# on terminal seed failure so run_phase can skip just that (phase, pm) cell
+# instead of aborting the whole bench.
+#
+# Lockfile provenance: all utoo variants install from one package-lock.json.
+# Generate it with the *baseline* binary (utoo-next) when wired up, so a PR
+# that changes resolution/lockfile shape can never perturb the input the
+# baseline is measured against — p3/p4 compare install speed on equal input.
+seed_lockfile_cmd() {
+  local pm=$1
+  if [ -n "${UTOO_NEXT_BIN:-}" ]; then
+    echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE"
+    return
+  fi
+  case "$pm" in
+    utoo)      echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
+    utoo-npm)  echo "$UTOO_NPM_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
+    utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
+    utoo-alt)  echo "env $UTOO_ALT_ENV utoo deps --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
+  esac
+}
+
 seed_for_phase() {
   local phase=$1 pm=$2
+  local seed_log="$RESULTS_DIR/seed_${phase}_${pm}.log"
   cd "$PROJECT_DIR"
   case "$phase:$pm" in
-    p3_*:utoo|p4_*:utoo)
+    p3_*:utoo|p4_*:utoo|p3_*:utoo-npm|p4_*:utoo-npm|p3_*:utoo-next|p4_*:utoo-next|p3_*:utoo-alt|p4_*:utoo-alt)
       if [ ! -f package-lock.json ]; then
-        echo -e "  ${CYAN}seed: running \`utoo deps\` to generate package-lock.json${NC}"
-        utoo deps --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
-      fi
-      ;;
-    p3_*:utoo-npm|p4_*:utoo-npm)
-      if [ ! -f package-lock.json ]; then
-        echo -e "  ${CYAN}seed: running \`utoo-npm deps\` to generate package-lock.json${NC}"
-        "$UTOO_NPM_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
-      fi
-      ;;
-    p3_*:utoo-next|p4_*:utoo-next)
-      if [ ! -f package-lock.json ]; then
-        echo -e "  ${CYAN}seed: running \`utoo-next deps\` to generate package-lock.json${NC}"
-        "$UTOO_NEXT_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NEXT_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+        echo -e "  ${CYAN}seed: generating package-lock.json (baseline-pinned when available)${NC}"
+        retry 3 bash -c "$(seed_lockfile_cmd "$pm") >> '$seed_log' 2>&1" || return 1
       fi
       ;;
     p3_*:bun|p4_*:bun)
       if [ ! -f bun.lock ]; then
         echo -e "  ${CYAN}seed: running \`bun install --lockfile-only\` to generate bun.lock${NC}"
         rm -f package-lock.json
-        bun install --lockfile-only --registry="$REGISTRY" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+        retry 3 bash -c "bun install --lockfile-only --registry='$REGISTRY' >> '$seed_log' 2>&1" || return 1
       fi
       ;;
   esac
@@ -296,17 +319,13 @@ seed_for_phase() {
       utoo)      cache=$UTOO_CACHE ;;
       utoo-npm)  cache=$UTOO_NPM_CACHE ;;
       utoo-next) cache=$UTOO_NEXT_CACHE ;;
+      utoo-alt)  cache=$UTOO_ALT_CACHE ;;
       bun)       cache=$BUN_CACHE ;;
     esac
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
       echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
       rm -rf node_modules
-      case "$pm" in
-        utoo)      utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        utoo-npm)  "$UTOO_NPM_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        utoo-next) "$UTOO_NEXT_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NEXT_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        bun)       bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-      esac
+      retry 3 bash -c "$(install_cmd "$pm") >> '$RESULTS_DIR/seed_warmup_${pm}.log' 2>&1" || return 1
       rm -rf node_modules
     fi
   fi
@@ -317,6 +336,7 @@ install_cmd() {
     utoo)      echo "utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
     utoo-npm)  echo "$UTOO_NPM_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
     utoo-next) echo "$UTOO_NEXT_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
+    utoo-alt)  echo "env $UTOO_ALT_ENV utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
     bun)       echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
   esac
 }
@@ -326,6 +346,7 @@ resolve_cmd() {
     utoo)      echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
     utoo-npm)  echo "$UTOO_NPM_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
     utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
+    utoo-alt)  echo "env $UTOO_ALT_ENV utoo deps --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
     bun)       echo "bun install --lockfile-only --registry=$REGISTRY" ;;
   esac
 }
@@ -337,7 +358,17 @@ run_phase() {
   local prep_script="$RESULTS_DIR/prep_${phase}_${pm}.sh"
   local cmd_script="$RESULTS_DIR/cmd_${phase}_${pm}.sh"
 
-  seed_for_phase "$phase" "$pm"
+  # Cheap phases get more runs (see RUNS_CHEAP).
+  local runs=$RUNS
+  case "$phase" in
+    p1_* | p4_*) runs=$RUNS_CHEAP ;;
+  esac
+
+  if ! seed_for_phase "$phase" "$pm"; then
+    echo -e "  ${RED}$pm $phase seed failed after retries — skipping this cell${NC}"
+    printf '{"failed":"seed"}\n' > "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_failed.json"
+    return 0
+  fi
   write_prepare "$prep_script" "$phase" "$pm"
 
   # Reset metrics file; wrap the bench command so /usr/bin/time can measure it.
@@ -371,31 +402,45 @@ run_phase() {
   capture_footprint "$phase" "$pm" "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_footprint.json"
 }
 
+# Optional phase filter: PHASES="p3,p4" runs only those phases — ablation
+# runs targeting one subsystem (e.g. clone concurrency) don't need the full
+# matrix. Default runs everything.
+PHASES=${PHASES:-p0,p1,p3,p4}
+phase_enabled() { [[ ",$PHASES," == *",$1,"* ]]; }
+
 # === PHASE 0: full cold install (clean slate + full install) ===
 # Matches the end-to-end user scenario: no lockfile, no cache, no node_modules.
 # Directly comparable to `bun install` / `utoo install` on a freshly cloned repo.
-banner "Phase 0 · full cold install (lockfile + cache + node_modules all wiped)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p0_full_cold" "$pm" "$(install_cmd "$pm")"
-done
+if phase_enabled p0; then
+  banner "Phase 0 · full cold install (lockfile + cache + node_modules all wiped)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p0_full_cold" "$pm" "$(install_cmd "$pm")"
+  done
+fi
 
 # === PHASE 1: resolve only (clean slate) ===
-banner "Phase 1 · resolve (lockfile only, cold cache)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p1_resolve" "$pm" "$(resolve_cmd "$pm")"
-done
+if phase_enabled p1; then
+  banner "Phase 1 · resolve (lockfile only, cold cache)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p1_resolve" "$pm" "$(resolve_cmd "$pm")"
+  done
+fi
 
 # === PHASE 3: cold install (lockfile exists, cache empty) ===
-banner "Phase 3 · cold install (lockfile present, empty cache, empty node_modules)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p3_cold_install" "$pm" "$(install_cmd "$pm")"
-done
+if phase_enabled p3; then
+  banner "Phase 3 · cold install (lockfile present, empty cache, empty node_modules)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p3_cold_install" "$pm" "$(install_cmd "$pm")"
+  done
+fi
 
 # === PHASE 4: warm link (cache populated, lockfile exists) ===
-banner "Phase 4 · warm link (lockfile present, populated cache, empty node_modules)"
-for pm in "${PACKAGE_MANAGERS[@]}"; do
-  run_phase "p4_warm_link" "$pm" "$(install_cmd "$pm")"
-done
+if phase_enabled p4; then
+  banner "Phase 4 · warm link (lockfile present, populated cache, empty node_modules)"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    run_phase "p4_warm_link" "$pm" "$(install_cmd "$pm")"
+  done
+fi
 
 # === SUMMARY ===
 banner "Summary"
@@ -498,5 +543,16 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     }
   }
 "
+
+# Export raw per-cell results (hyperfine JSON, metrics, footprint, failure
+# markers) for the CI comment renderer — keyed by registry host so multi-leg
+# runs (npmjs + npmmirror) don't clobber each other across state wipes.
+if [ -n "${BENCH_OUT_DIR:-}" ]; then
+  REG_LABEL=$(echo "$REGISTRY" | sed -E 's|^https?://||; s|/.*$||')
+  EXPORT_DIR="$BENCH_OUT_DIR/results-$REG_LABEL"
+  mkdir -p "$EXPORT_DIR"
+  cp "$RESULTS_DIR/$PROJECT"_* "$EXPORT_DIR/" 2>/dev/null || true
+  echo -e "${GREEN}Exported raw results to $EXPORT_DIR${NC}"
+fi
 
 echo -e "${GREEN}Done. Raw results in $RESULTS_DIR${NC}"
