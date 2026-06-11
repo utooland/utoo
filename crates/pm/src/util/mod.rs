@@ -8,6 +8,7 @@ pub mod extractor;
 pub mod format_print;
 pub mod git_resolver;
 pub mod http;
+pub mod install_progress;
 pub mod integrity;
 pub mod json;
 pub mod linker;
