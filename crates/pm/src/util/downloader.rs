@@ -52,8 +52,11 @@ pub async fn download_bytes(url: &str, auth_token: Option<&str>) -> Result<Bytes
                     // await: each chunk feeds the live byte counter the spinner
                     // renders as `↓ 23.4 MB (8.2 MB/s)`.
                     let _gauge = GaugeGuard::downloading();
-                    let mut buf =
-                        BytesMut::with_capacity(response.content_length().unwrap_or(0) as usize);
+                    // Capacity hint only — capped so a bogus Content-Length
+                    // can't force a huge allocation; BytesMut grows as needed.
+                    const MAX_PREALLOC: u64 = 32 * 1024 * 1024;
+                    let hint = response.content_length().unwrap_or(0).min(MAX_PREALLOC);
+                    let mut buf = BytesMut::with_capacity(hint as usize);
                     let mut stream = response.bytes_stream();
                     while let Some(chunk) = stream.next().await {
                         let chunk = chunk
