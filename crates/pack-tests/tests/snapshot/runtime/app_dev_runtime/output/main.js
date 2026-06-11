@@ -2137,6 +2137,24 @@ let BACKEND;
             // loaded instantly.
             resolver.loadingStarted = true;
             if (isCss(chunkUrl)) {
+                if (typeof importScripts !== 'function') {
+                    const decodedChunkUrl = decodeURI(chunkUrl);
+                    const previousLinks = document.querySelectorAll(`link[rel=stylesheet][href="${chunkUrl}"],link[rel=stylesheet][href^="${chunkUrl}?"],link[rel=stylesheet][href="${decodedChunkUrl}"],link[rel=stylesheet][href^="${decodedChunkUrl}?"]`);
+                    if (previousLinks.length === 0) {
+                        const link = document.createElement('link');
+                        link.rel = 'stylesheet';
+                        link.crossOrigin = CROSS_ORIGIN;
+                        link.href = chunkUrl;
+                        link.onerror = ()=>{
+                            resolver.reject();
+                        };
+                        link.onload = ()=>{
+                            resolver.resolve();
+                        };
+                        document.head.appendChild(link);
+                        return resolver.promise;
+                    }
+                }
                 resolver.resolve();
                 return resolver.promise;
             }
