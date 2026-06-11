@@ -75,6 +75,27 @@ on:
         required: false
         default: '3'
         type: string
+      utoo_alt_env:
+        description: '[phases] Extra env for a second utoo variant (ablation A/B), e.g. "UTOO_TARBALL_HTTP=h2" or "UTOO_CLONE_CONCURRENCY=8"'
+        required: false
+        default: ''
+        type: string
+      phases:
+        description: '[phases] Comma-separated phase filter (p0,p1,p3,p4) - ablations can run just the relevant phases'
+        required: false
+        default: 'p0,p1,p3,p4'
+        type: string
+      phases_pm_list:
+        description: '[phases] PMs to bench - an utoo vs utoo-alt ablation only needs "utoo"'
+        required: false
+        default: 'utoo,utoo-next,utoo-npm,bun'
+        type: string
+      phases_registry:
+        description: '[phases] Registry leg(s) to run'
+        required: false
+        default: 'both'
+        type: choice
+        options: [both, npmjs, npmmirror]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -526,7 +547,11 @@ jobs:
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: linux
-      - uses: ./.github/actions/install-utoo-npm-baseline
+      # utoo-npm (last published release) only changes on releases — bench it
+      # on manual dispatch only; label-triggered PR runs compare against
+      # utoo-next, which is the signal that can actually change per PR.
+      - if: github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/install-utoo-npm-baseline
       # The utoo-next binary is built upstream by build-linux's
       # "Build next branch utoo (bench baseline)" step. Just download.
       - name: Download utoo-next binary
@@ -544,7 +569,7 @@ jobs:
         run: |
           hyperfine --version
           utoo --version
-          "$UTOO_NPM_BIN" --version
+          if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           "$UTOO_NEXT_BIN" --version
           bun --version
       - name: Define cache wipe function
@@ -553,7 +578,7 @@ jobs:
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
-                 /tmp/utoo-next-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-next-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -561,18 +586,25 @@ jobs:
       - name: Wipe bench state before npmjs
         run: bash /tmp/wipe-bench-state.sh
       - name: Run phase-isolated benchmark · npmjs
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.phases_registry != 'npmmirror'
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
+          # p1/p4 cells finish in seconds — extra runs there sharpen the
+          # significance gate of the PR comment at negligible cost.
+          BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
+          PHASES: ${{ github.event.inputs.phases || 'p0,p1,p3,p4' }}
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
+          PM_LIST: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.phases_pm_list || 'utoo,utoo-next,utoo-npm,bun') || 'utoo,utoo-next,bun' }}
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
       # npmmirror only runs on manual dispatch — label-triggered runs stick to
       # the npmjs leg to keep PR feedback loops short.
       - name: Stash npmjs logs and wipe state before npmmirror
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.phases_registry != 'npmjs'
         run: |
           mkdir -p /tmp/bench-logs-stash
           cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
@@ -580,12 +612,16 @@ jobs:
           mkdir -p /tmp/pm-bench-output
           cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
       - name: Run phase-isolated benchmark · npmmirror
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.phases_registry != 'npmjs'
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
+          BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
+          PHASES: ${{ github.event.inputs.phases || 'p0,p1,p3,p4' }}
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
+          PM_LIST: ${{ github.event.inputs.phases_pm_list || 'utoo,utoo-next,utoo-npm,bun' }}
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
@@ -601,6 +637,7 @@ jobs:
         with:
           platform: linux
           os: ubuntu-latest
+          project: ${{ github.event.inputs.project || 'ant-design' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   bench-phases-mac:
@@ -642,7 +679,7 @@ jobs:
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
-                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/bun-bench-cache \
+                 /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -650,15 +687,21 @@ jobs:
       - name: Wipe bench state before npmjs
         run: bash /tmp/wipe-bench-state.sh
       - name: Run phase-isolated benchmark · npmjs
+        if: github.event.inputs.phases_registry != 'npmmirror'
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
+          PHASES: ${{ github.event.inputs.phases || 'p0,p1,p3,p4' }}
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
+          PM_LIST: ${{ github.event.inputs.phases_pm_list || 'utoo,utoo-npm,bun' }}
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
       - name: Stash npmjs logs and wipe state before npmmirror
+        if: github.event.inputs.phases_registry != 'npmjs'
         run: |
           mkdir -p /tmp/bench-logs-stash
           cp -r /tmp/pm-bench-output/. /tmp/bench-logs-stash/ 2>/dev/null || true
@@ -666,11 +709,16 @@ jobs:
           mkdir -p /tmp/pm-bench-output
           cp -r /tmp/bench-logs-stash/. /tmp/pm-bench-output/ 2>/dev/null || true
       - name: Run phase-isolated benchmark · npmmirror
+        if: github.event.inputs.phases_registry != 'npmjs'
         env:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-npm,bun'
+          BENCH_RUNS_CHEAP: '5'
+          UTOO_ALT_ENV: ${{ github.event.inputs.utoo_alt_env || '' }}
+          PHASES: ${{ github.event.inputs.phases || 'p0,p1,p3,p4' }}
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
+          PM_LIST: ${{ github.event.inputs.phases_pm_list || 'utoo,utoo-npm,bun' }}
         run: |
           mkdir -p /tmp/pm-bench-output
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmmirror.log
@@ -686,6 +734,7 @@ jobs:
         with:
           platform: mac
           os: macos-latest
+          project: ${{ github.event.inputs.project || 'ant-design' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================

@@ -29,6 +29,14 @@ OUT=/tmp/pm-bench-output/pr_comment.md
 SHA="${GITHUB_SHA:0:7}"
 RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
+# Preferred path: the bench script exported raw per-cell JSON
+# (results-<registry>/ dirs). The node renderer computes Δ% vs utoo-next
+# with significance flags instead of scraping fixed-width log text. The awk
+# path below stays as a fallback for runs that died before the export step.
+if compgen -G "/tmp/pm-bench-output/results-*" > /dev/null; then
+  exec node "$(dirname "$0")/render-bench-phases-comment.mjs" "$PLATFORM" "$OS"
+fi
+
 mkdir -p /tmp/pm-bench-output
 {
   echo "## 📊 pm-bench-phases · \`$SHA\` · ${PLATFORM} (\`${OS}\`)"

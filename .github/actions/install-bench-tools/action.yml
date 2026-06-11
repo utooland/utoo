@@ -12,7 +12,16 @@ runs:
     - name: Install bench tools (linux)
       if: inputs.platform == 'linux'
       shell: bash
-      run: sudo apt-get update && sudo apt-get install -y hyperfine time
+      # Pinned hyperfine .deb straight from GitHub releases: skips the slow,
+      # occasionally flaky `apt-get update`, and pins the JSON schema the
+      # comment renderer parses. GNU time still comes from apt (tiny, and
+      # `apt-get install` without `update` resolves from the baked index).
+      run: |
+        curl -fsSL --retry 3 -o /tmp/hyperfine.deb \
+          https://github.com/sharkdp/hyperfine/releases/download/v1.19.0/hyperfine_1.19.0_amd64.deb
+        sudo dpkg -i /tmp/hyperfine.deb
+        /usr/bin/time --version >/dev/null 2>&1 || sudo apt-get install -y time \
+          || { sudo apt-get update && sudo apt-get install -y time; }
     - name: Install bench tools (mac)
       if: inputs.platform == 'mac'
       shell: bash
