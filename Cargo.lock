@@ -11381,6 +11381,7 @@ dependencies = [
  "indicatif",
  "libc",
  "libdeflater",
+ "mimalloc",
  "mockito",
  "once_cell",
  "open",

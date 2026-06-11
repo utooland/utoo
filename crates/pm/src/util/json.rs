@@ -79,12 +79,6 @@ pub async fn load_package_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     }
 }
 
-pub async fn load_package_lock_json_from_path(
-    path: &Path,
-) -> Result<utoo_ruborist::lock::PackageLock> {
-    read_json_file(&path.join("package-lock.json")).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,7 +3,7 @@ use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use anyhow::{Context, Result};
-use futures;
+use futures::{self, StreamExt as _};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -151,6 +151,8 @@ impl PackageService {
             .collect();
 
         let mut packages = Vec::new();
+        // (index into `packages`, lock path, is_link) for deferred script reads.
+        let mut pending_script_reads: Vec<(usize, String, bool)> = Vec::new();
         for (path, lock_package) in &package_lock.packages {
             if path.is_empty() {
                 continue;
@@ -219,44 +221,69 @@ impl PackageService {
                 continue;
             }
 
-            // Read lifecycle scripts from package.json only if needed. A
-            // workspace link contributes bin linking only — leave its scripts
-            // empty so `create_execution_queues` never queues them (owned by
+            // Read lifecycle scripts from package.json only when they can end
+            // up in an execution queue: the queues only consume
+            // preinstall/install/postinstall under `ScriptPolicy::Run`, and the
+            // lock's `hasInstallScript` marker covers exactly those three hooks
+            // — the same marker the early filter above already trusts. So a
+            // bin-only package (no marker) and the whole `Ignore` policy skip
+            // the read; a link's scripts are decided from disk. A workspace
+            // link contributes bin linking only — its scripts stay empty so
+            // `create_execution_queues` never queues them (owned by
             // `process_workspace_install_hooks`).
-            let lifecycle_scripts =
-                if !is_workspace_link && (has_scripts || scripts == ScriptPolicy::Run) {
-                    match Self::read_lifecycle_scripts(&package_path).await {
-                        Ok(s) => s,
-                        // A `file:` link can resolve to a missing or degenerate
-                        // `package.json` (e.g. a conflict artifact keyed
-                        // `node_modules/` with an empty name). Treat that as "no
-                        // scripts" rather than failing the whole install; a real
-                        // dependency with an unreadable manifest still errors.
-                        Err(_) if is_link => LifecycleScripts::default(),
-                        Err(e) => {
-                            return Err(e).with_context(|| {
-                                format!("Failed to read scripts for package: {path}")
-                            });
-                        }
-                    }
-                } else {
-                    LifecycleScripts::default()
-                };
+            let needs_script_read =
+                scripts == ScriptPolicy::Run && !is_workspace_link && (has_scripts || is_link);
 
             // Check if this package is an optional dependency (based on edge type)
             let is_optional =
                 lock_package.optional == Some(true) || lock_package.dev_optional == Some(true);
 
+            if needs_script_read {
+                pending_script_reads.push((packages.len(), path.clone(), is_link));
+            }
+
             let package_info = PackageInfo {
                 path: package_path,
                 bin_files,
                 scripts: Default::default(),
-                lifecycle_scripts,
+                lifecycle_scripts: LifecycleScripts::default(),
                 name: package_name,
             };
 
             packages.push((package_info, is_optional));
         }
+
+        // The reads are independent point lookups; run them concurrently
+        // instead of one awaited syscall+parse at a time.
+        let read_results = futures::stream::iter(pending_script_reads.into_iter().map(
+            |(idx, path, is_link)| {
+                let package_path = packages[idx].0.path.clone();
+                async move {
+                    let result = Self::read_lifecycle_scripts(&package_path).await;
+                    (idx, path, is_link, result)
+                }
+            },
+        ))
+        .buffer_unordered(32)
+        .collect::<Vec<_>>()
+        .await;
+
+        for (idx, path, is_link, result) in read_results {
+            match result {
+                Ok(s) => packages[idx].0.lifecycle_scripts = s,
+                // A `file:` link can resolve to a missing or degenerate
+                // `package.json` (e.g. a conflict artifact keyed
+                // `node_modules/` with an empty name). Treat that as "no
+                // scripts" rather than failing the whole install; a real
+                // dependency with an unreadable manifest still errors.
+                Err(_) if is_link => {}
+                Err(e) => {
+                    return Err(e)
+                        .with_context(|| format!("Failed to read scripts for package: {path}"));
+                }
+            }
+        }
+
         Ok(packages)
     }
 

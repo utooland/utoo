@@ -390,6 +390,18 @@ impl SchedulerState {
             return;
         }
 
+        // Fast path: a registry-style tarball whose download stage already
+        // completed (on warm installs the prefetch pass proves the cache for
+        // every package) goes straight to the clone queue. This skips the
+        // seeded-slot lookup task — a tokio spawn + URL sha256 + a stat of an
+        // `_http_` slot that only ever exists for non-registry tarballs.
+        if is_registry_tarball_url(&spec.package.tarball_url)
+            && let Some(cache_path) = self.download_done.get(&spec.package.key()).cloned()
+        {
+            self.clone_queue.push_back(ReadyClone { spec, cache_path });
+            return;
+        }
+
         self.resolve_cache_for_clone(spec);
     }
 
@@ -499,7 +511,12 @@ impl SchedulerState {
         );
         for (job, target) in admitted {
             let clone_done_tx = self.clone_done_tx.clone();
-            rayon::spawn(move || {
+            // Cloning is hardlink/copy syscalls that block in the kernel, not
+            // CPU work — run it on tokio's blocking pool instead of rayon's
+            // ncpu-sized pool, where it would (a) cap effective parallelism at
+            // ncpu regardless of `clone_limit` and (b) steal workers from
+            // libdeflater extraction during cold installs.
+            tokio::task::spawn_blocking(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     clone_package_sync(&PackageClone {
                         name: &job.spec.package.name,
@@ -626,9 +643,13 @@ impl SchedulerState {
 }
 
 fn clone_concurrency_limit() -> usize {
+    // Clone jobs are kernel-blocked metadata syscalls (hardlink farms), not
+    // CPU work, and they run on tokio's blocking pool — wider than cores is
+    // what keeps a 4-vCPU CI runner's disk queue fed. One serial walk per
+    // package means a single huge package still holds one slot either way.
     std::thread::available_parallelism()
-        .map(|n| (n.get() * 2).clamp(4, 16))
-        .unwrap_or(8)
+        .map(|n| (n.get() * 4).clamp(8, 32))
+        .unwrap_or(16)
 }
 
 fn extract_concurrency_limit() -> usize {

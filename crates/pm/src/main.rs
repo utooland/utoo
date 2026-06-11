@@ -2,6 +2,10 @@ use std::process;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
 use cmd::execute::execute;
