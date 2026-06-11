@@ -10,7 +10,7 @@ use crate::fs;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::lock::{
     Package, UpdatePackageJsonOptions, extract_package_name, format_save_spec, group_by_depth,
-    is_pkg_lock_outdated, resolve_package_spec, save_package_lock, update_package_json,
+    load_package_lock_if_fresh, resolve_package_spec, save_package_lock, update_package_json,
 };
 use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
 use crate::helper::workspace::init_project_root;
@@ -18,7 +18,6 @@ use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
-use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
@@ -269,21 +268,19 @@ impl InstallService {
     ) -> Result<()> {
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
-        // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
-        // itself emits a `tracing::warn` with the specific mismatch reason.
-        let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
-            && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
+        // install from a lockfile we couldn't validate. The check parses the
+        // lockfile, so a fresh result is the loaded lock itself — no second
+        // multi-MB parse. `load_package_lock_if_fresh` emits a
+        // `tracing::warn` with the specific mismatch reason when outdated.
+        let fresh_lock = if fs::try_exists(&lock_path).await.unwrap_or(false) {
+            load_package_lock_if_fresh(root_path).await.unwrap_or(None)
+        } else {
+            None
+        };
         let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
-        let (package_lock, events_prefetched) = if use_fresh_lock {
-            let lock = match load_package_lock_json_from_path(root_path).await {
-                Ok(lock) => lock,
-                Err(e) => {
-                    scheduler_handle.shutdown().await;
-                    return Err(e);
-                }
-            };
+        let (package_lock, events_prefetched) = if let Some(lock) = fresh_lock {
             (lock, false)
         } else {
             start_progress_bar();

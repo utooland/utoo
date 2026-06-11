@@ -16,7 +16,7 @@ use super::workspace::find_workspace_path;
 use crate::fs;
 use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
-use crate::util::json::{load_package_lock_json_from_path, read_json_file};
+use crate::util::json::read_json_file;
 use crate::util::user_config::{
     get_catalogs, get_or_load_package_json, get_peer_deps, set_package_json,
 };
@@ -59,33 +59,35 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         return Err(anyhow!("package.json not found"));
     }
 
-    // Check if we need to regenerate package-lock.json
-    let needs_regenerate = fs::metadata(root_path.join("package-lock.json"))
+    // Reuse the lockfile when it exists and is up to date; the freshness
+    // check already parsed it, so a fresh result is the loaded lock itself.
+    let fresh_lock = if fs::metadata(root_path.join("package-lock.json"))
         .await
-        .is_err()
-        || is_pkg_lock_outdated(root_path).await?;
+        .is_ok()
+    {
+        load_package_lock_if_fresh(root_path).await?
+    } else {
+        None
+    };
 
-    if needs_regenerate {
-        tracing::debug!("Resolving dependencies");
-        let output = Context::build_deps(root_path.to_path_buf()).await?;
-
-        // Write to disk asynchronously in background
-        let path = root_path.to_path_buf();
-        let lock_clone = output.lock.clone();
-        tokio::spawn(async move {
-            if let Err(e) = save_package_lock(&path, &lock_clone).await {
-                tracing::warn!("Failed to save package-lock.json: {e}");
-            }
-        });
-
-        return Ok(output.lock);
+    if let Some(package_lock) = fresh_lock {
+        tracing::debug!("Loading package-lock.json from current project");
+        return Ok(package_lock);
     }
 
-    // Load existing package-lock.json only when it's valid and up-to-date
-    tracing::debug!("Loading package-lock.json from current project");
-    let package_lock: PackageLock = load_package_lock_json_from_path(root_path).await?;
+    tracing::debug!("Resolving dependencies");
+    let output = Context::build_deps(root_path.to_path_buf()).await?;
 
-    Ok(package_lock)
+    // Write to disk asynchronously in background
+    let path = root_path.to_path_buf();
+    let lock_clone = output.lock.clone();
+    tokio::spawn(async move {
+        if let Err(e) = save_package_lock(&path, &lock_clone).await {
+            tracing::warn!("Failed to save package-lock.json: {e}");
+        }
+    });
+
+    Ok(output.lock)
 }
 
 /// Batch update package.json for multiple package specifications to reduce file I/O operations
@@ -260,7 +262,11 @@ fn root_optional_with_runtime(path: &str, pkg: &PackageJson) -> Option<HashMap<S
     Some(merged)
 }
 
-pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
+/// Freshness-check package-lock.json and return the parsed [`PackageLock`]
+/// when it is up to date — `Ok(None)` means outdated. Multi-MB lockfiles cost
+/// a full serde parse, so callers that go on to install from a fresh lock
+/// should consume this instead of re-reading the file after a boolean check.
+pub async fn load_package_lock_if_fresh(root_path: &Path) -> Result<Option<PackageLock>> {
     // Root package.json is served from the in-process cache. The cache
     // stays consistent with disk across the full `ut install` lifetime
     // because `update_package_json` calls `set_package_json` write-through
@@ -311,7 +317,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             None => {
                 let name = if path.is_empty() { "root" } else { path };
                 tracing::warn!("package-lock.json is outdated, new workspace {name} not found");
-                return Ok(true);
+                return Ok(None);
             }
         };
 
@@ -319,7 +325,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
         if !deps_match(pkg.dependencies.as_ref(), lock.dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} dependencies changed");
-            return Ok(true);
+            return Ok(None);
         }
 
         // `Context::build_deps` folds synthetic `node-bin-*` runtime deps into
@@ -332,7 +338,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
         if !deps_match(expected_optional, lock.optional_dependencies.as_ref()) {
             tracing::warn!("package-lock.json is outdated, {name} optionalDependencies changed");
-            return Ok(true);
+            return Ok(None);
         }
 
         if !deps_match(
@@ -340,7 +346,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             lock.dev_dependencies.as_ref(),
         ) {
             tracing::warn!("package-lock.json is outdated, {name} devDependencies changed");
-            return Ok(true);
+            return Ok(None);
         }
 
         if peer_deps == PeerDeps::Include
@@ -350,7 +356,7 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             )
         {
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
-            return Ok(true);
+            return Ok(None);
         }
     }
 
@@ -369,10 +375,10 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
 
     if !engines_match {
         tracing::warn!("package-lock.json is outdated, engines changed");
-        return Ok(true);
+        return Ok(None);
     }
 
-    Ok(false)
+    Ok(Some(lock_file))
 }
 
 /// Save PackageLock to disk synchronously
@@ -515,7 +521,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            is_pkg_lock_outdated(temp_path).await.unwrap(),
+            load_package_lock_if_fresh(temp_path)
+                .await
+                .unwrap()
+                .is_none(),
             expected,
             "package.json:\n{pkg_json}"
         );
@@ -615,7 +624,12 @@ mod tests {
         });
         fs::write(temp_path.join("package.json"), pkg_json.to_string()).unwrap();
         fs::write(temp_path.join("package-lock.json"), pkg_lock.to_string()).unwrap();
-        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
+        assert!(
+            load_package_lock_if_fresh(temp_path)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -704,7 +718,12 @@ mod tests {
         fs::write(temp_path.join("package-lock.json"), pkg_lock.to_string()).unwrap();
 
         // Test that empty object and missing field are treated as equal
-        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
+        assert!(
+            load_package_lock_if_fresh(temp_path)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         // Test reverse case: package.json has no dependencies field, package-lock.json has empty dependencies
         let pkg_json_no_deps = json!({
@@ -735,7 +754,12 @@ mod tests {
         .unwrap();
 
         // Test that missing field and empty object are treated as equal
-        assert!(!is_pkg_lock_outdated(temp_path).await.unwrap());
+        assert!(
+            load_package_lock_if_fresh(temp_path)
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
