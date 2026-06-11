@@ -63,6 +63,40 @@ pub fn resolve_target_version(view: VersionsRef<'_>, spec: &str) -> Result<Strin
     })
 }
 
+/// [`resolve_target_version`] over a per-package pre-parsed, descending-sorted
+/// version list (see `FullManifest::sorted_parsed_versions`): identical
+/// dist-tag / latest-preference policy, but the semver fallback early-exits on
+/// the first (= maximum) match instead of parsing every version per spec.
+pub fn resolve_target_version_sorted(
+    view: VersionsRef<'_>,
+    sorted: &[deno_semver::Version],
+    spec: &str,
+) -> Result<String, ResolveError> {
+    let VersionsRef {
+        versions,
+        dist_tags,
+    } = view;
+
+    if versions.is_empty() {
+        return Err(ResolveError::NoVersionsAvailable);
+    }
+
+    if let Some(version) = dist_tags.get(spec) {
+        return Ok(version.to_string());
+    }
+
+    let version = dist_tags
+        .get("latest")
+        .filter(|latest| matches(spec, latest))
+        .map(|latest| latest.to_string())
+        .or_else(|| super::semver::max_satisfying_sorted_desc(sorted, spec).map(|v| v.to_string()));
+
+    version.ok_or_else(|| ResolveError::NoMatchingVersion {
+        spec: spec.to_string(),
+        available_count: versions.len(),
+    })
+}
+
 /// Error type for version resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveError {

@@ -109,6 +109,7 @@ impl ManifestProvider for UnifiedRegistry {
                             },
                             etag,
                             last_updated: super::current_timestamp_secs(),
+                            parsed_versions: Default::default(),
                         });
                         self.store.store_versions(&name, versions);
                         ManifestFullData::Full {

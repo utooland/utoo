@@ -139,6 +139,18 @@ pub fn max_satisfying<'a>(versions: impl Iterator<Item = &'a str>, range: &str) 
     }
 }
 
+/// [`max_satisfying`] over a pre-parsed, descending-sorted list: the first
+/// match is the maximum, so this early-exits instead of parsing and scanning
+/// every version per spec. Pair with the per-package memoized sort
+/// (`FullManifest::sorted_parsed_versions`).
+pub fn max_satisfying_sorted_desc<'a>(sorted: &'a [Version], range: &str) -> Option<&'a Version> {
+    let req = VersionReq::parse_from_npm(range).ok()?;
+    if range == "*" {
+        return sorted.first();
+    }
+    sorted.iter().find(|v| req.matches(v))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

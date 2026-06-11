@@ -205,6 +205,7 @@ mod tests {
                     },
                     etag: Some("etag".to_string()),
                     last_updated: 1,
+                    parsed_versions: Default::default(),
                 }),
             );
             store.store_version_manifest(

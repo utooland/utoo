@@ -202,6 +202,14 @@ pub struct DependencyGraph {
     overrides: Option<Overrides>,
     /// Fast lookup set for override names
     override_names: HashSet<String>,
+    /// Per-parent `name → child` index over physical edges, maintained by
+    /// [`add_physical_edge`](Self::add_physical_edge) (the graph is
+    /// append-only — no edge ever gets removed). Hoisting parks most packages
+    /// directly under root, so the parent-chain search would otherwise scan
+    /// every root child (string compare each) for every edge — tens of
+    /// millions of comparisons on large trees, all inside the single-threaded
+    /// resolver driver.
+    child_index: HashMap<NodeIndex, HashMap<String, NodeIndex>>,
 }
 
 impl DependencyGraph {
@@ -241,6 +249,7 @@ impl DependencyGraph {
             root_index,
             overrides,
             override_names,
+            child_index: HashMap::new(),
         }
     }
 
@@ -251,7 +260,28 @@ impl DependencyGraph {
 
     /// Add a physical parent-child edge.
     pub fn add_physical_edge(&mut self, parent: NodeIndex, child: NodeIndex) -> EdgeIndex {
+        // `insert` (last wins) mirrors petgraph's reverse-insertion edge
+        // iteration the linear scan used to see first; duplicate names under
+        // one parent don't occur in a valid node_modules tree anyway.
+        let name = self.graph[child].name.clone();
+        self.child_index
+            .entry(parent)
+            .or_default()
+            .insert(name, child);
         self.graph.add_edge(parent, child, GraphEdge::Physical)
+    }
+
+    /// O(1) lookup of a physical child by name (see `child_index`).
+    fn find_physical_child(&self, parent: NodeIndex, name: &str) -> Option<NodeIndex> {
+        self.child_index.get(&parent)?.get(name).copied()
+    }
+
+    /// Whether any workspace member is attached under root — `workspace:`
+    /// specs are only meaningful between members of a workspace project.
+    pub fn has_workspace_members(&self) -> bool {
+        self.child_index
+            .get(&self.root_index)
+            .is_some_and(|children| children.values().any(|&idx| self.graph[idx].is_workspace()))
     }
 
     /// Add a dependency edge (self-loop for tracking).
@@ -454,23 +484,21 @@ impl DependencyGraph {
         spec: &str,
         requester: NodeIndex,
     ) -> FindResult {
-        // Check all physical children of current node
-        for child_idx in self.get_physical_children(current) {
+        // Probe the per-parent name index — O(depth) total instead of a
+        // linear scan over every physical child per ancestor level.
+        if let Some(child_idx) = self.find_physical_child(current, name) {
             let child = &self.graph[child_idx];
-            if child.name == name {
-                if matches(spec, &child.version) {
-                    return FindResult::Reuse(child_idx);
-                } else {
-                    tracing::debug!(
-                        "found conflict deps {}@{} got {}, conflict at {:?}",
-                        name,
-                        spec,
-                        child.version,
-                        child_idx
-                    );
-                    return FindResult::Conflict(requester);
-                }
+            if matches(spec, &child.version) {
+                return FindResult::Reuse(child_idx);
             }
+            tracing::debug!(
+                "found conflict deps {}@{} got {}, conflict at {:?}",
+                name,
+                spec,
+                child.version,
+                child_idx
+            );
+            return FindResult::Conflict(requester);
         }
 
         // Recurse to parent

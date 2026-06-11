@@ -561,14 +561,26 @@ pub async fn process_dependency<R: ManifestProvider>(
                     protocol: Protocol::Workspace,
                     ..
                 } => {
-                    // workspace: deps are resolved during graph initialisation.
-                    // If we reach here the workspace node wasn't found — skip
-                    // silently rather than aborting the whole resolution.
-                    tracing::debug!(
-                        "Skipping unresolved workspace dependency {}@{}",
-                        edge_info.name,
-                        edge_info.spec
-                    );
+                    // workspace: deps are resolved during graph initialisation
+                    // and are only meaningful between members of a workspace
+                    // project. Reaching here means the target member wasn't
+                    // found — for a project that declares no workspaces at
+                    // all that's almost certainly a misconfigured root, so
+                    // say it loudly; otherwise skip quietly (e.g. a stray
+                    // workspace: spec deep in a published manifest).
+                    if graph.has_workspace_members() {
+                        tracing::debug!(
+                            "Skipping unresolved workspace dependency {}@{}",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                    } else {
+                        tracing::warn!(
+                            "Ignoring workspace dependency {}@{} — this project declares no workspaces",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                    }
                     return Ok(ProcessResult::Skipped);
                 }
                 PackageSpec::Local {

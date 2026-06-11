@@ -95,6 +95,15 @@ pub struct FullManifest {
     #[serde(skip)]
     pub version_blobs: OnceLock<HashMap<String, Box<str>>>,
 
+    /// Parsed [`versions`](Self::versions), sorted descending, lazily built on
+    /// the first client-side semver match that the `latest` dist-tag doesn't
+    /// short-circuit. Every additional distinct spec for the package then walks
+    /// the sorted list top-down and early-exits, instead of re-parsing the full
+    /// version list per spec (react-scale packages: ~2k parses per spec, on the
+    /// single-threaded resolver driver).
+    #[serde(skip)]
+    pub parsed_versions: OnceLock<Vec<deno_semver::Version>>,
+
     pub time: HashMap<String, String>,
 
     #[serde(deserialize_with = "skip_on_error")]
@@ -171,20 +180,45 @@ impl FullManifest {
 
     /// One-shot extraction for the single speculative extract performed while a
     /// full manifest is first parsed. That call resolves exactly one version and
-    /// would never reuse the memoized split, so it parses the document directly
-    /// rather than paying to build (and retain) the per-version index.
+    /// would never reuse the memoized split, so it must not pay to build (and
+    /// retain) the per-version index — but it also must not pay a full-document
+    /// parse: a shallow borrowed `RawValue` pass brace-matches past every other
+    /// version without copying the body or materializing their objects (the
+    /// previous `simd_json::to_borrowed_value` route cloned the whole multi-MB
+    /// payload and parsed every version's subtree just to read one).
     pub fn get_core_version_oneshot(&self, version: &str) -> Option<CoreVersionManifest> {
-        use simd_json::prelude::ValueObjectAccess;
-        let mut buf = self.raw.to_vec();
-        let parsed = simd_json::to_borrowed_value(&mut buf).ok()?;
-        let version_obj = parsed.get("versions")?.get(version)?;
-        CoreVersionManifest::deserialize(version_obj).ok()
+        #[derive(Deserialize)]
+        struct VersionsOnly<'a> {
+            #[serde(borrow, default)]
+            versions: HashMap<&'a str, &'a serde_json::value::RawValue>,
+        }
+        let parsed: VersionsOnly = serde_json::from_slice(&self.raw).ok()?;
+        let blob = parsed.versions.get(version)?;
+        serde_json::from_str(blob.get()).ok()
     }
 
     /// Parse a single version on demand into full VersionManifest (cold path, e.g. `ut view`).
     pub fn get_full_version(&self, version: &str) -> Option<VersionManifest> {
         self.extract_version(version)
     }
+
+    /// Lazily parsed + descending-sorted version list (see
+    /// [`parsed_versions`](Self::parsed_versions)).
+    pub fn sorted_parsed_versions(&self) -> &[deno_semver::Version] {
+        self.parsed_versions
+            .get_or_init(|| sort_parsed_versions(&self.versions))
+    }
+}
+
+/// Parse a version-string list and sort descending — shared by the lazy
+/// per-package caches on [`FullManifest`] and `service::cache::VersionsInfo`.
+pub(crate) fn sort_parsed_versions(versions: &[String]) -> Vec<deno_semver::Version> {
+    let mut parsed: Vec<deno_semver::Version> = versions
+        .iter()
+        .filter_map(|v| deno_semver::Version::parse_from_npm(v).ok())
+        .collect();
+    parsed.sort_unstable_by(|a, b| b.cmp(a));
+    parsed
 }
 
 /// Extract a single version from `FullManifest` on rayon's CPU pool
