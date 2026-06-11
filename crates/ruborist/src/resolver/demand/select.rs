@@ -8,15 +8,15 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest, VersionsRef};
 use crate::model::node::EdgeType;
 use crate::resolver::edges::DependencyEdgeInfo;
 use crate::resolver::registry::ResolveError;
-use crate::resolver::version::resolve_target_version_sorted;
+use crate::resolver::version::resolve_target_version_lazy;
 
 use super::state::{ManifestState, PackageVersions};
 
-fn resolve_version_from_versions<RE>(
+fn resolve_version_from_versions<'a, RE>(
     edge: &DependencyEdgeInfo,
     package_name: &str,
     versions: VersionsRef<'_>,
-    sorted: &[deno_semver::Version],
+    sorted: impl FnOnce() -> &'a [deno_semver::Version],
     real_spec: &str,
 ) -> Result<Option<String>, ResolveError<RE>> {
     if versions.versions.is_empty() {
@@ -26,7 +26,7 @@ fn resolve_version_from_versions<RE>(
         return Err(ResolveError::NoVersions(package_name.to_string()));
     }
 
-    let version = match resolve_target_version_sorted(versions, sorted, real_spec) {
+    let version = match resolve_target_version_lazy(versions, sorted, real_spec) {
         Ok(version) => version,
         Err(_) if edge.edge_type == EdgeType::Optional => return Ok(None),
         Err(e) => {
@@ -159,7 +159,7 @@ fn select_full_manifest<RE>(
                 edge,
                 name,
                 (&*full).into(),
-                full.sorted_parsed_versions(),
+                || full.sorted_parsed_versions(),
                 spec,
             )?
             else {
@@ -179,7 +179,7 @@ fn select_full_manifest<RE>(
                 edge,
                 name,
                 (&*list).into(),
-                list.sorted_parsed_versions(),
+                || list.sorted_parsed_versions(),
                 spec,
             )?
             else {

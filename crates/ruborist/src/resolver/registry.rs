@@ -134,8 +134,8 @@ pub async fn resolve_package<P: ManifestProvider>(
     // Non-semver: fetch the full manifest, resolve the version client-side.
     let done = provider
         .execute_manifest_job(ManifestJob::Full {
-            name: fetch_name.clone(),
-            spec: Some(fetch_spec.clone()),
+            name: fetch_name.clone().into_owned(),
+            spec: Some(fetch_spec.clone().into_owned()),
         })
         .await
         .map_err(ResolveError::Registry)?;
@@ -148,7 +148,7 @@ pub async fn resolve_package<P: ManifestProvider>(
             ManifestFullData::Full { manifest, .. } => {
                 let resolved = resolve_from_manifest::<P::Error>(&manifest, &fetch_spec)?;
                 Ok(ResolvedPackage {
-                    name: fetch_name,
+                    name: fetch_name.into_owned(),
                     ..resolved
                 })
             }

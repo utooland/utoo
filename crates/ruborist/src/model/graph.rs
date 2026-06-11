@@ -261,8 +261,12 @@ impl DependencyGraph {
     /// Add a physical parent-child edge.
     pub fn add_physical_edge(&mut self, parent: NodeIndex, child: NodeIndex) -> EdgeIndex {
         // `insert` (last wins) mirrors petgraph's reverse-insertion edge
-        // iteration the linear scan used to see first; duplicate names under
-        // one parent don't occur in a valid node_modules tree anyway.
+        // iteration the linear scan used to see first. Duplicate names under
+        // one parent DO occur: `add_workspace_member` attaches a workspace
+        // node and its link node under root with the same name — last-wins
+        // keeps the link node, exactly what the old scan found first.
+        // Workspace-member lookups therefore bypass this index (see
+        // `find_workspace_member`).
         let name = self.graph[child].name.clone();
         self.child_index
             .entry(parent)
@@ -279,9 +283,30 @@ impl DependencyGraph {
     /// Whether any workspace member is attached under root — `workspace:`
     /// specs are only meaningful between members of a workspace project.
     pub fn has_workspace_members(&self) -> bool {
-        self.child_index
-            .get(&self.root_index)
-            .is_some_and(|children| children.values().any(|&idx| self.graph[idx].is_workspace()))
+        self.find_workspace_member_by(|_| true).is_some()
+    }
+
+    /// Look up a workspace member by package name (root children only —
+    /// workspace nodes always attach directly under root).
+    ///
+    /// Walks the real physical edges rather than `child_index`:
+    /// `add_workspace_member` attaches TWO same-name children under root (the
+    /// workspace node and its link node), and the name index keeps only the
+    /// most recent of the pair. Cold path — only unresolved `workspace:`
+    /// edges ever get here.
+    pub fn find_workspace_member(&self, name: &str) -> Option<NodeIndex> {
+        self.find_workspace_member_by(|node| node.name == name)
+    }
+
+    fn find_workspace_member_by(&self, pred: impl Fn(&PackageNode) -> bool) -> Option<NodeIndex> {
+        self.graph
+            .edges_directed(self.root_index, Outgoing)
+            .filter(|edge| matches!(edge.weight(), GraphEdge::Physical))
+            .map(|edge| edge.target())
+            .find(|&idx| {
+                let node = &self.graph[idx];
+                node.is_workspace() && pred(node)
+            })
     }
 
     /// Add a dependency edge (self-loop for tracking).

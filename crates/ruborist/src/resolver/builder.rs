@@ -561,27 +561,64 @@ pub async fn process_dependency<R: ManifestProvider>(
                     protocol: Protocol::Workspace,
                     ..
                 } => {
-                    // workspace: deps are resolved during graph initialisation
-                    // and are only meaningful between members of a workspace
-                    // project. Reaching here means the target member wasn't
-                    // found — for a project that declares no workspaces at
-                    // all that's almost certainly a misconfigured root, so
-                    // say it loudly; otherwise skip quietly (e.g. a stray
-                    // workspace: spec deep in a published manifest).
-                    if graph.has_workspace_members() {
+                    // Workspace members are linked during graph initialisation
+                    // via a synthetic, pre-resolved edge — the importer's
+                    // original `workspace:` edge still flows through the BFS
+                    // and terminates here. When the member exists this edge is
+                    // already physically satisfied: nothing to do.
+                    if graph.find_workspace_member(&edge_info.name).is_some() {
                         tracing::debug!(
-                            "Skipping unresolved workspace dependency {}@{}",
+                            "workspace dependency {}@{} already linked at graph init",
                             edge_info.name,
                             edge_info.spec
                         );
-                    } else {
-                        tracing::warn!(
-                            "Ignoring workspace dependency {}@{} — this project declares no workspaces",
-                            edge_info.name,
-                            edge_info.spec
-                        );
+                        return Ok(ProcessResult::Skipped);
                     }
-                    return Ok(ProcessResult::Skipped);
+                    // No such member: a misspelled name in an importer, or a
+                    // workspace: spec that leaked into a published manifest
+                    // (transitive deps must never declare it). Optional edges
+                    // skip with a warning; anything load-bearing fails with
+                    // the dependency chain attached (via `chain_err`) so the
+                    // offending package is identifiable.
+                    if edge_info.edge_type == EdgeType::Optional {
+                        tracing::warn!(
+                            "Skipping optional workspace dependency {}@{} — no matching workspace member",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                        return Ok(ProcessResult::Skipped);
+                    }
+                    return Err(ResolveError::Unsupported {
+                        spec: edge_info.spec.clone(),
+                        reason: if graph.has_workspace_members() {
+                            "workspace: dependency does not match any workspace member"
+                        } else {
+                            "workspace: dependency in a project that declares no workspaces"
+                        },
+                    });
+                }
+                PackageSpec::Local {
+                    protocol: Protocol::Catalog,
+                    ..
+                } => {
+                    // catalog: specs are resolved at edge-creation time for
+                    // importer (root/workspace) edges; reaching here means the
+                    // catalog entry was missing — or a catalog: spec shipped
+                    // inside a published manifest, which is a malformed
+                    // declaration. Same policy as workspace: above.
+                    if edge_info.edge_type == EdgeType::Optional {
+                        tracing::warn!(
+                            "Skipping optional catalog dependency {}@{} — unresolved catalog entry",
+                            edge_info.name,
+                            edge_info.spec
+                        );
+                        return Ok(ProcessResult::Skipped);
+                    }
+                    return Err(ResolveError::Unsupported {
+                        spec: edge_info.spec.clone(),
+                        reason: "catalog: spec was not resolved — published manifests must not \
+                                 carry catalog:, and importer catalogs must define the entry",
+                    });
                 }
                 PackageSpec::Local {
                     protocol: Protocol::File,
@@ -1036,6 +1073,110 @@ mod tests {
             dependencies: Some(dependencies),
             ..Default::default()
         }
+    }
+
+    /// A load-bearing `workspace:` spec that resolves to no workspace member
+    /// (here: a project with no workspaces at all) must fail resolution, not
+    /// silently vanish.
+    #[tokio::test]
+    async fn test_unresolved_workspace_prod_dep_errors() {
+        let registry = MockRegistryClient::new();
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([(
+                "missing-member".to_string(),
+                "workspace:*".to_string(),
+            )])),
+            ..PackageJson::new("test-project", "1.0.0")
+        };
+
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
+
+        let err = build_deps(&mut graph, &registry, PeerDeps::Include)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("workspace"),
+            "expected workspace error, got: {err}"
+        );
+    }
+
+    /// A `workspace:` spec inside a transitive (registry) manifest's
+    /// optionalDependencies is a malformed declaration — skip it with a
+    /// warning instead of failing the install.
+    #[tokio::test]
+    async fn test_transitive_optional_workspace_dep_skips() {
+        let mut registry = MockRegistryClient::new();
+        registry.add_package("dirty", "1.0.0", {
+            CoreVersionManifest {
+                optional_dependencies: Some(HashMap::from([(
+                    "ws-leak".to_string(),
+                    "workspace:*".to_string(),
+                )])),
+                ..create_version_manifest("dirty", "1.0.0")
+            }
+        });
+
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([("dirty".to_string(), "^1.0.0".to_string())])),
+            ..PackageJson::new("test-project", "1.0.0")
+        };
+
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
+
+        build_deps(&mut graph, &registry, PeerDeps::Include)
+            .await
+            .expect("optional workspace: leak must not fail the build");
+        // root + dirty; the leaked workspace dep is skipped, not materialized.
+        assert_eq!(graph.graph.node_count(), 2);
+    }
+
+    /// A `catalog:` spec inside a transitive (registry) manifest's regular
+    /// dependencies is a malformed declaration — fail with a message naming
+    /// catalog rather than the generic local-protocol error.
+    #[tokio::test]
+    async fn test_transitive_catalog_prod_dep_errors() {
+        let mut registry = MockRegistryClient::new();
+        registry.add_package(
+            "dirty",
+            "1.0.0",
+            create_version_manifest_with_deps("dirty", "1.0.0", vec![("react", "catalog:")]),
+        );
+
+        let root_pkg = PackageJson {
+            dependencies: Some(HashMap::from([("dirty".to_string(), "^1.0.0".to_string())])),
+            ..PackageJson::new("test-project", "1.0.0")
+        };
+
+        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg.clone());
+        let root_index = graph.root_index;
+        add_edges_from(
+            &mut graph,
+            root_index,
+            &root_pkg,
+            &EdgeContext::new(PeerDeps::Include, DevDeps::Include),
+        );
+
+        let err = build_deps(&mut graph, &registry, PeerDeps::Include)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("catalog"),
+            "expected catalog error, got: {err}"
+        );
     }
 
     #[tokio::test]
