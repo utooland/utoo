@@ -7,6 +7,9 @@ set -eo pipefail
 PROJECT=${PROJECT:-ant-design}
 REGISTRY=${REGISTRY:-https://registry.npmjs.org}
 RUNS=${BENCH_RUNS:-3}
+# Cheap phases (p1 resolve / p4 warm link) finish in seconds; more runs there
+# buys statistical power exactly where it's affordable.
+RUNS_CHEAP=${BENCH_RUNS_CHEAP:-$RUNS}
 IFS=',' read -ra PACKAGE_MANAGERS <<< "${PM_LIST:-utoo,bun}"
 
 BENCH_DIR=${BENCH_DIR:-/tmp/pm-bench}
@@ -53,6 +56,20 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 banner() { echo -e "${YELLOW}=== $* ===${NC}"; }
+
+# Retry a command a few times with a short pause — registry/network hiccups
+# during the (untimed) seed installs were the dominant CI flake mode, and a
+# single blip used to abort the whole bench via `set -e`.
+retry() {
+  local attempts=$1 i
+  shift
+  for ((i = 1; i <= attempts; i++)); do
+    "$@" && return 0
+    echo -e "  ${RED}attempt $i/$attempts failed:${NC} $*" >&2
+    [ "$i" -lt "$attempts" ] && sleep 5
+  done
+  return 1
+}
 
 # --- metrics wrapper ---
 # Keeps the hot path fast: only /usr/bin/time + counter snapshots inside the
@@ -148,7 +165,7 @@ capture_footprint() {
 banner "Preparing $PROJECT"
 cd "$BENCH_DIR"
 if [ ! -d "$PROJECT" ]; then
-  git clone --depth=1 "https://github.com/ant-design/${PROJECT}.git" "$PROJECT"
+  retry 3 git clone --depth=1 "https://github.com/ant-design/${PROJECT}.git" "$PROJECT"
 fi
 PROJECT_DIR="$BENCH_DIR/$PROJECT"
 
@@ -258,34 +275,43 @@ EOF
 }
 
 # Seed PM-specific state before a phase runs (lockfile + cache where needed).
-# This runs ONCE before hyperfine starts, not per-iteration.
+# This runs ONCE before hyperfine starts, not per-iteration. Returns non-zero
+# on terminal seed failure so run_phase can skip just that (phase, pm) cell
+# instead of aborting the whole bench.
+#
+# Lockfile provenance: all utoo variants install from one package-lock.json.
+# Generate it with the *baseline* binary (utoo-next) when wired up, so a PR
+# that changes resolution/lockfile shape can never perturb the input the
+# baseline is measured against — p3/p4 compare install speed on equal input.
+seed_lockfile_cmd() {
+  local pm=$1
+  if [ -n "${UTOO_NEXT_BIN:-}" ]; then
+    echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE"
+    return
+  fi
+  case "$pm" in
+    utoo)      echo "utoo deps --registry=$REGISTRY --cache-dir=$UTOO_CACHE" ;;
+    utoo-npm)  echo "$UTOO_NPM_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NPM_CACHE" ;;
+    utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
+  esac
+}
+
 seed_for_phase() {
   local phase=$1 pm=$2
+  local seed_log="$RESULTS_DIR/seed_${phase}_${pm}.log"
   cd "$PROJECT_DIR"
   case "$phase:$pm" in
-    p3_*:utoo|p4_*:utoo)
+    p3_*:utoo|p4_*:utoo|p3_*:utoo-npm|p4_*:utoo-npm|p3_*:utoo-next|p4_*:utoo-next)
       if [ ! -f package-lock.json ]; then
-        echo -e "  ${CYAN}seed: running \`utoo deps\` to generate package-lock.json${NC}"
-        utoo deps --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
-      fi
-      ;;
-    p3_*:utoo-npm|p4_*:utoo-npm)
-      if [ ! -f package-lock.json ]; then
-        echo -e "  ${CYAN}seed: running \`utoo-npm deps\` to generate package-lock.json${NC}"
-        "$UTOO_NPM_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
-      fi
-      ;;
-    p3_*:utoo-next|p4_*:utoo-next)
-      if [ ! -f package-lock.json ]; then
-        echo -e "  ${CYAN}seed: running \`utoo-next deps\` to generate package-lock.json${NC}"
-        "$UTOO_NEXT_BIN" deps --registry="$REGISTRY" --cache-dir="$UTOO_NEXT_CACHE" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+        echo -e "  ${CYAN}seed: generating package-lock.json (baseline-pinned when available)${NC}"
+        retry 3 bash -c "$(seed_lockfile_cmd "$pm") >> '$seed_log' 2>&1" || return 1
       fi
       ;;
     p3_*:bun|p4_*:bun)
       if [ ! -f bun.lock ]; then
         echo -e "  ${CYAN}seed: running \`bun install --lockfile-only\` to generate bun.lock${NC}"
         rm -f package-lock.json
-        bun install --lockfile-only --registry="$REGISTRY" > "$RESULTS_DIR/seed_${phase}_${pm}.log" 2>&1
+        retry 3 bash -c "bun install --lockfile-only --registry='$REGISTRY' >> '$seed_log' 2>&1" || return 1
       fi
       ;;
   esac
@@ -301,12 +327,7 @@ seed_for_phase() {
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
       echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
       rm -rf node_modules
-      case "$pm" in
-        utoo)      utoo install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        utoo-npm)  "$UTOO_NPM_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NPM_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        utoo-next) "$UTOO_NEXT_BIN" install --ignore-scripts --registry="$REGISTRY" --cache-dir="$UTOO_NEXT_CACHE" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-        bun)       bun  install --ignore-scripts --registry="$REGISTRY" > "$RESULTS_DIR/seed_warmup_${pm}.log" 2>&1 ;;
-      esac
+      retry 3 bash -c "$(install_cmd "$pm") >> '$RESULTS_DIR/seed_warmup_${pm}.log' 2>&1" || return 1
       rm -rf node_modules
     fi
   fi
@@ -337,7 +358,17 @@ run_phase() {
   local prep_script="$RESULTS_DIR/prep_${phase}_${pm}.sh"
   local cmd_script="$RESULTS_DIR/cmd_${phase}_${pm}.sh"
 
-  seed_for_phase "$phase" "$pm"
+  # Cheap phases get more runs (see RUNS_CHEAP).
+  local runs=$RUNS
+  case "$phase" in
+    p1_* | p4_*) runs=$RUNS_CHEAP ;;
+  esac
+
+  if ! seed_for_phase "$phase" "$pm"; then
+    echo -e "  ${RED}$pm $phase seed failed after retries — skipping this cell${NC}"
+    printf '{"failed":"seed"}\n' > "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_failed.json"
+    return 0
+  fi
   write_prepare "$prep_script" "$phase" "$pm"
 
   # Reset metrics file; wrap the bench command so /usr/bin/time can measure it.
@@ -498,5 +529,16 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     }
   }
 "
+
+# Export raw per-cell results (hyperfine JSON, metrics, footprint, failure
+# markers) for the CI comment renderer — keyed by registry host so multi-leg
+# runs (npmjs + npmmirror) don't clobber each other across state wipes.
+if [ -n "${BENCH_OUT_DIR:-}" ]; then
+  REG_LABEL=$(echo "$REGISTRY" | sed -E 's|^https?://||; s|/.*$||')
+  EXPORT_DIR="$BENCH_OUT_DIR/results-$REG_LABEL"
+  mkdir -p "$EXPORT_DIR"
+  cp "$RESULTS_DIR/$PROJECT"_* "$EXPORT_DIR/" 2>/dev/null || true
+  echo -e "${GREEN}Exported raw results to $EXPORT_DIR${NC}"
+fi
 
 echo -e "${GREEN}Done. Raw results in $RESULTS_DIR${NC}"

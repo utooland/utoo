@@ -526,7 +526,11 @@ jobs:
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: linux
-      - uses: ./.github/actions/install-utoo-npm-baseline
+      # utoo-npm (last published release) only changes on releases — bench it
+      # on manual dispatch only; label-triggered PR runs compare against
+      # utoo-next, which is the signal that can actually change per PR.
+      - if: github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/install-utoo-npm-baseline
       # The utoo-next binary is built upstream by build-linux's
       # "Build next branch utoo (bench baseline)" step. Just download.
       - name: Download utoo-next binary
@@ -544,7 +548,7 @@ jobs:
         run: |
           hyperfine --version
           utoo --version
-          "$UTOO_NPM_BIN" --version
+          if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           "$UTOO_NEXT_BIN" --version
           bun --version
       - name: Define cache wipe function
@@ -565,7 +569,11 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
-          PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
+          # p1/p4 cells finish in seconds — extra runs there sharpen the
+          # significance gate of the PR comment at negligible cost.
+          BENCH_RUNS_CHEAP: '5'
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
+          PM_LIST: ${{ github.event_name == 'workflow_dispatch' && 'utoo,utoo-next,utoo-npm,bun' || 'utoo,utoo-next,bun' }}
         run: |
           chmod +x bench/pm-bench-phases.sh
           bash bench/pm-bench-phases.sh 2>&1 | tee /tmp/pm-bench-output/bench-phases-npmjs.log
@@ -585,6 +593,8 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS_CHEAP: '5'
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: 'utoo,utoo-next,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
@@ -601,6 +611,7 @@ jobs:
         with:
           platform: linux
           os: ubuntu-latest
+          project: ${{ github.event.inputs.project || 'ant-design' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   bench-phases-mac:
@@ -654,6 +665,8 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmjs.org'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS_CHEAP: '5'
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           chmod +x bench/pm-bench-phases.sh
@@ -670,6 +683,8 @@ jobs:
           PROJECT: ${{ github.event.inputs.project || 'ant-design' }}
           REGISTRY: 'https://registry.npmmirror.com'
           BENCH_RUNS: ${{ github.event.inputs.bench_runs || '3' }}
+          BENCH_RUNS_CHEAP: '5'
+          BENCH_OUT_DIR: '/tmp/pm-bench-output'
           PM_LIST: 'utoo,utoo-npm,bun'
         run: |
           mkdir -p /tmp/pm-bench-output
@@ -686,6 +701,7 @@ jobs:
         with:
           platform: mac
           os: macos-latest
+          project: ${{ github.event.inputs.project || 'ant-design' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
