@@ -13,20 +13,13 @@
 //! construction.
 
 use std::collections::HashMap;
-#[cfg(feature = "http-tarball")]
-use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
 
-#[cfg(feature = "http-tarball")]
-use anyhow::Context as _;
-
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::CoreVersionManifest;
-#[cfg(feature = "http-tarball")]
-use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
@@ -87,9 +80,7 @@ async fn resolve_http_dep(
 #[cfg(feature = "native-git")]
 use crate::resolver::git::GitCloneCache;
 #[cfg(feature = "http-tarball")]
-use crate::resolver::http::{HttpFetchCache, file_cache_slot};
-#[cfg(feature = "http-tarball")]
-use crate::resolver::tar::commit_tarball_bytes;
+use crate::resolver::http::HttpFetchCache;
 
 #[cfg(not(feature = "native-git"))]
 type GitCloneCache = crate::resolver::common::DedupCache<()>;
@@ -100,9 +91,17 @@ type HttpFetchCache = crate::resolver::common::DedupCache<()>;
 pub use super::edges::{
     DependencyEdgeInfo, DependencySource, EdgeContext, add_edges_from, collect_unresolved_edges,
 };
-// Node-type propagation lives in its own pass; re-exported here for the
-// callers that historically reached it through builder.
+// Node-type propagation and graph placement live in their own passes;
+// re-exported here for the callers that historically reached them through
+// builder.
+#[cfg(feature = "http-tarball")]
+use super::file::process_file_dep;
 pub use super::node_types::{compute_node_types, update_node_type_from_edge};
+pub use super::placement::process_dependency_with_resolved;
+pub(crate) use super::placement::{
+    chain_err, handle_resolved_registry_manifest, place_new_node, reuse_existing_node,
+    try_reuse_dependency,
+};
 pub use crate::model::node::{DevDeps, PeerDeps};
 
 /// Default number of concurrent manifest fetches for the demand resolver.
@@ -281,95 +280,6 @@ pub enum ProcessResult {
     Created(NodeIndex),
     /// Skipped (optional dependency that failed to resolve)
     Skipped,
-}
-
-/// Handle a `file:` dep: dir → Link node inline (returns
-/// `ControlFlow::Break`); tarball → stream bytes through the shared
-/// `commit_tarball_bytes` and hand the `ResolvedPackage` back to the
-/// normal BFS flow via `ControlFlow::Continue`.
-#[cfg(feature = "http-tarball")]
-async fn process_file_dep<E>(
-    graph: &mut DependencyGraph,
-    node_index: NodeIndex,
-    conflict_parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    path_spec: &str,
-    cache_dir: Option<&Path>,
-) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
-    let file_err = |source: anyhow::Error| ResolveError::File {
-        spec: edge.spec.clone(),
-        source,
-    };
-
-    // Base dir is the on-disk source for root/workspace/link nodes, or
-    // the parent of the `file:<abs>` tarball URL stamped on a transitive
-    // file-tarball dep's manifest. Registry nodes have no valid base.
-    let node = graph.get_node(node_index);
-    let base = node
-        .filter(|n| n.is_root() || n.is_workspace() || n.is_link())
-        .map(|n| n.path.clone())
-        .or_else(|| {
-            let NodeManifest::Registry(m) = &node?.manifest else {
-                return None;
-            };
-            let url = m.dist.tarball.as_deref()?.strip_prefix("file:")?;
-            std::path::Path::new(url).parent().map(Path::to_path_buf)
-        })
-        .ok_or_else(|| ResolveError::Unsupported {
-            spec: edge.spec.clone(),
-            reason: "transitive file: deps inside a published registry package are not supported",
-        })?;
-    let abs = base.join(path_spec);
-
-    let meta = match std::fs::metadata(&abs) {
-        Ok(m) => m,
-        Err(_) if edge.edge_type == EdgeType::Optional => {
-            return Ok(ControlFlow::Break(ProcessResult::Skipped));
-        }
-        Err(e) => {
-            return Err(file_err(
-                anyhow::Error::new(e).context(format!("file: target {}", abs.display())),
-            ));
-        }
-    };
-
-    if meta.is_dir() {
-        // Symlink install — same graph shape as a workspace link. We
-        // intentionally do not walk the linked package's transitive deps
-        // (npm-link semantics: the linked dir owns its own node_modules).
-        let pkg = crate::model::util::read_package_json(&abs)
-            .await
-            .map_err(file_err)?;
-        let idx = graph.add_node(PackageNode::link_from_package_json(abs, pkg));
-        graph.add_physical_edge(conflict_parent, idx);
-        graph.mark_dependency_resolved(edge.edge_id, idx);
-        return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
-    }
-
-    let cache_dir = cache_dir
-        .ok_or_else(|| file_err(anyhow::anyhow!("cache_dir required for file: tarball")))?
-        .to_path_buf();
-    let slot = file_cache_slot(&abs);
-    let pinned = format!("file:{}", abs.display());
-    let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let bytes = std::fs::read(&abs)
-            .with_context(|| format!("failed to read tarball {}", abs.display()))?;
-        commit_tarball_bytes(&cache_dir, &bytes, pinned, &slot)
-    })
-    .await
-    {
-        Ok(Ok(m)) => m,
-        Ok(Err(_)) | Err(_) if edge.edge_type == EdgeType::Optional => {
-            return Ok(ControlFlow::Break(ProcessResult::Skipped));
-        }
-        Ok(Err(source)) => return Err(file_err(source)),
-        Err(join) => return Err(file_err(join.into())),
-    };
-    Ok(ControlFlow::Continue(ResolvedPackage {
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-        manifest: Arc::new(manifest),
-    }))
 }
 
 /// Process a single dependency edge.
@@ -869,110 +779,6 @@ fn graph_to_package_lock(
 ) -> PackageLock {
     let (packages, _total) = graph.serialize_to_packages(root_path);
     PackageLock::new(&pkg.name, &pkg.version, packages)
-}
-
-// ---- demand-resolver graph building (moved from demand::driver) ----
-
-/// Resolve `edge` onto an already-present compatible node by marking the edge
-/// resolved. Shared by the pre-fetch reuse probe ([`try_reuse_dependency`]) and
-/// the post-resolution placement ([`process_dependency_with_resolved`]), whose
-/// `FindResult::Reuse` arms are otherwise identical. Node types are assigned in
-/// a single pass after the tree is built (see [`compute_node_types`]).
-fn reuse_existing_node(
-    graph: &mut DependencyGraph,
-    edge: &DependencyEdgeInfo,
-    existing_index: NodeIndex,
-) -> ProcessResult {
-    graph.mark_dependency_resolved(edge.edge_id, existing_index);
-    ProcessResult::Reused(existing_index)
-}
-
-pub(crate) fn try_reuse_dependency(
-    graph: &mut DependencyGraph,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-) -> Option<ProcessResult> {
-    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
-        FindResult::Reuse(existing_index) => Some(reuse_existing_node(graph, edge, existing_index)),
-        FindResult::Conflict(_) | FindResult::New(_) => None,
-    }
-}
-
-pub fn process_dependency_with_resolved(
-    graph: &mut DependencyGraph,
-    node_index: NodeIndex,
-    edge_info: &DependencyEdgeInfo,
-    resolved: &ResolvedPackage,
-    config: &BuildDepsConfig,
-) -> ProcessResult {
-    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
-        FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
-        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
-            place_new_node(graph, conflict_parent, edge_info, resolved, config)
-        }
-    }
-}
-
-/// Attach a freshly resolved package under `conflict_parent`: create the
-/// node, link it physically, resolve the originating edge, and queue its own
-/// dependency edges. The single placement tail shared by the spec router
-/// ([`process_dependency`]) and the demand path
-/// ([`process_dependency_with_resolved`]).
-fn place_new_node(
-    graph: &mut DependencyGraph,
-    conflict_parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    resolved: &ResolvedPackage,
-    config: &BuildDepsConfig,
-) -> ProcessResult {
-    let new_node = create_package_node(&edge.name, resolved, conflict_parent, graph);
-    let new_index = graph.add_node(new_node);
-    graph.add_physical_edge(conflict_parent, new_index);
-    graph.mark_dependency_resolved(edge.edge_id, new_index);
-    add_edges_from(
-        graph,
-        new_index,
-        &*resolved.manifest,
-        &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-    );
-    ProcessResult::Created(new_index)
-}
-
-pub(crate) fn chain_err<E>(
-    graph: &DependencyGraph,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    inner: ResolveError<E>,
-) -> ResolveError<E> {
-    let mut chain = graph.logical_ancestry(parent);
-    chain.push((edge.name.clone(), edge.spec.clone()));
-    ResolveError::WithChain {
-        chain,
-        source: Box::new(inner),
-    }
-}
-
-/// Build the graph node for an already-resolved registry manifest (override
-/// resolution is applied upstream by the demand loop, which owns the per-run
-/// manifest cache). Emits the resolve event and links the node.
-pub(crate) fn handle_resolved_registry_manifest<E>(
-    graph: &mut DependencyGraph,
-    receiver: &E,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    manifest: Arc<CoreVersionManifest>,
-    config: &BuildDepsConfig,
-) -> ProcessResult
-where
-    E: EventReceiver,
-{
-    let resolved = ResolvedPackage {
-        name: edge.name.clone(),
-        version: manifest.version.clone(),
-        manifest,
-    };
-    receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
-    process_dependency_with_resolved(graph, parent, edge, &resolved, config)
 }
 
 #[cfg(test)]
