@@ -92,7 +92,9 @@ pub mod progress {
 
 /// Platform compatibility checks.
 pub mod compat {
-    pub use crate::model::compatibility::{is_cpu_compatible, is_os_compatible};
+    pub use crate::model::compatibility::{
+        PlatformConstraint, is_cpu_compatible, is_os_compatible, is_platform_compatible,
+    };
 }
 
 /// Git clone and resolution helpers.

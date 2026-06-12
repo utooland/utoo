@@ -1,6 +1,6 @@
 //! Package tarball metadata for downloading and verification.
 
-use crate::model::compatibility::is_platform_compatible;
+use crate::model::compatibility::{PlatformConstraint, is_platform_compatible};
 use crate::model::manifest::CoreVersionManifest;
 
 /// Package tarball information for downloading.
@@ -19,9 +19,9 @@ pub struct PackageTarballInfo<'a> {
     /// Integrity hash for verification
     pub integrity: Option<&'a str>,
     /// OS compatibility constraint (if specified)
-    pub os: Option<&'a serde_json::Value>,
+    pub os: Option<&'a PlatformConstraint>,
     /// CPU compatibility constraint (if specified)
-    pub cpu: Option<&'a serde_json::Value>,
+    pub cpu: Option<&'a PlatformConstraint>,
 }
 
 impl PackageTarballInfo<'_> {

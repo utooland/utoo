@@ -1188,7 +1188,7 @@ mod tests {
                 resolved: Some("registry-url".to_string()),
                 bin: Some(json!({"tool": "tool.exe"})),
                 has_install_script: Some(false),
-                os: Some(json!(["win32"])), // Only Windows
+                os: Some(serde_json::from_value(json!(["win32"])).unwrap()), // Only Windows
                 ..LockPackage::default()
             },
         );

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+use super::compatibility::PlatformConstraint;
 use super::util::deserialize_or_default;
 
 /// Deserialize a `scripts` map, silently dropping entries whose values are not
@@ -82,17 +83,23 @@ pub struct PackageJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
 
-    /// OS constraints. `Value` on purpose: npm's spec says array-of-strings,
-    /// but the CLI (`npm-install-checks`) also tolerates a bare string, and
-    /// real packages ship both shapes — same wire type as
-    /// `CoreVersionManifest`/`LockPackage` so [`super::compatibility`]
-    /// evaluates all three uniformly.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub os: Option<Value>,
+    /// OS constraints. Same typed wire shape as
+    /// `CoreVersionManifest`/`LockPackage`; malformed values read as `None`
+    /// (= unconstrained), matching npm.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub os: Option<PlatformConstraint>,
 
     /// CPU constraints (same string-or-array tolerance as `os`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu: Option<Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub cpu: Option<PlatformConstraint>,
 
     /// Has install scripts
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -386,15 +393,18 @@ mod tests {
             "os": ["!win32"], "cpu": ["x64", "arm64"]
         });
         let pkg = PackageJson::from_value(&array_form).unwrap();
-        assert_eq!(pkg.os, Some(json!(["!win32"])));
+        assert_eq!(
+            pkg.os,
+            Some(PlatformConstraint::Many(vec!["!win32".to_string()]))
+        );
 
         let string_form = json!({
             "name": "b", "version": "1.0.0",
             "os": "linux", "cpu": "x64"
         });
         let pkg = PackageJson::from_value(&string_form).unwrap();
-        assert_eq!(pkg.os, Some(json!("linux")));
-        assert_eq!(pkg.cpu, Some(json!("x64")));
+        assert_eq!(pkg.os, Some(PlatformConstraint::One("linux".to_string())));
+        assert_eq!(pkg.cpu, Some(PlatformConstraint::One("x64".to_string())));
     }
 
     #[test]

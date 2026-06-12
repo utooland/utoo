@@ -10,6 +10,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use super::compatibility::PlatformConstraint;
 use super::package_json::PackageJson;
 
 /// Borrowed view of the data needed to resolve a version spec — a slice of
@@ -438,13 +439,13 @@ pub struct CoreVersionManifest {
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
-    pub os: Option<Value>,
+    pub os: Option<PlatformConstraint>,
 
     #[serde(
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cpu: Option<Value>,
+    pub cpu: Option<PlatformConstraint>,
 
     #[serde(
         deserialize_with = "skip_on_error",
@@ -655,7 +656,7 @@ impl NodeManifest {
     }
 
     /// Get OS constraints.
-    pub fn os(&self) -> Option<&Value> {
+    pub fn os(&self) -> Option<&PlatformConstraint> {
         match self {
             NodeManifest::Local(pkg) => pkg.os.as_ref(),
             NodeManifest::Registry(manifest) => manifest.os.as_ref(),
@@ -663,7 +664,7 @@ impl NodeManifest {
     }
 
     /// Get CPU constraints.
-    pub fn cpu(&self) -> Option<&Value> {
+    pub fn cpu(&self) -> Option<&PlatformConstraint> {
         match self {
             NodeManifest::Local(pkg) => pkg.cpu.as_ref(),
             NodeManifest::Registry(manifest) => manifest.cpu.as_ref(),

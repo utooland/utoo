@@ -8,6 +8,7 @@ use std::path::Path;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
+use super::compatibility::PlatformConstraint;
 use super::graph::DependencyGraph;
 use super::node::EdgeType;
 use super::util::{PackageNameStr, deserialize_or_default};
@@ -62,10 +63,18 @@ pub struct LockPackage {
     pub engines: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub funding: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub os: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cpu: Option<serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub os: Option<PlatformConstraint>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub cpu: Option<PlatformConstraint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
