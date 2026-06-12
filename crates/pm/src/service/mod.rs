@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod binary;
 pub mod clean;
+pub mod clean_cache;
 pub mod config;
 pub mod dependency_graph;
 pub mod execute;

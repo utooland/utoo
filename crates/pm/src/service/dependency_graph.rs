@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use petgraph::Graph;
 use petgraph::graph::{DiGraph, NodeIndex};
-use std::path::Path;
-
 use utoo_ruborist::lock::{LockPackageNode, PackageLock};
 
 /// Upper bound on the number of dependency chains `ut list` enumerates per
@@ -309,6 +310,35 @@ impl LockGraphService {
     }
 }
 
+/// A node in the dependency tree built from root-to-package paths.
+///
+/// `NodeIndex::end()` marks the synthetic root; real nodes index into the
+/// lock graph.
+#[derive(Debug)]
+pub struct DepTreeNode {
+    pub index: NodeIndex,
+    pub children: BTreeMap<NodeIndex, DepTreeNode>,
+}
+
+/// Merge a set of package→root paths into a single tree rooted at a
+/// synthetic `NodeIndex::end()` node.
+pub fn build_dep_tree(paths: &[Vec<NodeIndex>]) -> DepTreeNode {
+    let mut root = DepTreeNode {
+        index: NodeIndex::end(),
+        children: BTreeMap::new(),
+    };
+    for path in paths {
+        let mut node = &mut root;
+        for &idx in path.iter().rev() {
+            node = node.children.entry(idx).or_insert_with(|| DepTreeNode {
+                index: idx,
+                children: BTreeMap::new(),
+            });
+        }
+    }
+    root
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,5 +523,18 @@ mod tests {
             paths.len() >= 2,
             "Should find paths to multiple workspace packages"
         );
+    }
+
+    #[test]
+    fn test_build_dep_tree() {
+        let paths = vec![vec![
+            NodeIndex::new(3),
+            NodeIndex::new(2),
+            NodeIndex::new(1),
+            NodeIndex::new(0),
+        ]];
+        let tree = build_dep_tree(&paths);
+        // root should have one child (a)
+        assert_eq!(tree.children.len(), 1);
     }
 }
