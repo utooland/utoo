@@ -108,3 +108,22 @@ pub mod http {
     #[cfg(feature = "http-tarball")]
     pub use crate::resolver::http::{file_cache_slot, http_cache_slot};
 }
+
+/// Tar + gzip primitives and the atomic cache-slot commit protocol.
+///
+/// Shared with pm's install-phase extractor
+/// (`crates/pm/src/util/extractor.rs`) so registry slots and BFS-seeded
+/// slots are produced by identical gzip sizing, tar-slip guarding, and
+/// mode normalization, under the same durability contract: every
+/// `~/.cache/nm/` slot becomes visible only via atomic rename of a
+/// fully-written staging directory that already contains the `_resolved`
+/// marker (see `resolver/common.rs`).
+pub mod tar {
+    #[cfg(any(feature = "native-git", feature = "http-tarball"))]
+    pub use crate::resolver::common::commit_cache_dir_atomic;
+    #[cfg(feature = "http-tarball")]
+    pub use crate::resolver::tar::{
+        MAX_UNCOMPRESSED_BYTES, estimate_uncompressed_size, gzip_decompress,
+        is_safe_tar_entry_path, normalize_entry_mode,
+    };
+}

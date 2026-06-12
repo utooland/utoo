@@ -11359,7 +11359,6 @@ dependencies = [
  "ignore",
  "indicatif",
  "libc",
- "libdeflater",
  "mockito",
  "once_cell",
  "open",

@@ -4,6 +4,13 @@
 //! into in-memory [`TarEntry`]s (so the manifest can be inspected before
 //! deciding where to commit) and then emit those entries atomically into
 //! a cache slot.
+//!
+//! The low-level primitives — [`estimate_uncompressed_size`],
+//! [`gzip_decompress`], [`is_safe_tar_entry_path`], and
+//! [`normalize_entry_mode`] — are also consumed by pm's install-phase
+//! extractor (`crates/pm/src/util/extractor.rs`) via the
+//! [`crate::tar`] façade, so registry slots and BFS-seeded slots are
+//! produced by the exact same gzip/tar rules.
 
 use std::io::Read;
 #[cfg(unix)]
@@ -27,7 +34,7 @@ pub(crate) struct TarEntry {
 
 /// Sanity ceiling for gzip ISIZE trust and for `file:` directory copies —
 /// keeps both paths aligned on the same "biggest reasonable package" limit.
-pub(crate) const MAX_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Single-pass tar scan: collects safe entries **and** the shallowest
 /// `package.json` blob for manifest extraction.
@@ -49,11 +56,7 @@ pub(crate) fn scan_tarball(tar_bytes: &[u8]) -> Result<(Vec<TarEntry>, Vec<u8>)>
             .context("failed to read tar entry path")?
             .into_owned();
 
-        if rel_path.is_absolute()
-            || rel_path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
+        if !is_safe_tar_entry_path(&rel_path) {
             tracing::warn!(
                 "Skipping tar entry with unsafe path: {}",
                 rel_path.display()
@@ -62,7 +65,7 @@ pub(crate) fn scan_tarball(tar_bytes: &[u8]) -> Result<(Vec<TarEntry>, Vec<u8>)>
         }
 
         let is_dir = entry.header().entry_type().is_dir();
-        let mode = entry.header().mode().unwrap_or(0o644);
+        let mode = normalize_entry_mode(entry.header().mode().unwrap_or(0o644));
         // Don't pre-reserve from entry.size() — a crafted header could trigger
         // huge allocations. Let Vec grow naturally.
         let mut content = Vec::new();
@@ -98,8 +101,8 @@ pub(crate) fn scan_tarball(tar_bytes: &[u8]) -> Result<(Vec<TarEntry>, Vec<u8>)>
 /// directory layout (including the typical `package/` wrapper) so the
 /// install phase can locate the real package root via `find_real_src`.
 ///
-/// Preserves the executable bit on Unix — npm packages rely on it for
-/// binaries under `bin/`.
+/// Entry modes were already passed through [`normalize_entry_mode`] at scan
+/// time, so the executable bit npm packages rely on for `bin/` survives.
 pub(crate) fn write_entries(entries: &[TarEntry], dest: &Path) -> Result<()> {
     for entry in entries {
         let full_path = dest.join(&entry.rel_path);
@@ -116,17 +119,54 @@ pub(crate) fn write_entries(entries: &[TarEntry], dest: &Path) -> Result<()> {
             .with_context(|| format!("failed to write {}", full_path.display()))?;
 
         #[cfg(unix)]
-        if entry.mode != 0o644 {
-            let _ =
-                std::fs::set_permissions(&full_path, std::fs::Permissions::from_mode(entry.mode));
+        if entry.mode != 0o644
+            && let Err(e) =
+                std::fs::set_permissions(&full_path, std::fs::Permissions::from_mode(entry.mode))
+        {
+            tracing::warn!(
+                "Failed to set mode {:o} on {}: {e}",
+                entry.mode,
+                full_path.display()
+            );
         }
     }
     Ok(())
 }
 
-/// Estimate uncompressed size from the gzip ISIZE footer, bounded by sanity
-/// limits to deflect crafted-footer allocation bombs.
-fn estimate_uncompressed_size(gzip_bytes: &[u8]) -> usize {
+/// Returns `true` when a tar entry path is safe to join under an extraction
+/// root: rejects absolute paths and any `..` component (Tar Slip).
+///
+/// Shared with pm's install-phase extractor so every extraction path in the
+/// `~/.cache/nm/` tree applies the same traversal guard.
+pub fn is_safe_tar_entry_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && !path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+/// Unified tar-entry mode rule for every cache slot (registry, git, http,
+/// file): **preserve the archive's raw permission bits**, stripping only
+/// setuid/setgid/sticky so a crafted tarball cannot plant a setuid binary
+/// in the shared cache.
+///
+/// Why preserve-raw instead of pm's old "widen everything to 0o644/0o755"
+/// rule: the npm CLI replays the tarball's recorded mode (filtered through
+/// umask) rather than rewriting it, so preserving raw matches upstream
+/// behavior, keeps the executable bit `bin/` scripts depend on, respects
+/// intentionally-restricted files (e.g. `0o600` templates), and — most
+/// importantly — guarantees the same input bytes produce the same cache
+/// tree no matter which resolver populated the slot.
+pub fn normalize_entry_mode(raw_mode: u32) -> u32 {
+    raw_mode & 0o777
+}
+
+/// Estimate uncompressed size from the gzip ISIZE footer (last 4 bytes:
+/// original size mod 2^32), bounded by sanity limits to deflect
+/// crafted-footer allocation bombs. Falls back to `len * 10` when the
+/// footer is implausible (below 16 bytes or above
+/// [`MAX_UNCOMPRESSED_BYTES`]).
+pub fn estimate_uncompressed_size(gzip_bytes: &[u8]) -> usize {
     const MIN: usize = 16;
     if gzip_bytes.len() < 4 {
         return gzip_bytes.len() * 10;
@@ -173,7 +213,10 @@ pub(crate) fn commit_tarball_bytes(
     Ok(manifest)
 }
 
-pub(crate) fn gzip_decompress(gzip_bytes: &[u8]) -> Result<Vec<u8>> {
+/// Decompress a gzip stream with libdeflate, sizing the output buffer from
+/// [`estimate_uncompressed_size`] and retrying once with a 4x buffer when
+/// the estimate proves too small.
+pub fn gzip_decompress(gzip_bytes: &[u8]) -> Result<Vec<u8>> {
     let mut decompressor = libdeflater::Decompressor::new();
     let estimated = estimate_uncompressed_size(gzip_bytes);
     let mut output = vec![0u8; estimated];
@@ -189,4 +232,43 @@ pub(crate) fn gzip_decompress(gzip_bytes: &[u8]) -> Result<Vec<u8>> {
     };
     output.truncate(actual);
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_path_predicate_rejects_traversal() {
+        assert!(is_safe_tar_entry_path(Path::new("package/index.js")));
+        assert!(is_safe_tar_entry_path(Path::new("package.json")));
+        assert!(!is_safe_tar_entry_path(Path::new("/etc/passwd")));
+        assert!(!is_safe_tar_entry_path(Path::new("package/../../evil")));
+        assert!(!is_safe_tar_entry_path(Path::new("../outside")));
+    }
+
+    #[test]
+    fn mode_rule_preserves_raw_permission_bits() {
+        assert_eq!(normalize_entry_mode(0o644), 0o644);
+        assert_eq!(normalize_entry_mode(0o755), 0o755);
+        // Intentionally-restricted modes survive (pm used to widen to 644).
+        assert_eq!(normalize_entry_mode(0o600), 0o600);
+        assert_eq!(normalize_entry_mode(0o640), 0o640);
+        // setuid/setgid/sticky are stripped.
+        assert_eq!(normalize_entry_mode(0o4755), 0o755);
+        assert_eq!(normalize_entry_mode(0o2644), 0o644);
+    }
+
+    #[test]
+    fn isize_footer_estimate_is_bounded() {
+        // Plausible footer → trusted verbatim.
+        let mut bytes = vec![0u8; 100];
+        bytes[96..].copy_from_slice(&1024u32.to_le_bytes());
+        assert_eq!(estimate_uncompressed_size(&bytes), 1024);
+        // Implausible footer (zero) → fallback to len * 10.
+        let zeros = vec![0u8; 100];
+        assert_eq!(estimate_uncompressed_size(&zeros), 1000);
+        // Tiny input → fallback.
+        assert_eq!(estimate_uncompressed_size(&[1, 2]), 20);
+    }
 }

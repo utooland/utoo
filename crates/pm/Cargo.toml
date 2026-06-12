@@ -36,7 +36,6 @@ globset            = "0.4"
 ignore             = "0.4"
 indicatif          = "0.17.8"
 libc               = "0.2"
-libdeflater        = "1.25"
 once_cell          = "1.19"
 open               = "5"
 owo-colors         = { workspace = true }
