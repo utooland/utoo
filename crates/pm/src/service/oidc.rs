@@ -85,6 +85,7 @@ async fn github_actions_id_token(req_url: &str, req_token: &str, audience: &str)
     url.query_pairs_mut().append_pair("audience", audience);
 
     let resp = client()
+        .ok()?
         .get(url)
         .header("Accept", "application/json")
         .bearer_auth(req_token)
@@ -110,7 +111,7 @@ async fn exchange(registry: &str, package_name: &str, id_token: &str) -> Result<
         escaped_name(package_name),
     );
 
-    let resp = client()
+    let resp = client()?
         .post(&url)
         .bearer_auth(id_token)
         .send()

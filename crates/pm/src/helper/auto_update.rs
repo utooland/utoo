@@ -184,7 +184,7 @@ async fn execute_update(version: &str) -> Result<()> {
 /// Fetch latest version from registry, write to cache file, and return the version.
 async fn fetch_and_cache_version() -> Result<String> {
     let registry_url = format!("{}/utoo/latest", get_registry());
-    let client = client_builder()
+    let client = client_builder()?
         .timeout(std::time::Duration::from_millis(1000))
         .build()
         .context("Failed to create HTTP client")?;
