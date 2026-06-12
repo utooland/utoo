@@ -63,6 +63,31 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+/// Disposition of a lock entry in the install pipeline.
+///
+/// Derived in one place so the lockfile prefetch seed and `reify_packages`
+/// cannot drift — an earlier hand-rolled prefetch filter did, and
+/// over-downloaded gigabytes of incompatible binaries. (The platform filter
+/// lives in the shared `prefetch_tarball` gate for the same reason.)
+enum LockEntryAction {
+    /// Omitted by --omit config: not installed at all.
+    Skip,
+    /// Workspace `link:` entry: symlinked, never cloned or downloaded.
+    Link,
+    /// Regular entry: cloned via the scheduler (and thus prefetchable).
+    Clone,
+}
+
+fn classify_lock_entry(package: &Package, omit: &HashSet<OmitType>) -> LockEntryAction {
+    if should_omit_package(package, omit) {
+        LockEntryAction::Skip
+    } else if package.link.is_some() {
+        LockEntryAction::Link
+    } else {
+        LockEntryAction::Clone
+    }
+}
+
 async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
@@ -102,8 +127,8 @@ async fn reify_packages(
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
-                // Skip packages based on omit config
-                if should_omit_package(package, omit) {
+                let action = classify_lock_entry(package, omit);
+                if matches!(action, LockEntryAction::Skip) {
                     PROGRESS_BAR.inc(1);
                     continue;
                 }
@@ -120,7 +145,7 @@ async fn reify_packages(
                         }
                         _ => resolved.clone(),
                     };
-                    if package.link.is_some() {
+                    if matches!(action, LockEntryAction::Link) {
                         let link_name = extract_package_name(&path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
@@ -310,13 +335,12 @@ impl InstallService {
         // authoritative `ensure_clone`.
         if !events_prefetched {
             for (path, package) in &package_lock.packages {
-                // Skip what `install_packages` won't clone: workspace links and
-                // omitted deps. The platform filter lives in the shared
+                // Seed only what `install_packages` will actually clone — the
+                // same `classify_lock_entry` it consumes, so the two passes
+                // can't drift. The platform filter lives in the shared
                 // `prefetch_tarball` gate (same one the resolver event path
-                // uses), so it can't drift from the install-time skip logic — an
-                // earlier hand-rolled filter here missed it and over-downloaded
-                // gigabytes of incompatible (darwin/win) binaries.
-                if package.link.is_some() || should_omit_package(package, omit) {
+                // uses) for the same reason.
+                if !matches!(classify_lock_entry(package, omit), LockEntryAction::Clone) {
                     continue;
                 }
                 if let (Some(version), Some(resolved)) =
