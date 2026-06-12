@@ -2,10 +2,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
 use utoo_ruborist::service::{
     BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
 };
+use utoo_ruborist::workspace::WorkspaceDiscovery;
 
 use crate::service::auth;
 use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};

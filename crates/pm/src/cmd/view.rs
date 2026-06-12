@@ -39,18 +39,16 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
     // Resolve version and get full VersionManifest (with all display fields)
-    let resolved_version = utoo_ruborist::resolver::version::resolve_target_version(
-        (&full_manifest).into(),
-        version_spec,
-    )
-    .map_err(|e| {
-        anyhow!(
-            "Version resolution failed for {}@{}: {}",
-            name,
-            version_spec,
-            e
-        )
-    })?;
+    let resolved_version =
+        utoo_ruborist::registry::resolve_target_version((&full_manifest).into(), version_spec)
+            .map_err(|e| {
+                anyhow!(
+                    "Version resolution failed for {}@{}: {}",
+                    name,
+                    version_spec,
+                    e
+                )
+            })?;
 
     let version_manifest: VersionManifest = full_manifest
         .get_full_version(&resolved_version)

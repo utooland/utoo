@@ -11,7 +11,7 @@ use utoo_ruborist::builder::{
     DevDeps, EdgeContext, add_edges_from, add_workspace_member, resolve_workspace_member_edges,
 };
 use utoo_ruborist::graph::{DependencyGraph, EdgeType};
-use utoo_ruborist::resolver::runtime::install_runtime;
+use utoo_ruborist::runtime::install_runtime;
 
 use crate::helper::ruborist_context::Context as FsContext;
 use crate::util::user_config::{get_or_load_package_json, get_peer_deps};

@@ -20,7 +20,7 @@ use super::semver::{matches, max_satisfying};
 /// ```
 /// use std::collections::HashMap;
 /// use utoo_ruborist::manifest::VersionsRef;
-/// use utoo_ruborist::resolver::version::resolve_target_version;
+/// use utoo_ruborist::registry::resolve_target_version;
 ///
 /// let mut dist_tags = HashMap::new();
 /// dist_tags.insert("latest".to_string(), "1.2.3".to_string());

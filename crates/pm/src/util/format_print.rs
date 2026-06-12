@@ -4,8 +4,7 @@ use std::io::Write;
 
 use colored::Colorize;
 use term_size;
-use utoo_ruborist::resolver::registry::ResolveError;
-use utoo_ruborist::traits::registry::RegistryError;
+use utoo_ruborist::registry::{RegistryError, ResolveError};
 
 use crate::helper::migrate::MigrateResult;
 use crate::service::pm_pack::PackResult;

@@ -7,7 +7,7 @@ use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::resolver::runtime::install_runtime_from_map;
+use utoo_ruborist::runtime::install_runtime_from_map;
 use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
 use utoo_ruborist::util::PackageNameStr;
 

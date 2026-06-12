@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::ScriptsView;
-use utoo_ruborist::model::package_json::parse_bin_field;
+use utoo_ruborist::manifest::{ScriptsView, parse_bin_field};
 
 use super::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
 use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
