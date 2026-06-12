@@ -5404,9 +5404,9 @@ dependencies = [
 
 [[package]]
 name = "opfs-project"
-version = "0.2.8"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2c6f83474d2f7ca98f9f419568db611e171775fc59a524f1fd64574a868737f"
+checksum = "c4a2d62fde0aad91700c1724f6cfefb4ef30ea7150db82cbd383da8264c57324"
 dependencies = [
  "anyhow",
  "bytes",
