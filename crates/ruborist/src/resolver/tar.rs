@@ -146,19 +146,19 @@ pub fn is_safe_tar_entry_path(path: &Path) -> bool {
 }
 
 /// Unified tar-entry mode rule for every cache slot (registry, git, http,
-/// file): **preserve the archive's raw permission bits**, stripping only
-/// setuid/setgid/sticky so a crafted tarball cannot plant a setuid binary
-/// in the shared cache.
+/// file): npm-style normalization — every file becomes `0o644`, plus
+/// `0o755` when any exec bit is set in the archive.
 ///
-/// Why preserve-raw instead of pm's old "widen everything to 0o644/0o755"
-/// rule: the npm CLI replays the tarball's recorded mode (filtered through
-/// umask) rather than rewriting it, so preserving raw matches upstream
-/// behavior, keeps the executable bit `bin/` scripts depend on, respects
-/// intentionally-restricted files (e.g. `0o600` templates), and — most
-/// importantly — guarantees the same input bytes produce the same cache
-/// tree no matter which resolver populated the slot.
+/// Real-world tarballs ship owner-only modes (the e2e suite pins
+/// google-protobuf, whose entries are `0o640`); replaying them produces
+/// node_modules that other users/processes cannot read. Normalizing keeps
+/// installs world-readable, preserves the exec bit `bin/` scripts depend
+/// on, inherently strips setuid/setgid/sticky so a crafted tarball cannot
+/// plant a setuid binary in the shared cache, and guarantees the same
+/// input bytes produce the same cache tree no matter which resolver
+/// populated the slot.
 pub fn normalize_entry_mode(raw_mode: u32) -> u32 {
-    raw_mode & 0o777
+    if raw_mode & 0o111 != 0 { 0o755 } else { 0o644 }
 }
 
 /// Estimate uncompressed size from the gzip ISIZE footer (last 4 bytes:
@@ -248,13 +248,15 @@ mod tests {
     }
 
     #[test]
-    fn mode_rule_preserves_raw_permission_bits() {
+    fn mode_rule_normalizes_to_world_readable() {
         assert_eq!(normalize_entry_mode(0o644), 0o644);
         assert_eq!(normalize_entry_mode(0o755), 0o755);
-        // Intentionally-restricted modes survive (pm used to widen to 644).
-        assert_eq!(normalize_entry_mode(0o600), 0o600);
-        assert_eq!(normalize_entry_mode(0o640), 0o640);
-        // setuid/setgid/sticky are stripped.
+        // Owner-only modes widen to world-readable — google-protobuf ships
+        // 0o640 entries and installs must stay readable (e2e-pinned).
+        assert_eq!(normalize_entry_mode(0o600), 0o644);
+        assert_eq!(normalize_entry_mode(0o640), 0o644);
+        // Any exec bit ⇒ 0o755; setuid/setgid never survive.
+        assert_eq!(normalize_entry_mode(0o700), 0o755);
         assert_eq!(normalize_entry_mode(0o4755), 0o755);
         assert_eq!(normalize_entry_mode(0o2644), 0o644);
     }

@@ -243,9 +243,8 @@ fn parse_tar_entries(buf: &Bytes, stage: &Path) -> Result<Vec<ExtractedEntry>> {
 
         let full_path = stage.join(&path);
         // Unified mode rule shared with ruborist's BFS-seeded slots:
-        // preserve the archive's raw permission bits (setuid/setgid/sticky
-        // stripped). See `utoo_ruborist::tar::normalize_entry_mode` for the
-        // rationale.
+        // npm-style 0o644/0o755 normalization. See
+        // `utoo_ruborist::tar::normalize_entry_mode` for the rationale.
         let mode = normalize_entry_mode(entry.header().mode().unwrap_or(0o644));
         entries.push(ExtractedEntry {
             path: full_path,
