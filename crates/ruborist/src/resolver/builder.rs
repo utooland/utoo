@@ -27,7 +27,7 @@ use crate::model::manifest::CoreVersionManifest;
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::demand::{ResolverManifestCache, run_main_loop_bfs};
+use crate::resolver::demand::{ManifestState, ResolverManifestCache, run_main_loop_bfs};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::service::{ManifestProvider, ProjectCacheData};
 use crate::spec::{Catalogs, PackageSpec, Protocol};
@@ -728,31 +728,24 @@ pub async fn process_dependency<R: ManifestProvider>(
                 }
             };
 
-            // Check override using resolved version (not original spec)
-            let resolved = if let Some(override_spec) =
-                graph.check_override(node_index, &edge_info.name, Some(&resolved.version))
+            // Check override using resolved version (not original spec).
+            // No manifest cache on this path — non-registry specs are rare.
+            let resolved = match resolve_override(
+                graph,
+                registry,
+                node_index,
+                edge_info,
+                &resolved.version,
+                None,
+            )
+            .await?
             {
-                tracing::debug!(
-                    "Override: {}@{} (resolved {}) => {}",
-                    edge_info.name,
-                    edge_info.spec,
-                    resolved.version,
-                    override_spec
-                );
-                // Re-resolve with override spec
-                match resolve_registry_dep(
-                    registry,
-                    &edge_info.name,
-                    &override_spec,
-                    &edge_info.edge_type,
-                )
-                .await?
-                {
-                    Some(r) => r,
-                    None => resolved, // Fallback to original if override fails
-                }
-            } else {
-                resolved
+                Some(manifest) => ResolvedPackage {
+                    name: manifest.name.clone(),
+                    version: manifest.version.clone(),
+                    manifest,
+                },
+                None => resolved,
             };
 
             // Create new node
@@ -775,6 +768,58 @@ pub async fn process_dependency<R: ManifestProvider>(
 
             Ok(ProcessResult::Created(new_index))
         }
+    }
+}
+
+/// Resolve a dependency override for `edge` against the already-resolved
+/// version. Single implementation shared by the demand driver and the
+/// non-registry/sequential-fallback path in [`process_dependency`].
+///
+/// Returns `Some(manifest)` when an override rule matched and resolved, and
+/// `None` when no rule applies or the override failed to resolve — npm
+/// semantics fall back to the original resolution rather than erroring.
+///
+/// With `state`, the per-run manifest cache is consulted and populated so
+/// sibling edges single-flight the override and the overridden manifest
+/// persists to the project cache.
+pub(crate) async fn resolve_override<R: ManifestProvider>(
+    graph: &DependencyGraph,
+    registry: &R,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    resolved_version: &str,
+    mut state: Option<&mut ManifestState>,
+) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<R::Error>> {
+    let Some(override_spec) = graph.check_override(parent, &edge.name, Some(resolved_version))
+    else {
+        return Ok(None);
+    };
+
+    if let Some(state) = state.as_deref_mut()
+        && let Some(cached) = state.get_version_manifest(&edge.name, &override_spec)
+    {
+        return Ok(Some(cached));
+    }
+
+    tracing::debug!(
+        "Override: {}@{} (resolved {}) => {}",
+        edge.name,
+        edge.spec,
+        resolved_version,
+        override_spec
+    );
+    match resolve_registry_dep(registry, &edge.name, &override_spec, &edge.edge_type).await? {
+        Some(overridden) => {
+            if let Some(state) = state {
+                state.cache_version(
+                    edge.name.clone(),
+                    override_spec,
+                    Arc::clone(&overridden.manifest),
+                );
+            }
+            Ok(Some(overridden.manifest))
+        }
+        None => Ok(None),
     }
 }
 
