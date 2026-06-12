@@ -389,6 +389,50 @@ async fn process_file_dep<E>(
 /// * `edge_info` - Information about the dependency edge
 /// * `config` - Build configuration (peer_deps, cache_dir, etc.)
 ///
+/// Shared optional-edge policy for the non-registry resolvers (git/http): a
+/// failed optional edge logs and resolves to `Skipped`; a load-bearing one
+/// returns the spec-specific error built by `wrap`.
+fn absorb_optional_failure<E>(
+    edge: &DependencyEdgeInfo,
+    kind: &str,
+    err: anyhow::Error,
+    wrap: impl FnOnce(anyhow::Error) -> ResolveError<E>,
+) -> Result<ProcessResult, ResolveError<E>> {
+    if edge.edge_type == EdgeType::Optional {
+        tracing::debug!(
+            "Skipped optional {kind} dependency {}@{}",
+            edge.name,
+            edge.spec
+        );
+        Ok(ProcessResult::Skipped)
+    } else {
+        Err(wrap(err))
+    }
+}
+
+/// Shared policy for `workspace:`/`catalog:` specs that reach the BFS — a
+/// declaration anomaly (see the call sites for why). Optional edges skip with
+/// a warning; load-bearing ones fail as `Unsupported`.
+fn skip_optional_or_unsupported<E>(
+    edge: &DependencyEdgeInfo,
+    kind: &str,
+    warn_detail: &str,
+    reason: &'static str,
+) -> Result<ProcessResult, ResolveError<E>> {
+    if edge.edge_type == EdgeType::Optional {
+        tracing::warn!(
+            "Skipping optional {kind} dependency {}@{} — {warn_detail}",
+            edge.name,
+            edge.spec
+        );
+        return Ok(ProcessResult::Skipped);
+    }
+    Err(ResolveError::Unsupported {
+        spec: edge.spec.clone(),
+        reason,
+    })
+}
+
 /// # Returns
 /// The result of processing (reused, created, or skipped)
 pub async fn process_dependency<R: ManifestProvider>(
@@ -421,19 +465,16 @@ pub async fn process_dependency<R: ManifestProvider>(
                     .await
                     {
                         Ok(r) => r,
-                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
-                            tracing::debug!(
-                                "Skipped optional non-registry dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
-                        }
                         Err(e) => {
-                            return Err(ResolveError::Git {
-                                url: edge_info.spec.clone(),
-                                source: e,
-                            });
+                            return absorb_optional_failure(
+                                edge_info,
+                                "non-registry",
+                                e,
+                                |source| ResolveError::Git {
+                                    url: edge_info.spec.clone(),
+                                    source,
+                                },
+                            );
                         }
                     }
                 }
@@ -450,18 +491,12 @@ pub async fn process_dependency<R: ManifestProvider>(
                     // warning; anything load-bearing fails with the
                     // dependency chain attached (via `chain_err`) so the
                     // offending package is identifiable.
-                    if edge_info.edge_type == EdgeType::Optional {
-                        tracing::warn!(
-                            "Skipping optional workspace dependency {}@{} — no matching workspace member",
-                            edge_info.name,
-                            edge_info.spec
-                        );
-                        return Ok(ProcessResult::Skipped);
-                    }
-                    return Err(ResolveError::Unsupported {
-                        spec: edge_info.spec.clone(),
-                        reason: "workspace: dependency does not match any workspace member of this project",
-                    });
+                    return skip_optional_or_unsupported(
+                        edge_info,
+                        "workspace",
+                        "no matching workspace member",
+                        "workspace: dependency does not match any workspace member of this project",
+                    );
                 }
                 PackageSpec::Local {
                     protocol: Protocol::Catalog,
@@ -472,19 +507,13 @@ pub async fn process_dependency<R: ManifestProvider>(
                     // catalog entry was missing — or a catalog: spec shipped
                     // inside a published manifest, which is a malformed
                     // declaration. Same policy as workspace: above.
-                    if edge_info.edge_type == EdgeType::Optional {
-                        tracing::warn!(
-                            "Skipping optional catalog dependency {}@{} — unresolved catalog entry",
-                            edge_info.name,
-                            edge_info.spec
-                        );
-                        return Ok(ProcessResult::Skipped);
-                    }
-                    return Err(ResolveError::Unsupported {
-                        spec: edge_info.spec.clone(),
-                        reason: "catalog: spec was not resolved — published manifests must not \
-                                 carry catalog:, and importer catalogs must define the entry",
-                    });
+                    return skip_optional_or_unsupported(
+                        edge_info,
+                        "catalog",
+                        "unresolved catalog entry",
+                        "catalog: spec was not resolved — published manifests must not \
+                         carry catalog:, and importer catalogs must define the entry",
+                    );
                 }
                 PackageSpec::Local {
                     protocol: Protocol::File,
@@ -530,18 +559,12 @@ pub async fn process_dependency<R: ManifestProvider>(
                     .await
                     {
                         Ok(r) => r,
-                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
-                            tracing::debug!(
-                                "Skipped optional HTTP dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
-                        }
                         Err(e) => {
-                            return Err(ResolveError::Http {
-                                url: url.clone(),
-                                source: e,
+                            return absorb_optional_failure(edge_info, "HTTP", e, |source| {
+                                ResolveError::Http {
+                                    url: url.clone(),
+                                    source,
+                                }
                             });
                         }
                     }

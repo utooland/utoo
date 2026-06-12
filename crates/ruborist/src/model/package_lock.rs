@@ -13,6 +13,14 @@ use super::node::EdgeType;
 use super::util::{PackageNameStr, deserialize_or_default};
 
 /// Represents a license field that can be either a string or an array of strings.
+///
+/// One of three deliberately different shapes for npm's polymorphic license
+/// field: lockfiles serialize what the resolver recorded (string or legacy
+/// array), on-disk package.json uses [`super::package_json::LicenseConfig`]
+/// (string or `{type, url}` object), and registry manifests keep a plain
+/// `Option<String>` with `skip_on_error` (display-only, malformed data must
+/// never fail an install). Each context tolerates exactly the malformations
+/// it actually sees on its wire; don't merge them without checking all three.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum License {

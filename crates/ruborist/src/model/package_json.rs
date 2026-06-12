@@ -240,6 +240,10 @@ pub fn parse_bin_field(bin: &Value, package_name: &str) -> Vec<(String, String)>
 }
 
 /// License configuration (can be string or object).
+///
+/// The on-disk package.json shape of npm's polymorphic license field; see
+/// [`super::package_lock::License`] for the lockfile shape and how the three
+/// representations divide the wire contexts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum LicenseConfig {

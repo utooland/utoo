@@ -180,53 +180,16 @@ impl ScriptService {
         print_multi_workspace_header(script_name, layers);
 
         for (layer_index, layer) in layers.iter().enumerate() {
-            let workspaces_to_run: Vec<_> = layer
-                .iter()
-                .filter_map(|name| paths.get(name).map(|p| (name.clone(), p.clone())))
-                .collect();
-
-            if workspaces_to_run.is_empty() {
-                continue;
-            }
-
-            let mut join_set = JoinSet::new();
-            for (workspace_name, ws_path) in workspaces_to_run {
-                let script_name = script_name.to_string();
-                let script_args = script_args.clone();
-
-                join_set.spawn(async move {
-                    run_script_captured(
-                        &ws_path,
-                        &script_name,
-                        &workspace_name,
-                        missing,
-                        script_args,
-                    )
-                    .await
-                });
-            }
-
-            let mut failed_names = Vec::new();
-            let mut separator_printed = false;
-            while let Some(outcome) = join_set.join_next().await.transpose()? {
-                let WorkspaceOutcome::Ran {
-                    name,
-                    header,
-                    body,
-                    success,
-                } = outcome
-                else {
-                    continue;
-                };
-                if !separator_printed {
-                    print_layer_separator(layer_index, layer_count);
-                    separator_printed = true;
-                }
-                print_workspace_result(&header, &body, success);
-                if !success {
-                    failed_names.push(name);
-                }
-            }
+            let failed_names = Self::run_layer(
+                layer,
+                paths,
+                script_name,
+                missing,
+                script_args.as_deref(),
+                layer_index,
+                layer_count,
+            )
+            .await?;
             anyhow::ensure!(
                 failed_names.is_empty(),
                 "Script execution failed in layer {}: {}",
@@ -236,6 +199,68 @@ impl ScriptService {
         }
 
         Ok(())
+    }
+
+    /// Run one topological layer concurrently: spawn every workspace's
+    /// captured script, print each result as it completes (separator before
+    /// the first), and return the names that failed.
+    async fn run_layer(
+        layer: &[String],
+        paths: &HashMap<String, PathBuf>,
+        script_name: &str,
+        missing: MissingScript,
+        script_args: Option<&[String]>,
+        layer_index: usize,
+        layer_count: usize,
+    ) -> Result<Vec<String>> {
+        let workspaces_to_run: Vec<_> = layer
+            .iter()
+            .filter_map(|name| paths.get(name).map(|p| (name.clone(), p.clone())))
+            .collect();
+
+        if workspaces_to_run.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut join_set = JoinSet::new();
+        for (workspace_name, ws_path) in workspaces_to_run {
+            let script_name = script_name.to_string();
+            let script_args = script_args.map(<[String]>::to_vec);
+
+            join_set.spawn(async move {
+                run_script_captured(
+                    &ws_path,
+                    &script_name,
+                    &workspace_name,
+                    missing,
+                    script_args,
+                )
+                .await
+            });
+        }
+
+        let mut failed_names = Vec::new();
+        let mut separator_printed = false;
+        while let Some(outcome) = join_set.join_next().await.transpose()? {
+            let WorkspaceOutcome::Ran {
+                name,
+                header,
+                body,
+                success,
+            } = outcome
+            else {
+                continue;
+            };
+            if !separator_printed {
+                print_layer_separator(layer_index, layer_count);
+                separator_printed = true;
+            }
+            print_workspace_result(&header, &body, success);
+            if !success {
+                failed_names.push(name);
+            }
+        }
+        Ok(failed_names)
     }
 }
 

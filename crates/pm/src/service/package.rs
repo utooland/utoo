@@ -191,21 +191,11 @@ impl PackageService {
                 continue;
             }
 
-            // Skip packages that don't meet the filter criteria. A link node is
-            // never dropped here on the `has_scripts` test (it carries no script
-            // marker in the lock); its scripts are read from disk below.
-            if scripts == ScriptPolicy::Ignore && !has_bin {
-                continue; // scripts mode: only process packages with binaries
-            }
-            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin && !is_link {
-                continue; // full mode: process packages with scripts or binaries
+            if !Self::passes_script_policy(scripts, has_scripts, has_bin, is_link) {
+                continue;
             }
 
-            // Check platform compatibility
-            let is_compatible = lock_package.cpu.as_ref().is_none_or(is_cpu_compatible)
-                && lock_package.os.as_ref().is_none_or(is_os_compatible);
-
-            if !is_compatible {
+            if !Self::entry_platform_compatible(lock_package) {
                 tracing::debug!("Package {path} is not compatible with current platform");
                 continue;
             }
@@ -218,29 +208,15 @@ impl PackageService {
                 continue;
             }
 
-            // Read lifecycle scripts from package.json only if needed. A
-            // workspace link contributes bin linking only — leave its scripts
-            // empty so `create_execution_queues` never queues them (owned by
-            // `process_workspace_install_hooks`).
-            let lifecycle_scripts =
-                if !is_workspace_link && (has_scripts || scripts == ScriptPolicy::Run) {
-                    match Self::read_lifecycle_scripts(&package_path).await {
-                        Ok(s) => s,
-                        // A `file:` link can resolve to a missing or degenerate
-                        // `package.json` (e.g. a conflict artifact keyed
-                        // `node_modules/` with an empty name). Treat that as "no
-                        // scripts" rather than failing the whole install; a real
-                        // dependency with an unreadable manifest still errors.
-                        Err(_) if is_link => LifecycleScripts::default(),
-                        Err(e) => {
-                            return Err(e).with_context(|| {
-                                format!("Failed to read scripts for package: {path}")
-                            });
-                        }
-                    }
-                } else {
-                    LifecycleScripts::default()
-                };
+            let lifecycle_scripts = Self::entry_lifecycle_scripts(
+                &package_path,
+                path,
+                scripts,
+                has_scripts,
+                is_link,
+                is_workspace_link,
+            )
+            .await?;
 
             // Check if this package is an optional dependency (based on edge type)
             let is_optional = lock_package.is_optional();
@@ -256,6 +232,58 @@ impl PackageService {
             packages.push((package_info, is_optional));
         }
         Ok(packages)
+    }
+
+    /// Early policy filter for one lock entry (npm's `#retrieveNodesByType`).
+    ///
+    /// A link node is never dropped on the `has_scripts` test — it carries no
+    /// script marker in the lock; its scripts are read from disk afterwards.
+    fn passes_script_policy(
+        scripts: ScriptPolicy,
+        has_scripts: bool,
+        has_bin: bool,
+        is_link: bool,
+    ) -> bool {
+        match scripts {
+            // scripts-ignored mode: only packages with binaries matter.
+            ScriptPolicy::Ignore => has_bin,
+            // full mode: packages with scripts, binaries, or link nodes.
+            ScriptPolicy::Run => has_scripts || has_bin || is_link,
+        }
+    }
+
+    /// Platform gate for one lock entry (absent os/cpu = compatible).
+    fn entry_platform_compatible(lock_package: &LockPackage) -> bool {
+        lock_package.cpu.as_ref().is_none_or(is_cpu_compatible)
+            && lock_package.os.as_ref().is_none_or(is_os_compatible)
+    }
+
+    /// Read one entry's lifecycle scripts from its on-disk package.json, when
+    /// the policy needs them.
+    ///
+    /// A workspace link contributes bin linking only — its scripts stay empty
+    /// so `create_execution_queues` never queues them (they are owned by
+    /// `process_workspace_install_hooks`). A `file:` link can resolve to a
+    /// missing or degenerate `package.json` (e.g. a conflict artifact keyed
+    /// `node_modules/` with an empty name); that reads as "no scripts" rather
+    /// than failing the install, while a real dependency with an unreadable
+    /// manifest still errors.
+    async fn entry_lifecycle_scripts(
+        package_path: &Path,
+        path: &str,
+        scripts: ScriptPolicy,
+        has_scripts: bool,
+        is_link: bool,
+        is_workspace_link: bool,
+    ) -> Result<LifecycleScripts> {
+        if is_workspace_link || !(has_scripts || scripts == ScriptPolicy::Run) {
+            return Ok(LifecycleScripts::default());
+        }
+        match Self::read_lifecycle_scripts(package_path).await {
+            Ok(s) => Ok(s),
+            Err(_) if is_link => Ok(LifecycleScripts::default()),
+            Err(e) => Err(e).with_context(|| format!("Failed to read scripts for package: {path}")),
+        }
     }
 
     /// Create execution queues with bins_only parameter support
