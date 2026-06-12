@@ -65,7 +65,7 @@ fn print_package_info(
     full_manifest: &FullManifest,
     version_manifest: &VersionManifest,
 ) -> Result<()> {
-    tracing::debug!("Target version: {}", version_manifest.version);
+    tracing::debug!("Target version: {}", version_manifest.core.version);
 
     print_package_header(full_manifest, version_manifest);
     print_package_description(full_manifest, version_manifest);
@@ -92,12 +92,14 @@ fn print_package_header(full_manifest: &FullManifest, version_manifest: &Version
 
     // Use license from version manifest or fallback to full manifest
     let license = version_manifest
+        .core
         .license
         .as_deref()
         .or(full_manifest.license.as_deref())
         .unwrap_or("UNLICENSED");
 
     let deps_count = version_manifest
+        .core
         .dependencies
         .as_ref()
         .map(|d| d.len())
@@ -112,8 +114,8 @@ fn print_package_header(full_manifest: &FullManifest, version_manifest: &Version
 
     println!(
         "\n{}@{} | {} | deps: {} | versions: {}",
-        version_manifest.name.bright_blue().bold(),
-        version_manifest.version.bright_green(),
+        version_manifest.core.name.bright_blue().bold(),
+        version_manifest.core.version.bright_green(),
         license.yellow(),
         deps_str.cyan(),
         versions_count.magenta()
@@ -152,20 +154,20 @@ fn print_keywords(full_manifest: &FullManifest, version_manifest: &VersionManife
 }
 
 fn print_dist_info(version_manifest: &VersionManifest) {
-    if let Some(tarball) = &version_manifest.dist.tarball {
+    if let Some(tarball) = &version_manifest.core.dist.tarball {
         println!("\n{}", "dist".bright_yellow().bold());
         println!("{} {}", ".tarball:".cyan(), tarball.blue().underline());
     }
 
-    if let Some(shasum) = &version_manifest.dist.shasum {
+    if let Some(shasum) = &version_manifest.core.dist.shasum {
         println!("{} {}", ".shasum:".cyan(), shasum.green());
     }
 
-    if let Some(integrity) = &version_manifest.dist.integrity {
+    if let Some(integrity) = &version_manifest.core.dist.integrity {
         println!("{} {}", ".integrity:".cyan(), integrity.green());
     }
 
-    if let Some(unpacked_size) = version_manifest.dist.unpacked_size {
+    if let Some(unpacked_size) = version_manifest.core.dist.unpacked_size {
         let size_mb = unpacked_size as f64 / 1024.0 / 1024.0;
         println!(
             "{} {} MB",
@@ -231,6 +233,7 @@ fn print_bugs_info(full_manifest: &FullManifest, version_manifest: &VersionManif
 
 fn print_dependencies(version_manifest: &VersionManifest) {
     if let Some(dependencies) = version_manifest
+        .core
         .dependencies
         .as_ref()
         .filter(|d| !d.is_empty())
@@ -289,7 +292,7 @@ fn print_dist_tags(full_manifest: &FullManifest) {
 
 fn print_publish_info(full_manifest: &FullManifest, version_manifest: &VersionManifest) {
     // Get publish time from time info
-    if let Some(time_str) = full_manifest.time.get(&version_manifest.version)
+    if let Some(time_str) = full_manifest.time.get(&version_manifest.core.version)
         && let Ok(published_time) = chrono::DateTime::parse_from_rfc3339(time_str)
     {
         let time_str = format_time_ago(published_time.with_timezone(&Utc));
@@ -349,10 +352,13 @@ mod tests {
         };
 
         let version_manifest = VersionManifest {
-            name: "test-package".to_string(),
-            version: "1.0.0".to_string(),
+            core: utoo_ruborist::manifest::CoreVersionManifest {
+                name: "test-package".to_string(),
+                version: "1.0.0".to_string(),
+                dist: Dist::default(),
+                ..Default::default()
+            },
             description: Some("A test package".to_string()),
-            dist: Dist::default(),
             ..Default::default()
         };
 

@@ -282,11 +282,19 @@ where
 
 /// Version-specific manifest from npm registry.
 /// This represents a single version entry in the `versions` field.
+///
+/// The install-relevant fields live in the flattened [`CoreVersionManifest`]
+/// (`core`) — the single source of truth for their names and `skip_on_error`
+/// handling — and this struct only adds the display-oriented fields used by
+/// `ut view`. The flatten round-trips through serde's content buffer, which
+/// is fine on this cold path; the hot path parses [`CoreVersionManifest`]
+/// directly and is unaffected.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VersionManifest {
-    pub name: String,
-    pub version: String,
+    /// Install-relevant fields, shared with the hot path.
+    #[serde(flatten)]
+    pub core: CoreVersionManifest,
 
     #[serde(
         deserialize_with = "skip_on_error",
@@ -299,12 +307,6 @@ pub struct VersionManifest {
         skip_serializing_if = "Option::is_none"
     )]
     pub main: Option<String>,
-
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub scripts: Option<HashMap<String, String>>,
 
     #[serde(
         deserialize_with = "skip_on_error",
@@ -328,12 +330,6 @@ pub struct VersionManifest {
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
-    pub license: Option<String>,
-
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
     pub bugs: Option<Bugs>,
 
     #[serde(
@@ -343,73 +339,11 @@ pub struct VersionManifest {
     pub homepage: Option<String>,
 
     #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dependencies: Option<HashMap<String, String>>,
-
-    #[serde(rename = "devDependencies")]
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub dev_dependencies: Option<HashMap<String, String>>,
-
-    #[serde(rename = "peerDependencies")]
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub peer_dependencies: Option<HashMap<String, String>>,
-
-    #[serde(rename = "optionalDependencies")]
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub optional_dependencies: Option<HashMap<String, String>>,
-
-    #[serde(
         rename = "bundledDependencies",
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
     pub bundled_dependencies: Option<Vec<String>>,
-
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub engines: Option<HashMap<String, String>>,
-
-    /// Binary files configuration - can be string or object
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub bin: Option<Value>,
-
-    /// Install script indicator (used by npm to optimize package installation)
-    #[serde(rename = "hasInstallScript")]
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub has_install_script: Option<bool>,
-
-    /// Platform compatibility - CPU
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub cpu: Option<Value>,
-
-    /// Platform compatibility - OS
-    #[serde(
-        deserialize_with = "skip_on_error",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub os: Option<Value>,
 
     #[serde(rename = "_id")]
     pub id: String,
@@ -427,8 +361,6 @@ pub struct VersionManifest {
         skip_serializing_if = "Option::is_none"
     )]
     pub npm_version: Option<String>,
-
-    pub dist: Dist,
 
     #[serde(rename = "_npmUser")]
     #[serde(
@@ -886,10 +818,10 @@ mod tests {
         }"#;
 
         let manifest: VersionManifest = serde_json::from_str(json).unwrap();
-        assert_eq!(manifest.name, "jsonparse");
-        assert_eq!(manifest.version, "1.3.1");
-        assert_eq!(manifest.license, Some("MIT".to_string()));
-        assert!(manifest.dependencies.is_some());
+        assert_eq!(manifest.core.name, "jsonparse");
+        assert_eq!(manifest.core.version, "1.3.1");
+        assert_eq!(manifest.core.license, Some("MIT".to_string()));
+        assert!(manifest.core.dependencies.is_some());
     }
 
     #[test]
@@ -908,7 +840,7 @@ mod tests {
         assert_eq!(manifest.license, None); // skip_on_error should handle this
 
         let manifest2: VersionManifest = serde_json::from_str(json).unwrap();
-        assert_eq!(manifest2.license, None);
+        assert_eq!(manifest2.core.license, None);
     }
 
     #[test]

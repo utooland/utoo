@@ -96,7 +96,7 @@ pub struct PackageJson {
 
     /// Distribution info (from registry)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dist: Option<DistInfo>,
+    pub dist: Option<crate::model::manifest::Dist>,
 
     /// Package description
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -273,30 +273,6 @@ pub struct PublishConfig {
     /// Package access level ("public" or "restricted")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<String>,
-}
-
-/// Distribution information from registry.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DistInfo {
-    /// Tarball URL
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tarball: Option<String>,
-
-    /// Integrity hash (SRI format)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub integrity: Option<String>,
-
-    /// SHA-1 hash (legacy)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shasum: Option<String>,
-
-    /// File count
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_count: Option<u32>,
-
-    /// Unpacked size
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unpacked_size: Option<u64>,
 }
 
 /// Empty map constant for convenience methods that return references.
