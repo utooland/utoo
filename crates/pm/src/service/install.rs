@@ -132,8 +132,9 @@ async fn reify_packages(
                     PROGRESS_BAR.inc(1);
                     continue;
                 }
-                let path = path.clone();
-                let package = package.clone();
+                // No clones here: the spawned task only captures the owned
+                // name/version/resolved/target_path it actually needs, so
+                // skipped/linked entries never pay for a LockPackage copy.
                 if let Some(ref resolved) = package.resolved {
                     // Lockfile stores `file:` URLs root-relative (npm format).
                     // Cloner only understands absolute URLs — re-absolutize
@@ -146,12 +147,12 @@ async fn reify_packages(
                         _ => resolved.clone(),
                     };
                     if matches!(action, LockEntryAction::Link) {
-                        let link_name = extract_package_name(&path);
+                        let link_name = extract_package_name(path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
                             continue;
                         }
-                        link(Path::new(&resolved), Path::new(&path))
+                        link(Path::new(&resolved), Path::new(path))
                             .await
                             .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
                         PROGRESS_BAR.inc(1);
@@ -173,13 +174,12 @@ async fn reify_packages(
                         continue;
                     }
 
-                    let name = package.get_name(&path);
+                    let name = package.get_name(path);
                     let version = package
                         .version
                         .clone()
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
-                    let cwd_clone = cwd.to_path_buf();
-                    let target_path = cwd_clone.join(&path);
+                    let target_path = cwd.join(path);
                     let scheduler = scheduler.clone();
 
                     // Check if this is an optional dependency
