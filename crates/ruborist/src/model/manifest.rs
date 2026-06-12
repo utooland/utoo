@@ -657,7 +657,7 @@ impl NodeManifest {
     /// Get OS constraints.
     pub fn os(&self) -> Option<&Value> {
         match self {
-            NodeManifest::Local(_) => None, // PackageJson uses Vec<String>
+            NodeManifest::Local(pkg) => pkg.os.as_ref(),
             NodeManifest::Registry(manifest) => manifest.os.as_ref(),
         }
     }
@@ -665,7 +665,7 @@ impl NodeManifest {
     /// Get CPU constraints.
     pub fn cpu(&self) -> Option<&Value> {
         match self {
-            NodeManifest::Local(_) => None, // PackageJson uses Vec<String>
+            NodeManifest::Local(pkg) => pkg.cpu.as_ref(),
             NodeManifest::Registry(manifest) => manifest.cpu.as_ref(),
         }
     }

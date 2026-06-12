@@ -82,13 +82,17 @@ pub struct PackageJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
 
-    /// OS constraints
+    /// OS constraints. `Value` on purpose: npm's spec says array-of-strings,
+    /// but the CLI (`npm-install-checks`) also tolerates a bare string, and
+    /// real packages ship both shapes — same wire type as
+    /// `CoreVersionManifest`/`LockPackage` so [`super::compatibility`]
+    /// evaluates all three uniformly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub os: Option<Vec<String>>,
+    pub os: Option<Value>,
 
-    /// CPU constraints
+    /// CPU constraints (same string-or-array tolerance as `os`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu: Option<Vec<String>>,
+    pub cpu: Option<Value>,
 
     /// Has install scripts
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -371,6 +375,27 @@ impl PackageJson {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// npm's spec says os/cpu are string arrays, but the CLI tolerates bare
+    /// strings and real packages ship both — parsing must accept both shapes
+    /// (a string-form `os` used to fail the whole PackageJson parse).
+    #[test]
+    fn test_os_cpu_accept_string_and_array() {
+        let array_form = json!({
+            "name": "a", "version": "1.0.0",
+            "os": ["!win32"], "cpu": ["x64", "arm64"]
+        });
+        let pkg = PackageJson::from_value(&array_form).unwrap();
+        assert_eq!(pkg.os, Some(json!(["!win32"])));
+
+        let string_form = json!({
+            "name": "b", "version": "1.0.0",
+            "os": "linux", "cpu": "x64"
+        });
+        let pkg = PackageJson::from_value(&string_form).unwrap();
+        assert_eq!(pkg.os, Some(json!("linux")));
+        assert_eq!(pkg.cpu, Some(json!("x64")));
+    }
 
     #[test]
     fn test_parse_simple_package() {
