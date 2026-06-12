@@ -16,7 +16,8 @@ use crate::resolver::edges::DependencyEdgeInfo;
 use crate::service::VersionsInfo;
 
 /// A parked edge waiting on a pending fetch: its node and the dependency edge.
-type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
+/// Defined here — the store owns the waiter payload — and shared by the driver.
+pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
 /// Resolved version manifests produced by one run, as neutral
 /// `(name, spec, manifest)` tuples. The persistence layer (`ProjectCacheData`)

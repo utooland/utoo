@@ -27,7 +27,7 @@ use super::queue::{FetchDone, FetchKey};
 use super::queue::{FetchFuture, FetchQueues};
 use super::schedule::{schedule_fetch, schedule_transitive_prefetches};
 use super::select::{EdgeStep, ResolutionMode, WaitKey, select_edge};
-use super::state::{ManifestState, PackageVersions, ResolverManifestCache};
+use super::state::{ManifestState, PackageVersions, ResolverManifestCache, WaitingEdge};
 use crate::model::node::PeerDeps;
 use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone};
 use crate::traits::registry::RegistryError;
@@ -422,9 +422,6 @@ where
 //
 // These tie the manifest store and the fetch scheduler together; the store and
 // the queue stay unaware of each other.
-
-/// A parked edge waiting on a pending fetch (matches `state`'s waiter payload).
-pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
 pub(super) fn registry_error<E: From<RegistryError>>(
     message: impl Into<String>,

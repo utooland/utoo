@@ -57,14 +57,7 @@ pub async fn clean(pattern: &str) -> Result<()> {
     }
 
     // Sort by package name and version number
-    to_delete.sort_by(|a, b| {
-        let pkg_cmp = a.0.cmp(&b.0);
-        if pkg_cmp == std::cmp::Ordering::Equal {
-            a.1.cmp(&b.1)
-        } else {
-            pkg_cmp
-        }
-    });
+    to_delete.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     println!("\nThe following caches will be deleted:");
     for (pkg, version, _) in &to_delete {

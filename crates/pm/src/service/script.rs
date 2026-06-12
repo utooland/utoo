@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Write as _;
@@ -89,6 +90,16 @@ async fn build_script_command(
     }
 
     Ok(cmd)
+}
+
+/// Append extra CLI args to a script body, borrowing when there are none —
+/// the common per-script case allocates nothing.
+fn join_script_args<'a>(script_content: &'a str, script_args: &[&str]) -> Cow<'a, str> {
+    if script_args.is_empty() {
+        Cow::Borrowed(script_content)
+    } else {
+        Cow::Owned(format!("{} {}", script_content, script_args.join(" ")))
+    }
 }
 
 /// Cached result of node-gyp availability check and installation
@@ -367,12 +378,9 @@ impl ScriptService {
             script_name
         );
 
-        let cmd_content = match script_args.is_empty() {
-            true => script_content,
-            false => &format!("{} {}", script_content, script_args.join(" ")),
-        };
+        let cmd_content = join_script_args(script_content, &script_args);
 
-        let mut cmd = build_script_command(package, script_name, cmd_content).await?;
+        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
         cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
@@ -473,13 +481,9 @@ impl ScriptService {
         script_content: &str,
         script_args: Vec<&str>,
     ) -> Result<std::process::Output> {
-        let cmd_content = if script_args.is_empty() {
-            script_content
-        } else {
-            &format!("{} {}", script_content, script_args.join(" "))
-        };
+        let cmd_content = join_script_args(script_content, &script_args);
 
-        let mut cmd = build_script_command(package, script_name, cmd_content).await?;
+        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());

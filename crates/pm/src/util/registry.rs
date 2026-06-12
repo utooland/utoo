@@ -56,11 +56,8 @@ pub async fn select_fastest_registry() -> String {
     };
 
     let registries = [REGISTRY_NPMMIRROR, REGISTRY_NPMJS];
-    let futures: Vec<_> = registries
-        .iter()
-        .map(|r| ping_registry(&client, r))
-        .collect();
-    let results = futures::future::join_all(futures).await;
+    let results =
+        futures::future::join_all(registries.iter().map(|r| ping_registry(&client, r))).await;
 
     let (registry, latency_info) = match results
         .into_iter()

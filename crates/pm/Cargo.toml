@@ -19,7 +19,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow             = { workspace = true }
 async-trait        = { workspace = true }
-atty               = "0.2"
 base64             = "0.22"
 bytes              = "1.11.0"
 chrono             = { version = "0.4", features = ["serde"] }

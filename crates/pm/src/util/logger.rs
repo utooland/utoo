@@ -71,7 +71,7 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     LOG_FILE_PATH.set(log_path.clone()).ok();
 
     // 3. Detect if stdout is a TTY (terminal) to decide on colors
-    let is_tty = atty::is(atty::Stream::Stdout);
+    let is_tty = std::io::stdout().is_terminal();
 
     // 4. Build subscriber with different filters for console and file
     Registry::default()

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
 use owo_colors::OwoColorize;
 use utoo_ruborist::manifest::{FullManifest, VersionManifest};
@@ -34,21 +34,14 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
         token.as_deref(),
     )
     .await
-    .map_err(|e| anyhow!("Failed to fetch package info for {}: {}", package_spec, e))?;
+    .with_context(|| format!("Failed to fetch package info for {package_spec}"))?;
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
     // Resolve version and get full VersionManifest (with all display fields)
     let resolved_version =
         utoo_ruborist::registry::resolve_target_version((&full_manifest).into(), version_spec)
-            .map_err(|e| {
-                anyhow!(
-                    "Version resolution failed for {}@{}: {}",
-                    name,
-                    version_spec,
-                    e
-                )
-            })?;
+            .with_context(|| format!("Version resolution failed for {name}@{version_spec}"))?;
 
     let version_manifest: VersionManifest = full_manifest
         .get_full_version(&resolved_version)

@@ -65,7 +65,7 @@ impl PackageNode {
             path,
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
+            manifest: NodeManifest::Local(Box::new(pkg)),
             node_type: NodeType::Regular,
             is_prod: false,
             is_dev: false,
@@ -82,7 +82,7 @@ impl PackageNode {
             path,
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
+            manifest: NodeManifest::Local(Box::new(pkg)),
             node_type: NodeType::Root,
             is_prod: false,
             is_dev: false,
@@ -103,7 +103,7 @@ impl PackageNode {
             path,
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
+            manifest: NodeManifest::Local(Box::new(pkg)),
             node_type: NodeType::Workspace,
             is_prod: false,
             is_dev: false,
@@ -120,7 +120,7 @@ impl PackageNode {
             path,
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
+            manifest: NodeManifest::Local(Box::new(pkg)),
             node_type: NodeType::Link,
             is_prod: false,
             is_dev: false,
@@ -155,8 +155,10 @@ impl PackageNode {
 pub enum GraphEdge {
     /// Physical parent-child relationship (directory structure)
     Physical,
-    /// Logical dependency relationship
-    Dependency(DependencyEdge),
+    /// Logical dependency relationship. Boxed: physical edges outnumber
+    /// dependency edges in the petgraph and a unit variant must not pay the
+    /// full DependencyEdge footprint.
+    Dependency(Box<DependencyEdge>),
 }
 
 /// Dependency edge data.
@@ -311,7 +313,7 @@ impl DependencyGraph {
     ) -> EdgeIndex {
         let dep_edge = DependencyEdge::new(name, spec, edge_type);
         self.graph
-            .add_edge(from, from, GraphEdge::Dependency(dep_edge))
+            .add_edge(from, from, GraphEdge::Dependency(Box::new(dep_edge)))
     }
 
     /// Get the physical parent of a node.
@@ -386,7 +388,7 @@ impl DependencyGraph {
             .edges_directed(node, Outgoing)
             .filter_map(|edge| {
                 if let GraphEdge::Dependency(dep) = edge.weight() {
-                    Some((edge.id(), dep))
+                    Some((edge.id(), dep.as_ref()))
                 } else {
                     None
                 }

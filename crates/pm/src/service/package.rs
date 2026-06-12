@@ -272,26 +272,14 @@ impl PackageService {
 
             // Script queues - skip in bins_only mode
             if scripts == ScriptPolicy::Run {
-                if package
-                    .lifecycle_scripts
-                    .get_script(LifecycleHook::Preinstall)
-                    .is_some()
-                {
-                    queues.preinstall.push((Rc::clone(&package), is_optional));
-                }
-                if package
-                    .lifecycle_scripts
-                    .get_script(LifecycleHook::Install)
-                    .is_some()
-                {
-                    queues.install.push((Rc::clone(&package), is_optional));
-                }
-                if package
-                    .lifecycle_scripts
-                    .get_script(LifecycleHook::Postinstall)
-                    .is_some()
-                {
-                    queues.postinstall.push((Rc::clone(&package), is_optional));
+                for (hook, queue) in [
+                    (LifecycleHook::Preinstall, &mut queues.preinstall),
+                    (LifecycleHook::Install, &mut queues.install),
+                    (LifecycleHook::Postinstall, &mut queues.postinstall),
+                ] {
+                    if package.lifecycle_scripts.get_script(hook).is_some() {
+                        queue.push((Rc::clone(&package), is_optional));
+                    }
                 }
             }
 
@@ -397,7 +385,9 @@ impl PackageService {
         for (is_optional, result) in script_results {
             if let Err(e) = result {
                 if is_optional {
-                    tracing::warn!("Optional dependency script failed (ignored): {e}");
+                    // `{:#}` prints the full cause chain — this warn is the only
+                    // signal the user gets that an optional dep's script failed.
+                    tracing::warn!("Optional dependency script failed (ignored): {e:#}");
                 } else {
                     return Err(e);
                 }

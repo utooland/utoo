@@ -564,10 +564,10 @@ pub struct Directories {
 /// This enum distinguishes between local packages (root/workspace) and
 /// registry packages (resolved dependencies).
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub enum NodeManifest {
-    /// Local package.json (root or workspace)
-    Local(PackageJson),
+    /// Local package.json (root or workspace), boxed so the rare Local
+    /// variant does not inflate every Registry node to PackageJson size.
+    Local(Box<PackageJson>),
     /// Registry package manifest (resolved dependency, Arc-shared for cheap cloning)
     Registry(Arc<CoreVersionManifest>),
 }
@@ -717,7 +717,7 @@ impl NodeManifest {
 
 impl From<PackageJson> for NodeManifest {
     fn from(pkg: PackageJson) -> Self {
-        NodeManifest::Local(pkg)
+        NodeManifest::Local(Box::new(pkg))
     }
 }
 

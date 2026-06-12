@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Write as _;
 use std::io;
 use std::io::Write;
 
@@ -83,10 +84,10 @@ pub fn format_resolve_chain(err: &anyhow::Error) -> Option<String> {
     let mut out = String::from("required by:");
     for (i, (name, version)) in chain.iter().enumerate() {
         if i == 0 {
-            out.push_str(&format!("\n  {name}@{version}"));
+            let _ = write!(out, "\n  {name}@{version}");
         } else {
             let indent = "    ".repeat(i - 1);
-            out.push_str(&format!("\n  {indent}└── {name}@{version}"));
+            let _ = write!(out, "\n  {indent}└── {name}@{version}");
         }
     }
     Some(out)
