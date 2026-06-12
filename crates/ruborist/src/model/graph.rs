@@ -688,6 +688,8 @@ pub enum FindResult {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     fn create_pkg(name: &str, version: &str) -> PackageJson {
@@ -888,8 +890,6 @@ mod tests {
 
     #[test]
     fn test_workspace_override() {
-        use serde_json::json;
-
         // Create root package.json with workspaces and overrides
         let pkg_value = json!({
             "name": "root",
@@ -940,8 +940,6 @@ mod tests {
 
     #[test]
     fn test_simple_override() {
-        use serde_json::json;
-
         // Simple global override: all lodash -> 4.17.21
         let pkg_value = json!({
             "name": "root",
@@ -960,8 +958,6 @@ mod tests {
 
     #[test]
     fn test_versioned_override() {
-        use serde_json::json;
-
         // Override only specific version range
         let pkg_value = json!({
             "name": "root",
@@ -984,8 +980,6 @@ mod tests {
 
     #[test]
     fn test_nested_override_chain() {
-        use serde_json::json;
-
         // Override debug only under express
         let pkg_value = json!({
             "name": "root",
@@ -1019,8 +1013,6 @@ mod tests {
 
     #[test]
     fn test_deeply_nested_override() {
-        use serde_json::json;
-
         // Override only under express > body-parser
         let pkg_value = json!({
             "name": "root",
@@ -1068,8 +1060,6 @@ mod tests {
 
     #[test]
     fn test_override_with_find_compatible_node() {
-        use serde_json::json;
-
         // Test that override affects find_compatible_node result
         let pkg_value = json!({
             "name": "root",
@@ -1098,8 +1088,6 @@ mod tests {
 
     #[test]
     fn test_no_override_when_name_not_matched() {
-        use serde_json::json;
-
         let pkg_value = json!({
             "name": "root",
             "version": "1.0.0",
@@ -1117,8 +1105,6 @@ mod tests {
 
     #[test]
     fn test_scoped_package_override() {
-        use serde_json::json;
-
         let pkg_value = json!({
             "name": "root",
             "version": "1.0.0",
@@ -1136,8 +1122,6 @@ mod tests {
 
     #[test]
     fn test_reference_override() {
-        use serde_json::json;
-
         // Test $dep_name reference
         let pkg_value = json!({
             "name": "root",
@@ -1159,8 +1143,6 @@ mod tests {
 
     #[test]
     fn test_conditional_override_with_resolved_version() {
-        use serde_json::json;
-
         // Conditional override: only apply when resolved version matches ^9
         let pkg_value = json!({
             "name": "root",

@@ -58,9 +58,13 @@ async fn find_binary_in_hierarchy(start_path: &Path, command: &str) -> Result<Op
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    use tempfile::TempDir;
+
     use super::*;
     use crate::fs as async_fs;
-    use tempfile::TempDir;
 
     // Helper function to create a test directory structure
     async fn create_test_structure() -> Result<TempDir> {
@@ -78,7 +82,6 @@ mod tests {
         // Set executable permissions on Unix systems
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let mut perms = async_fs::metadata(&test_binary).await?.permissions();
             perms.set_mode(0o755);
             async_fs::set_permissions(&test_binary, perms).await?;

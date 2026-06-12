@@ -578,6 +578,7 @@ pub(super) fn apply_fetch_result(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -585,9 +586,14 @@ mod tests {
 
     use super::*;
     use crate::model::manifest::CoreVersionManifest;
+    use crate::model::node::DevDeps;
     use crate::model::package_json::PackageJson;
-    use crate::resolver::builder::resolve;
+    use crate::resolver::builder::{
+        add_edges_from, add_workspace_member, build_deps_with_config_output, resolve,
+    };
+    use crate::resolver::edges::EdgeContext;
     use crate::service::{ManifestJob, ManifestJobDone};
+    use crate::traits::progress::NoopReceiver;
     use crate::traits::registry::mock::{MockError, MockRegistryClient};
 
     /// A parked waiter; node/edge indices are placeholders — `apply_fetch_result`
@@ -763,15 +769,6 @@ mod tests {
         // workspace `app`.deps: mid -> deep -> shared (deep prod via a workspace)
         // `shared` is reachable through a workspace's prod chain, so it must be
         // prod, not dev — the cross-workspace analog of the resolve-order bug.
-        use crate::model::graph::DependencyGraph;
-        use crate::model::node::DevDeps;
-        use crate::resolver::builder::{
-            BuildDepsConfig, add_edges_from, add_workspace_member, build_deps_with_config_output,
-        };
-        use crate::resolver::edges::EdgeContext;
-        use crate::traits::progress::NoopReceiver;
-        use std::path::PathBuf;
-
         let mut inner = MockRegistryClient::new();
         inner.add_package(
             "mid",

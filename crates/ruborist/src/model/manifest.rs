@@ -10,6 +10,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use super::package_json::PackageJson;
+
 /// Borrowed view of the data needed to resolve a version spec — a slice of
 /// available versions plus a dist-tag map.
 ///
@@ -556,8 +558,6 @@ pub struct Directories {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test: Option<String>,
 }
-
-use super::package_json::PackageJson;
 
 /// Manifest for a node in the dependency graph.
 ///

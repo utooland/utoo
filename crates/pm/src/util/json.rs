@@ -100,10 +100,12 @@ pub async fn load_package_lock_json_from_path(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::{Value, json};
     use std::fs;
     use tempfile::tempdir;
+    use utoo_ruborist::manifest::{PackageJson, ScriptsView};
+
+    use super::*;
 
     #[tokio::test]
     async fn test_read_json_file() {
@@ -150,7 +152,6 @@ mod tests {
 
         fs::write(&package_path, test_data.to_string()).unwrap();
 
-        use utoo_ruborist::manifest::PackageJson;
         let pkg: PackageJson = load_package_json(dir.path()).await.unwrap();
         assert_eq!(pkg.name, "test-package");
         assert_eq!(pkg.version, "1.0.0");
@@ -172,7 +173,6 @@ mod tests {
         )
         .unwrap();
 
-        use utoo_ruborist::manifest::ScriptsView;
         let view: ScriptsView = load_package_json(dir.path()).await.unwrap();
         // Last value wins, matching JSON.parse semantics
         assert_eq!(view.scripts.get("prepublish").unwrap(), "node build.js");

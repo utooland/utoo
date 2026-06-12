@@ -1,8 +1,13 @@
-use anyhow::{Context, Result};
-use bytes::Bytes;
+use std::collections::HashSet;
+use std::fs;
+use std::io::{Cursor, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use bytes::Bytes;
+use rayon::prelude::*;
 
 const MIN_ESTIMATED_SIZE: usize = 16;
 const MAX_ESTIMATED_SIZE: usize = 512 * 1024 * 1024; // 512MB
@@ -73,11 +78,6 @@ async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 
 /// Synchronous extraction: decompress + parse + parallel write, all on rayon.
 fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -> Result<()> {
-    use rayon::prelude::*;
-    use std::collections::HashSet;
-    use std::fs;
-    use std::io::Write;
-
     // Decompress gzip using libdeflate
     let mut output = vec![0u8; estimated_size];
 
@@ -174,8 +174,6 @@ fn extract_tarball_sync(gzip_bytes: Bytes, estimated_size: usize, dest: &Path) -
 /// tuples into the decompressed `buf`. Skips directories, ignores any
 /// path-traversal entries.
 fn parse_tar_entries(buf: &Bytes, dest: &Path) -> Result<Vec<ExtractedEntry>> {
-    use std::io::Cursor;
-
     let cursor = Cursor::new(buf.as_ref());
     let mut archive = tar::Archive::new(cursor);
     let mut entries = Vec::new();

@@ -2,9 +2,14 @@
 //!
 //! Shared types for serializing/deserializing npm lock files.
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
+use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
+
+use super::graph::DependencyGraph;
+use super::node::EdgeType;
 use super::util::{PackageNameStr, deserialize_or_default};
 
 /// Represents a license field that can be either a string or an array of strings.
@@ -196,13 +201,6 @@ impl PackageLock {
 // ============================================================================
 // Graph Serialization
 // ============================================================================
-
-use std::path::Path;
-
-use petgraph::graph::NodeIndex;
-
-use super::graph::DependencyGraph;
-use super::node::EdgeType;
 
 /// Serialize a dependency graph to PackageLock format.
 ///
@@ -530,8 +528,6 @@ mod tests {
 
     /// Helper: create a graph with a single non-root node, return its LockPackage.
     fn lock_pkg_for_node(is_dev: bool, is_optional: bool, is_peer: bool) -> LockPackage {
-        use super::super::graph::DependencyGraph;
-
         let root_pkg = PackageJson::new("root", "1.0.0");
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("/root"), root_pkg);
 
@@ -593,8 +589,6 @@ mod tests {
     /// The resolver also creates graph edges for both lodash and workspace-a,
     /// but the root lockfile entry should only contain lodash.
     fn build_workspace_graph() -> HashMap<String, LockPackage> {
-        use super::super::graph::DependencyGraph;
-
         let mut root_pkg = PackageJson::new("my-project", "1.0.0");
         // Only regular deps in manifest — workspace packages are NOT listed
         // in dependencies; they're discovered from the workspaces field.
@@ -681,8 +675,6 @@ mod tests {
     /// what made `collect` run a workspace's install scripts a second time.
     #[test]
     fn test_link_node_omits_script_markers() {
-        use super::super::graph::DependencyGraph;
-
         let root_pkg = PackageJson::new("my-project", "1.0.0");
         let root_path = PathBuf::from("/project");
         let mut graph = DependencyGraph::from_package_json(root_path.clone(), root_pkg);
@@ -733,8 +725,6 @@ mod tests {
 
     #[test]
     fn test_root_resolves_catalog_specs() {
-        use super::super::graph::DependencyGraph;
-
         let mut root_pkg = PackageJson::new("catalog-project", "1.0.0");
         root_pkg.dependencies = Some(HashMap::from([
             ("react".to_string(), "catalog:default".to_string()),

@@ -136,6 +136,8 @@ async fn exchange(registry: &str, package_name: &str, id_token: &str) -> Result<
 
 #[cfg(test)]
 mod tests {
+    use mockito::Matcher;
+
     use super::*;
 
     #[test]
@@ -166,7 +168,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_github_actions_id_token() {
-        use mockito::Matcher;
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("GET", "/token")

@@ -4,8 +4,6 @@ use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 use cmd::config::{handle_config_get, handle_config_list, handle_config_set};
 use cmd::deps::build_deps;
-use cmd::execute::execute;
-use cmd::init::init;
 use cmd::install::{install, install_global_package, update_packages};
 use cmd::link::{link_current_to_global, link_global_to_local};
 use cmd::list::list_dependencies;
@@ -589,7 +587,7 @@ async fn async_main() -> Result<()> {
             list_dependencies(&cwd, &package).await?;
         }
         Some(Commands::Execute { command, args }) => {
-            execute(&command, args).await?;
+            service::execute::execute_package(&command, args).await?;
         }
         Some(Commands::Run {
             script,
@@ -632,7 +630,7 @@ async fn async_main() -> Result<()> {
             }
         }
         Some(Commands::Init { yes }) => {
-            init(yes, None).await?;
+            service::init::init(yes, None).await?;
             log_time_end("package.json created");
         }
         Some(Commands::Pack { path, dry_run }) => {

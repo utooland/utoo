@@ -397,9 +397,10 @@ mod tests {
     use std::fs;
 
     use serde_json::json;
-    use tempfile::TempDir;
+    use tempfile::{TempDir, tempdir};
 
     use super::*;
+    use crate::util::cli_enum::{PackageAction, SaveType};
 
     #[test]
     fn test_version_to_write() {
@@ -740,10 +741,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_package_json_preserves_trailing_newline() {
-        use tempfile::tempdir;
-
-        use crate::util::cli_enum::{PackageAction, SaveType};
-
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
 
@@ -794,10 +791,6 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[tokio::test]
     async fn test_update_package_json_preserves_crlf() {
-        use tempfile::tempdir;
-
-        use crate::util::cli_enum::{PackageAction, SaveType};
-
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
 

@@ -196,9 +196,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+
+    use tokio::sync::Barrier;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_try_init_dedupes_success() {
@@ -281,8 +284,6 @@ mod tests {
     /// and the waiter would sleep forever.
     #[tokio::test]
     async fn test_no_missed_notifications() {
-        use tokio::sync::Barrier;
-
         let map = Arc::new(OnceMap::<String, i32>::new());
         let barrier = Arc::new(Barrier::new(2));
 

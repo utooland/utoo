@@ -507,8 +507,6 @@ mod tests {
 
     #[test]
     fn test_should_omit_package() {
-        use std::collections::HashSet;
-
         // Empty omit set should not omit anything
         let empty_omit: HashSet<OmitType> = HashSet::new();
         let dev_pkg = Package {

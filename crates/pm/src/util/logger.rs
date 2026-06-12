@@ -12,6 +12,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+use utoo_ruborist::progress::BuildEvent;
 
 /// Cached at startup: is stderr connected to a terminal?
 ///
@@ -217,7 +218,6 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
         if !*IS_TTY {
             return;
         }
-        use utoo_ruborist::progress::BuildEvent;
         match event {
             BuildEvent::DependencyCount { count } => {
                 PROGRESS_BAR.inc_length(count as u64);

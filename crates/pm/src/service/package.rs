@@ -353,8 +353,6 @@ impl PackageService {
         queue: &[(Rc<PackageInfo>, bool)],
         hook: LifecycleHook,
     ) -> Result<()> {
-        use futures;
-
         let queue_start = std::time::Instant::now();
         tracing::debug!("Starting {} queue with {} scripts", hook, queue.len());
 
@@ -437,8 +435,6 @@ impl PackageService {
     ///      try_join_all/rayon parallelism only saved an additional 2-3ms over
     ///      sync, well within stddev — not worth the concurrency complexity.
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
-        use std::collections::HashSet;
-
         // Sort by package path for deterministic dedupe winners across runs
         // (`collect_packages_from_lock` walks a HashMap, so input order is
         // non-deterministic without this).
@@ -826,9 +822,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_queues_skips_missing_bin_file() {
-        use std::fs;
-        use tempfile::TempDir;
-
         // Create a temporary directory for the fake package
         let temp_dir = TempDir::new().unwrap();
         let package_path = temp_dir.path();
@@ -870,11 +863,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_with_scripts() {
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
 
         // Create test packages in memory
@@ -996,12 +984,6 @@ mod tests {
     /// `file:` link (not a workspace) keeps running its scripts.
     #[tokio::test]
     async fn test_collect_packages_from_lock_skips_workspace_hooks() {
-        use crate::model::package::LifecycleHook;
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
         let mut packages = HashMap::new();
 
@@ -1145,10 +1127,6 @@ mod tests {
     /// `conflict-bundle-file-dep` e2e crash.
     #[tokio::test]
     async fn test_collect_tolerates_link_with_missing_manifest() {
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
         // The link's path resolves to the node_modules dir itself, which exists
         // but holds no package.json.
@@ -1179,11 +1157,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_platform_compatibility() {
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
 
         let mut packages = HashMap::new();
@@ -1256,11 +1229,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_optional_flag() {
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
 
         let mut packages = HashMap::new();
@@ -1358,9 +1326,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_script_queue_optional_failure_ignored() {
-        use std::fs;
-        use tempfile::TempDir;
-
         // Create a temporary directory for the test package
         let temp_dir = TempDir::new().unwrap();
         let package_path = temp_dir.path();

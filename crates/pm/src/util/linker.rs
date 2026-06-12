@@ -1,6 +1,9 @@
-use crate::fs;
-use anyhow::{Context, Result};
+use std::fs as sfs;
 use std::path::{self, Path, PathBuf};
+
+use anyhow::{Context, Result};
+
+use crate::fs;
 
 /// Convert a path to absolute. Treats empty paths as `"."` because lockfiles
 /// use `resolved: ""` for the root workspace linking itself.
@@ -75,8 +78,6 @@ pub async fn link(src: &Path, dst: &Path) -> Result<()> {
 /// real syscall cost — bench data showed ~6× slowdown for serial async
 /// vs sync on ant-design (36ms → 6ms across 228 bins).
 fn prepare_link_sync(src: &Path, dst: &Path) -> Result<Option<(PathBuf, PathBuf)>> {
-    use std::fs as sfs;
-
     let abs_src = to_absolute(src)?;
     let abs_dst = to_absolute(dst)?;
 
@@ -149,8 +150,6 @@ pub fn link_bin(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn win_bin_shims_sync(src: &Path, dst: &Path) -> Result<()> {
-    use std::fs as sfs;
-
     let bin_dir = dst.parent().context("bin link has no parent dir")?;
     let bin_name = dst
         .file_name()

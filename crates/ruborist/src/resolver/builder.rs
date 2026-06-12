@@ -12,11 +12,13 @@
 //! demand (no separate preload phase), overlapping network I/O with graph
 //! construction.
 
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(feature = "http-tarball")]
+use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use petgraph::graph::{EdgeIndex, NodeIndex};
 
 #[cfg(feature = "http-tarball")]
 use anyhow::Context as _;
@@ -27,6 +29,7 @@ use crate::model::manifest::CoreVersionManifest;
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
+use crate::model::package_lock::PackageLock;
 use crate::resolver::demand::{ManifestState, ResolverManifestCache, run_main_loop_bfs};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
 use crate::service::{ManifestProvider, ProjectCacheData};
@@ -84,7 +87,9 @@ async fn resolve_http_dep(
 #[cfg(feature = "native-git")]
 use crate::resolver::git::GitCloneCache;
 #[cfg(feature = "http-tarball")]
-use crate::resolver::http::HttpFetchCache;
+use crate::resolver::http::{HttpFetchCache, file_cache_slot};
+#[cfg(feature = "http-tarball")]
+use crate::resolver::tar::commit_tarball_bytes;
 
 #[cfg(not(feature = "native-git"))]
 type GitCloneCache = crate::resolver::common::DedupCache<()>;
@@ -376,8 +381,6 @@ pub fn update_node_type_from_edge(
 /// once set it clears the others and the `!is_prod` guards freeze the node), so
 /// every node changes O(1) times.
 pub fn compute_node_types(graph: &mut DependencyGraph) {
-    use std::collections::VecDeque;
-
     // Seed only the importers (root + workspace members); their edge types seed
     // their direct deps, and the fixpoint re-queues every changed node's
     // children, so the whole reachable graph is covered without visiting leaves
@@ -447,11 +450,6 @@ async fn process_file_dep<E>(
     path_spec: &str,
     cache_dir: Option<&Path>,
 ) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
-    use std::ops::ControlFlow;
-
-    use crate::resolver::http::file_cache_slot;
-    use crate::resolver::tar::commit_tarball_bytes;
-
     let file_err = |source: anyhow::Error| ResolveError::File {
         spec: edge.spec.clone(),
         source,
@@ -932,9 +930,6 @@ where
 // ============================================================================
 // High-level API
 // ============================================================================
-
-use crate::model::package_lock::PackageLock;
-use std::path::Path;
 
 /// Build package-lock.json from a package.json.
 ///

@@ -339,8 +339,10 @@ fn format_publish_line(time_str: &str, version_manifest: &VersionManifest) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use mockito::Matcher;
     use utoo_ruborist::manifest::Dist;
+
+    use super::*;
 
     #[test]
     fn test_print_package_info() {
@@ -372,8 +374,6 @@ mod tests {
     /// because the registry service used ETag caching.
     #[tokio::test]
     async fn test_view_twice_no_304_error() {
-        use mockito::Matcher;
-
         let mut server = mockito::Server::new_async().await;
         let manifest = r#"{
             "name": "is-odd",

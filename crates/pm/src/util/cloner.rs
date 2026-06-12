@@ -1,6 +1,12 @@
+#[cfg(target_os = "macos")]
+use std::ffi::CString;
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+#[cfg(target_os = "macos")]
+use libc::clonefile;
 use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
 
@@ -39,14 +45,6 @@ pub struct PackageClone<'a> {
     pub cache: &'a Path,
     pub target: &'a Path,
 }
-
-#[cfg(target_os = "macos")]
-use std::ffi::CString;
-#[cfg(target_os = "macos")]
-use std::os::unix::ffi::OsStrExt;
-
-#[cfg(target_os = "macos")]
-use libc::clonefile;
 
 /// Hardlink-first directory clone with a copy fallback. Used directly on
 /// Linux/Windows, and on macOS as the fallback when `clonefile` can't run
@@ -355,6 +353,9 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     mod hardlink_clone_tests {
+        #[cfg(unix)]
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
         use tokio::io::AsyncReadExt;
 
         use super::*;
@@ -539,8 +540,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_permissions() -> Result<()> {
-            use std::os::unix::fs::PermissionsExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -577,8 +576,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_read_only_permissions() -> Result<()> {
-            use std::os::unix::fs::PermissionsExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -615,8 +612,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_preserves_executable_in_subdirs() -> Result<()> {
-            use std::os::unix::fs::PermissionsExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -677,8 +672,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_per_file_fallback_does_not_latch() -> Result<()> {
-            use std::os::unix::fs::MetadataExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -733,8 +726,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_install_script_forces_copy() -> Result<()> {
-            use std::os::unix::fs::MetadataExt;
-
             let temp = TempDir::new()?;
             // has_install_script_sync checks `src.parent()/_hasInstallScript`,
             // mirroring the cache layout `<cache>/<name>/<version>/package`.

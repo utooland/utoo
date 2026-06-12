@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Write as _;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::OnceCell;
 use tokio::task::JoinSet;
 
@@ -226,7 +229,6 @@ impl ScriptService {
         // Unix: Only process if not already executable
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let permissions = metadata.permissions();
             let is_executable = permissions.mode() & 0o111 != 0;
 
@@ -262,7 +264,6 @@ impl ScriptService {
         // Set executable permissions on Unix
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let mut perms = crate::fs::metadata(&target_path)
                 .await
                 .with_context(|| {
@@ -282,8 +283,6 @@ impl ScriptService {
     /// Check if file needs shebang and add it if needed
     /// Returns Ok(true) if shebang was added, Ok(false) if not needed, Err if binary/non-UTF8
     async fn check_and_add_shebang(target_path: &Path) -> Result<bool> {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         // Read first 512 bytes to check for shebang and validate UTF-8
         // file is automatically dropped here
         let header = {
@@ -751,7 +750,6 @@ mod tests {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let permissions = fs::metadata(&test_file).unwrap().permissions();
             assert!(permissions.mode() & 0o111 != 0, "File not made executable");
         }
@@ -785,7 +783,6 @@ mod tests {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let permissions = fs::metadata(&binary_file).unwrap().permissions();
             assert!(
                 permissions.mode() & 0o111 != 0,
@@ -823,7 +820,6 @@ mod tests {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let permissions = fs::metadata(&text_file).unwrap().permissions();
             assert!(
                 permissions.mode() & 0o111 != 0,
@@ -853,7 +849,6 @@ mod tests {
 
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let permissions = fs::metadata(&text_file).unwrap().permissions();
             assert!(permissions.mode() & 0o111 != 0, "File should be executable");
         }
@@ -911,12 +906,6 @@ mod tests {
 
     #[test]
     fn test_has_node_gyp_in_path_found() {
-        use std::env;
-        use std::fs;
-        #[cfg(unix)]
-        use std::os::unix::fs::PermissionsExt;
-        use tempfile::tempdir;
-
         // Create a temporary directory
         let temp_dir = tempdir().unwrap();
         let node_gyp_path = temp_dir.path().join("node-gyp");
@@ -943,10 +932,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_ensure_node_gyp_found() {
-        use std::env;
-        use std::fs;
-        #[cfg(unix)]
-        use std::os::unix::fs::PermissionsExt;
         // Create a temporary directory
         let temp_dir = tempfile::tempdir().unwrap();
         let node_gyp_path = temp_dir.path().join("node-gyp");
@@ -973,7 +958,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_node_gyp_pkg_true_and_false() {
-        use std::fs;
         // Create a temporary directory
         let temp_dir = tempfile::tempdir().unwrap();
         let package_path = temp_dir.path();

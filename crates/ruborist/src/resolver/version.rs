@@ -130,6 +130,7 @@ impl std::error::Error for ResolveError {}
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::HashMap;
 
     use super::*;
@@ -227,8 +228,6 @@ mod tests {
     /// per-package parse+sort the shortcuts exist to avoid.
     #[test]
     fn test_lazy_skips_sorted_on_shortcut() {
-        use std::cell::Cell;
-
         let mut dist_tags = HashMap::new();
         dist_tags.insert("latest".to_string(), "1.5.0".to_string());
         dist_tags.insert("beta".to_string(), "2.0.0-beta.1".to_string());

@@ -6,6 +6,8 @@
 //! a cache slot.
 
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -115,7 +117,6 @@ pub(crate) fn write_entries(entries: &[TarEntry], dest: &Path) -> Result<()> {
 
         #[cfg(unix)]
         if entry.mode != 0o644 {
-            use std::os::unix::fs::PermissionsExt;
             let _ =
                 std::fs::set_permissions(&full_path, std::fs::Permissions::from_mode(entry.mode));
         }
