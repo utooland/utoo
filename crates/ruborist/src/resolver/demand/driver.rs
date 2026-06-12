@@ -3,10 +3,9 @@
 //! per-run [`ManifestState`] store and [`FetchQueues`] scheduler.
 
 use std::collections::VecDeque;
-use std::future::poll_fn;
 use std::sync::Arc;
-use std::task::Poll;
 
+use futures::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
 
@@ -364,27 +363,19 @@ where
                 ctx.pump_fetches(&mut fetches, &mut queues, concurrency);
             }
 
-            loop {
-                let ready = poll_fn(|cx| match fetches.poll_next_unpin(cx) {
-                    Poll::Ready(done) => Poll::Ready(done),
-                    Poll::Pending => Poll::Ready(None),
-                })
-                .await;
-                let Some(done) = ready else {
-                    break;
-                };
-                let done = done.map_err(|e| {
-                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
-                })?;
-
-                apply_fetch_result(
+            // Drain every already-completed fetch without yielding.
+            // `now_or_never` polls once with a no-op waker; that can't lose a
+            // wakeup here because the loop always re-polls (or `.await`s) the
+            // stream afterwards.
+            while let Some(done) = fetches.next().now_or_never().flatten() {
+                absorb_fetch_done(
                     &mut state,
                     &mut queues,
                     done,
                     supports_semver,
                     config.peer_deps,
                     &mut level_pending,
-                );
+                )?;
             }
 
             if !level_pending.is_empty() {
@@ -408,18 +399,14 @@ where
                     .await?;
                 break;
             };
-            let done = done.map_err(|e| {
-                registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
-            })?;
-
-            apply_fetch_result(
+            absorb_fetch_done(
                 &mut state,
                 &mut queues,
                 done,
                 supports_semver,
                 config.peer_deps,
                 &mut level_pending,
-            );
+            )?;
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
@@ -443,6 +430,29 @@ pub(super) fn registry_error<E: From<RegistryError>>(
     message: impl Into<String>,
 ) -> ResolveError<E> {
     ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
+}
+
+/// Unwrap one completed fetch task and feed its result back into the
+/// store/queues. Shared by the non-blocking drain and the blocking tail of
+/// the level loop.
+fn absorb_fetch_done<E: From<RegistryError>>(
+    state: &mut ManifestState,
+    queues: &mut FetchQueues,
+    done: Result<FetchDone, String>,
+    supports_semver: ResolutionMode,
+    peer_deps: PeerDeps,
+    level_pending: &mut VecDeque<WaitingEdge>,
+) -> Result<(), ResolveError<E>> {
+    let done = done.map_err(|e| registry_error::<E>(format!("manifest fetch task failed: {e}")))?;
+    apply_fetch_result(
+        state,
+        queues,
+        done,
+        supports_semver,
+        peer_deps,
+        level_pending,
+    );
+    Ok(())
 }
 
 async fn fetch_registry_manifest_inner<R: ManifestProvider>(

@@ -557,11 +557,7 @@ pub async fn process_dependency<R: ManifestProvider>(
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
         FindResult::Reuse(existing_index) => {
-            // Mark edge as resolved. Node types are assigned in a single pass
-            // after the tree is built (see `compute_node_types`).
-            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
-
-            Ok(ProcessResult::Reused(existing_index))
+            Ok(reuse_existing_node(graph, edge_info, existing_index))
         }
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
             // Parse spec once and exhaustively route by variant.
@@ -748,25 +744,13 @@ pub async fn process_dependency<R: ManifestProvider>(
                 None => resolved,
             };
 
-            // Create new node
-            let new_node = create_package_node(&edge_info.name, &resolved, conflict_parent, graph);
-            let new_index = graph.add_node(new_node);
-
-            // Add physical edge
-            graph.add_physical_edge(conflict_parent, new_index);
-
-            // Mark dependency as resolved
-            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-
-            // Add dependencies of the new node
-            add_edges_from(
+            Ok(place_new_node(
                 graph,
-                new_index,
-                &*resolved.manifest,
-                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-            );
-
-            Ok(ProcessResult::Created(new_index))
+                conflict_parent,
+                edge_info,
+                &resolved,
+                config,
+            ))
         }
     }
 }
@@ -1060,19 +1044,34 @@ pub fn process_dependency_with_resolved(
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
         FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
-            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
-            let new_index = graph.add_node(new_node);
-            graph.add_physical_edge(conflict_parent, new_index);
-            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-            add_edges_from(
-                graph,
-                new_index,
-                &*resolved.manifest,
-                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-            );
-            ProcessResult::Created(new_index)
+            place_new_node(graph, conflict_parent, edge_info, resolved, config)
         }
     }
+}
+
+/// Attach a freshly resolved package under `conflict_parent`: create the
+/// node, link it physically, resolve the originating edge, and queue its own
+/// dependency edges. The single placement tail shared by the spec router
+/// ([`process_dependency`]) and the demand path
+/// ([`process_dependency_with_resolved`]).
+fn place_new_node(
+    graph: &mut DependencyGraph,
+    conflict_parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    resolved: &ResolvedPackage,
+    config: &BuildDepsConfig,
+) -> ProcessResult {
+    let new_node = create_package_node(&edge.name, resolved, conflict_parent, graph);
+    let new_index = graph.add_node(new_node);
+    graph.add_physical_edge(conflict_parent, new_index);
+    graph.mark_dependency_resolved(edge.edge_id, new_index);
+    add_edges_from(
+        graph,
+        new_index,
+        &*resolved.manifest,
+        &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
+    );
+    ProcessResult::Created(new_index)
 }
 
 pub(crate) fn chain_err<E>(
