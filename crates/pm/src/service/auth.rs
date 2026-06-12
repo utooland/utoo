@@ -10,6 +10,13 @@ fn registry_api(registry: &str, path: &str) -> String {
     format!("{}{}", registry.trim_end_matches('/'), path)
 }
 
+/// npm `escapedName`: only the `/` in a scoped name is percent-encoded, so
+/// `@scope/name` → `@scope%2fname` and `pkg` stays `pkg` (npm does the same
+/// via `npa.resolve().escapedName`).
+pub(crate) fn escaped_package_name(package_name: &str) -> String {
+    package_name.replace('/', "%2f")
+}
+
 /// Extract host from registry URL for use as config key suffix.
 ///
 /// "https://registry.npmjs.org/" -> "registry.npmjs.org"

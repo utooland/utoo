@@ -108,7 +108,7 @@ async fn exchange(registry: &str, package_name: &str, id_token: &str) -> Result<
     let url = format!(
         "{}/-/npm/v1/oidc/token/exchange/package/{}",
         registry.trim_end_matches('/'),
-        escaped_name(package_name),
+        auth::escaped_package_name(package_name),
     );
 
     let resp = client()?
@@ -132,12 +132,6 @@ async fn exchange(registry: &str, package_name: &str, id_token: &str) -> Result<
         .as_str()
         .map(str::to_owned)
         .ok_or_else(|| anyhow::anyhow!("OIDC token exchange response missing `token`"))
-}
-
-/// npm `escapedName`: only the `/` in a scoped name is percent-encoded, so
-/// `@scope/name` → `@scope%2fname` and `pkg` stays `pkg`.
-fn escaped_name(package_name: &str) -> String {
-    package_name.replace('/', "%2f")
 }
 
 #[cfg(test)]
@@ -166,8 +160,8 @@ mod tests {
 
     #[test]
     fn test_escaped_name() {
-        assert_eq!(escaped_name("lodash"), "lodash");
-        assert_eq!(escaped_name("@scope/pkg"), "@scope%2fpkg");
+        assert_eq!(auth::escaped_package_name("lodash"), "lodash");
+        assert_eq!(auth::escaped_package_name("@scope/pkg"), "@scope%2fpkg");
     }
 
     #[tokio::test]

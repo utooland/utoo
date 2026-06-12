@@ -179,17 +179,7 @@ fn load_package_json_sync<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let pkg_path = path.join("package.json");
     let content = std::fs::read_to_string(&pkg_path)
         .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
-
-    match serde_json::from_str(&content) {
-        Ok(v) => Ok(v),
-        Err(original_err) => match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(value) => serde_json::from_value(value)
-                .with_context(|| format!("Failed to deserialize {pkg_path:?}")),
-            Err(_) => {
-                Err(original_err).with_context(|| format!("Failed to parse JSON from {pkg_path:?}"))
-            }
-        },
-    }
+    super::json::parse_package_json_lenient(&content, &pkg_path)
 }
 
 fn validate_name_version_sync(dst: &Path, name: &str, version: &str) -> bool {

@@ -43,10 +43,8 @@ pub fn write_compact_sync<T: Serialize>(path: &Path, value: &T) -> io::Result<()
     writer.flush()
 }
 
-/// Load package.json from a directory path and deserialize into the caller's
-/// chosen view type `T`. Use a full `PackageJson` for root projects, or a
-/// minimal view (e.g. `ScriptsView`) for node_modules to avoid parsing
-/// unnecessary / non-standard fields.
+/// Parse package.json content into the caller's chosen view type `T`,
+/// tolerating duplicate keys.
 ///
 /// Some published npm packages ship package.json with duplicate keys
 /// (e.g. `mime@1.3.4` has two `scripts` entries). serde's derived
@@ -55,15 +53,18 @@ pub fn write_compact_sync<T: Serialize>(path: &Path, value: &T) -> io::Result<()
 /// So when direct struct deserialization fails while the JSON itself is
 /// valid, we retry through a Value intermediary to collapse duplicates.
 /// The normal (no-duplicate) path has zero extra overhead.
-pub async fn load_package_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    let pkg_path = path.join("package.json");
-    let content = crate::fs::read_to_string(&pkg_path)
-        .await
-        .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
-
-    match serde_json::from_str(&content) {
+///
+/// `pkg_path` is used for error/log context only. This is the single
+/// implementation of the lenient contract — both the async loader here and
+/// the sync loader in `util::cloner` go through it so the tolerance can't
+/// drift between paths.
+pub fn parse_package_json_lenient<T: DeserializeOwned>(
+    content: &str,
+    pkg_path: &Path,
+) -> Result<T> {
+    match serde_json::from_str(content) {
         Ok(v) => Ok(v),
-        Err(original_err) => match serde_json::from_str::<serde_json::Value>(&content) {
+        Err(original_err) => match serde_json::from_str::<serde_json::Value>(content) {
             Ok(value) => {
                 tracing::warn!(
                     "package.json has non-standard structure (e.g. duplicate keys), \
@@ -77,6 +78,18 @@ pub async fn load_package_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
             }
         },
     }
+}
+
+/// Load package.json from a directory path and deserialize into the caller's
+/// chosen view type `T`. Use a full `PackageJson` for root projects, or a
+/// minimal view (e.g. `ScriptsView`) for node_modules to avoid parsing
+/// unnecessary / non-standard fields.
+pub async fn load_package_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let pkg_path = path.join("package.json");
+    let content = crate::fs::read_to_string(&pkg_path)
+        .await
+        .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
+    parse_package_json_lenient(&content, &pkg_path)
 }
 
 pub async fn load_package_lock_json_from_path(

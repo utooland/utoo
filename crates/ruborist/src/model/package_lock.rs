@@ -72,6 +72,14 @@ pub struct LockPackage {
 }
 
 impl LockPackage {
+    /// Whether this entry is reachable only through optional edges: a direct
+    /// optional dependency, or npm's `devOptional` (dev + optional) flag.
+    /// The single definition of "failures may be ignored" used by
+    /// install/reify/script execution.
+    pub fn is_optional(&self) -> bool {
+        self.optional == Some(true) || self.dev_optional == Some(true)
+    }
+
     /// Extract package name from path string.
     /// Handles both normal and scoped packages.
     pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {

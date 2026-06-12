@@ -101,9 +101,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
 
     tracing::info!("Publishing to {} with tag {}", opts.registry, opts.tag);
 
-    // Scoped packages: encode `/` as `%2f` so the registry sees a single path
-    // segment (npm does the same via `npa.resolve().escapedName`).
-    let escaped_name = pack_result.name.replace('/', "%2f");
+    let escaped_name = auth::escaped_package_name(&pack_result.name);
     let url = format!("{}/{}", opts.registry.trim_end_matches('/'), escaped_name);
 
     let response = send_with_web_auth_retry(&url, &token, &payload, opts.otp).await?;

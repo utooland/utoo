@@ -158,8 +158,7 @@ async fn reify_packages(
                     let scheduler = scheduler.clone();
 
                     // Check if this is an optional dependency
-                    let is_optional =
-                        package.optional == Some(true) || package.dev_optional == Some(true);
+                    let is_optional = package.is_optional();
 
                     clone_tasks.push(async move {
                         if let Err(e) = scheduler
@@ -553,8 +552,7 @@ mod tests {
 
         // Regular package - not optional
         let regular_pkg = Package::default();
-        let is_optional =
-            regular_pkg.optional == Some(true) || regular_pkg.dev_optional == Some(true);
+        let is_optional = regular_pkg.is_optional();
         assert!(!is_optional, "Regular package should not be optional");
 
         // Optional package
@@ -562,8 +560,7 @@ mod tests {
             optional: Some(true),
             ..Package::default()
         };
-        let is_optional =
-            optional_pkg.optional == Some(true) || optional_pkg.dev_optional == Some(true);
+        let is_optional = optional_pkg.is_optional();
         assert!(is_optional, "Package with optional=true should be optional");
 
         // Dev optional package
@@ -571,8 +568,7 @@ mod tests {
             dev_optional: Some(true),
             ..Package::default()
         };
-        let is_optional =
-            dev_optional_pkg.optional == Some(true) || dev_optional_pkg.dev_optional == Some(true);
+        let is_optional = dev_optional_pkg.is_optional();
         assert!(
             is_optional,
             "Package with dev_optional=true should be optional"
@@ -583,8 +579,7 @@ mod tests {
             optional: Some(false),
             ..Package::default()
         };
-        let is_optional =
-            not_optional_pkg.optional == Some(true) || not_optional_pkg.dev_optional == Some(true);
+        let is_optional = not_optional_pkg.is_optional();
         assert!(
             !is_optional,
             "Package with optional=false should not be optional"

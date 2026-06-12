@@ -243,8 +243,7 @@ impl PackageService {
                 };
 
             // Check if this package is an optional dependency (based on edge type)
-            let is_optional =
-                lock_package.optional == Some(true) || lock_package.dev_optional == Some(true);
+            let is_optional = lock_package.is_optional();
 
             let package_info = PackageInfo {
                 path: package_path,
