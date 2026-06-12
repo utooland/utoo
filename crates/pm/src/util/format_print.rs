@@ -93,6 +93,15 @@ pub fn format_resolve_chain(err: &anyhow::Error) -> Option<String> {
     Some(out)
 }
 
+/// `"3 packages installed"` / `"1 package uninstalled"` — the count line
+/// printed when an install/uninstall finishes.
+pub fn pluralized_package_count(count: usize, verb: &str) -> String {
+    format!(
+        "{count} package{} {verb}",
+        if count == 1 { "" } else { "s" }
+    )
+}
+
 pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1000;
     const MB: u64 = KB * 1000;

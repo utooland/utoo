@@ -18,6 +18,7 @@ use service::workspace::WorkspaceFilter;
 use util::cli_enum::{
     ConfigScope, OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type,
 };
+use util::format_print::pluralized_package_count;
 use util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use util::user_config::{
     InstallScope, init_registry, set_cache_dir, set_install_scope, set_legacy_peer_deps,
@@ -507,11 +508,7 @@ async fn async_main() -> Result<()> {
                     for spec in specs.iter() {
                         install_global_package(spec, prefix.as_deref()).await?;
                     }
-                    log_time_end(&format!(
-                        "{} package{} installed",
-                        specs.len(),
-                        if specs.len() == 1 { "" } else { "s" }
-                    ));
+                    log_time_end(&pluralized_package_count(specs.len(), "installed"));
                 } else {
                     let save_type = parse_save_type(save_dev, save_peer, save_optional);
                     let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
@@ -524,11 +521,7 @@ async fn async_main() -> Result<()> {
                     )
                     .await?;
                     // Log install result with correct singular/plural form in one line
-                    log_time_end(&format!(
-                        "{} package{} installed",
-                        specs.len(),
-                        if specs.len() == 1 { "" } else { "s" }
-                    ));
+                    log_time_end(&pluralized_package_count(specs.len(), "installed"));
                 }
             } else {
                 let cwd = std::env::current_dir()?;
@@ -552,15 +545,9 @@ async fn async_main() -> Result<()> {
                     SaveType::Prod,
                 )
                 .await?;
-                log_time_end(&format!(
-                    "{} package{} uninstalled",
-                    specs.len(),
-                    if specs.len() == 1 { "" } else { "s" }
-                ));
+                log_time_end(&pluralized_package_count(specs.len(), "uninstalled"));
             } else {
-                return Err(anyhow::anyhow!(
-                    "Package specification is required for uninstall"
-                ));
+                anyhow::bail!("Package specification is required for uninstall");
             }
         }
         Some(Commands::Rebuild) => {

@@ -5,6 +5,39 @@ use colored::*;
 use std::cmp::max;
 use std::process::Command;
 
+/// The static command catalog rendered by `ut help`: (name, aliases, about).
+const BUILTIN_COMMANDS: &[(&str, &str, &str)] = &[
+    (cmd::INSTALL_NAME, cmd::INSTALL_ALIASES, cmd::INSTALL_ABOUT),
+    (
+        cmd::UNINSTALL_NAME,
+        cmd::UNINSTALL_ALIAS,
+        cmd::UNINSTALL_ABOUT,
+    ),
+    (cmd::REBUILD_NAME, cmd::REBUILD_ALIAS, cmd::REBUILD_ABOUT),
+    (cmd::CLEAN_NAME, cmd::CLEAN_ALIAS, cmd::CLEAN_ABOUT),
+    (cmd::DEPS_NAME, cmd::DEPS_ALIAS, cmd::DEPS_ABOUT),
+    (cmd::UPDATE_NAME, cmd::UPDATE_ALIAS, cmd::UPDATE_ABOUT),
+    (cmd::LIST_NAME, cmd::LIST_ALIAS, cmd::LIST_ABOUT),
+    (cmd::EXECUTE_NAME, cmd::EXECUTE_ALIAS, cmd::EXECUTE_ABOUT),
+    (cmd::VIEW_NAME, cmd::VIEW_ALIASES, cmd::VIEW_ABOUT),
+    (cmd::LINK_NAME, cmd::LINK_ALIAS, cmd::LINK_ABOUT),
+    (cmd::CONFIG_NAME, cmd::CONFIG_ALIAS, cmd::CONFIG_ABOUT),
+    (cmd::RUN_NAME, cmd::RUN_ALIAS, cmd::RUN_ABOUT),
+    (cmd::PACK_NAME, cmd::PACK_ALIAS, cmd::PACK_ABOUT),
+    (cmd::PUBLISH_NAME, cmd::PUBLISH_ALIAS, cmd::PUBLISH_ABOUT),
+    (cmd::PING_NAME, cmd::PING_ALIAS, cmd::PING_ABOUT),
+    (cmd::LOGIN_NAME, cmd::LOGIN_ALIAS, cmd::LOGIN_ABOUT),
+    (cmd::LOGOUT_NAME, cmd::LOGOUT_ALIAS, cmd::LOGOUT_ABOUT),
+    (cmd::WHOAMI_NAME, cmd::WHOAMI_ALIAS, cmd::WHOAMI_ABOUT),
+    (cmd::INIT_NAME, cmd::INIT_ALIAS, cmd::INIT_ABOUT),
+    (
+        cmd::COMPLETIONS_NAME,
+        cmd::COMPLETIONS_ALIAS,
+        "Generate shell completion scripts",
+    ),
+    ("*", "", "→ ut run *"),
+];
+
 pub struct ConfigService {
     config: Config,
 }
@@ -54,39 +87,6 @@ impl ConfigService {
         println!();
         println!("{}", "Commands:".bold());
 
-        // Define all utoo-pm commands using constants
-        let builtin_commands = vec![
-            (cmd::INSTALL_NAME, cmd::INSTALL_ALIASES, cmd::INSTALL_ABOUT),
-            (
-                cmd::UNINSTALL_NAME,
-                cmd::UNINSTALL_ALIAS,
-                cmd::UNINSTALL_ABOUT,
-            ),
-            (cmd::REBUILD_NAME, cmd::REBUILD_ALIAS, cmd::REBUILD_ABOUT),
-            (cmd::CLEAN_NAME, cmd::CLEAN_ALIAS, cmd::CLEAN_ABOUT),
-            (cmd::DEPS_NAME, cmd::DEPS_ALIAS, cmd::DEPS_ABOUT),
-            (cmd::UPDATE_NAME, cmd::UPDATE_ALIAS, cmd::UPDATE_ABOUT),
-            (cmd::LIST_NAME, cmd::LIST_ALIAS, cmd::LIST_ABOUT),
-            (cmd::EXECUTE_NAME, cmd::EXECUTE_ALIAS, cmd::EXECUTE_ABOUT),
-            (cmd::VIEW_NAME, cmd::VIEW_ALIASES, cmd::VIEW_ABOUT),
-            (cmd::LINK_NAME, cmd::LINK_ALIAS, cmd::LINK_ABOUT),
-            (cmd::CONFIG_NAME, cmd::CONFIG_ALIAS, cmd::CONFIG_ABOUT),
-            (cmd::RUN_NAME, cmd::RUN_ALIAS, cmd::RUN_ABOUT),
-            (cmd::PACK_NAME, cmd::PACK_ALIAS, cmd::PACK_ABOUT),
-            (cmd::PUBLISH_NAME, cmd::PUBLISH_ALIAS, cmd::PUBLISH_ABOUT),
-            (cmd::PING_NAME, cmd::PING_ALIAS, cmd::PING_ABOUT),
-            (cmd::LOGIN_NAME, cmd::LOGIN_ALIAS, cmd::LOGIN_ABOUT),
-            (cmd::LOGOUT_NAME, cmd::LOGOUT_ALIAS, cmd::LOGOUT_ABOUT),
-            (cmd::WHOAMI_NAME, cmd::WHOAMI_ALIAS, cmd::WHOAMI_ABOUT),
-            (cmd::INIT_NAME, cmd::INIT_ALIAS, cmd::INIT_ABOUT),
-            (
-                cmd::COMPLETIONS_NAME,
-                cmd::COMPLETIONS_ALIAS,
-                "Generate shell completion scripts",
-            ),
-            ("*", "", "→ ut run *"),
-        ];
-
         // Find the longest command name and option name
         let option_names = ["-h, --help", "-v, --version"];
 
@@ -95,7 +95,7 @@ impl ConfigService {
 
         let max_width = max(
             get_max_length(
-                &builtin_commands
+                &BUILTIN_COMMANDS
                     .iter()
                     .map(|(name, _, _)| *name)
                     .collect::<Vec<_>>(),
@@ -104,7 +104,7 @@ impl ConfigService {
         );
 
         // Print all commands
-        for (name, alias, description) in &builtin_commands {
+        for (name, alias, description) in BUILTIN_COMMANDS {
             let description = if alias.is_empty() {
                 description.to_string()
             } else {
