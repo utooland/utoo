@@ -27,7 +27,7 @@ use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -166,12 +166,13 @@ fn mark_update_failed(timestamp: Option<u64>) {
 }
 
 async fn execute_update(version: &str) -> Result<()> {
-    let status = Command::new("utoo")
+    let status = tokio::process::Command::new("utoo")
         .args(["i", &format!("utoo@{version}"), "-g"])
         .env("CI", "1")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
+        .await
         .context("Failed to execute update command")?;
 
     if status.success() {

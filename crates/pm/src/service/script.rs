@@ -59,6 +59,8 @@ async fn build_script_command(
 ) -> Result<Command> {
     let bin_paths = ScriptService::collect_bin_paths(package).await?;
     let env_path = ScriptService::build_path_env(&bin_paths);
+    let init_cwd =
+        env::current_dir().context("failed to read current working directory for INIT_CWD")?;
 
     let mut cmd = Command::new("sh");
     cmd.arg("-c")
@@ -66,13 +68,7 @@ async fn build_script_command(
         .current_dir(&package.path)
         .env("PATH", env_path)
         .env("npm_lifecycle_event", script_name)
-        .env(
-            "INIT_CWD",
-            env::current_dir()
-                .expect("failed to get current working directory")
-                .to_string_lossy()
-                .to_string(),
-        )
+        .env("INIT_CWD", init_cwd)
         .env("npm_package_json", package.path.join("package.json"))
         .env("npm_config_global", get_install_scope().as_env_value());
 

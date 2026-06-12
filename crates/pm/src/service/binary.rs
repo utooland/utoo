@@ -100,40 +100,57 @@ fn get_replace_host_files(binary_mirror: &Map<String, Value>) -> Vec<&str> {
         .unwrap_or_else(|| vec!["lib/index.js", "lib/install.js"])
 }
 
+/// The mirror host from binary-mirror config. The config is fetched from a
+/// registry, so a missing/non-string `host` must surface as an error, not a
+/// panic.
+fn mirror_host(binary_mirror: &Map<String, Value>) -> Result<&str> {
+    binary_mirror
+        .get("host")
+        .and_then(Value::as_str)
+        .context("binary-mirror config missing string `host`")
+}
+
 fn replace_with_regex(content: &str, replace_map: &Value) -> Result<String> {
+    let replace_map = replace_map
+        .as_object()
+        .context("replaceHostRegExpMap is not an object")?;
     let mut result = content.to_string();
-    for (pattern, replacement) in replace_map.as_object().unwrap() {
+    for (pattern, replacement) in replace_map {
         let re = Regex::new(pattern).with_context(|| format!("Invalid regex pattern {pattern}"))?;
-        result = re
-            .replace_all(&result, replacement.as_str().unwrap())
-            .to_string();
+        let replacement = replacement
+            .as_str()
+            .with_context(|| format!("replaceHostRegExpMap[{pattern}] is not a string"))?;
+        result = re.replace_all(&result, replacement).to_string();
     }
     Ok(result)
 }
 
 fn replace_with_map(content: &str, binary_mirror: &Map<String, Value>) -> Result<String> {
     let replace_map = if let Some(map) = binary_mirror.get("replaceHostMap") {
-        map.as_object().unwrap().clone()
+        map.as_object()
+            .context("replaceHostMap is not an object")?
+            .clone()
     } else {
-        let mut map = Map::new();
+        let host = mirror_host(binary_mirror)?;
         let hosts = binary_mirror
             .get("replaceHost")
             .and_then(|h| h.as_array())
             .map(|h| h.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec![binary_mirror["host"].as_str().unwrap()]);
+            .unwrap_or_else(|| vec![host]);
 
-        for host in hosts {
-            map.insert(
-                host.to_string(),
-                Value::String(binary_mirror["host"].as_str().unwrap().to_string()),
-            );
+        let mut map = Map::new();
+        for from in hosts {
+            map.insert(from.to_string(), Value::String(host.to_string()));
         }
         map
     };
 
     let mut result = content.to_string();
     for (from, to) in replace_map {
-        result = result.replace(&from, to.as_str().unwrap());
+        let to = to
+            .as_str()
+            .with_context(|| format!("replaceHostMap[{from}] is not a string"))?;
+        result = result.replace(&from, to);
     }
     Ok(result)
 }
@@ -171,7 +188,7 @@ async fn handle_cypress(
     binary_mirror: &Map<String, Value>,
     target_os: Option<&str>,
 ) -> Result<()> {
-    if pkg["name"].as_str().unwrap() != "cypress" {
+    if pkg.get("name").and_then(Value::as_str) != Some("cypress") {
         return Ok(());
     }
 
@@ -182,7 +199,11 @@ async fn handle_cypress(
     });
 
     let platforms = if let Some(new_platforms) = binary_mirror.get("newPlatforms") {
-        if matches(">=3.3.0", pkg["version"].as_str().unwrap()) {
+        let version = pkg
+            .get("version")
+            .and_then(Value::as_str)
+            .context("cypress package.json missing string `version`")?;
+        if matches(">=3.3.0", version) {
             new_platforms
         } else {
             &default_platforms
@@ -199,22 +220,18 @@ async fn handle_cypress(
                 .await
                 .context("Failed to read download.js")?;
 
+            let host = mirror_host(binary_mirror)?;
+            let mirror_return = format!(
+                "return \"{host}\" + version + \"/{target_platform}/cypress.zip\"; // hack by npminstall"
+            );
             let new_content = content
                 .replace(
                     "return version ? prepend(`desktop/${version}`) : prepend('desktop')",
-                    &format!(
-                        "return \"{}\" + version + \"/{}/cypress.zip\"; // hack by npminstall",
-                        binary_mirror["host"].as_str().unwrap(),
-                        target_platform
-                    ),
+                    &mirror_return,
                 )
                 .replace(
                     "return version ? prepend('desktop/' + version) : prepend('desktop');",
-                    &format!(
-                        "return \"{}\" + version + \"/{}/cypress.zip\"; // hack by npminstall",
-                        binary_mirror["host"].as_str().unwrap(),
-                        target_platform
-                    ),
+                    &mirror_return,
                 );
 
             fs::write(&download_file, new_content)
@@ -282,7 +299,7 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
         handle_cypress(dir, &pkg, binary_mirror, None).await?;
 
         // Write updated package.json
-        fs::write(pkg_path, serde_json::to_string_pretty(&pkg).unwrap())
+        fs::write(pkg_path, serde_json::to_string_pretty(&pkg)?)
             .await
             .context("Failed to write package.json")?;
     }
