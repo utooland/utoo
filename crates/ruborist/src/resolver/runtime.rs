@@ -24,8 +24,6 @@
 
 use std::collections::HashMap;
 
-use serde_json::Value;
-
 // Native implementation
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
@@ -57,15 +55,6 @@ mod native {
         optional_deps
     }
 
-    pub fn install_runtime(engines: &Value) -> HashMap<String, String> {
-        let version = match engines.get("install-node").and_then(|v| v.as_str()) {
-            Some(v) if !v.is_empty() => v,
-            _ => return HashMap::new(),
-        };
-
-        get_node_deps(version)
-    }
-
     pub fn install_runtime_from_map(engines: &HashMap<String, String>) -> HashMap<String, String> {
         let version = match engines.get("install-node") {
             Some(v) if !v.is_empty() => v.as_str(),
@@ -81,10 +70,6 @@ mod native {
 mod wasm {
     use super::*;
 
-    pub fn install_runtime(_engines: &Value) -> HashMap<String, String> {
-        HashMap::new()
-    }
-
     pub fn install_runtime_from_map(_engines: &HashMap<String, String>) -> HashMap<String, String> {
         HashMap::new()
     }
@@ -99,47 +84,6 @@ pub use wasm::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_install_runtime_with_empty_version() {
-        let engines = json!({ "install-node": "" });
-        let result = install_runtime(&engines);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_install_runtime_with_valid_version() {
-        let engines = json!({ "install-node": "16.17.0" });
-        let result = install_runtime(&engines);
-
-        // Check all expected dependencies
-        assert_eq!(result.get("node-darwin-x64"), Some(&"16.17.0".to_string()));
-        assert_eq!(
-            result.get("node-bin-darwin-arm64"),
-            Some(&"16.17.0".to_string())
-        );
-        assert_eq!(result.get("node-linux-x64"), Some(&"16.17.0".to_string()));
-        assert_eq!(result.get("node-linux-arm64"), Some(&"16.17.0".to_string()));
-        assert_eq!(result.get("node-win-x64"), Some(&"16.17.0".to_string()));
-        assert_eq!(result.get("node-win-x86"), Some(&"16.17.0".to_string()));
-
-        assert_eq!(result.len(), 6);
-    }
-
-    #[test]
-    fn test_install_runtime_no_install_node() {
-        let engines = json!({});
-        let result = install_runtime(&engines);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_install_runtime_null_value() {
-        let engines = json!({ "install-node": null });
-        let result = install_runtime(&engines);
-        assert!(result.is_empty());
-    }
 
     #[test]
     fn test_install_runtime_from_map_with_valid_version() {
@@ -148,7 +92,16 @@ mod tests {
 
         let result = install_runtime_from_map(&engines);
 
+        // Check all expected per-platform dependencies.
         assert_eq!(result.get("node-darwin-x64"), Some(&"18.0.0".to_string()));
+        assert_eq!(
+            result.get("node-bin-darwin-arm64"),
+            Some(&"18.0.0".to_string())
+        );
+        assert_eq!(result.get("node-linux-x64"), Some(&"18.0.0".to_string()));
+        assert_eq!(result.get("node-linux-arm64"), Some(&"18.0.0".to_string()));
+        assert_eq!(result.get("node-win-x64"), Some(&"18.0.0".to_string()));
+        assert_eq!(result.get("node-win-x86"), Some(&"18.0.0".to_string()));
         assert_eq!(result.len(), 6);
     }
 

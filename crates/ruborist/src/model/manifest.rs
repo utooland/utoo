@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::compatibility::PlatformConstraint;
-use super::package_json::PackageJson;
+use super::package_json::{PackageJson, WorkspacesConfig};
 
 /// Borrowed view of the data needed to resolve a version spec — a slice of
 /// available versions plus a dist-tag map.
@@ -697,12 +697,9 @@ impl NodeManifest {
     }
 
     /// Get workspaces configuration (only for local packages).
-    pub fn workspaces(&self) -> Option<Value> {
+    pub fn workspaces(&self) -> Option<&WorkspacesConfig> {
         match self {
-            NodeManifest::Local(pkg) => pkg
-                .workspaces
-                .as_ref()
-                .and_then(|w| serde_json::to_value(w).ok()),
+            NodeManifest::Local(pkg) => pkg.workspaces.as_ref(),
             NodeManifest::Registry(_) => None,
         }
     }

@@ -75,7 +75,7 @@ pub mod builder {
 
 /// Node.js runtime requirement helpers (engines field).
 pub mod runtime {
-    pub use crate::resolver::runtime::{install_runtime, install_runtime_from_map};
+    pub use crate::resolver::runtime::install_runtime_from_map;
 }
 
 /// Workspace member discovery.

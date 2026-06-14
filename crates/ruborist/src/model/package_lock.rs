@@ -203,16 +203,6 @@ impl PackageLock {
             packages,
         }
     }
-
-    /// Convert from graph's serialized packages Value to PackageLock.
-    pub fn from_packages_value(
-        name: String,
-        version: String,
-        packages: serde_json::Value,
-    ) -> Result<Self, serde_json::Error> {
-        let packages_map: HashMap<String, LockPackage> = serde_json::from_value(packages)?;
-        Ok(Self::new(name, version, packages_map))
-    }
 }
 
 // ============================================================================
@@ -326,9 +316,7 @@ fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> L
         name: Some(node.name.clone()),
         version: Some(node.version.clone()),
         engines: manifest.engines().cloned(),
-        workspaces: manifest
-            .workspaces()
-            .and_then(|v| serde_json::from_value(v).ok()),
+        workspaces: manifest.workspaces().map(|w| w.patterns().to_vec()),
         ..LockPackage::default()
     };
 
