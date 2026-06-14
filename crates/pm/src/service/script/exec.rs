@@ -46,9 +46,7 @@ async fn build_script_command(
             package.name
         );
         for (key, value) in envs {
-            if let Some(value_str) = value.as_str() {
-                cmd.env(key, value_str);
-            }
+            cmd.env(key, value);
         }
     }
 
