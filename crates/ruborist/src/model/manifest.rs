@@ -590,50 +590,55 @@ impl NodeManifest {
         }
     }
 
-    /// Get production dependencies.
+    /// Read a field that exists on both variants (or just one), picking the
+    /// right source. Collapses the `match self { Local => …, Registry => … }`
+    /// skeleton that every borrowing accessor below would otherwise repeat;
+    /// for a Local-only or Registry-only field pass `|_| None` for the other.
+    fn pick<'a, T: ?Sized>(
+        &'a self,
+        local: impl FnOnce(&'a PackageJson) -> Option<&'a T>,
+        registry: impl FnOnce(&'a CoreVersionManifest) -> Option<&'a T>,
+    ) -> Option<&'a T> {
+        match self {
+            NodeManifest::Local(pkg) => local(pkg),
+            NodeManifest::Registry(manifest) => registry(manifest),
+        }
+    }
+
+    /// Get production dependencies (empty map → None).
     pub fn dependencies(&self) -> Option<&HashMap<String, String>> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.dependencies.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.dependencies.as_ref(),
-        }
-        .filter(|m| !m.is_empty())
+        self.pick(|p| p.dependencies.as_ref(), |m| m.dependencies.as_ref())
+            .filter(|m| !m.is_empty())
     }
 
-    /// Get peer dependencies.
+    /// Get peer dependencies (empty map → None).
     pub fn peer_dependencies(&self) -> Option<&HashMap<String, String>> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.peer_dependencies.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.peer_dependencies.as_ref(),
-        }
+        self.pick(
+            |p| p.peer_dependencies.as_ref(),
+            |m| m.peer_dependencies.as_ref(),
+        )
         .filter(|m| !m.is_empty())
     }
 
-    /// Get optional dependencies.
+    /// Get optional dependencies (empty map → None).
     pub fn optional_dependencies(&self) -> Option<&HashMap<String, String>> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.optional_dependencies.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.optional_dependencies.as_ref(),
-        }
+        self.pick(
+            |p| p.optional_dependencies.as_ref(),
+            |m| m.optional_dependencies.as_ref(),
+        )
         .filter(|m| !m.is_empty())
     }
 
-    /// Get dev dependencies (only for local packages).
+    /// Get dev dependencies (only for local packages; empty map → None).
     pub fn dev_dependencies(&self) -> Option<&HashMap<String, String>> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.dev_dependencies.as_ref(),
-            NodeManifest::Registry(_) => None,
-        }
-        .filter(|m| !m.is_empty())
+        self.pick(|p| p.dev_dependencies.as_ref(), |_| None)
+            .filter(|m| !m.is_empty())
     }
 
-    /// Get engines requirements.
-    /// Returns None for empty maps.
+    /// Get engines requirements (empty map → None).
     pub fn engines(&self) -> Option<&HashMap<String, String>> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.engines.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.engines.as_ref(),
-        }
-        .filter(|m| !m.is_empty())
+        self.pick(|p| p.engines.as_ref(), |m| m.engines.as_ref())
+            .filter(|m| !m.is_empty())
     }
 
     /// Get binary configuration.
@@ -657,18 +662,12 @@ impl NodeManifest {
 
     /// Get OS constraints.
     pub fn os(&self) -> Option<&PlatformConstraint> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.os.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.os.as_ref(),
-        }
+        self.pick(|p| p.os.as_ref(), |m| m.os.as_ref())
     }
 
     /// Get CPU constraints.
     pub fn cpu(&self) -> Option<&PlatformConstraint> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.cpu.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.cpu.as_ref(),
-        }
+        self.pick(|p| p.cpu.as_ref(), |m| m.cpu.as_ref())
     }
 
     /// Check if has install script.
@@ -679,37 +678,25 @@ impl NodeManifest {
         }
     }
 
-    /// Get scripts.
+    /// Get scripts (empty map → None).
     pub fn scripts(&self) -> Option<&HashMap<String, String>> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.scripts.as_ref(),
-            NodeManifest::Registry(manifest) => manifest.scripts.as_ref(),
-        }
-        .filter(|m| !m.is_empty())
+        self.pick(|p| p.scripts.as_ref(), |m| m.scripts.as_ref())
+            .filter(|m| !m.is_empty())
     }
 
-    /// Get distribution info (tarball, integrity).
+    /// Get distribution info (tarball, integrity) — registry packages only.
     pub fn dist(&self) -> Option<&Dist> {
-        match self {
-            NodeManifest::Local(_) => None,
-            NodeManifest::Registry(manifest) => Some(&manifest.dist),
-        }
+        self.pick(|_| None, |m| Some(&m.dist))
     }
 
     /// Get workspaces configuration (only for local packages).
     pub fn workspaces(&self) -> Option<&WorkspacesConfig> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.workspaces.as_ref(),
-            NodeManifest::Registry(_) => None,
-        }
+        self.pick(|p| p.workspaces.as_ref(), |_| None)
     }
 
     /// Get overrides configuration (only for local packages).
     pub fn overrides(&self) -> Option<&Value> {
-        match self {
-            NodeManifest::Local(pkg) => pkg.overrides.as_ref(),
-            NodeManifest::Registry(_) => None,
-        }
+        self.pick(|p| p.overrides.as_ref(), |_| None)
     }
 }
 
