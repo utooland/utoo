@@ -61,8 +61,6 @@ pub struct LockPackage {
         deserialize_with = "deserialize_or_default"
     )]
     pub engines: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub funding: Option<serde_json::Value>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
