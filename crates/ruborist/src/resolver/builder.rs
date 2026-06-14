@@ -768,17 +768,8 @@ where
     build_deps_with_receiver(&mut graph, registry, peer_deps, receiver).await?;
 
     // Convert to PackageLock
-    Ok(graph_to_package_lock(&graph, pkg, Path::new(".")))
-}
-
-/// Convert a DependencyGraph to PackageLock.
-fn graph_to_package_lock(
-    graph: &DependencyGraph,
-    pkg: &PackageJson,
-    root_path: &Path,
-) -> PackageLock {
-    let (packages, _total) = graph.serialize_to_packages(root_path);
-    PackageLock::new(&pkg.name, &pkg.version, packages)
+    let (packages, _total) = graph.serialize_to_packages(Path::new("."));
+    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
 
 #[cfg(test)]

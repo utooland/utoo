@@ -38,6 +38,30 @@ pub struct PackageNode {
 }
 
 impl PackageNode {
+    /// Core constructor: every node starts with all dependency-type flags
+    /// clear (they are assigned later by `compute_node_types`). The public
+    /// constructors below differ only in manifest source, node type, and how
+    /// name/version are derived.
+    fn new(
+        name: String,
+        version: String,
+        path: PathBuf,
+        manifest: NodeManifest,
+        node_type: NodeType,
+    ) -> Self {
+        Self {
+            path,
+            name,
+            version,
+            manifest,
+            node_type,
+            is_prod: false,
+            is_dev: false,
+            is_peer: false,
+            is_optional: false,
+        }
+    }
+
     /// Create a new regular package node from CoreVersionManifest.
     pub fn from_version_manifest(
         name: String,
@@ -45,88 +69,70 @@ impl PackageNode {
         manifest: Arc<CoreVersionManifest>,
     ) -> Self {
         let version = manifest.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Registry(manifest),
-            node_type: NodeType::Regular,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Registry(manifest),
+            NodeType::Regular,
+        )
     }
 
     /// Create a new regular package node from PackageJson.
     pub fn from_package_json(name: String, path: PathBuf, pkg: PackageJson) -> Self {
         let version = pkg.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(Box::new(pkg)),
-            node_type: NodeType::Regular,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Regular,
+        )
     }
 
     /// Create a root project node from PackageJson.
     pub fn root_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
         let version = pkg.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(Box::new(pkg)),
-            node_type: NodeType::Root,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Root,
+        )
     }
 
     /// Create a workspace package node from PackageJson.
     pub fn workspace_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
+        // A workspace member with no version pins to `*` so dependents can
+        // always satisfy a `workspace:*` requirement.
         let version = if pkg.version.is_empty() {
             "*".to_string()
         } else {
             pkg.version.clone()
         };
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(Box::new(pkg)),
-            node_type: NodeType::Workspace,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Workspace,
+        )
     }
 
     /// Create a symlinked package node from PackageJson.
     pub fn link_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
         let version = pkg.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(Box::new(pkg)),
-            node_type: NodeType::Link,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Link,
+        )
     }
 
     /// Check if this is the root node.

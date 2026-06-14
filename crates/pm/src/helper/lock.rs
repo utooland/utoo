@@ -9,7 +9,6 @@ use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::runtime::install_runtime_from_map;
 use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
-use utoo_ruborist::util::PackageNameStr;
 
 use super::ruborist_context::Context;
 use super::workspace::find_workspace_path;
@@ -222,22 +221,6 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
         PackageSpec::Http { url } => {
             anyhow::bail!("HTTP tarball spec ({url}) not supported in this context")
         }
-    }
-}
-
-/// Extract the relative package name from a package directory path string.
-/// Handles both normal and scoped packages, and skips invalid deep paths.
-pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
-    if let Some(idx) = path_str.rfind("node_modules/") {
-        let pkg_name = &path_str[idx + "node_modules/".len()..];
-        let parts: Vec<&str> = pkg_name.split('/').collect();
-        // Only allow ora or @scope/ora, skip @pkg/name/path/custom/package.json
-        if parts.len() > 2 || (parts.len() == 2 && !parts[0].is_scoped()) {
-            return None;
-        }
-        Some(pkg_name)
-    } else {
-        None
     }
 }
 
@@ -460,27 +443,6 @@ mod tests {
         assert_eq!(
             format_save_spec("file:../local-pkg", "1.0.0"),
             "file:../local-pkg"
-        );
-    }
-
-    #[test]
-    fn test_path_to_pkg_name() {
-        // Normal nested package
-        assert_eq!(
-            super::path_to_pkg_name("/root/node_modules/a/node_modules/b"),
-            Some("b")
-        );
-        // Top-level package
-        assert_eq!(super::path_to_pkg_name("/root/node_modules/a"), Some("a"));
-
-        assert_eq!(
-            super::path_to_pkg_name("/root/node_modules/@a/b"),
-            Some("@a/b")
-        );
-        // Deep invalid path (should be None)
-        assert_eq!(
-            super::path_to_pkg_name("/root/node_modules/@a/b/node_modules/b/c/d"),
-            None
         );
     }
 
