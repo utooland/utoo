@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::compatibility::PlatformConstraint;
-use super::package_json::{PackageJson, WorkspacesConfig};
+use super::package_json::{BinField, PackageJson, WorkspacesConfig};
 
 /// Borrowed view of the data needed to resolve a version spec — a slice of
 /// available versions plus a dist-tag map.
@@ -427,7 +427,7 @@ pub struct CoreVersionManifest {
         deserialize_with = "skip_on_error",
         skip_serializing_if = "Option::is_none"
     )]
-    pub bin: Option<Value>,
+    pub bin: Option<BinField>,
 
     #[serde(
         deserialize_with = "skip_on_error",
@@ -636,15 +636,15 @@ impl NodeManifest {
         .filter(|m| !m.is_empty())
     }
 
-    /// Get binary configuration as Value (for serialization compatibility).
-    /// Returns None for null or empty objects.
-    pub fn bin(&self) -> Option<Value> {
-        let value = match self {
-            NodeManifest::Local(pkg) => pkg.bin.as_ref().and_then(|b| serde_json::to_value(b).ok()),
+    /// Get binary configuration.
+    /// Returns None for empty maps.
+    pub fn bin(&self) -> Option<BinField> {
+        match self {
+            NodeManifest::Local(pkg) => pkg.bin.clone(),
             NodeManifest::Registry(manifest) => manifest.bin.clone(),
-        };
-        // Filter out null and empty objects
-        value.filter(|v| !v.is_null() && !v.as_object().is_some_and(|obj| obj.is_empty()))
+        }
+        // Filter out empty maps (matching npm, which records no binaries).
+        .filter(|b| !matches!(b, BinField::Map(map) if map.is_empty()))
     }
 
     /// Get license.

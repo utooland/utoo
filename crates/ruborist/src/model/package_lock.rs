@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::compatibility::PlatformConstraint;
 use super::graph::DependencyGraph;
 use super::node::EdgeType;
+use super::package_json::BinField;
 use super::util::{PackageNameStr, deserialize_or_default};
 
 /// Represents a license field that can be either a string or an array of strings.
@@ -53,8 +54,12 @@ pub struct LockPackage {
         skip_serializing_if = "Option::is_none"
     )]
     pub optional_dependencies: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bin: Option<serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub bin: Option<BinField>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -685,7 +690,10 @@ mod tests {
         // A link node whose package declares a bin, scripts, and a literal
         // hasInstallScript — none of the script markers should survive.
         let mut link_pkg = PackageJson::new("linked", "1.0.0");
-        link_pkg.bin = Some(serde_json::json!({ "linked-cli": "cli.js" }));
+        link_pkg.bin = Some(BinField::Map(std::collections::BTreeMap::from([(
+            "linked-cli".to_string(),
+            "cli.js".to_string(),
+        )])));
         link_pkg.scripts = Some(HashMap::from([(
             "postinstall".to_string(),
             "echo hi".to_string(),

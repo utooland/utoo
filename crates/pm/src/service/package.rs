@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
-use utoo_ruborist::manifest::{ScriptsView, parse_bin_field};
+use utoo_ruborist::manifest::ScriptsView;
 
 use super::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
 use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
@@ -180,7 +180,7 @@ impl PackageService {
             let bin_files = lock_package
                 .bin
                 .as_ref()
-                .map(|bin| parse_bin_field(bin, &package_name))
+                .map(|bin| bin.entries(&package_name))
                 .unwrap_or_default();
             let has_bin = !bin_files.is_empty();
 
@@ -517,6 +517,15 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use tempfile::TempDir;
+    use utoo_ruborist::manifest::BinField;
+
+    /// Test helper: build a single-binary `BinField::Map`.
+    fn bin_map(name: &str, path: &str) -> Option<BinField> {
+        Some(BinField::Map(std::collections::BTreeMap::from([(
+            name.to_string(),
+            path.to_string(),
+        )])))
+    }
 
     #[tokio::test]
     async fn test_process_project_hooks_basic() {
@@ -893,7 +902,7 @@ mod tests {
                 name: Some("full-package".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"cli": "bin/cli.js"})),
+                bin: bin_map("cli", "bin/cli.js"),
                 has_install_script: Some(true),
                 ..LockPackage::default()
             },
@@ -906,7 +915,7 @@ mod tests {
                 name: Some("bin-only".to_string()),
                 version: Some("2.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 ..LockPackage::default()
             },
@@ -1011,7 +1020,7 @@ mod tests {
             LockPackage {
                 name: Some("lib-a".to_string()),
                 version: Some("1.0.0".to_string()),
-                bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
+                bin: bin_map("lib-a-cli", "bin/cli.js"),
                 has_install_script: Some(true),
                 ..LockPackage::default()
             },
@@ -1026,7 +1035,7 @@ mod tests {
                 name: Some("lib-a".to_string()),
                 link: Some(true),
                 resolved: Some("lib-a".to_string()),
-                bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
+                bin: bin_map("lib-a-cli", "bin/cli.js"),
                 ..LockPackage::default()
             },
         );
@@ -1186,7 +1195,7 @@ mod tests {
                 name: Some("win-only".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "tool.exe"})),
+                bin: bin_map("tool", "tool.exe"),
                 has_install_script: Some(false),
                 os: Some(serde_json::from_value(json!(["win32"])).unwrap()), // Only Windows
                 ..LockPackage::default()
@@ -1200,7 +1209,7 @@ mod tests {
                 name: Some("cross-platform".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "tool.js"})),
+                bin: bin_map("tool", "tool.js"),
                 has_install_script: Some(false),
                 ..LockPackage::default()
             },
@@ -1258,7 +1267,7 @@ mod tests {
                 name: Some("regular-pkg".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 optional: None,
                 ..LockPackage::default()
@@ -1272,7 +1281,7 @@ mod tests {
                 name: Some("optional-pkg".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 optional: Some(true),
                 ..LockPackage::default()
@@ -1286,7 +1295,7 @@ mod tests {
                 name: Some("dev-optional-pkg".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 dev_optional: Some(true),
                 ..LockPackage::default()

@@ -49,6 +49,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
     use utoo_ruborist::lock::{LockPackage, PackageLock};
+    use utoo_ruborist::manifest::BinField;
 
     fn create_test_package_lock() -> PackageLock {
         let mut packages = HashMap::new();
@@ -62,7 +63,10 @@ mod tests {
                 resolved: Some(
                     "https://registry.npmjs.org/test-package/-/test-package-1.0.0.tgz".to_string(),
                 ),
-                bin: Some(json!({"test-cli": "bin/cli.js"})),
+                bin: Some(BinField::Map(std::collections::BTreeMap::from([(
+                    "test-cli".to_string(),
+                    "bin/cli.js".to_string(),
+                )]))),
                 has_install_script: Some(true),
                 ..LockPackage::default()
             },
@@ -78,7 +82,10 @@ mod tests {
                     "https://registry.npmjs.org/bin-only-package/-/bin-only-package-2.0.0.tgz"
                         .to_string(),
                 ),
-                bin: Some(json!({"bin-tool": "index.js"})),
+                bin: Some(BinField::Map(std::collections::BTreeMap::from([(
+                    "bin-tool".to_string(),
+                    "index.js".to_string(),
+                )]))),
                 has_install_script: Some(false),
                 ..LockPackage::default()
             },

@@ -45,7 +45,7 @@ pub mod manifest {
         CoreVersionManifest, Dist, FullManifest, VersionManifest, VersionsRef,
     };
     pub use crate::model::package_json::{
-        IdentityView, PackageInstallView, PackageJson, PublishConfig, ScriptsView, parse_bin_field,
+        BinField, IdentityView, PackageInstallView, PackageJson, PublishConfig, ScriptsView,
     };
 }
 
