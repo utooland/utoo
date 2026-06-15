@@ -190,6 +190,39 @@ impl PackageSpec {
     }
 }
 
+/// Coarse cache-layout classification of a resolved package, derived from the
+/// dependency's [`PackageSpec`].
+///
+/// Each variant maps to a distinct cache-slot layout, so the installer must
+/// route download/extract and seeded-slot lookup by this — **not** by
+/// re-parsing the resolved tarball URL. A registry package and a direct http
+/// tarball dependency both resolve to an `https://….tgz` URL, so the URL alone
+/// cannot tell them apart; only the originating spec can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TarballSource {
+    /// Registry semver dependency — cache slot `<name>/<version>/`.
+    Registry,
+    /// Direct `http(s)://…tgz` tarball dependency — cache slot
+    /// `<name>/_http_<url_hash>/` (disambiguated by URL so it never collides
+    /// with a registry package of the same name/version).
+    Http,
+    /// Git dependency.
+    Git,
+    /// Local `file:` tarball or directory dependency.
+    File,
+}
+
+impl From<&PackageSpec> for TarballSource {
+    fn from(spec: &PackageSpec) -> Self {
+        match spec {
+            PackageSpec::Registry { .. } => Self::Registry,
+            PackageSpec::Http { .. } => Self::Http,
+            PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => Self::Git,
+            PackageSpec::Local { .. } => Self::File,
+        }
+    }
+}
+
 impl From<&str> for PackageSpec {
     fn from(raw: &str) -> Self {
         match Protocol::strip_prefix(raw) {
@@ -399,6 +432,27 @@ mod tests {
 
     fn spec(s: &str) -> PackageSpec {
         s.parse_spec()
+    }
+
+    #[test]
+    fn tarball_source_maps_each_spec_variant() {
+        assert_eq!(
+            TarballSource::from(&spec("lodash@^4")),
+            TarballSource::Registry
+        );
+        assert_eq!(
+            TarballSource::from(&spec("https://example.com/foo.tgz")),
+            TarballSource::Http
+        );
+        assert_eq!(
+            TarballSource::from(&spec("git+https://github.com/u/r.git#abc")),
+            TarballSource::Git
+        );
+        assert_eq!(TarballSource::from(&spec("github:u/r")), TarballSource::Git);
+        assert_eq!(
+            TarballSource::from(&spec("file:../local.tgz")),
+            TarballSource::File
+        );
     }
 
     /// The allocation-free `is_registry_spec` must agree with the full parse

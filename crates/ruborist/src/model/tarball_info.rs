@@ -2,6 +2,7 @@
 
 use crate::model::compatibility::{PlatformConstraint, is_platform_compatible};
 use crate::model::manifest::CoreVersionManifest;
+use crate::spec::TarballSource;
 
 /// Package tarball information for downloading.
 ///
@@ -22,6 +23,11 @@ pub struct PackageTarballInfo<'a> {
     pub os: Option<&'a PlatformConstraint>,
     /// CPU compatibility constraint (if specified)
     pub cpu: Option<&'a PlatformConstraint>,
+    /// Cache-layout classification, used by the installer to route the tarball
+    /// to the correct cache slot. A `CoreVersionManifest` only ever describes a
+    /// registry package, so [`From<&CoreVersionManifest>`] fills `Registry`;
+    /// the lockfile-seed path sets it from the originating spec.
+    pub source: TarballSource,
 }
 
 impl PackageTarballInfo<'_> {
@@ -40,6 +46,7 @@ impl<'a> From<&'a CoreVersionManifest> for PackageTarballInfo<'a> {
             integrity: m.dist.integrity.as_deref(),
             os: m.os.as_ref(),
             cpu: m.cpu.as_ref(),
+            source: TarballSource::Registry,
         }
     }
 }

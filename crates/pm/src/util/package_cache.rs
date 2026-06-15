@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use utoo_ruborist::cache_slot::{file_cache_slot, http_cache_slot};
-use utoo_ruborist::spec::Protocol;
+use utoo_ruborist::spec::TarballSource;
 
 use super::cache::get_cache_dir;
 use super::extractor::extract_and_write;
@@ -87,24 +87,42 @@ pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<
     slot_cache_lookup(name, http_cache_slot(tarball_url)).await
 }
 
-/// Resolve cache slots that may have been seeded during dependency resolution
-/// without falling through to registry download. `Ok(None)` means this is a
-/// registry-style HTTP tarball that should be downloaded into `<name>/<version>`.
+/// Resolve the BFS-seeded cache slot for a non-registry package, routed by its
+/// [`TarballSource`] rather than by re-parsing the resolved URL (a registry and
+/// an http tarball both resolve to `https://….tgz`, indistinguishable by URL).
+///
+/// - `Registry` → `Ok(None)`: no seeded slot; the download pipeline fills
+///   `<name>/<version>/`.
+/// - `Git` / `File` / `Http` → the slot seeded during resolution; **`Err` if it
+///   is missing**. Crucially `Http` does *not* fall through to a registry
+///   download: that would extract the http tarball into `<name>/<version>/` and
+///   collide with the registry package of the same name@version. A missing slot
+///   means resolution must re-seed it, so we surface a hard error instead.
 pub async fn resolve_seeded_cache_path(
     name: &str,
     version: &str,
     tarball_url: &str,
+    source: TarballSource,
 ) -> Result<Option<PathBuf>> {
-    match tarball_url.parse::<Protocol>() {
-        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url)
+    match source {
+        TarballSource::Registry => Ok(None),
+        TarballSource::Git => git_cache_lookup(name, version, tarball_url)
             .await
             .map(Some)
             .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}")),
-        Ok(Protocol::File) => file_cache_lookup(name, tarball_url)
+        TarballSource::File => file_cache_lookup(name, tarball_url)
             .await
             .map(Some)
             .ok_or_else(|| anyhow::anyhow!("file tarball cache not found for {name}@{version}")),
-        _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
+        TarballSource::Http => http_tarball_cache_lookup(name, tarball_url)
+            .await
+            .map(Some)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "http tarball cache not found for {name}@{version}; \
+                     re-run resolution to seed it (url: {tarball_url})"
+                )
+            }),
     }
 }
 

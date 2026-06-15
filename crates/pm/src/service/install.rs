@@ -18,6 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
+use crate::util::downloader::is_git_url;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
@@ -25,6 +26,7 @@ use crate::util::logger::{
 };
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::progress::PackageTarballInfo;
+use utoo_ruborist::spec::{PackageSpec, TarballSource};
 
 use super::binary::update_package_binary;
 use super::clean::clean_deps;
@@ -88,17 +90,59 @@ fn classify_lock_entry(package: &Package, omit: &HashSet<OmitType>) -> LockEntry
     }
 }
 
+/// Collect the http-tarball **spec URLs** declared across every package's
+/// dependency maps. An http tarball dep's lockfile `resolved` equals the
+/// `https://…tgz` spec its parent declared (the resolver stores the spec URL as
+/// `dist.tarball`), so membership in this set identifies an http dep without
+/// confusing it with a registry package — whose `resolved` is also `https://…`
+/// but never appears as a declared spec. See [`TarballSource`].
+fn collect_http_tarball_urls(packages: &HashMap<String, Package>) -> HashSet<String> {
+    packages
+        .values()
+        .flat_map(|p| {
+            [
+                p.dependencies.as_ref(),
+                p.dev_dependencies.as_ref(),
+                p.peer_dependencies.as_ref(),
+                p.optional_dependencies.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .flat_map(|m| m.values())
+        })
+        .filter(|spec| matches!(PackageSpec::from(spec.as_str()), PackageSpec::Http { .. }))
+        .cloned()
+        .collect()
+}
+
+/// Classify a package's cache layout from its lockfile `resolved` URL. The URL
+/// alone can't separate a registry tarball from an http one (both are
+/// `https://…tgz`), so http deps are matched against `http_urls`; `file:` and
+/// git carry distinguishable prefixes.
+fn tarball_source(resolved: &str, http_urls: &HashSet<String>) -> TarballSource {
+    if resolved.starts_with("file:") {
+        TarballSource::File
+    } else if is_git_url(resolved) {
+        TarballSource::Git
+    } else if http_urls.contains(resolved) {
+        TarballSource::Http
+    } else {
+        TarballSource::Registry
+    }
+}
+
 async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    http_urls: &HashSet<String>,
 ) -> Result<()> {
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
-    reify_packages(groups, cwd, omit, scheduler).await
+    reify_packages(groups, cwd, omit, scheduler, http_urls).await
 }
 
 /// Clone/link every package in `groups` into `<cwd>/node_modules`, level by
@@ -112,6 +156,7 @@ async fn reify_packages(
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    http_urls: &HashSet<String>,
 ) -> Result<()> {
     log_progress("linking packages");
 
@@ -136,6 +181,10 @@ async fn reify_packages(
                 // name/version/resolved/target_path it actually needs, so
                 // skipped/linked entries never pay for a LockPackage copy.
                 if let Some(ref resolved) = package.resolved {
+                    // Classify from the original `resolved` (before file:
+                    // re-absolutization) so the scheduler routes this package to
+                    // the correct cache slot instead of re-parsing the URL.
+                    let source = tarball_source(resolved, http_urls);
                     // Lockfile stores `file:` URLs root-relative (npm format).
                     // Cloner only understands absolute URLs — re-absolutize
                     // here so the cloner/downloader stays unaware of project
@@ -187,7 +236,13 @@ async fn reify_packages(
 
                     clone_tasks.push(async move {
                         if let Err(e) = scheduler
-                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                            .ensure_clone(
+                                name.clone(),
+                                version,
+                                resolved,
+                                target_path.clone(),
+                                source,
+                            )
                             .await
                         {
                             if is_optional {
@@ -333,6 +388,7 @@ impl InstallService {
         // from `PackageResolved` events. Non-registry specs (file/git/link) are
         // filtered inside `prefetch_download`; the scheduler dedupes against the
         // authoritative `ensure_clone`.
+        let http_urls = collect_http_tarball_urls(&package_lock.packages);
         if !events_prefetched {
             for (path, package) in &package_lock.packages {
                 // Seed only what `install_packages` will actually clone — the
@@ -354,6 +410,7 @@ impl InstallService {
                         integrity: None,
                         os: package.os.as_ref(),
                         cpu: package.cpu.as_ref(),
+                        source: tarball_source(resolved, &http_urls),
                     });
                 }
             }
@@ -367,7 +424,7 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let install_result = install_packages(&groups, root_path, omit, &scheduler)
+        let install_result = install_packages(&groups, root_path, omit, &scheduler, &http_urls)
             .await
             .context("Failed to install packages");
 
@@ -444,12 +501,13 @@ impl InstallService {
 
         // Reify ADDITIVELY (no clean_deps) into the shared global node_modules.
         let groups = group_by_depth(&lock.packages);
+        let http_urls = collect_http_tarball_urls(&lock.packages);
         if !lock.packages.is_empty() {
             start_progress_bar();
             PROGRESS_BAR.set_length(lock.packages.len() as u64);
         }
         let link_start = Instant::now();
-        let reify = reify_packages(&groups, &root_path, &omit, &scheduler).await;
+        let reify = reify_packages(&groups, &root_path, &omit, &scheduler, &http_urls).await;
         let counts = scheduler_handle.shutdown().await;
         reify.context("Failed to install global package")?;
         finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
@@ -486,6 +544,36 @@ impl InstallService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tarball_source_classifies_by_resolved_and_http_set() {
+        // The http-spec set holds the original `https://…tgz` spec URLs.
+        let http = HashSet::from(["https://cdn.example.com/foo-1.0.0.tgz".to_string()]);
+
+        // A registry tarball download URL is also `https://…tgz`, but it is not
+        // a declared spec, so it must classify as Registry — this is exactly the
+        // case the old `is_registry_tarball_url` (Protocol::Http) got wrong.
+        assert_eq!(
+            tarball_source(
+                "https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz",
+                &http
+            ),
+            TarballSource::Registry
+        );
+        // The exact declared http spec URL → Http (its own cache slot).
+        assert_eq!(
+            tarball_source("https://cdn.example.com/foo-1.0.0.tgz", &http),
+            TarballSource::Http
+        );
+        assert_eq!(
+            tarball_source("file:/abs/local.tgz", &http),
+            TarballSource::File
+        );
+        assert_eq!(
+            tarball_source("git+https://github.com/u/r.git#abc", &http),
+            TarballSource::Git
+        );
+    }
 
     #[test]
     fn test_extract_package_name_from_path() {

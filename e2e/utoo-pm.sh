@@ -197,6 +197,30 @@ done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
 cd ../../..
 
+# Case 8.3b: an http(s) tarball dep — even with a registry-host URL — must cache
+# under its own `_http_<hash>` slot, never the registry `<name>/<version>/` slot.
+# The old `is_registry_tarball_url` only checked the https:// prefix, so it
+# misclassified the http tarball and extracted it into `<name>/<version>/`,
+# colliding with a registry package of the same name@version in the shared cache.
+# Use an isolated cache dir so a polluted registry slot can't be masked by a real
+# registry install elsewhere in this script.
+echo -e "${YELLOW}Case 8.3b: http tarball uses _http_ slot, not registry slot${NC}"
+ISO_DIR=$(mktemp -d)
+ISO_CACHE=$(mktemp -d)
+cp e2e/pm/http-tarball-deps/package.json "$ISO_DIR/"
+( cd "$ISO_DIR" && UTOO_CACHE_DIR="$ISO_CACHE" utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: isolated http tarball install failed${NC}"; rm -rf "$ISO_DIR" "$ISO_CACHE"; exit 1; }
+# abbrev@2.0.0 is declared as an http tarball URL: it must land in _http_<hash>.
+if ! ls "$ISO_CACHE"/abbrev/_http_* >/dev/null 2>&1; then
+    echo -e "${RED}FAIL: http tarball abbrev not cached in _http_ slot${NC}"; rm -rf "$ISO_DIR" "$ISO_CACHE"; exit 1
+fi
+# ...and must NOT pollute the registry slot abbrev/2.0.0.
+if [ -d "$ISO_CACHE/abbrev/2.0.0" ]; then
+    echo -e "${RED}FAIL: http tarball polluted registry cache slot abbrev/2.0.0${NC}"; rm -rf "$ISO_DIR" "$ISO_CACHE"; exit 1
+fi
+rm -rf "$ISO_DIR" "$ISO_CACHE"
+echo -e "${GREEN}PASS: http tarball isolated to _http_ slot, registry slot clean${NC}"
+
 # Case 8.4: file: dependency install. Directory deps install as a SYMLINK
 # (npm-compatible); tarball deps extract + clone from the cache slot.
 echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"

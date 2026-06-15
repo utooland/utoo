@@ -6,10 +6,11 @@ use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
+use utoo_ruborist::spec::TarballSource;
 
 use crate::service::auth;
 use crate::util::cloner::{PackageClone, clone_package_sync};
-use crate::util::downloader::{download_bytes, is_registry_tarball_url};
+use crate::util::downloader::download_bytes;
 use crate::util::package_cache::{
     ExtractOutcome, extract_to_cache, registry_cache_lookup, resolve_seeded_cache_path,
 };
@@ -49,6 +50,10 @@ struct PackageRef {
     name: String,
     version: String,
     tarball_url: String,
+    /// Cache-layout class, carried from the resolver/lockfile so the download
+    /// and seeded-slot stages route by true source instead of re-parsing the
+    /// resolved URL (which can't tell a registry tarball from an http one).
+    source: TarballSource,
 }
 
 impl PackageRef {
@@ -158,14 +163,25 @@ impl InstallSchedulerHandle {
 }
 
 impl InstallScheduler {
-    pub(crate) fn prefetch_download(&self, name: String, version: String, tarball_url: String) {
-        if !is_registry_tarball_url(&tarball_url) {
+    pub(crate) fn prefetch_download(
+        &self,
+        name: String,
+        version: String,
+        tarball_url: String,
+        source: TarballSource,
+    ) {
+        // Only registry packages use the download pipeline (extract into
+        // `<name>/<version>/`). Http/git/file tarballs are seeded into their own
+        // cache slots during resolution; prefetching them here would extract
+        // them into the registry slot and collide (see `resolve_seeded_cache_path`).
+        if source != TarballSource::Registry {
             return;
         }
         let _ = self.tx.send(Command::PrefetchDownload(PackageRef {
             name,
             version,
             tarball_url,
+            source,
         }));
     }
 
@@ -183,6 +199,7 @@ impl InstallScheduler {
                 info.name.to_string(),
                 info.version.to_string(),
                 url.to_string(),
+                info.source,
             );
         }
     }
@@ -193,6 +210,7 @@ impl InstallScheduler {
         version: String,
         tarball_url: String,
         target: PathBuf,
+        source: TarballSource,
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -202,6 +220,7 @@ impl InstallScheduler {
                         name,
                         version,
                         tarball_url,
+                        source,
                     },
                     target,
                     parent: None,
@@ -400,6 +419,7 @@ impl SchedulerState {
                 &task_spec.package.name,
                 &task_spec.package.version,
                 &task_spec.package.tarball_url,
+                task_spec.package.source,
             )
             .await
             .map_err(|e| format!("{e:#}"));
@@ -642,6 +662,7 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             tarball_url: format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz"),
+            source: TarballSource::Registry,
         }
     }
 
