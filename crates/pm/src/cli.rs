@@ -7,15 +7,16 @@ use clap::{Parser, Subcommand};
 
 use crate::cmd::install::InstallArgs;
 use crate::constants::cmd::{
-    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_ALIAS, COMPLETIONS_NAME,
-    CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT, DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT,
-    EXECUTE_ALIAS, EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS, INIT_NAME, INSTALL_ABOUT, INSTALL_NAME,
-    LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME,
-    LOGOUT_ABOUT, LOGOUT_ALIAS, LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT,
-    PING_ALIAS, PING_NAME, PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT,
-    REBUILD_ALIAS, REBUILD_NAME, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
-    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
-    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
+    CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_ALIAS,
+    COMPLETIONS_LONG_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
+    DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS,
+    INIT_NAME, INSTALL_ABOUT, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ABOUT,
+    LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME, LOGOUT_ABOUT, LOGOUT_ALIAS,
+    LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
+    PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
+    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
+    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
+    WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 
@@ -107,11 +108,9 @@ pub enum ConfigCommands {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Install dependencies
     #[command(name = INSTALL_NAME, aliases = ["i", "add"], about = INSTALL_ABOUT)]
     Install(InstallArgs),
 
-    /// Uninstall dependencies
     #[command(name = UNINSTALL_NAME, alias = UNINSTALL_ALIAS, about = UNINSTALL_ABOUT)]
     Uninstall {
         /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
@@ -144,16 +143,14 @@ pub enum Commands {
     #[command(name = UPDATE_NAME, alias = UPDATE_ALIAS, about = UPDATE_ABOUT)]
     Update,
 
-    /// List dependencies like npm list
-    #[command(name = LIST_NAME, alias = LIST_ALIAS)]
+    #[command(name = LIST_NAME, alias = LIST_ALIAS, about = LIST_ABOUT)]
     List {
         /// Package name to show dependencies for
         #[arg(value_name = "PACKAGE")]
         package: String,
     },
 
-    /// Run scripts defined in package.json
-    #[command(name = RUN_NAME, alias = RUN_ALIAS)]
+    #[command(name = RUN_NAME, alias = RUN_ALIAS, about = RUN_ABOUT)]
     Run {
         /// Script name to run (optional, will prompt if not provided)
         script: Option<String>,
@@ -176,7 +173,6 @@ pub enum Commands {
         args: Vec<String>,
     },
 
-    /// Execute packages similar to npx
     #[command(name = EXECUTE_NAME, alias = EXECUTE_ALIAS, about = EXECUTE_ABOUT)]
     Execute {
         /// Command (package) to execute, or `--version` for `x` itself.
@@ -201,7 +197,6 @@ pub enum Commands {
         package: String,
     },
 
-    /// Link current package to global or create symlink to global package
     #[command(name = LINK_NAME, alias = LINK_ALIAS, about = LINK_ABOUT)]
     Link {
         /// Package name to link from global (if not provided, links current package to global)
@@ -255,7 +250,6 @@ pub enum Commands {
         command: ConfigCommands,
     },
 
-    /// Create a package.json file
     #[command(name = INIT_NAME, alias = INIT_ALIAS, about = INIT_ABOUT)]
     Init {
         /// Skip prompts and use defaults
@@ -263,8 +257,7 @@ pub enum Commands {
         yes: bool,
     },
 
-    /// Generate shell completion scripts
-    #[command(name = COMPLETIONS_NAME, alias = COMPLETIONS_ALIAS, about = COMPLETIONS_ABOUT)]
+    #[command(name = COMPLETIONS_NAME, alias = COMPLETIONS_ALIAS, about = COMPLETIONS_ABOUT, long_about = COMPLETIONS_LONG_ABOUT)]
     Completions {
         /// Shell to generate completions for (auto-detected if omitted)
         #[arg(value_enum)]
