@@ -7,7 +7,7 @@ use clap::Args;
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
 use crate::service::install::InstallService;
-use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy, parse_save_type};
+use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy};
 use crate::util::format_print::pluralized_package_count;
 use crate::util::logger::log_time_end;
 use crate::util::user_config::{
@@ -95,7 +95,7 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
         Ok(())
     } else {
-        let save_type = parse_save_type(args.save_dev, args.save_peer, args.save_optional);
+        let save_type = SaveType::from_flags(args.save_dev, args.save_peer, args.save_optional);
         let spec_refs: Vec<&str> = args.specs.iter().map(|s| s.as_str()).collect();
         update_packages(
             PackageAction::Add,

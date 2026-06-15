@@ -15,15 +15,20 @@ pub enum SaveType {
     Prod,
 }
 
-pub fn parse_save_type(save_dev: bool, save_peer: bool, save_optional: bool) -> SaveType {
-    if save_dev {
-        SaveType::Dev
-    } else if save_peer {
-        SaveType::Peer
-    } else if save_optional {
-        SaveType::Optional
-    } else {
-        SaveType::Prod
+impl SaveType {
+    /// Pick the dependency section from the mutually-exclusive `--save-*`
+    /// flags, defaulting to `Prod`. First flag set wins (dev > peer >
+    /// optional), matching the CLI's documented precedence.
+    pub fn from_flags(save_dev: bool, save_peer: bool, save_optional: bool) -> Self {
+        if save_dev {
+            Self::Dev
+        } else if save_peer {
+            Self::Peer
+        } else if save_optional {
+            Self::Optional
+        } else {
+            Self::Prod
+        }
     }
 }
 
