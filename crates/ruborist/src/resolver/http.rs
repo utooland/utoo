@@ -205,11 +205,10 @@ pub(crate) async fn resolve_http_dep(
     })
     .await?;
 
-    Ok(ResolvedPackage {
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
+    Ok(ResolvedPackage::from_manifest(
+        manifest.name.clone(),
         manifest,
-    })
+    ))
 }
 
 #[cfg(test)]

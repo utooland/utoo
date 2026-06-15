@@ -12,6 +12,7 @@ use serde_json::Value;
 
 use super::compatibility::PlatformConstraint;
 use super::package_json::{BinField, PackageJson, WorkspacesConfig};
+use crate::util::spawn_cpu;
 
 /// Borrowed view of the data needed to resolve a version spec — a slice of
 /// available versions plus a dist-tag map.
@@ -238,20 +239,11 @@ pub async fn extract_core_version_off_runtime(
     full: Arc<FullManifest>,
     version: String,
 ) -> (String, Option<Arc<CoreVersionManifest>>) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
-            let core = full.get_core_version(&version).map(Arc::new);
-            let _ = tx.send((version, core));
-        });
-        rx.await.expect("rayon parse worker dropped before sending")
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
+    spawn_cpu(move || {
         let core = full.get_core_version(&version).map(Arc::new);
         (version, core)
-    }
+    })
+    .await
 }
 
 /// Deserialize a versions map by extracting only the keys, skipping all values.

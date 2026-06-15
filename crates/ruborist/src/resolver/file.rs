@@ -103,9 +103,8 @@ pub(crate) async fn process_file_dep<E>(
         Ok(Err(source)) => return Err(file_err(source)),
         Err(join) => return Err(file_err(join.into())),
     };
-    Ok(ControlFlow::Continue(ResolvedPackage {
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-        manifest: Arc::new(manifest),
-    }))
+    Ok(ControlFlow::Continue(ResolvedPackage::from_manifest(
+        manifest.name.clone(),
+        Arc::new(manifest),
+    )))
 }

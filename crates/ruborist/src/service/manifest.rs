@@ -14,6 +14,7 @@ use super::fetch::{
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::version::resolve_target_version_lazy;
+use crate::util::spawn_cpu;
 
 /// Parse a JSON buffer on rayon's CPU thread pool (native) or inline
 /// (wasm32). The buffer is consumed because `simd_json` mutates it in-place.
@@ -25,22 +26,11 @@ pub(crate) async fn parse_json_vec_off_runtime<T>(
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
-            let result = simd_json::serde::from_slice::<T>(&mut parse_buf)
-                .map_err(|e| anyhow!("JSON parse error: {e}"));
-            let _ = tx.send(result);
-        });
-        rx.await
-            .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
+    spawn_cpu(move || {
         simd_json::serde::from_slice::<T>(&mut parse_buf)
             .map_err(|e| anyhow!("JSON parse error: {e}"))
-    }
+    })
+    .await
 }
 
 /// Parse a full wire-fetched manifest and restore its raw byte payload.
@@ -113,20 +103,7 @@ pub(crate) async fn parse_full_manifest_with_core_off_runtime(
     raw_bytes: Bytes,
     spec: Option<String>,
 ) -> Result<FullManifestParseResult, anyhow::Error> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        rayon::spawn(move || {
-            let result = parse_full_manifest_with_core_sync(raw_bytes, spec);
-            let _ = tx.send(result);
-        });
-        rx.await
-            .map_err(|e| anyhow!("rayon parse channel closed: {e}"))?
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        parse_full_manifest_with_core_sync(raw_bytes, spec)
-    }
+    spawn_cpu(move || parse_full_manifest_with_core_sync(raw_bytes, spec)).await
 }
 
 /// Result of a full manifest fetch with ETag support.

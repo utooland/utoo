@@ -111,11 +111,7 @@ pub(crate) fn handle_resolved_registry_manifest<E>(
 where
     E: EventReceiver,
 {
-    let resolved = ResolvedPackage {
-        name: edge.name.clone(),
-        version: manifest.version.clone(),
-        manifest,
-    };
+    let resolved = ResolvedPackage::from_manifest(edge.name.clone(), manifest);
     receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
     process_dependency_with_resolved(graph, parent, edge, &resolved, config)
 }

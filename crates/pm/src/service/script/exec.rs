@@ -145,39 +145,15 @@ impl ScriptService {
             anyhow::bail!("Path is not a file: {}", target_path.display());
         }
 
-        // Unix: Only process if not already executable
+        // Unix: only process if not already executable. Windows: always (no
+        // executable bit to gate on).
         #[cfg(unix)]
-        {
-            let permissions = metadata.permissions();
-            let is_executable = permissions.mode() & 0o111 != 0;
-
-            if !is_executable {
-                match Self::check_and_add_shebang(target_path).await {
-                    Ok(added) => {
-                        if added {
-                            tracing::debug!("Added shebang to {}", target_path.display());
-                        }
-                    }
-                    Err(e) => {
-                        tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
-                    }
-                }
-            }
-        }
-
-        // Windows: Always try to add shebang (no executable bit to check)
+        let needs_shebang = metadata.permissions().mode() & 0o111 == 0;
         #[cfg(not(unix))]
-        {
-            match Self::check_and_add_shebang(target_path).await {
-                Ok(added) => {
-                    if added {
-                        tracing::debug!("Added shebang to {}", target_path.display());
-                    }
-                }
-                Err(e) => {
-                    tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e);
-                }
-            }
+        let needs_shebang = true;
+
+        if needs_shebang {
+            Self::try_add_shebang(target_path).await;
         }
 
         // Set executable permissions on Unix
@@ -197,6 +173,17 @@ impl ScriptService {
         }
 
         Ok(())
+    }
+
+    /// Run [`check_and_add_shebang`](Self::check_and_add_shebang) and log the
+    /// outcome. A shebang failure (binary / non-UTF8 file) is non-fatal — the
+    /// file just isn't a shell script — so it is logged, not propagated.
+    async fn try_add_shebang(target_path: &Path) {
+        match Self::check_and_add_shebang(target_path).await {
+            Ok(true) => tracing::debug!("Added shebang to {}", target_path.display()),
+            Ok(false) => {}
+            Err(e) => tracing::debug!("Skipping shebang for {}: {}", target_path.display(), e),
+        }
     }
 
     /// Check if file needs shebang and add it if needed

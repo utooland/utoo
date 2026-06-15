@@ -513,11 +513,7 @@ pub async fn process_dependency<R: ManifestProvider>(
             )
             .await?
             {
-                Some(manifest) => ResolvedPackage {
-                    name: manifest.name.clone(),
-                    version: manifest.version.clone(),
-                    manifest,
-                },
+                Some(manifest) => ResolvedPackage::from_manifest(manifest.name.clone(), manifest),
                 None => resolved,
             };
 
