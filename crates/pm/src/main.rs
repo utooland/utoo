@@ -2,6 +2,7 @@ use std::process;
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
+use mimalloc::MiMalloc;
 
 use crate::cli::{Cli, Commands, detect_shell_from_env};
 use crate::cmd::clean::clean;
@@ -19,6 +20,13 @@ use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_en
 use crate::util::user_config::{
     init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit,
 };
+
+// Allocation-heavy workload (multi-MB JSON parses, graph build, per-file clone
+// bookkeeping); mimalloc measurably beats the system allocator here, matching
+// what the pack crates already do via TurboMalloc. Resolved through the
+// workspace [patch.crates-io] to the utooland fork.
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 mod cli;
 mod cmd;
