@@ -1,4 +1,3 @@
-pub mod binary_resolver;
 pub mod cache;
 pub mod cli_enum;
 pub mod cloner;
