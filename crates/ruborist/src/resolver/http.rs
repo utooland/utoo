@@ -121,13 +121,44 @@ pub fn http_cache_slot(url: &str) -> String {
     cache_slot("_http_", url.as_bytes())
 }
 
-/// Cache slot for a local tarball keyed on its absolute path. Path is
-/// normalized via `Path::components()` first so BFS (`base.join("./foo.tgz")`)
-/// and install (`cwd.join("foo.tgz")` from a root-relative lockfile entry)
-/// hash to the same slot.
+/// Cache slot for a local tarball keyed on its absolute path. The path is
+/// lexically normalized first so BFS and install hash to the same slot.
+///
+/// BFS resolves the tarball from a canonical absolute path
+/// (`base.join("/abs/foo.tgz")`), but install re-absolutizes a *root-relative*
+/// lockfile entry (`cwd.join("../../foo.tgz")`) whenever the tarball lives
+/// outside the project root. `Path::components()` collapses `.` and redundant
+/// separators but **keeps `..`**, so those two spellings of the same file would
+/// otherwise hash to different slots and the install-time lookup would miss.
+/// [`lexically_normalize`] collapses `..` so both spellings agree.
 pub fn file_cache_slot(abs_path: &Path) -> String {
-    let normalized: PathBuf = abs_path.components().collect();
+    let normalized = lexically_normalize(abs_path);
     cache_slot("_file_", normalized.as_os_str().as_encoded_bytes())
+}
+
+/// Collapse `.` and `..` purely lexically (no filesystem access, so it works
+/// for not-yet-existing paths and stays identical across BFS and install).
+///
+/// `..` pops the preceding normal component but never climbs past a root or
+/// prefix; a leading `..` in a relative path is preserved.
+fn lexically_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut stack: Vec<Component> = Vec::new();
+    for comp in path.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => match stack.last() {
+                Some(Component::Normal(_)) => {
+                    stack.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => stack.push(comp),
+            },
+            _ => stack.push(comp),
+        }
+    }
+    stack.iter().map(|c| c.as_os_str()).collect()
 }
 
 fn fetch_and_extract_blocking(
@@ -313,6 +344,44 @@ mod tests {
         let bytes = make_targz(&[("package/README.md", b"hi")]);
         let err = fetch_and_extract_blocking(tmp.path(), "u", bytes).unwrap_err();
         assert!(err.to_string().contains("package.json not found"));
+    }
+
+    #[test]
+    fn file_slot_is_stable_across_dotdot_spellings() {
+        // BFS resolves from a canonical absolute path; install re-absolutizes a
+        // root-relative lockfile entry, which carries `..` when the tarball
+        // lives outside the project root. Both must hash to the same slot.
+        let canonical = Path::new("/tmp/pkgs/foo.tgz");
+        let via_dotdot = Path::new("/tmp/pkgs/app/../../pkgs/foo.tgz");
+        let via_curdir = Path::new("/tmp/pkgs/./foo.tgz");
+
+        assert_eq!(file_cache_slot(canonical), file_cache_slot(via_dotdot));
+        assert_eq!(file_cache_slot(canonical), file_cache_slot(via_curdir));
+        assert!(file_cache_slot(canonical).starts_with("_file_"));
+
+        // Distinct tarballs still get distinct slots.
+        assert_ne!(
+            file_cache_slot(canonical),
+            file_cache_slot(Path::new("/tmp/pkgs/bar.tgz"))
+        );
+    }
+
+    #[test]
+    fn lexically_normalize_collapses_dotdot_without_climbing_root() {
+        assert_eq!(
+            lexically_normalize(Path::new("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
+        // Excess `..` saturates at the root rather than escaping it.
+        assert_eq!(
+            lexically_normalize(Path::new("/a/../../../b")),
+            PathBuf::from("/b")
+        );
+        // Leading `..` in a relative path is preserved (nothing to pop).
+        assert_eq!(
+            lexically_normalize(Path::new("../a/b")),
+            PathBuf::from("../a/b")
+        );
     }
 
     #[test]
