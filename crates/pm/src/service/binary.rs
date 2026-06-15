@@ -94,9 +94,79 @@ static CONFIG: OnceCell<BinaryMirrorConfig> = OnceCell::const_new();
 /// Cached result of whether we should skip binary mirror envs
 static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
+/// On-disk cache TTL for `binary-mirror-config`. The config changes rarely;
+/// without this cache every warm install on a non-npmjs registry pays a
+/// network round trip (TLS + manifest fetch) before the first mirror-matched
+/// package can finish cloning. 6h keeps worst-case staleness of a new mirror
+/// entry within the same workday.
+const DISK_CACHE_TTL_SECS: u64 = 21600; // 6 hours
+
+fn disk_cache_path() -> std::path::PathBuf {
+    crate::util::cache::get_cache_dir().join("_binary-mirror-config.json")
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Return the cached config if still fresh. `BinaryMirrorConfig` is
+/// deserialize-only, so the cache stores the raw `binary-mirror-config`
+/// manifest and we re-parse it here — the same path `load_config` takes for a
+/// freshly fetched manifest.
+fn read_disk_cache() -> Option<BinaryMirrorConfig> {
+    let raw = std::fs::read(disk_cache_path()).ok()?;
+    let cached: Value = serde_json::from_slice(&raw).ok()?;
+    let fetched_at = cached.get("fetched_at")?.as_u64()?;
+    if now_secs().saturating_sub(fetched_at) > DISK_CACHE_TTL_SECS {
+        return None;
+    }
+    serde_json::from_value(cached.get("manifest")?.clone()).ok()
+}
+
+/// Persist the raw manifest (not the typed config) with a fetch timestamp, so
+/// a later run rebuilds the config without touching the network.
+fn write_disk_cache(bytes: &[u8]) {
+    if let Ok(manifest) = serde_json::from_slice::<Value>(bytes) {
+        let entry = serde_json::json!({ "fetched_at": now_secs(), "manifest": manifest });
+        let path = disk_cache_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = crate::util::json::write_compact_sync(&path, &entry) {
+            tracing::debug!("Failed to write binary mirror config cache: {e}");
+        }
+    }
+}
+
+/// Kick off the config fetch in the background so it overlaps the install
+/// pipeline instead of stalling the first mirror-matched package (the
+/// `OnceCell` dedupes against the eventual in-line caller).
+pub fn warm_binary_mirror_config() {
+    if should_skip_binary_mirror() {
+        return;
+    }
+    tokio::spawn(async {
+        if let Err(e) = load_config().await {
+            tracing::debug!("Binary mirror config warmup failed: {e}");
+        }
+    });
+}
+
 async fn load_config() -> Result<&'static BinaryMirrorConfig> {
     CONFIG
         .get_or_try_init(|| async {
+            // Serve from the on-disk cache while fresh — a fully warm install
+            // must not touch the network for a config that changes rarely.
+            if let Some(config) = tokio::task::spawn_blocking(read_disk_cache)
+                .await
+                .ok()
+                .flatten()
+            {
+                return Ok(config);
+            }
             // Go through the registry client so URL construction and private-
             // registry auth are handled in one place rather than hand-rolled.
             // `binary-mirror-config@latest` is a normal version manifest whose
@@ -106,7 +176,10 @@ async fn load_config() -> Result<&'static BinaryMirrorConfig> {
                 .fetch_version_manifest_bytes("binary-mirror-config", "latest")
                 .await
                 .context("Failed to fetch binary mirror config")?;
-            serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")
+            let config: BinaryMirrorConfig =
+                serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")?;
+            tokio::task::spawn_blocking(move || write_disk_cache(&bytes));
+            Ok(config)
         })
         .await
 }

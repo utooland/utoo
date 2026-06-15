@@ -291,6 +291,9 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
+        // Overlap the binary-mirror-config fetch (non-npmjs registries only)
+        // with the whole pipeline; awaited lazily per mirror-matched package.
+        super::binary::warm_binary_mirror_config();
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
         // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
