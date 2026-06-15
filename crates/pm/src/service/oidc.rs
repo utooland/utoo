@@ -85,6 +85,7 @@ async fn github_actions_id_token(req_url: &str, req_token: &str, audience: &str)
     url.query_pairs_mut().append_pair("audience", audience);
 
     let resp = client()
+        .ok()?
         .get(url)
         .header("Accept", "application/json")
         .bearer_auth(req_token)
@@ -107,10 +108,10 @@ async fn exchange(registry: &str, package_name: &str, id_token: &str) -> Result<
     let url = format!(
         "{}/-/npm/v1/oidc/token/exchange/package/{}",
         registry.trim_end_matches('/'),
-        escaped_name(package_name),
+        auth::escaped_package_name(package_name),
     );
 
-    let resp = client()
+    let resp = client()?
         .post(&url)
         .bearer_auth(id_token)
         .send()
@@ -133,14 +134,10 @@ async fn exchange(registry: &str, package_name: &str, id_token: &str) -> Result<
         .ok_or_else(|| anyhow::anyhow!("OIDC token exchange response missing `token`"))
 }
 
-/// npm `escapedName`: only the `/` in a scoped name is percent-encoded, so
-/// `@scope/name` → `@scope%2fname` and `pkg` stays `pkg`.
-fn escaped_name(package_name: &str) -> String {
-    package_name.replace('/', "%2f")
-}
-
 #[cfg(test)]
 mod tests {
+    use mockito::Matcher;
+
     use super::*;
 
     #[test]
@@ -165,13 +162,12 @@ mod tests {
 
     #[test]
     fn test_escaped_name() {
-        assert_eq!(escaped_name("lodash"), "lodash");
-        assert_eq!(escaped_name("@scope/pkg"), "@scope%2fpkg");
+        assert_eq!(auth::escaped_package_name("lodash"), "lodash");
+        assert_eq!(auth::escaped_package_name("@scope/pkg"), "@scope%2fpkg");
     }
 
     #[tokio::test]
     async fn test_github_actions_id_token() {
-        use mockito::Matcher;
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("GET", "/token")

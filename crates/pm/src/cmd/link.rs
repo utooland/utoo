@@ -1,12 +1,34 @@
+use std::path::Path;
+
+use anyhow::{Context, Result};
+
 use crate::cmd::install::install;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::linker::link;
+use crate::util::logger::log_time_end;
 use crate::util::user_config::resolve_global_prefix;
-use anyhow::{Context, Result};
-use std::path::Path;
+
+/// Entry point for the `link` command.
+pub async fn run(packages: Option<Vec<String>>, prefix: Option<String>) -> Result<()> {
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    match packages {
+        None => {
+            // Link current package to global
+            let package_name = link_current_to_global(&cwd, prefix.as_deref()).await?;
+            log_time_end(&format!("{package_name} linked"));
+        }
+        Some(packages) => {
+            for package in packages.iter() {
+                link_global_to_local(&cwd, package, prefix.as_deref()).await?;
+            }
+            log_time_end(&format!("'{}' linked to local", packages.join(", ")));
+        }
+    }
+    Ok(())
+}
 
 /// Link current package to global (equivalent to npm link without args)
 pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<String> {

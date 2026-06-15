@@ -1,7 +1,13 @@
 //! Package cache layer: cache-path layout, seeded-slot lookups, and extracting
 //! downloaded tarball bytes into the cache. The network phase lives in
 //! [`super::downloader`]; the raw gzip/tar primitive lives in
-//! [`super::extractor`]. This module owns the `_resolved` cache contract.
+//! [`super::extractor`].
+//!
+//! Lookups here key on the `_resolved` marker, whose contract is shared
+//! with ruborist's BFS-seeded slots (`resolver/common.rs`): every cache
+//! slot becomes visible only via atomic rename of a fully-written staging
+//! dir that already contains `_resolved`, so any slot with the marker is
+//! complete.
 
 use std::path::PathBuf;
 

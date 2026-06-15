@@ -27,7 +27,7 @@ use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -166,12 +166,13 @@ fn mark_update_failed(timestamp: Option<u64>) {
 }
 
 async fn execute_update(version: &str) -> Result<()> {
-    let status = Command::new("utoo")
+    let status = tokio::process::Command::new("utoo")
         .args(["i", &format!("utoo@{version}"), "-g"])
         .env("CI", "1")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
+        .await
         .context("Failed to execute update command")?;
 
     if status.success() {
@@ -184,7 +185,7 @@ async fn execute_update(version: &str) -> Result<()> {
 /// Fetch latest version from registry, write to cache file, and return the version.
 async fn fetch_and_cache_version() -> Result<String> {
     let registry_url = format!("{}/utoo/latest", get_registry());
-    let client = client_builder()
+    let client = client_builder()?
         .timeout(std::time::Duration::from_millis(1000))
         .build()
         .context("Failed to create HTTP client")?;

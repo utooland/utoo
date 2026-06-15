@@ -65,6 +65,19 @@ pub struct ResolvedPackage {
     pub manifest: Arc<CoreVersionManifest>,
 }
 
+impl ResolvedPackage {
+    /// Build from a manifest, taking the version from it. `name` is a
+    /// parameter because callers source it differently — the requesting
+    /// edge's name vs the manifest's own name.
+    pub fn from_manifest(name: impl Into<String>, manifest: Arc<CoreVersionManifest>) -> Self {
+        Self {
+            name: name.into(),
+            version: manifest.version.clone(),
+            manifest,
+        }
+    }
+}
+
 /// Versions info for a package (lightweight, without full manifests).
 #[derive(Debug, Clone)]
 pub struct VersionsInfo {

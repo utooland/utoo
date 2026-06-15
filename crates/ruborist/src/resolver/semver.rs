@@ -44,17 +44,8 @@ use deno_semver::{Version, VersionReq};
 pub fn normalize_spec<'a>(name: &'a str, spec: &'a str) -> (Cow<'a, str>, Cow<'a, str>) {
     // Handle npm: alias - fetch the aliased package instead
     if let Some(npm_spec) = spec.strip_prefix("npm:") {
-        // Skip "npm:"
-        // Use rfind to handle scoped packages like @scope/pkg@version
-        if let Some(last_at_index) = npm_spec.rfind('@') {
-            // Make sure we don't split on the @ of a scoped package
-            if last_at_index > 0 {
-                let (pkg_name, version) = npm_spec.split_at(last_at_index);
-                return (Cow::Borrowed(pkg_name), Cow::Borrowed(&version[1..]));
-            }
-        }
-        // No version specified
-        return (Cow::Borrowed(npm_spec), Cow::Borrowed("*"));
+        let (pkg_name, version) = split_npm_alias(npm_spec);
+        return (Cow::Borrowed(pkg_name), Cow::Borrowed(version));
     }
 
     // Handle workspace: prefix - keep original name, extract version
@@ -66,6 +57,18 @@ pub fn normalize_spec<'a>(name: &'a str, spec: &'a str) -> (Cow<'a, str>, Cow<'a
     // No special prefix, return as-is — borrowed, so the per-edge common case
     // (plain registry spec) allocates nothing.
     (Cow::Borrowed(name), Cow::Borrowed(spec))
+}
+
+/// Split an `npm:` alias body (after the prefix) into (aliased name, range).
+///
+/// `rfind('@')` handles scoped packages (`@scope/pkg@^1.0.0`); an `@` at
+/// index 0 is the scope marker of a version-less alias (`@scope/pkg`), not a
+/// separator.
+fn split_npm_alias(npm_spec: &str) -> (&str, &str) {
+    match npm_spec.rfind('@') {
+        Some(idx) if idx > 0 => (&npm_spec[..idx], &npm_spec[idx + 1..]),
+        _ => (npm_spec, "*"),
+    }
 }
 
 /// Check if a version matches a semver range.
@@ -84,15 +87,11 @@ pub fn normalize_spec<'a>(name: &'a str, spec: &'a str) -> (Cow<'a, str>, Cow<'a
 /// assert!(matches("*", "1.2.3"));
 /// ```
 pub fn matches(range: &str, version: &str) -> bool {
-    // Handle npm: alias prefix
-    let range = if range.starts_with("npm:") {
-        if let Some(idx) = range.rfind('@') {
-            &range[idx + 1..]
-        } else {
-            "*"
-        }
-    } else {
-        range
+    // Handle npm: alias prefix via the shared splitter so scoped aliases
+    // (`npm:@scope/pkg`) don't get sliced at the scope marker.
+    let range = match range.strip_prefix("npm:") {
+        Some(npm_spec) => split_npm_alias(npm_spec).1,
+        None => range,
     };
 
     // Wildcard matches everything
@@ -187,6 +186,14 @@ mod tests {
         assert!(matches("npm:lodash@^4.0.0", "4.17.21"));
         assert!(!matches("npm:lodash@^4.0.0", "3.10.0"));
         assert!(matches("npm:lodash", "4.17.21")); // No version = *
+    }
+
+    #[test]
+    fn test_scoped_npm_alias() {
+        assert!(matches("npm:@scope/pkg@^1.0.0", "1.2.3"));
+        assert!(!matches("npm:@scope/pkg@^2.0.0", "1.2.3"));
+        // Version-less scoped alias: the scope `@` is not a separator => *
+        assert!(matches("npm:@scope/pkg", "1.2.3"));
     }
 
     #[test]

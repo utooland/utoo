@@ -12,6 +12,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+use utoo_ruborist::progress::BuildEvent;
 
 /// Cached at startup: is stderr connected to a terminal?
 ///
@@ -70,7 +71,7 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     LOG_FILE_PATH.set(log_path.clone()).ok();
 
     // 3. Detect if stdout is a TTY (terminal) to decide on colors
-    let is_tty = atty::is(atty::Stream::Stdout);
+    let is_tty = std::io::stdout().is_terminal();
 
     // 4. Build subscriber with different filters for console and file
     Registry::default()
@@ -217,7 +218,6 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
         if !*IS_TTY {
             return;
         }
-        use utoo_ruborist::progress::BuildEvent;
         match event {
             BuildEvent::DependencyCount { count } => {
                 PROGRESS_BAR.inc_length(count as u64);

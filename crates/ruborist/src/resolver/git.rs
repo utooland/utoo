@@ -8,6 +8,8 @@
 //! is run in a `tokio::task::spawn_blocking` thread so the async executor is
 //! never blocked.
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -145,7 +147,6 @@ fn extract_tree_to_dir(
                 // Set executable permission on Unix
                 #[cfg(unix)]
                 if entry.mode().kind() == gix::object::tree::EntryKind::BlobExecutable {
-                    use std::os::unix::fs::PermissionsExt;
                     let perms = std::fs::Permissions::from_mode(0o755);
                     if let Err(e) = std::fs::set_permissions(&entry_path, perms) {
                         tracing::debug!(

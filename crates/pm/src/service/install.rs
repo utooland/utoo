@@ -63,6 +63,31 @@ fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
     false
 }
 
+/// Disposition of a lock entry in the install pipeline.
+///
+/// Derived in one place so the lockfile prefetch seed and `reify_packages`
+/// cannot drift — an earlier hand-rolled prefetch filter did, and
+/// over-downloaded gigabytes of incompatible binaries. (The platform filter
+/// lives in the shared `prefetch_tarball` gate for the same reason.)
+enum LockEntryAction {
+    /// Omitted by --omit config: not installed at all.
+    Skip,
+    /// Workspace `link:` entry: symlinked, never cloned or downloaded.
+    Link,
+    /// Regular entry: cloned via the scheduler (and thus prefetchable).
+    Clone,
+}
+
+fn classify_lock_entry(package: &Package, omit: &HashSet<OmitType>) -> LockEntryAction {
+    if should_omit_package(package, omit) {
+        LockEntryAction::Skip
+    } else if package.link.is_some() {
+        LockEntryAction::Link
+    } else {
+        LockEntryAction::Clone
+    }
+}
+
 async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
@@ -102,13 +127,14 @@ async fn reify_packages(
 
         if let Some(packages) = groups.get(depth) {
             for (path, package) in packages.iter() {
-                // Skip packages based on omit config
-                if should_omit_package(package, omit) {
+                let action = classify_lock_entry(package, omit);
+                if matches!(action, LockEntryAction::Skip) {
                     PROGRESS_BAR.inc(1);
                     continue;
                 }
-                let path = path.clone();
-                let package = package.clone();
+                // No clones here: the spawned task only captures the owned
+                // name/version/resolved/target_path it actually needs, so
+                // skipped/linked entries never pay for a LockPackage copy.
                 if let Some(ref resolved) = package.resolved {
                     // Lockfile stores `file:` URLs root-relative (npm format).
                     // Cloner only understands absolute URLs — re-absolutize
@@ -120,13 +146,13 @@ async fn reify_packages(
                         }
                         _ => resolved.clone(),
                     };
-                    if package.link.is_some() {
-                        let link_name = extract_package_name(&path);
+                    if matches!(action, LockEntryAction::Link) {
+                        let link_name = extract_package_name(path);
                         if link_name.is_empty() {
                             PROGRESS_BAR.inc(1);
                             continue;
                         }
-                        link(Path::new(&resolved), Path::new(&path))
+                        link(Path::new(&resolved), Path::new(path))
                             .await
                             .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
                         PROGRESS_BAR.inc(1);
@@ -148,18 +174,16 @@ async fn reify_packages(
                         continue;
                     }
 
-                    let name = package.get_name(&path);
+                    let name = package.get_name(path);
                     let version = package
                         .version
                         .clone()
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
-                    let cwd_clone = cwd.to_path_buf();
-                    let target_path = cwd_clone.join(&path);
+                    let target_path = cwd.join(path);
                     let scheduler = scheduler.clone();
 
                     // Check if this is an optional dependency
-                    let is_optional =
-                        package.optional == Some(true) || package.dev_optional == Some(true);
+                    let is_optional = package.is_optional();
 
                     clone_tasks.push(async move {
                         if let Err(e) = scheduler
@@ -311,13 +335,12 @@ impl InstallService {
         // authoritative `ensure_clone`.
         if !events_prefetched {
             for (path, package) in &package_lock.packages {
-                // Skip what `install_packages` won't clone: workspace links and
-                // omitted deps. The platform filter lives in the shared
+                // Seed only what `install_packages` will actually clone — the
+                // same `classify_lock_entry` it consumes, so the two passes
+                // can't drift. The platform filter lives in the shared
                 // `prefetch_tarball` gate (same one the resolver event path
-                // uses), so it can't drift from the install-time skip logic — an
-                // earlier hand-rolled filter here missed it and over-downloaded
-                // gigabytes of incompatible (darwin/win) binaries.
-                if package.link.is_some() || should_omit_package(package, omit) {
+                // uses) for the same reason.
+                if !matches!(classify_lock_entry(package, omit), LockEntryAction::Clone) {
                     continue;
                 }
                 if let (Some(version), Some(resolved)) =
@@ -484,8 +507,6 @@ mod tests {
 
     #[test]
     fn test_should_omit_package() {
-        use std::collections::HashSet;
-
         // Empty omit set should not omit anything
         let empty_omit: HashSet<OmitType> = HashSet::new();
         let dev_pkg = Package {
@@ -553,8 +574,7 @@ mod tests {
 
         // Regular package - not optional
         let regular_pkg = Package::default();
-        let is_optional =
-            regular_pkg.optional == Some(true) || regular_pkg.dev_optional == Some(true);
+        let is_optional = regular_pkg.is_optional();
         assert!(!is_optional, "Regular package should not be optional");
 
         // Optional package
@@ -562,8 +582,7 @@ mod tests {
             optional: Some(true),
             ..Package::default()
         };
-        let is_optional =
-            optional_pkg.optional == Some(true) || optional_pkg.dev_optional == Some(true);
+        let is_optional = optional_pkg.is_optional();
         assert!(is_optional, "Package with optional=true should be optional");
 
         // Dev optional package
@@ -571,8 +590,7 @@ mod tests {
             dev_optional: Some(true),
             ..Package::default()
         };
-        let is_optional =
-            dev_optional_pkg.optional == Some(true) || dev_optional_pkg.dev_optional == Some(true);
+        let is_optional = dev_optional_pkg.is_optional();
         assert!(
             is_optional,
             "Package with dev_optional=true should be optional"
@@ -583,8 +601,7 @@ mod tests {
             optional: Some(false),
             ..Package::default()
         };
-        let is_optional =
-            not_optional_pkg.optional == Some(true) || not_optional_pkg.dev_optional == Some(true);
+        let is_optional = not_optional_pkg.is_optional();
         assert!(
             !is_optional,
             "Package with optional=false should not be optional"

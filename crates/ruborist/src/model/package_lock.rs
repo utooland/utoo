@@ -2,12 +2,27 @@
 //!
 //! Shared types for serializing/deserializing npm lock files.
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 
+use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
+
+use super::compatibility::PlatformConstraint;
+use super::graph::DependencyGraph;
+use super::node::EdgeType;
+use super::package_json::BinField;
 use super::util::{PackageNameStr, deserialize_or_default};
 
 /// Represents a license field that can be either a string or an array of strings.
+///
+/// One of three deliberately different shapes for npm's polymorphic license
+/// field: lockfiles serialize what the resolver recorded (string or legacy
+/// array), on-disk package.json uses [`super::package_json::LicenseConfig`]
+/// (string or `{type, url}` object), and registry manifests keep a plain
+/// `Option<String>` with `skip_on_error` (display-only, malformed data must
+/// never fail an install). Each context tolerates exactly the malformations
+/// it actually sees on its wire; don't merge them without checking all three.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum License {
@@ -39,20 +54,30 @@ pub struct LockPackage {
         skip_serializing_if = "Option::is_none"
     )]
     pub optional_dependencies: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bin: Option<serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub bin: Option<BinField>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_or_default"
     )]
     pub engines: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub funding: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub os: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cpu: Option<serde_json::Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub os: Option<PlatformConstraint>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub cpu: Option<PlatformConstraint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,6 +97,14 @@ pub struct LockPackage {
 }
 
 impl LockPackage {
+    /// Whether this entry is reachable only through optional edges: a direct
+    /// optional dependency, or npm's `devOptional` (dev + optional) flag.
+    /// The single definition of "failures may be ignored" used by
+    /// install/reify/script execution.
+    pub fn is_optional(&self) -> bool {
+        self.optional == Some(true) || self.dev_optional == Some(true)
+    }
+
     /// Extract package name from path string.
     /// Handles both normal and scoped packages.
     pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
@@ -173,28 +206,11 @@ impl PackageLock {
             packages,
         }
     }
-
-    /// Convert from graph's serialized packages Value to PackageLock.
-    pub fn from_packages_value(
-        name: String,
-        version: String,
-        packages: serde_json::Value,
-    ) -> Result<Self, serde_json::Error> {
-        let packages_map: HashMap<String, LockPackage> = serde_json::from_value(packages)?;
-        Ok(Self::new(name, version, packages_map))
-    }
 }
 
 // ============================================================================
 // Graph Serialization
 // ============================================================================
-
-use std::path::Path;
-
-use petgraph::graph::NodeIndex;
-
-use super::graph::DependencyGraph;
-use super::node::EdgeType;
 
 /// Serialize a dependency graph to PackageLock format.
 ///
@@ -303,9 +319,7 @@ fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> L
         name: Some(node.name.clone()),
         version: Some(node.version.clone()),
         engines: manifest.engines().cloned(),
-        workspaces: manifest
-            .workspaces()
-            .and_then(|v| serde_json::from_value(v).ok()),
+        workspaces: manifest.workspaces().map(|w| w.patterns().to_vec()),
         ..LockPackage::default()
     };
 
@@ -522,8 +536,6 @@ mod tests {
 
     /// Helper: create a graph with a single non-root node, return its LockPackage.
     fn lock_pkg_for_node(is_dev: bool, is_optional: bool, is_peer: bool) -> LockPackage {
-        use super::super::graph::DependencyGraph;
-
         let root_pkg = PackageJson::new("root", "1.0.0");
         let mut graph = DependencyGraph::from_package_json(PathBuf::from("/root"), root_pkg);
 
@@ -585,8 +597,6 @@ mod tests {
     /// The resolver also creates graph edges for both lodash and workspace-a,
     /// but the root lockfile entry should only contain lodash.
     fn build_workspace_graph() -> HashMap<String, LockPackage> {
-        use super::super::graph::DependencyGraph;
-
         let mut root_pkg = PackageJson::new("my-project", "1.0.0");
         // Only regular deps in manifest — workspace packages are NOT listed
         // in dependencies; they're discovered from the workspaces field.
@@ -673,8 +683,6 @@ mod tests {
     /// what made `collect` run a workspace's install scripts a second time.
     #[test]
     fn test_link_node_omits_script_markers() {
-        use super::super::graph::DependencyGraph;
-
         let root_pkg = PackageJson::new("my-project", "1.0.0");
         let root_path = PathBuf::from("/project");
         let mut graph = DependencyGraph::from_package_json(root_path.clone(), root_pkg);
@@ -682,7 +690,10 @@ mod tests {
         // A link node whose package declares a bin, scripts, and a literal
         // hasInstallScript — none of the script markers should survive.
         let mut link_pkg = PackageJson::new("linked", "1.0.0");
-        link_pkg.bin = Some(serde_json::json!({ "linked-cli": "cli.js" }));
+        link_pkg.bin = Some(BinField::Map(std::collections::BTreeMap::from([(
+            "linked-cli".to_string(),
+            "cli.js".to_string(),
+        )])));
         link_pkg.scripts = Some(HashMap::from([(
             "postinstall".to_string(),
             "echo hi".to_string(),
@@ -725,8 +736,6 @@ mod tests {
 
     #[test]
     fn test_root_resolves_catalog_specs() {
-        use super::super::graph::DependencyGraph;
-
         let mut root_pkg = PackageJson::new("catalog-project", "1.0.0");
         root_pkg.dependencies = Some(HashMap::from([
             ("react".to_string(), "catalog:default".to_string()),

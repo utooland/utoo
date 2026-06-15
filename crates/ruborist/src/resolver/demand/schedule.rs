@@ -75,29 +75,34 @@ fn schedule_registry_fetch(
 ) {
     let (real_name, real_spec) = normalize_spec(&name, &spec);
     let (real_name, real_spec) = (real_name.into_owned(), real_spec.into_owned());
-    if matches!(supports_semver, ResolutionMode::Semver) {
-        if state.is_version_settled(&real_name, &real_spec) {
-            return;
+    // Exhaustive on purpose: a new resolution mode must pick a job shape
+    // explicitly instead of silently falling into the full-manifest branch.
+    match supports_semver {
+        ResolutionMode::Semver => {
+            if state.is_version_settled(&real_name, &real_spec) {
+                return;
+            }
+            queues.push(
+                ManifestJob::Version {
+                    name: real_name.clone(),
+                    spec: real_spec.clone(),
+                    fetch_spec: real_spec,
+                },
+                priority,
+            );
         }
-        queues.push(
-            ManifestJob::Version {
-                name: real_name.clone(),
-                spec: real_spec.clone(),
-                fetch_spec: real_spec,
-            },
-            priority,
-        );
-    } else {
-        if state.has_package_source(&real_name) {
-            return;
+        ResolutionMode::FullManifest => {
+            if state.has_package_source(&real_name) {
+                return;
+            }
+            queues.push(
+                ManifestJob::Full {
+                    name: real_name,
+                    spec: Some(real_spec),
+                },
+                priority,
+            );
         }
-        queues.push(
-            ManifestJob::Full {
-                name: real_name,
-                spec: Some(real_spec),
-            },
-            priority,
-        );
     }
 }
 

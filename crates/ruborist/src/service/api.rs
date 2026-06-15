@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 
 use super::cache::ProjectCacheData;
 use super::fs::Glob;
@@ -219,7 +219,6 @@ pub async fn read_root_manifest<G: Glob + Clone>(
     cwd: &Path,
     glob: G,
 ) -> Result<(PathBuf, PackageJson)> {
-    use anyhow::Context as _;
     let discovery = WorkspaceDiscovery::new(glob);
     let root_path = discovery.find_root_path(cwd).await?;
     let pkg_path = root_path.join("package.json");

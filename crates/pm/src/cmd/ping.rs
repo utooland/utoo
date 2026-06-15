@@ -10,7 +10,7 @@ pub async fn ping(registry: Option<&str>) -> Result<()> {
 
     println!("{} {}", "PING".green(), registry.cyan());
 
-    let client = client_builder()
+    let client = client_builder()?
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 

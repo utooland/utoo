@@ -1,6 +1,12 @@
+#[cfg(target_os = "macos")]
+use std::ffi::CString;
+#[cfg(target_os = "macos")]
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+#[cfg(target_os = "macos")]
+use libc::clonefile;
 use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
 
@@ -39,14 +45,6 @@ pub struct PackageClone<'a> {
     pub cache: &'a Path,
     pub target: &'a Path,
 }
-
-#[cfg(target_os = "macos")]
-use std::ffi::CString;
-#[cfg(target_os = "macos")]
-use std::os::unix::ffi::OsStrExt;
-
-#[cfg(target_os = "macos")]
-use libc::clonefile;
 
 /// Hardlink-first directory clone with a copy fallback. Used directly on
 /// Linux/Windows, and on macOS as the fallback when `clonefile` can't run
@@ -179,17 +177,7 @@ fn load_package_json_sync<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let pkg_path = path.join("package.json");
     let content = std::fs::read_to_string(&pkg_path)
         .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
-
-    match serde_json::from_str(&content) {
-        Ok(v) => Ok(v),
-        Err(original_err) => match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(value) => serde_json::from_value(value)
-                .with_context(|| format!("Failed to deserialize {pkg_path:?}")),
-            Err(_) => {
-                Err(original_err).with_context(|| format!("Failed to parse JSON from {pkg_path:?}"))
-            }
-        },
-    }
+    super::json::parse_package_json_lenient(&content, &pkg_path)
 }
 
 fn validate_name_version_sync(dst: &Path, name: &str, version: &str) -> bool {
@@ -365,6 +353,9 @@ mod tests {
 
     #[cfg(not(target_os = "macos"))]
     mod hardlink_clone_tests {
+        #[cfg(unix)]
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
         use tokio::io::AsyncReadExt;
 
         use super::*;
@@ -549,8 +540,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_permissions() -> Result<()> {
-            use std::os::unix::fs::PermissionsExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -587,8 +576,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_fast_copy_preserves_read_only_permissions() -> Result<()> {
-            use std::os::unix::fs::PermissionsExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -625,8 +612,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_preserves_executable_in_subdirs() -> Result<()> {
-            use std::os::unix::fs::PermissionsExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -687,8 +672,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_per_file_fallback_does_not_latch() -> Result<()> {
-            use std::os::unix::fs::MetadataExt;
-
             let temp = TempDir::new()?;
             let src_dir = temp.path().join("src");
             let dst_dir = temp.path().join("dst");
@@ -743,8 +726,6 @@ mod tests {
         #[cfg(unix)]
         #[tokio::test]
         async fn test_clone_dir_install_script_forces_copy() -> Result<()> {
-            use std::os::unix::fs::MetadataExt;
-
             let temp = TempDir::new()?;
             // has_install_script_sync checks `src.parent()/_hasInstallScript`,
             // mirroring the cache layout `<cache>/<name>/<version>/package`.
