@@ -411,6 +411,19 @@ impl SchedulerState {
             return;
         }
 
+        // Fast path: a registry-style tarball whose download stage already
+        // completed (on warm installs the prefetch pass proves the cache for
+        // every package) goes straight to the clone queue. This skips the
+        // seeded-slot lookup task in `resolve_cache_for_clone` — a tokio spawn
+        // + URL sha256 + a stat of an `_http_` slot that only ever exists for
+        // non-registry tarballs.
+        if is_registry_tarball(&spec.package.tarball_url)
+            && let Some(cache_path) = self.download_done.get(&spec.package.key()).cloned()
+        {
+            self.clone_queue.push_back(ReadyClone { spec, cache_path });
+            return;
+        }
+
         self.resolve_cache_for_clone(spec);
     }
 
