@@ -18,9 +18,12 @@
 //!
 //! [`util::retry`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/retry.rs
 
+use std::fmt::Display;
+use std::future::Future;
 use std::time::Duration;
 
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
+use tokio_retry::RetryIf;
 
 /// Fixed retry delays used for all fetch operations in this crate.
 pub const RETRY_DELAYS: [Duration; 5] = [
@@ -56,6 +59,26 @@ impl std::fmt::Display for FetchError {
 /// Predicate for `RetryIf::spawn` — returns true for transient failures.
 pub fn is_retryable(err: &FetchError) -> bool {
     matches!(err, FetchError::Retryable(_))
+}
+
+/// Run `attempt` under the shared retry policy, mapping a terminal
+/// [`FetchError`] into an `anyhow` error labelled `Failed to fetch {target}`.
+///
+/// This is the single envelope for registry manifest fetches — keeping the
+/// retry strategy, retry predicate, and terminal error shape in one place so
+/// they can't drift between the full-manifest and version-manifest fetchers.
+pub(crate) async fn with_fetch_retry<T, A, Fut>(target: impl Display, attempt: A) -> Result<T>
+where
+    A: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, FetchError>>,
+{
+    RetryIf::spawn(retry_strategy(), attempt, is_retryable)
+        .await
+        .map_err(|e| match e {
+            FetchError::Retryable(e) | FetchError::Permanent(e) => {
+                anyhow!("Failed to fetch {target}: {e:#}")
+            }
+        })
 }
 
 /// Classify a `reqwest::Error` as retryable or permanent.

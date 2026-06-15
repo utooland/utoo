@@ -6,11 +6,8 @@
 
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
-use tokio_retry::RetryIf;
 
-use super::fetch::{
-    FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
-};
+use super::fetch::{FetchError, classify_reqwest_error, classify_status, with_fetch_retry};
 use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::version::resolve_target_version_lazy;
@@ -163,58 +160,49 @@ pub async fn fetch_full_manifest_bytes(
         MetadataFormat::Complete => "application/json",
     };
 
-    RetryIf::spawn(
-        retry_strategy(),
-        || {
-            let url = url.clone();
-            let etag = etag_owned.clone();
-            let auth = auth_owned.clone();
-            async move {
-                let mut request = get_client()
-                    .map_err(FetchError::Permanent)?
-                    .get(&url)
-                    .header("Accept", accept);
-                if let Some(etag_value) = &etag {
-                    request = request.header("If-None-Match", etag_value);
-                }
-                if let Some(token) = &auth {
-                    request = request.bearer_auth(token);
-                }
-
-                let response = request.send().await.map_err(classify_reqwest_error)?;
-                let status = response.status();
-
-                if status == reqwest::StatusCode::NOT_MODIFIED {
-                    if etag.is_some() {
-                        return Ok(FetchManifestBytesResult::NotModified);
-                    }
-                    // Server bug: 304 without If-None-Match. Treat as error.
-                    return Err(classify_status(status, &url));
-                }
-
-                if status.is_success() {
-                    let new_etag = response
-                        .headers()
-                        .get("etag")
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_string());
-
-                    let raw_bytes = response.bytes().await.map_err(classify_reqwest_error)?;
-
-                    Ok(FetchManifestBytesResult::Ok(raw_bytes, new_etag))
-                } else {
-                    Err(classify_status(status, &url))
-                }
+    with_fetch_retry(opts.name, || {
+        let url = url.clone();
+        let etag = etag_owned.clone();
+        let auth = auth_owned.clone();
+        async move {
+            let mut request = get_client()
+                .map_err(FetchError::Permanent)?
+                .get(&url)
+                .header("Accept", accept);
+            if let Some(etag_value) = &etag {
+                request = request.header("If-None-Match", etag_value);
             }
-        },
-        is_retryable,
-    )
-    .await
-    .map_err(|e| match e {
-        FetchError::Retryable(e) | FetchError::Permanent(e) => {
-            anyhow!("Failed to fetch {}: {:#}", opts.name, e)
+            if let Some(token) = &auth {
+                request = request.bearer_auth(token);
+            }
+
+            let response = request.send().await.map_err(classify_reqwest_error)?;
+            let status = response.status();
+
+            if status == reqwest::StatusCode::NOT_MODIFIED {
+                if etag.is_some() {
+                    return Ok(FetchManifestBytesResult::NotModified);
+                }
+                // Server bug: 304 without If-None-Match. Treat as error.
+                return Err(classify_status(status, &url));
+            }
+
+            if status.is_success() {
+                let new_etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                let raw_bytes = response.bytes().await.map_err(classify_reqwest_error)?;
+
+                Ok(FetchManifestBytesResult::Ok(raw_bytes, new_etag))
+            } else {
+                Err(classify_status(status, &url))
+            }
         }
     })
+    .await
 }
 
 /// Fetch full manifest with retry and ETag support.
@@ -308,36 +296,27 @@ pub(crate) async fn fetch_version_manifest_vec(
         MetadataFormat::Complete => "application/json",
     };
 
-    RetryIf::spawn(
-        retry_strategy(),
-        || {
-            let url = url.clone();
-            let auth = auth_owned.clone();
-            async move {
-                let mut request = get_client()
-                    .map_err(FetchError::Permanent)?
-                    .get(&url)
-                    .header("Accept", accept);
-                if let Some(token) = &auth {
-                    request = request.bearer_auth(token);
-                }
-                let response = request.send().await.map_err(classify_reqwest_error)?;
-
-                if response.status().is_success() {
-                    read_body_vec(response).await
-                } else {
-                    Err(classify_status(response.status(), &url))
-                }
+    with_fetch_retry(format!("{}@{}", opts.name, opts.spec), || {
+        let url = url.clone();
+        let auth = auth_owned.clone();
+        async move {
+            let mut request = get_client()
+                .map_err(FetchError::Permanent)?
+                .get(&url)
+                .header("Accept", accept);
+            if let Some(token) = &auth {
+                request = request.bearer_auth(token);
             }
-        },
-        is_retryable,
-    )
-    .await
-    .map_err(|e| match e {
-        FetchError::Retryable(e) | FetchError::Permanent(e) => {
-            anyhow!("Failed to fetch {}@{}: {:#}", opts.name, opts.spec, e)
+            let response = request.send().await.map_err(classify_reqwest_error)?;
+
+            if response.status().is_success() {
+                read_body_vec(response).await
+            } else {
+                Err(classify_status(response.status(), &url))
+            }
         }
     })
+    .await
 }
 
 #[cfg(test)]
