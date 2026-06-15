@@ -65,6 +65,14 @@ pub struct BuildDepsOptions<G, R> {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
+    /// An existing `package-lock.json` to reuse as the resolved-tree baseline.
+    /// When present, the graph is seeded with this tree (see
+    /// `resolver::seeding::seed_graph_from_lock`) so the resolver only does work for the delta —
+    /// added/changed/removed direct deps — and the prior tree's layout is
+    /// preserved verbatim. `None` falls back to a full cold resolve. The
+    /// lockfile supersedes `project_cache` on this path: it already pins every
+    /// resolved manifest, so `project_cache` is ignored when this is `Some`.
+    pub baseline: Option<PackageLock>,
 }
 
 impl<G, R> BuildDepsOptions<G, R> {
@@ -86,6 +94,7 @@ impl<G, R> BuildDepsOptions<G, R> {
             glob,
             receiver,
             catalogs: HashMap::new(),
+            baseline: None,
         }
     }
 }
@@ -129,7 +138,17 @@ where
         glob,
         receiver,
         catalogs,
+        baseline,
     } = options;
+
+    // The lockfile baseline pins every resolved manifest itself, so the
+    // separate manifest project cache is redundant — and seeding both would
+    // duplicate the warm state. Drop it on the reuse path.
+    let project_cache = if baseline.is_some() {
+        None
+    } else {
+        project_cache
+    };
 
     // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
@@ -175,6 +194,15 @@ where
     // attached — the BFS never sees a workspace: spec on the happy path.
     resolve_workspace_member_edges(&mut graph);
 
+    // 3b. Seed the resolved tree from the existing lockfile (if any). Importer
+    //     edges stay unresolved (live, from the current manifests) so the BFS
+    //     resolves only the delta against the seeded nodes; everything pinned
+    //     by the lock is reused with no network I/O.
+    let reuse_baseline = baseline.is_some();
+    if let Some(lock) = baseline {
+        crate::resolver::seeding::seed_graph_from_lock(&mut graph, &lock, &root_path);
+    }
+
     // 4. The host supplies the stateless registry client (URL, store, semver,
     //    auth) pre-built. The warm `project_cache` seeds the demand resolver's
     //    manifest cache directly via `BuildDepsConfig::project_cache` below.
@@ -200,7 +228,13 @@ where
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
-    let (packages, _total) = graph.serialize_to_packages(&root_path);
+    // On the reuse path, prune nodes the BFS left orphaned (removed deps,
+    // versions shadowed by a re-resolved bump) before emitting the lock.
+    let (packages, _total) = if reuse_baseline {
+        graph.serialize_to_packages_pruned(&root_path)
+    } else {
+        graph.serialize_to_packages(&root_path)
+    };
 
     // Export the manifests resolved this run for the host to persist.
     let project_cache = ProjectCacheData::from_resolved(manifest_cache.entries);
@@ -251,6 +285,7 @@ mod tests {
             glob: NoopGlob,
             receiver: NoopReceiver,
             catalogs: HashMap::new(),
+            baseline: None,
         };
 
         assert_eq!(options.concurrency, 20);
@@ -279,6 +314,7 @@ mod tests {
             glob: NoopGlob,
             receiver: NoopReceiver,
             catalogs: HashMap::new(),
+            baseline: None,
         };
         let mut pkg = PackageJson::new("utoo-global", "0.0.0");
         pkg.private = Some(true);

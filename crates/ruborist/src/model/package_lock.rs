@@ -2,7 +2,7 @@
 //!
 //! Shared types for serializing/deserializing npm lock files.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use petgraph::graph::NodeIndex;
@@ -234,6 +234,23 @@ pub fn serialize_to_packages(
     graph: &DependencyGraph,
     root_path: &Path,
 ) -> (HashMap<String, LockPackage>, i32) {
+    serialize_to_packages_filtered(graph, root_path, None)
+}
+
+/// Serialize the graph, optionally restricting output to a set of reachable
+/// nodes. With `reachable = None` every physical descendant of root is emitted
+/// (the cold-resolve behaviour). With `reachable = Some(set)` a physical child
+/// outside the set is skipped — neither emitted nor descended into — which
+/// prunes orphaned seeded nodes on the lockfile-reuse path. A node's only
+/// physical home is under one parent, and a resolved edge can only target a
+/// node in the requester's ancestor chain, so the reachable set always forms a
+/// connected physical subtree from root: skipping an unreachable node never
+/// strands a reachable one.
+pub fn serialize_to_packages_filtered(
+    graph: &DependencyGraph,
+    root_path: &Path,
+    reachable: Option<&HashSet<NodeIndex>>,
+) -> (HashMap<String, LockPackage>, i32) {
     let mut packages = HashMap::new();
     let mut stack = vec![(graph.root_index, String::new())];
     let mut total_packages = 0;
@@ -249,6 +266,11 @@ pub fn serialize_to_packages(
 
         // Add physical children to processing stack
         for child_index in graph.get_physical_children(node_index) {
+            // On the pruning path, drop children outside the reachable set so
+            // orphaned seeded subtrees never reach the lock.
+            if reachable.is_some_and(|set| !set.contains(&child_index)) {
+                continue;
+            }
             let child = graph.get_node(child_index).expect("Child node must exist");
             let child_prefix = if prefix.is_empty() {
                 if child.is_workspace() {

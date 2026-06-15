@@ -1378,4 +1378,75 @@ if (pTimeout.dev === true) {
 echo -e "${GREEN}PASS: prod-reachable devDependency correctly not marked dev${NC}"
 cd ../../../
 
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — adding a dep doesn't redraw the tree
+# ═══════════════════════════════════════════════════════════════
+# A fresh `utoo install` writes the baseline lock. Adding a single leaf
+# dependency must REUSE that lock as the resolved-tree baseline: every package
+# already in the lock keeps its exact version and `resolved`, and the only new
+# entries belong to the added package's own subtree. This is the behaviour the
+# lockfile-reuse seeding guarantees — no full re-resolve, no concurrent
+# reshuffle of the existing tree.
+echo -e "${YELLOW}Case: package-lock.json reuse keeps existing tree stable${NC}"
+cd e2e/pm/lockfile-reuse
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+# Restore the fixture manifest (a prior run may have added is-number to it).
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "4.3.4"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: baseline install failed for lockfile-reuse${NC}"; exit 1; }
+cp package-lock.json package-lock.before.json
+
+# Add a single leaf dependency (is-number@7.0.0 has no dependencies of its own).
+utoo install is-number@7.0.0 --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: add is-number failed for lockfile-reuse${NC}"; exit 1; }
+
+node -e '
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+
+// Every package pinned before the add must survive unchanged (same version +
+// resolved). If the tree were re-resolved from scratch, hoisting could move or
+// re-pin these even though the user only added one package.
+for (const [key, pkg] of Object.entries(before)) {
+  if (key === "" || pkg.link) continue; // root + links carry no resolved tarball
+  const now = after[key];
+  if (!now) { console.error("REGRESSION: lost lock entry " + key); process.exit(1); }
+  if (now.version !== pkg.version) {
+    console.error("REGRESSION: " + key + " version changed " + pkg.version + " -> " + now.version);
+    process.exit(1);
+  }
+  if (now.resolved !== pkg.resolved) {
+    console.error("REGRESSION: " + key + " resolved changed for " + key);
+    process.exit(1);
+  }
+}
+
+// The added package must be present, and the set of NEW keys must be exactly
+// its own subtree (here: just is-number, a leaf).
+if (!after["node_modules/is-number"]) {
+  console.error("is-number not added to lockfile");
+  process.exit(1);
+}
+const newKeys = Object.keys(after).filter((k) => !(k in before));
+const unexpected = newKeys.filter((k) => k !== "node_modules/is-number");
+if (unexpected.length) {
+  console.error("REGRESSION: adding is-number introduced unrelated entries: " + unexpected.join(", "));
+  process.exit(1);
+}
+console.log("lock reuse: " + Object.keys(before).length + " entries preserved, +" + newKeys.length + " added");
+' || { echo -e "${RED}FAIL: adding a dep redrew the existing lock tree${NC}"; exit 1; }
+rm -f package-lock.before.json
+echo -e "${GREEN}PASS: package-lock.json reuse keeps existing tree stable${NC}"
+cd ../../../
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

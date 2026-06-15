@@ -2,12 +2,15 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::service::{BuildDepsOptions, BuildDepsOutput, Glob, UnifiedRegistry};
 use utoo_ruborist::workspace::WorkspaceDiscovery;
 
+use crate::fs;
 use crate::service::auth;
 use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};
 use crate::util::cache::get_cache_dir;
+use crate::util::json::load_package_lock_json_from_path;
 use crate::util::logger::ProgressReceiver;
 use crate::util::manifest_store::DiskManifestStore;
 use crate::util::project_cache;
@@ -46,7 +49,21 @@ impl Context {
         receiver: R,
     ) -> BuildDepsOptions<GlobImpl, R> {
         let catalogs = get_catalogs().await;
-        let project_cache = Some(project_cache::load(&cwd).await);
+
+        // Reuse an existing `package-lock.json` as the resolved-tree baseline:
+        // the resolver seeds the prior tree and resolves only the delta, so
+        // `ut install <pkg>` adds a node instead of recomputing (and
+        // reshuffling) the whole tree. The lockfile pins every resolved
+        // manifest, so it supersedes the `.utoo-manifest.json` project cache —
+        // only fall back to that cache when there is no usable lockfile (a fresh
+        // project, or a global install with no lock).
+        let baseline = load_baseline(&cwd).await;
+        let project_cache = if baseline.is_some() {
+            None
+        } else {
+            Some(project_cache::load(&cwd).await)
+        };
+
         BuildDepsOptions {
             cwd,
             registry: Self::registry().await,
@@ -57,6 +74,7 @@ impl Context {
             glob: TokioGlob,
             receiver,
             catalogs,
+            baseline,
         }
     }
 
@@ -106,6 +124,26 @@ impl Context {
     /// consume `WorkspacePackage` directly.
     pub fn discovery() -> WorkspaceDiscovery<GlobImpl> {
         WorkspaceDiscovery::new(Self::glob())
+    }
+}
+
+/// Load an existing `package-lock.json` to reuse as the resolver baseline.
+///
+/// Returns `None` when no lockfile exists (a fresh project, or a global install)
+/// or when it can't be parsed (an old `lockfileVersion: 1` file with no
+/// `packages` map, or a corrupt one) — in every such case the caller falls back
+/// to a full cold resolve, so an unusable lockfile only costs a warning.
+async fn load_baseline(cwd: &Path) -> Option<PackageLock> {
+    let lock_path = cwd.join("package-lock.json");
+    if !fs::try_exists(&lock_path).await.unwrap_or(false) {
+        return None;
+    }
+    match load_package_lock_json_from_path(cwd).await {
+        Ok(lock) => Some(lock),
+        Err(e) => {
+            tracing::warn!("ignoring package-lock.json for reuse (will cold-resolve): {e:#}");
+            None
+        }
     }
 }
 

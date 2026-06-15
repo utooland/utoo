@@ -470,6 +470,63 @@ impl DependencyGraph {
         super::package_lock::serialize_to_packages(self, root_path)
     }
 
+    /// Serialize to package-lock.json format, dropping any node not reachable
+    /// from the importers via resolved dependency edges. Used on the
+    /// lockfile-reuse path, where seeding inserts the whole prior tree and the
+    /// BFS may leave some of it orphaned: a removed direct dependency's subtree,
+    /// or a node shadowed by a re-resolved (bumped) version. See
+    /// [`reachable_nodes`](Self::reachable_nodes).
+    #[inline]
+    pub fn serialize_to_packages_pruned(
+        &self,
+        root_path: &Path,
+    ) -> (HashMap<String, super::package_lock::LockPackage>, i32) {
+        super::package_lock::serialize_to_packages_filtered(
+            self,
+            root_path,
+            Some(&self.reachable_nodes()),
+        )
+    }
+
+    /// The set of nodes reachable from the importers (root + workspace members)
+    /// by following **resolved** dependency edges. This is the same traversal
+    /// [`compute_node_types`](crate::resolver::node_types::compute_node_types)
+    /// uses to assign node types, so "has a type" and "is reachable" agree.
+    ///
+    /// On a cold resolve every placed node is reachable (the resolver only
+    /// creates a node when it resolves an edge to it), so this is the identity
+    /// — it only prunes on the reuse path, where seeded-but-orphaned nodes
+    /// remain physically attached under the append-only graph invariant.
+    pub fn reachable_nodes(&self) -> HashSet<NodeIndex> {
+        let mut reachable: HashSet<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&i| {
+                self.get_node(i)
+                    .is_some_and(|n| n.is_root() || n.is_workspace())
+            })
+            .collect();
+        let mut stack: Vec<NodeIndex> = reachable.iter().copied().collect();
+        while let Some(node) = stack.pop() {
+            // Walk resolved dependency edges by their target index only — no need
+            // for `get_resolved_dependencies`, which would clone each dep name.
+            let targets: Vec<NodeIndex> = self
+                .graph
+                .edges_directed(node, Outgoing)
+                .filter_map(|edge| match edge.weight() {
+                    GraphEdge::Dependency(dep) if dep.valid => dep.to,
+                    _ => None,
+                })
+                .collect();
+            for target in targets {
+                if reachable.insert(target) {
+                    stack.push(target);
+                }
+            }
+        }
+        reachable
+    }
+
     /// Find compatible node in parent chain for dependency resolution.
     ///
     /// For unconditional overrides (spec == "*"), uses the override target_spec.

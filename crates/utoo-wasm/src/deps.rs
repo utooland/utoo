@@ -52,6 +52,9 @@ pub async fn build_deps_from_file(
         glob: OpfsGlob,
         receiver: NoopReceiver,
         catalogs: std::collections::HashMap::new(),
+        // Browser builds always cold-resolve for now; wiring the OPFS lockfile
+        // in as a baseline is a follow-up.
+        baseline: None,
     };
 
     build_deps(options, pkg).await.map(|output| output.lock)
