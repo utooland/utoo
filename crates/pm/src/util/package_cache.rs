@@ -1,23 +1,27 @@
-//! Package cache layer: cache-path layout, seeded-slot lookups, and extracting
-//! downloaded tarball bytes into the cache. The network phase lives in
-//! [`super::downloader`]; the raw gzip/tar primitive lives in
-//! [`super::extractor`].
+//! Package cache layer: cache-path layout, install-time routing, and
+//! extracting tarball bytes. The network phase lives in [`super::downloader`];
+//! the raw gzip/tar primitive lives in [`super::extractor`].
 //!
-//! Lookups here key on the `_resolved` marker, whose contract is shared
-//! with ruborist's BFS-seeded slots (`resolver/common.rs`): every cache
-//! slot becomes visible only via atomic rename of a fully-written staging
-//! dir that already contains `_resolved`, so any slot with the marker is
-//! complete.
+//! Routing ([`resolve_cache_plan`]) classifies a lockfile entry by the host of
+//! its `resolved` URL: git deps and trusted-registry-host tarballs use the
+//! shared global `~/.cache/nm/` store, while non-registry tarballs (untrusted
+//! https + local `file:`) are materialized **directly** into `node_modules`
+//! ([`extract_non_registry_to_target`]) and never enter the cache.
+//!
+//! Cache lookups key on the `_resolved` marker, whose contract is shared with
+//! ruborist's BFS-seeded git slots (`resolver/common.rs`): every cache slot
+//! becomes visible only via atomic rename of a fully-written staging dir that
+//! already contains `_resolved`, so any slot with the marker is complete.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use utoo_ruborist::cache_slot::{file_cache_slot, http_cache_slot};
-use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;
+use super::downloader::is_git_url;
 use super::extractor::extract_and_write;
+use super::user_config::is_registry_tarball;
 
 /// Outcome of materializing a registry tarball into the cache. Returned so the
 /// caller (the install scheduler) keeps its own download/reuse counts instead
@@ -55,57 +59,69 @@ pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> O
     None
 }
 
-/// Look up a ruborist-seeded cache slot at `<cache_dir>/<name>/<slot>/`.
+/// How the install phase should materialize a lockfile entry, decided purely
+/// by classifying its `resolved` URL by host/scheme (the lockfile stores no
+/// source tag — see [`is_registry_tarball`]).
+pub enum CachePlan {
+    /// A git dep, already cloned into the global cache during BFS at
+    /// `<cache>/<name>/<commit_sha>/`; clone from there.
+    GitCache(PathBuf),
+    /// A registry-host tarball: download into the global `<name>/<version>`
+    /// slot, then clone from there (the existing registry pipeline).
+    RegistryDownload,
+    /// A non-registry tarball (http(s) remote or local `file:`): fetch/read the
+    /// tarball and extract it **directly** into the package's `node_modules`
+    /// target. These never enter the global cache.
+    DirectExtract,
+}
+
+/// Classify a lockfile entry's `resolved` URL into a [`CachePlan`].
 ///
-/// Returns `Some(path)` only if the slot's `_resolved` marker exists —
-/// otherwise returns `None` so the caller can fall through to the next
-/// routing step (typically the registry download path).
-async fn slot_cache_lookup(name: &str, slot: String) -> Option<PathBuf> {
-    let cache_path = get_cache_dir().join(name).join(slot);
-    if crate::fs::try_exists(&cache_path.join("_resolved"))
-        .await
-        .unwrap_or(false)
-    {
-        Some(cache_path)
+/// Routing is by host/scheme only:
+/// - `git+…` / git URLs → [`CachePlan::GitCache`] (errors if the BFS-seeded
+///   git slot is missing, which would indicate a corrupt lockfile/cache).
+/// - a trusted registry-host tarball → [`CachePlan::RegistryDownload`].
+/// - anything else (untrusted https or `file:`) → [`CachePlan::DirectExtract`].
+pub async fn resolve_cache_plan(name: &str, version: &str, tarball_url: &str) -> Result<CachePlan> {
+    if is_git_url(tarball_url) {
+        return git_cache_lookup(name, version, tarball_url)
+            .await
+            .map(CachePlan::GitCache)
+            .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}"));
+    }
+    if is_registry_tarball(tarball_url) {
+        return Ok(CachePlan::RegistryDownload);
+    }
+    Ok(CachePlan::DirectExtract)
+}
+
+/// Materialize a non-registry tarball ([`CachePlan::DirectExtract`]) straight
+/// into `target` (the package's `node_modules` directory), bypassing the global
+/// cache entirely.
+///
+/// `file:<abs>` tarballs are read from disk; everything else is fetched over
+/// http(s) (with a registry auth token only when the host warrants one). The
+/// tarball is then extracted via [`extract_tarball_to_dir`], which strips the
+/// npm `package/` wrapper and writes no `_resolved` marker.
+pub async fn extract_non_registry_to_target(tarball_url: &str, target: &Path) -> Result<()> {
+    let bytes: Bytes = if let Some(abs) = tarball_url.strip_prefix("file:") {
+        let abs = abs.to_string();
+        tokio::task::spawn_blocking(move || std::fs::read(&abs).map(Bytes::from))
+            .await
+            .context("file tarball read task failed")?
+            .with_context(|| format!("failed to read tarball {tarball_url}"))?
     } else {
-        None
-    }
-}
-
-/// Look up the cache path for a `file:<absolute_tarball>` dependency.
-///
-/// The URL must already be absolute; call sites that read relative URLs
-/// from the lockfile are responsible for re-absolutizing against the
-/// project root before reaching the cloner.
-pub async fn file_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
-    let abs_path = tarball_url.strip_prefix("file:")?;
-    slot_cache_lookup(name, file_cache_slot(std::path::Path::new(abs_path))).await
-}
-
-/// Look up the cache path for an HTTP(S) tarball dep.
-pub async fn http_tarball_cache_lookup(name: &str, tarball_url: &str) -> Option<PathBuf> {
-    slot_cache_lookup(name, http_cache_slot(tarball_url)).await
-}
-
-/// Resolve cache slots that may have been seeded during dependency resolution
-/// without falling through to registry download. `Ok(None)` means this is a
-/// registry-style HTTP tarball that should be downloaded into `<name>/<version>`.
-pub async fn resolve_seeded_cache_path(
-    name: &str,
-    version: &str,
-    tarball_url: &str,
-) -> Result<Option<PathBuf>> {
-    match tarball_url.parse::<Protocol>() {
-        Ok(Protocol::Git) => git_cache_lookup(name, version, tarball_url)
+        let token = crate::service::auth::token_for_url(tarball_url).await;
+        super::downloader::download_bytes(tarball_url, token.as_deref())
             .await
-            .map(Some)
-            .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}")),
-        Ok(Protocol::File) => file_cache_lookup(name, tarball_url)
-            .await
-            .map(Some)
-            .ok_or_else(|| anyhow::anyhow!("file tarball cache not found for {name}@{version}")),
-        _ => Ok(http_tarball_cache_lookup(name, tarball_url).await),
-    }
+            .with_context(|| format!("failed to download tarball {tarball_url}"))?
+    };
+
+    let target = target.to_path_buf();
+    tokio::task::spawn_blocking(move || utoo_ruborist::tar::extract_tarball_to_dir(&bytes, &target))
+        .await
+        .context("direct-extract task failed")?
+        .with_context(|| format!("failed to extract tarball {tarball_url}"))
 }
 
 /// Return the registry cache path for a package version.
