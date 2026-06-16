@@ -16,7 +16,6 @@ pub mod cmd {
     pub const UPDATE_ABOUT: &str = "Remove node_modules and reinstall";
 
     pub const INSTALL_NAME: &str = "install";
-    pub const INSTALL_ALIASES: &str = "i, add";
     pub const INSTALL_ABOUT: &str = "Install project dependencies";
 
     pub const REBUILD_NAME: &str = "rebuild";
@@ -35,7 +34,6 @@ pub mod cmd {
     pub const VIEW_ALIAS: &str = "v";
     pub const VIEW_ALIAS_INFO: &str = "info";
     pub const VIEW_ALIAS_SHOW: &str = "show";
-    pub const VIEW_ALIASES: &str = "v, info, show";
     pub const VIEW_ABOUT: &str = "View package information";
 
     pub const LIST_NAME: &str = "list";
@@ -84,5 +82,6 @@ pub mod cmd {
 
     pub const COMPLETIONS_NAME: &str = "completions";
     pub const COMPLETIONS_ALIAS: &str = "cmp";
-    pub const COMPLETIONS_ABOUT: &str = "Generate shell completion scripts\n\nAdd to your shell config:\n  bash:  echo 'eval \"$(utoo completions bash)\"' >> ~/.bashrc\n  zsh:   echo 'eval \"$(utoo completions zsh)\"' >> ~/.zshrc\n  fish:  utoo completions fish > ~/.config/fish/completions/utoo.fish";
+    pub const COMPLETIONS_ABOUT: &str = "Generate shell completion scripts";
+    pub const COMPLETIONS_LONG_ABOUT: &str = "Generate shell completion scripts\n\nAdd to your shell config:\n  bash:  echo 'eval \"$(utoo completions bash)\"' >> ~/.bashrc\n  zsh:   echo 'eval \"$(utoo completions zsh)\"' >> ~/.zshrc\n  fish:  utoo completions fish > ~/.config/fish/completions/utoo.fish";
 }

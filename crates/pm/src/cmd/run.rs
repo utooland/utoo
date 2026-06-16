@@ -1,9 +1,13 @@
-use crate::helper::fuzzy_select;
-use crate::helper::workspace::update_cwd_to_project;
-use crate::service::script::{MissingScript, ScriptService};
-use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 use anyhow::{Context, Result};
 use colored::Colorize;
+
+use crate::helper::fuzzy_select;
+use crate::helper::workspace::update_cwd_to_project;
+use crate::service::config::ConfigService;
+use crate::service::script::{MissingScript, ScriptService};
+use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
+use crate::util::cli_enum::ConfigScope;
+use crate::util::config_file::Config;
 
 pub async fn run(
     script_name: Option<&str>,
@@ -51,6 +55,32 @@ pub async fn run(
             ScriptService::run_in_layers(&layers, &paths, &script_name, missing, script_args).await
         }
     }
+}
+
+/// Fallback for `utoo <name>` when `<name>` is not a built-in subcommand:
+/// prefer a custom command from the config, otherwise run `<name>` as a
+/// package.json script.
+pub async fn run_fallback(
+    script_name: &str,
+    filter: WorkspaceFilter,
+    script_args: Vec<String>,
+) -> Result<()> {
+    // First check if there's a custom command configured for this script name
+    let config = Config::load(ConfigScope::Local).await?;
+    let config_service = ConfigService::new(config);
+    if let Ok(Some(_)) = config_service.get_available_cmd(script_name) {
+        // Execute the custom command
+        config_service.execute_command(script_name, &script_args)?;
+        return Ok(());
+    }
+
+    // If no custom command found, try to run as script
+    let script_args = if script_args.is_empty() {
+        None
+    } else {
+        Some(script_args)
+    };
+    run(Some(script_name), filter, MissingScript::Fail, script_args).await
 }
 
 #[cfg(test)]

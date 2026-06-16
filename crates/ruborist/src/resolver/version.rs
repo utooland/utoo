@@ -20,7 +20,7 @@ use super::semver::{matches, max_satisfying};
 /// ```
 /// use std::collections::HashMap;
 /// use utoo_ruborist::manifest::VersionsRef;
-/// use utoo_ruborist::resolver::version::resolve_target_version;
+/// use utoo_ruborist::registry::resolve_target_version;
 ///
 /// let mut dist_tags = HashMap::new();
 /// dist_tags.insert("latest".to_string(), "1.2.3".to_string());
@@ -37,29 +37,8 @@ pub fn resolve_target_version(view: VersionsRef<'_>, spec: &str) -> Result<Strin
         versions,
         dist_tags,
     } = view;
-
-    if versions.is_empty() {
-        return Err(ResolveError::NoVersionsAvailable);
-    }
-
-    // First check if spec is a dist-tag
-    if let Some(version) = dist_tags.get(spec) {
-        return Ok(version.to_string());
-    }
-
-    // Not a dist-tag, do semver matching
-    // Check if 'latest' dist-tag satisfies the spec (npm behavior)
-    let version = dist_tags
-        .get("latest")
-        .filter(|latest| matches(spec, latest))
-        .map(|latest| latest.to_string())
-        .or_else(|| {
-            max_satisfying(versions.iter().map(|s| s.as_str()), spec).map(|v| v.to_string())
-        });
-
-    version.ok_or_else(|| ResolveError::NoMatchingVersion {
-        spec: spec.to_string(),
-        available_count: versions.len(),
+    resolve_with_fallback(versions, dist_tags, spec, || {
+        max_satisfying(versions.iter().map(|s| s.as_str()), spec).map(|v| v.to_string())
     })
 }
 
@@ -83,27 +62,40 @@ pub fn resolve_target_version_lazy<'a>(
         versions,
         dist_tags,
     } = view;
+    resolve_with_fallback(versions, dist_tags, spec, || {
+        super::semver::max_satisfying_sorted_desc(sorted(), spec).map(|v| v.to_string())
+    })
+}
 
+/// The npm version-selection ladder, implemented once: dist-tag shortcut,
+/// then `latest`-preference, then the caller's max-satisfying fallback (the
+/// only step where the eager and lazy variants differ).
+fn resolve_with_fallback(
+    versions: &[String],
+    dist_tags: &std::collections::HashMap<String, String>,
+    spec: &str,
+    fallback: impl FnOnce() -> Option<String>,
+) -> Result<String, ResolveError> {
     if versions.is_empty() {
         return Err(ResolveError::NoVersionsAvailable);
     }
 
+    // First check if spec is a dist-tag
     if let Some(version) = dist_tags.get(spec) {
         return Ok(version.to_string());
     }
 
-    let version = dist_tags
+    // Not a dist-tag: prefer `latest` when it satisfies the spec (npm
+    // behavior), otherwise run the caller's semver search.
+    dist_tags
         .get("latest")
         .filter(|latest| matches(spec, latest))
         .map(|latest| latest.to_string())
-        .or_else(|| {
-            super::semver::max_satisfying_sorted_desc(sorted(), spec).map(|v| v.to_string())
-        });
-
-    version.ok_or_else(|| ResolveError::NoMatchingVersion {
-        spec: spec.to_string(),
-        available_count: versions.len(),
-    })
+        .or_else(fallback)
+        .ok_or_else(|| ResolveError::NoMatchingVersion {
+            spec: spec.to_string(),
+            available_count: versions.len(),
+        })
 }
 
 /// Error type for version resolution.
@@ -138,6 +130,7 @@ impl std::error::Error for ResolveError {}
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::collections::HashMap;
 
     use super::*;
@@ -235,8 +228,6 @@ mod tests {
     /// per-package parse+sort the shortcuts exist to avoid.
     #[test]
     fn test_lazy_skips_sorted_on_shortcut() {
-        use std::cell::Cell;
-
         let mut dist_tags = HashMap::new();
         dist_tags.insert("latest".to_string(), "1.5.0".to_string());
         dist_tags.insert("beta".to_string(), "2.0.0-beta.1".to_string());

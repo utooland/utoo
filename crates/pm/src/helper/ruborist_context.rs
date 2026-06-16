@@ -2,10 +2,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use utoo_ruborist::resolver::workspace::WorkspaceDiscovery;
-use utoo_ruborist::service::{
-    BuildDepsOptions, BuildDepsOutput, Glob, ManifestStore, UnifiedRegistry,
-};
+use utoo_ruborist::service::{BuildDepsOptions, BuildDepsOutput, Glob, UnifiedRegistry};
+use utoo_ruborist::workspace::WorkspaceDiscovery;
 
 use crate::service::auth;
 use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};
@@ -42,10 +40,6 @@ pub(crate) type Registry = UnifiedRegistry;
 pub(crate) struct Context;
 
 impl Context {
-    fn manifest_store() -> Arc<dyn ManifestStore> {
-        Arc::new(DiskManifestStore::new(get_cache_dir()))
-    }
-
     /// Create BuildDepsOptions with a custom event receiver.
     pub async fn deps_options<R: utoo_ruborist::progress::EventReceiver>(
         cwd: PathBuf,
@@ -95,7 +89,7 @@ impl Context {
         let mut builder = UnifiedRegistry::builder()
             .registry(get_registry())
             .auth_token(auth::cached_token().await)
-            .store(Self::manifest_store());
+            .store(Arc::new(DiskManifestStore::new(get_cache_dir())));
         if let Some(semver) = get_supports_semver() {
             builder = builder.supports_semver(semver);
         }

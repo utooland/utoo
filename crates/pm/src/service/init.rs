@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 use dialoguer::Input;
-use serde_json::json;
+use serde::Serialize;
 
 use crate::helper::git;
 
@@ -29,6 +29,8 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
     };
 
     let content = serde_json::to_string_pretty(&pkg)? + "\n";
+    // pkg is a typed GeneratedPackage; field order matches the canonical
+    // npm-init layout (name…license, repository last) via declaration order.
 
     println!("About to write to {}:\n", package_json_path.display());
     println!("{content}");
@@ -87,36 +89,61 @@ impl PackageFields {
         }
     }
 
-    fn into_json(self) -> serde_json::Value {
-        let mut pkg = json!({
-            "name": self.name,
-            "version": self.version,
-            "description": self.description,
-            "main": self.main,
-            "scripts": {
-                "test": self.test_script
-            },
-            "keywords": self.keywords,
-            "author": self.author,
-            "license": self.license
+    fn into_package(self) -> GeneratedPackage {
+        let repository = (!self.repository.is_empty()).then(|| GeneratedRepository {
+            repo_type: "git",
+            url: git::normalize_url(&self.repository),
         });
-
-        if !self.repository.is_empty() {
-            pkg["repository"] = json!({
-                "type": "git",
-                "url": git::normalize_url(&self.repository)
-            });
+        GeneratedPackage {
+            name: self.name,
+            version: self.version,
+            description: self.description,
+            main: self.main,
+            scripts: GeneratedScripts {
+                test: self.test_script,
+            },
+            keywords: self.keywords,
+            author: self.author,
+            license: self.license,
+            repository,
         }
-
-        pkg
     }
 }
 
-fn build_default_package(cwd: &Path) -> serde_json::Value {
-    PackageFields::defaults(cwd).into_json()
+/// The generated package.json, serialized verbatim to disk. Field declaration
+/// order is the on-disk key order, matching npm init's canonical layout.
+#[derive(Serialize)]
+struct GeneratedPackage {
+    name: String,
+    version: String,
+    description: String,
+    main: String,
+    scripts: GeneratedScripts,
+    keywords: Vec<String>,
+    author: String,
+    license: String,
+    /// Omitted entirely when no git repository was detected/entered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository: Option<GeneratedRepository>,
 }
 
-fn build_interactive_package(cwd: &Path) -> Result<serde_json::Value> {
+#[derive(Serialize)]
+struct GeneratedScripts {
+    test: String,
+}
+
+#[derive(Serialize)]
+struct GeneratedRepository {
+    #[serde(rename = "type")]
+    repo_type: &'static str,
+    url: String,
+}
+
+fn build_default_package(cwd: &Path) -> GeneratedPackage {
+    PackageFields::defaults(cwd).into_package()
+}
+
+fn build_interactive_package(cwd: &Path) -> Result<GeneratedPackage> {
     let defaults = PackageFields::defaults(cwd);
 
     let fields = PackageFields {
@@ -145,7 +172,7 @@ fn build_interactive_package(cwd: &Path) -> Result<serde_json::Value> {
         license: prompt("license", defaults.license, false)?,
     };
 
-    Ok(fields.into_json())
+    Ok(fields.into_package())
 }
 
 fn prompt(label: &str, default: String, allow_empty: bool) -> Result<String> {
@@ -166,12 +193,11 @@ mod tests {
         let cwd = Path::new("/tmp/test-pkg");
         let pkg = build_default_package(cwd);
 
-        assert_eq!(pkg["name"], "test-pkg");
-        assert_eq!(pkg["version"], "1.0.0");
-        assert_eq!(pkg["main"], "index.js");
-        assert_eq!(pkg["license"], "ISC");
-        assert!(pkg["scripts"]["test"].is_string());
-        assert!(pkg["keywords"].is_array());
+        assert_eq!(pkg.name, "test-pkg");
+        assert_eq!(pkg.version, "1.0.0");
+        assert_eq!(pkg.main, "index.js");
+        assert_eq!(pkg.license, "ISC");
+        assert!(!pkg.scripts.test.is_empty());
     }
 
     #[tokio::test]

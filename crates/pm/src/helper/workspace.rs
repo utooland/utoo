@@ -42,25 +42,24 @@ pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf>
 /// project root (install, update, deps, etc.).
 pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
     let root_dir = FsContext::discovery().find_root_path(cwd).await?;
-    if !compare_paths(cwd, &root_dir) {
-        tracing::debug!(
-            "Changing directory to workspace root: {}",
-            root_dir.display()
-        );
-        env::set_current_dir(&root_dir).context("Failed to change to root directory")?;
-    }
-
-    Ok(root_dir)
+    chdir_if_needed(cwd, root_dir, "workspace root")
 }
 
 /// Update current working directory to project directory (closest package.json).
 pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
     let project_dir = FsContext::discovery().find_project_path(cwd).await?;
-    if !compare_paths(cwd, &project_dir) {
-        tracing::debug!("Changing directory to project: {}", project_dir.display());
-        env::set_current_dir(&project_dir).context("Failed to change to project directory")?;
+    chdir_if_needed(cwd, project_dir, "project")
+}
+
+/// `chdir` into `target` when it differs from `cwd`, logging with `label`;
+/// returns `target` either way.
+fn chdir_if_needed(cwd: &Path, target: PathBuf, label: &str) -> Result<PathBuf> {
+    if !compare_paths(cwd, &target) {
+        tracing::debug!("Changing directory to {label}: {}", target.display());
+        env::set_current_dir(&target)
+            .with_context(|| format!("Failed to change to {label} directory"))?;
     }
-    Ok(project_dir)
+    Ok(target)
 }
 
 // Helper function to compare paths

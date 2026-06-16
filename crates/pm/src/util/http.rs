@@ -1,41 +1,28 @@
-use std::env;
 use std::sync::LazyLock;
+
+use anyhow::{Context, Result, anyhow};
 
 /// Global shared client for general-purpose HTTP requests.
 ///
-/// Uses the same no-system-proxy policy as [`client_builder`].
-/// For download-heavy workloads with custom timeouts, use [`client_builder`] instead.
-static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+/// Stores `Result` so proxy-configuration errors surface to callers on first
+/// use instead of panicking. For download-heavy workloads with custom
+/// timeouts, use [`client_builder`] instead.
+static CLIENT: LazyLock<Result<reqwest::Client, String>> = LazyLock::new(|| {
     client_builder()
-        .build()
-        .expect("Failed to build HTTP client")
+        .and_then(|b| b.build().context("Failed to build HTTP client"))
+        .map_err(|e| e.to_string())
 });
 
-/// Return a reference to the global shared [`reqwest::Client`].
-pub fn client() -> &'static reqwest::Client {
-    &CLIENT
+/// Return the global shared [`reqwest::Client`].
+pub fn client() -> Result<&'static reqwest::Client> {
+    CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 
-/// Create a [`reqwest::ClientBuilder`] with system proxy auto-detection disabled.
-///
-/// reqwest's `system-proxy` feature (enabled via Cargo feature unification)
-/// reads macOS / Windows system proxy settings (e.g. set by Surge / Clash),
-/// which can cause unexpected routing or significant slowdowns.
-///
-/// This builder only respects explicitly set environment variables:
-/// `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` (and their lowercase variants).
-pub fn client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .user_agent(concat!("utoo/", env!("CARGO_PKG_VERSION")))
-        .no_proxy()
-        .proxy(reqwest::Proxy::custom(|url| {
-            env_var("ALL_PROXY").or_else(|| match url.scheme() {
-                "https" => env_var("HTTPS_PROXY"),
-                _ => env_var("HTTP_PROXY"),
-            })
-        }))
-}
-
-fn env_var(key: &str) -> Option<String> {
-    env::var(key).or_else(|_| env::var(key.to_lowercase())).ok()
+/// pm's shared [`reqwest::ClientBuilder`]: ruborist's base policy (rustls
+/// TLS, caching DNS resolver, connect timeout, HTTP/1.1 connection pool, and
+/// env-var proxy handling with empty-string filtering) plus the utoo user
+/// agent. See `utoo_ruborist::service::client_builder` for the policy details.
+pub fn client_builder() -> Result<reqwest::ClientBuilder> {
+    Ok(utoo_ruborist::service::client_builder()?
+        .user_agent(concat!("utoo/", env!("CARGO_PKG_VERSION"))))
 }

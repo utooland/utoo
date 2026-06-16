@@ -7,11 +7,19 @@ use reqwest::{Client, StatusCode};
 use tokio_retry::RetryIf;
 use utoo_ruborist::spec::Protocol;
 
-use super::retry::{RetryableError, build_dns_cached_client, create_retry_strategy};
+use super::retry::{RetryableError, build_download_client, create_retry_strategy};
 
 // Global downloader client. Concurrency and duplicate work are controlled by
-// the caller's scheduler.
-static DOWNLOADER_CLIENT: Lazy<Client> = Lazy::new(build_dns_cached_client);
+// the caller's scheduler. Stores `Result` so proxy-configuration errors
+// surface to callers instead of panicking.
+static DOWNLOADER_CLIENT: Lazy<Result<Client, String>> =
+    Lazy::new(|| build_download_client().map_err(|e| e.to_string()));
+
+fn downloader_client() -> Result<&'static Client> {
+    DOWNLOADER_CLIENT
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
 
 /// Check whether a tarball URL refers to a git-resolved package.
 pub fn is_git_url(url: &str) -> bool {
@@ -29,13 +37,14 @@ pub fn is_registry_tarball_url(url: &str) -> bool {
 /// responsible for the leak guard (only pass a token for registry-host URLs —
 /// see [`crate::service::auth::token_for_url`]).
 pub async fn download_bytes(url: &str, auth_token: Option<&str>) -> Result<Bytes> {
+    let client = downloader_client()?;
     let retry_count = AtomicU32::new(0);
     RetryIf::spawn(
         create_retry_strategy(),
         || async {
             let attempt = retry_count.fetch_add(1, Ordering::Relaxed);
 
-            let mut request = DOWNLOADER_CLIENT.get(url);
+            let mut request = client.get(url);
             if let Some(token) = auth_token {
                 request = request.bearer_auth(token);
             }

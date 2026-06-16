@@ -128,6 +128,8 @@ Set rebase breakpoints or inspect carefully around commits touching:
 - file tracing / NFT
 - runtime output snapshots
 - wasm, worker threads, `wasm-bindgen`, `-Z build-std`
+- new `std::*` calls incompatible with `wasm32-unknown-unknown` (see adaptation patterns below)
+- newly introduced third-party crates that may not compile or run on `wasm32-unknown-unknown`
 
 ## Common Adaptation Patterns
 
@@ -255,6 +257,98 @@ Rules:
   ```toml
   "-Clink-arg=--export=__heap_base",
   ```
+
+### wasm32-unknown-unknown std API compatibility
+
+Upstream turbopack code targets native platforms. New `std` calls that work on native may panic or fail to compile on `wasm32-unknown-unknown`. During sync, grep newly added or modified files for the APIs below and gate or replace them.
+
+**Incompatible std APIs — comprehensive list:**
+
+| Category | API | Behavior on `wasm32-unknown-unknown` | Replacement / Workaround |
+|----------|-----|--------------------------------------|-------------------------|
+| Time | `std::time::Instant::now()` | **panics** at runtime (`unsupported platform`) | Use `tokio::time::Instant` from our forked tokio (which delegates to `performance.now()` in wasm) |
+| Time | `std::time::SystemTime::now()` | **panics** at runtime | Use `js_sys::Date::now()` or forked tokio equivalent behind `#[cfg]` |
+| Threads | `std::thread::spawn` | **panics** — no native thread support | Gate with `#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]`; use `wasm_bindgen_futures` or single-threaded path |
+| Threads | `std::thread::JoinHandle`, `std::thread::Builder` | unavailable at runtime | Same as above |
+| Threads | `std::thread::available_parallelism` | returns `Err` or 1 | Provide a wasm-aware fallback |
+| Threads | `std::thread::sleep` | **panics** | Use async sleep (`tokio::time::sleep` or `gloo_timers`) |
+| Threads | `std::thread::park` / `unpark` | **panics** | Avoid; restructure to async |
+| Sync | `std::sync::Condvar` | **panics** (requires thread parking) | Avoid on wasm; use async channels |
+| Sync | `std::sync::Barrier` | **panics** (requires threads) | Avoid on wasm |
+| Sync | `std::sync::mpsc::channel` | compiles but **deadlocks** in single-threaded context | Use `futures::channel` or `tokio::sync` |
+| Sync | `std::sync::OnceLock` (with blocking init) | may deadlock or panic if init blocks | Use `once_cell::sync::Lazy` with wasm-safe init, or `std::sync::LazyLock` with non-blocking init |
+| Filesystem | `std::fs::*` (read, write, metadata, etc.) | **compile error** or runtime panic | Gate with `#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]`; provide virtual FS or no-op |
+| Filesystem | `std::path::Path::canonicalize` | **panics** | Avoid; use path normalization without syscalls |
+| Networking | `std::net::TcpStream`, `UdpSocket`, `TcpListener` | **compile error** / unavailable | Gate or remove; not applicable in browser wasm |
+| Process | `std::process::Command`, `exit`, `abort` | **compile error** or panic | Gate with `#[cfg]` |
+| Environment | `std::env::var`, `current_dir`, `args` | **panics** or returns error | Gate; provide wasm-specific defaults |
+| Environment | `std::env::current_exe` | **panics** | Gate |
+| I/O | `std::io::stdin`, `stdout`, `stderr` (direct use) | stubs that return errors | Use `web_sys::console` for logging behind `#[cfg]` |
+| Random | `std::collections::HashMap` (random state) | compiles, but `RandomState` needs `getrandom` | Ensure `getrandom` crate has `"js"` feature enabled, or use `FxHashMap` |
+
+**Detection during sync:**
+
+```bash
+# After rebasing, scan newly changed turbopack files for risky std calls
+git -C next.js diff <merge-base>..HEAD --name-only -- '*.rs' | \
+  xargs rg -n '(std::time::Instant|std::time::SystemTime|std::thread::(spawn|sleep|park|Builder|JoinHandle|available_parallelism)|std::sync::(Condvar|Barrier|mpsc)|std::fs::|std::net::|std::process::|std::env::(var|current_dir|current_exe|args))'
+```
+
+If any match is found in code reachable from the `utoo-wasm` build:
+
+1. Report the call site, the upstream commit that introduced it, and why it breaks wasm.
+2. Propose one of:
+   - `#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]` gate with a wasm-compatible alternative
+   - Replacement with a forked-tokio or wasm-compatible equivalent
+   - Upstream conditional compilation if the code already has platform gates
+3. Wait for user confirmation before editing.
+
+### Third-party crate wasm compatibility
+
+Upstream turbopack may introduce new third-party crate dependencies. Not all crates compile or run correctly on `wasm32-unknown-unknown`.
+
+**Detection during sync:**
+
+```bash
+# After rebasing, diff Cargo.toml files for new dependencies
+git -C next.js diff <merge-base>..HEAD -- '**/Cargo.toml' | rg '^\+.*=.*\{' | rg -v '\[dev-dependencies\]'
+```
+
+**Evaluation checklist for each newly introduced crate:**
+
+1. **Check crate metadata**: Does the crate list `wasm32-unknown-unknown` as a supported target? Check `Cargo.toml` for `[target.'cfg(...)'.dependencies]` gates.
+2. **Check transitive deps**: Does the crate pull in known wasm-incompatible crates (`ring`, `native-tls`, `openssl-sys`, `mio` with epoll/kqueue, `tokio` with `rt-multi-thread`, `rayon`, etc.)?
+3. **Check for C/system deps**: Does the crate use `cc`, `cmake`, `pkg-config`, or `links = "..."` in its build script? These typically fail on wasm.
+4. **Check for `std::thread` / `std::net` / `std::fs`**: Does the crate internally use APIs from the incompatible list above?
+5. **Quick smoke test**:
+
+   ```bash
+   # Try compiling the crate alone for wasm
+   cargo check --target wasm32-unknown-unknown -p <crate-name>
+   ```
+
+**If a new crate is wasm-incompatible:**
+
+1. Report the crate name, which upstream commit introduced it, and what makes it incompatible.
+2. Propose one of:
+   - Feature-gate the dependency: `[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]`
+   - Find a wasm-compatible alternative crate
+   - Fork or patch the crate if a small fix is sufficient
+   - Gate the consuming code path with `#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]`
+3. Flag for user review — do not silently add wasm-incompatible dependencies.
+
+**Known wasm-incompatible crate patterns:**
+
+| Pattern | Examples | Why |
+|---------|----------|-----|
+| System TLS / crypto | `ring`, `native-tls`, `openssl-sys`, `rustls` (with `ring` backend) | C deps or asm not available on wasm |
+| Thread pool | `rayon`, `threadpool` | Requires `std::thread::spawn` |
+| Async runtime (full) | `tokio` with `rt-multi-thread` | Requires OS threads |
+| OS I/O polling | `mio`, `polling`, `epoll`, `kqueue` | No OS I/O on wasm |
+| File system | `notify`, `walkdir`, `glob` (runtime use) | No `std::fs` on wasm |
+| Networking | `hyper`, `reqwest` (default features) | Requires `std::net` |
+| Process | `duct`, `subprocess` | Requires `std::process` |
+| Time (blocking) | `crossbeam-channel` (with timeouts) | Uses `std::time::Instant` internally |
 
 ### Rust toolchain sync
 

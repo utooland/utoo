@@ -1,7 +1,25 @@
+use std::collections::HashMap;
+
+use anyhow::{Result, anyhow};
+
+use crate::cli::ConfigCommands;
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
-use anyhow::{Result, anyhow};
-use std::collections::HashMap;
+
+/// Entry point for the `config` subcommand.
+pub async fn run(command: ConfigCommands) -> Result<()> {
+    match command {
+        ConfigCommands::Set { key, value, global } => {
+            handle_config_set(key, value, global.into()).await
+        }
+        ConfigCommands::Get {
+            key,
+            global,
+            override_values,
+        } => handle_config_get(key, global.into(), override_values).await,
+        ConfigCommands::List { global } => handle_config_list(global.into()).await,
+    }
+}
 
 // Parse key val manually
 fn parse_key_val(s: &str) -> Result<(String, String)> {

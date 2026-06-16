@@ -20,7 +20,7 @@ use std::thread::JoinHandle;
 
 use async_trait::async_trait;
 use serde::Serialize;
-use utoo_ruborist::model::manifest::CoreVersionManifest;
+use utoo_ruborist::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
 use crate::util::json::{read_json_file, write_compact_sync};

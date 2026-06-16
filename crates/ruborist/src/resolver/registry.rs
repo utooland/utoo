@@ -128,7 +128,7 @@ pub async fn resolve_package<P: ManifestProvider>(
         // Semver registries resolve the range/tag server-side: one version job
         // returns the matching version's manifest directly.
         let manifest = version_manifest(provider, &fetch_name, &fetch_spec, &fetch_spec).await?;
-        return Ok(resolved_from_version(&fetch_name, manifest));
+        return Ok(ResolvedPackage::from_manifest(&*fetch_name, manifest));
     }
 
     // Non-semver: fetch the full manifest, resolve the version client-side.
@@ -142,7 +142,7 @@ pub async fn resolve_package<P: ManifestProvider>(
     match done {
         // The provider speculatively extracted the requested version already.
         ManifestJobDone::Version { manifest, .. } => {
-            Ok(resolved_from_version(&fetch_name, manifest))
+            Ok(ResolvedPackage::from_manifest(&*fetch_name, manifest))
         }
         ManifestJobDone::Full { data, .. } => match data {
             ManifestFullData::Full { manifest, .. } => {
@@ -159,7 +159,7 @@ pub async fn resolve_package<P: ManifestProvider>(
                     .map_err(|e| ResolveError::Version(format!("{name}@{fetch_spec}: {e}")))?;
                 let manifest =
                     version_manifest(provider, &fetch_name, &version, &fetch_spec).await?;
-                Ok(resolved_from_version(&fetch_name, manifest))
+                Ok(ResolvedPackage::from_manifest(fetch_name, manifest))
             }
         },
     }
@@ -185,14 +185,6 @@ async fn version_manifest<P: ManifestProvider>(
         ManifestJobDone::Full { .. } => Err(ResolveError::Version(format!(
             "{name}@{requested_spec}: provider returned a full manifest for a version job"
         ))),
-    }
-}
-
-fn resolved_from_version(name: &str, manifest: Arc<CoreVersionManifest>) -> ResolvedPackage {
-    ResolvedPackage {
-        name: name.to_string(),
-        version: manifest.version.clone(),
-        manifest,
     }
 }
 

@@ -1,10 +1,13 @@
+use std::collections::{HashMap, HashSet};
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use glob::glob;
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use utoo_ruborist::util::PackageNameStr;
 
-use crate::helper::lock::{Package, path_to_pkg_name};
+use crate::helper::lock::Package;
 use crate::helper::ruborist_context::Context as FsContext;
 
 /// Remove a symlink with platform-specific handling.
@@ -13,8 +16,6 @@ use crate::helper::ruborist_context::Context as FsContext;
 async fn remove_symlink(path: &Path) -> Result<(), std::io::Error> {
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-
         let metadata = crate::fs::symlink_metadata(path).await?;
         if !metadata.file_type().is_symlink() {
             return Ok(());
@@ -123,7 +124,7 @@ async fn remove_unused_packages(
                     )
                 })?;
 
-                if let Some(pkg_name) = path_to_pkg_name(&pkg_dir.to_string_lossy())
+                if let Some(pkg_name) = Package::path_to_pkg_name(&pkg_dir.to_string_lossy())
                     && !valid_packages.contains(rel_path.to_string_lossy().as_ref())
                 {
                     tracing::debug!("Cleaning unused package: {pkg_name}");
