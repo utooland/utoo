@@ -276,6 +276,9 @@ export interface ConfigComplete {
   };
   styles?: {
     autoCssModules?: boolean;
+    cssModules?: {
+      localIdentName?: string;
+    };
     emotion?: boolean | EmotionOptions;
     postcss?: JSONValue;
     less?: {

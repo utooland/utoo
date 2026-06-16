@@ -331,6 +331,7 @@ pub struct StyleConfig {
     pub styled_components: Option<StyledComponentsTransformOptionsOrBoolean>,
     pub emotion: Option<EmotionTransformConfig>,
     pub auto_css_modules: Option<bool>,
+    pub css_modules: Option<CssModulesConfig>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub postcss: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
@@ -339,6 +340,42 @@ pub struct StyleConfig {
     less: Option<serde_json::Value>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     inline_css: Option<serde_json::Value>,
+}
+
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct CssModulesConfig {
+    pub local_ident_name: Option<RcStr>,
+}
+
+impl CssModulesConfig {
+    pub fn local_ident_pattern(&self) -> Option<RcStr> {
+        self.local_ident_name
+            .as_ref()
+            .map(|pattern| normalize_css_modules_pattern(pattern).into())
+    }
+}
+
+fn normalize_css_modules_pattern(pattern: &str) -> String {
+    let mut normalized = String::with_capacity(pattern.len());
+    let mut rest = pattern;
+
+    while let Some(start) = rest.find("[hash:") {
+        normalized.push_str(&rest[..start]);
+
+        let placeholder = &rest[start..];
+        if let Some(end) = placeholder.find(']') {
+            normalized.push_str("[hash]");
+            rest = &placeholder[end + 1..];
+        } else {
+            normalized.push_str(placeholder);
+            return normalized;
+        }
+    }
+
+    normalized.push_str(rest);
+    normalized
 }
 
 #[turbo_tasks::value(eq = "manual")]
