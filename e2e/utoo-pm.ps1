@@ -567,4 +567,65 @@ if (-not (Get-Command cowsay -ErrorAction SilentlyContinue)) {
 }
 Write-Green "  ✓ PASS: utoo add -g works"
 
+# ═══════════════════════════════════════════════════════════════
+# Case: file: tarball located OUTSIDE the project root (Windows)
+# ═══════════════════════════════════════════════════════════════
+# Windows mirror of the bash Case 8.5b. A tarball outside the project root
+# yields a root-relative lockfile entry carrying `..` (e.g. "file:../foo.tgz").
+# BFS hashes the cache slot from the canonical absolute path, while install
+# re-absolutizes the `..`-laden lockfile path; without lexical `..`-collapse
+# (which must also handle the Windows `C:` drive prefix) the two disagree and
+# the clone fails with "file tarball cache not found". No other e2e exercises
+# this on win32-msvc.
+Write-Yellow "Case: file: tarball outside project root (Windows)"
+$extDir = Join-Path $env:TEMP "utoo-e2e-exttgz-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$extDir\src\ext-tarball-pkg" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$extDir\app" -Force | Out-Null
+
+    @{ name = "ext-tarball-pkg"; version = "5.6.7"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$extDir\src\ext-tarball-pkg\package.json"
+    Set-Content "$extDir\src\ext-tarball-pkg\index.js" "module.exports = 567;"
+
+    # Pack the leaf package into a tarball that sits OUTSIDE the app dir, so the
+    # lockfile's root-relative `file:` path carries a `..`.
+    Push-Location "$extDir\src\ext-tarball-pkg"
+    try {
+        npm pack 2>&1 | Out-Null
+        $tgz = Get-ChildItem "ext-tarball-pkg-*.tgz" | Select-Object -First 1
+        Move-Item $tgz.FullName "$extDir\ext-tarball-pkg.tgz"
+    }
+    finally { Pop-Location }
+
+    $tgzSpec = "file:" + ((Join-Path $extDir "ext-tarball-pkg.tgz") -replace '\\', '/')
+    @{
+        name         = "ext-tarball-app"
+        version      = "1.0.0"
+        private      = $true
+        dependencies = @{ "ext-tarball-pkg" = $tgzSpec }
+    } | ConvertTo-Json | Set-Content "$extDir\app\package.json"
+
+    Push-Location "$extDir\app"
+    try {
+        utoo install --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for tarball outside project root" }
+
+        if (-not (Test-Path "node_modules\ext-tarball-pkg\package.json")) {
+            throw "ext-tarball-pkg not materialized into node_modules"
+        }
+        $ver = node -p "require('./node_modules/ext-tarball-pkg/package.json').version"
+        if ($ver.Trim() -ne "5.6.7") { throw "ext-tarball-pkg expected v5.6.7, got $ver" }
+
+        # Lockfile must stay portable: a root-relative `file:` path, not absolute.
+        node -e "const lock=require('./package-lock.json');const tar=lock.packages['node_modules/ext-tarball-pkg']||{};const r=tar.resolved||'';if(!r.startsWith('file:')){console.error('resolved not file:',r);process.exit(1);}const p=r.slice(5);if(/^[A-Za-z]:/.test(p)||p[0]==='/'){console.error('resolved should be root-relative, got absolute:',r);process.exit(1);}console.log('  lockfile resolved (portable):',r);"
+        if ($LASTEXITCODE -ne 0) { throw "lockfile entry wrong for outside-root tarball" }
+
+        Write-Green "PASS: file: tarball outside project root installs (Windows)"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $extDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"
