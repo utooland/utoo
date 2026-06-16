@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main"
+      }
+    ],
+    "sourceMaps": false,
+    "styles": {
+      "cssModules": {
+        "localIdentName": "[local]__[hash:base64:6]"
+      }
+    }
+  }
+}
