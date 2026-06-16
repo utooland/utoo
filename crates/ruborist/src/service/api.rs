@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 
 use super::cache::ProjectCacheData;
 use super::fs::Glob;
@@ -32,7 +32,7 @@ use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, add_workspace_member,
-    build_deps_with_config_output,
+    build_deps_with_config_output, resolve_workspace_member_edges,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -171,6 +171,9 @@ where
             &edge_ctx,
         );
     }
+    // Settle all importer-declared workspace: edges now that every member is
+    // attached — the BFS never sees a workspace: spec on the happy path.
+    resolve_workspace_member_edges(&mut graph);
 
     // 4. The host supplies the stateless registry client (URL, store, semver,
     //    auth) pre-built. The warm `project_cache` seeds the demand resolver's
@@ -216,7 +219,6 @@ pub async fn read_root_manifest<G: Glob + Clone>(
     cwd: &Path,
     glob: G,
 ) -> Result<(PathBuf, PackageJson)> {
-    use anyhow::Context as _;
     let discovery = WorkspaceDiscovery::new(glob);
     let root_path = discovery.find_root_path(cwd).await?;
     let pkg_path = root_path.join("package.json");

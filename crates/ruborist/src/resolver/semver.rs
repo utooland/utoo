@@ -1,5 +1,7 @@
 //! Semver matching utilities using deno_semver.
 
+use std::borrow::Cow;
+
 use deno_semver::{Version, VersionReq};
 
 /// Normalize spec for registry requests.
@@ -39,30 +41,34 @@ use deno_semver::{Version, VersionReq};
 /// assert_eq!(name, "lodash");
 /// assert_eq!(spec, "^4.0.0");
 /// ```
-pub fn normalize_spec(name: &str, spec: &str) -> (String, String) {
+pub fn normalize_spec<'a>(name: &'a str, spec: &'a str) -> (Cow<'a, str>, Cow<'a, str>) {
     // Handle npm: alias - fetch the aliased package instead
     if let Some(npm_spec) = spec.strip_prefix("npm:") {
-        // Skip "npm:"
-        // Use rfind to handle scoped packages like @scope/pkg@version
-        if let Some(last_at_index) = npm_spec.rfind('@') {
-            // Make sure we don't split on the @ of a scoped package
-            if last_at_index > 0 {
-                let (pkg_name, version) = npm_spec.split_at(last_at_index);
-                return (pkg_name.to_string(), version[1..].to_string());
-            }
-        }
-        // No version specified
-        return (npm_spec.to_string(), "*".to_string());
+        let (pkg_name, version) = split_npm_alias(npm_spec);
+        return (Cow::Borrowed(pkg_name), Cow::Borrowed(version));
     }
 
     // Handle workspace: prefix - keep original name, extract version
     if let Some(workspace_spec) = spec.strip_prefix("workspace:") {
         // Skip "workspace:"
-        return (name.to_string(), workspace_spec.to_string());
+        return (Cow::Borrowed(name), Cow::Borrowed(workspace_spec));
     }
 
-    // No special prefix, return as-is
-    (name.to_string(), spec.to_string())
+    // No special prefix, return as-is — borrowed, so the per-edge common case
+    // (plain registry spec) allocates nothing.
+    (Cow::Borrowed(name), Cow::Borrowed(spec))
+}
+
+/// Split an `npm:` alias body (after the prefix) into (aliased name, range).
+///
+/// `rfind('@')` handles scoped packages (`@scope/pkg@^1.0.0`); an `@` at
+/// index 0 is the scope marker of a version-less alias (`@scope/pkg`), not a
+/// separator.
+fn split_npm_alias(npm_spec: &str) -> (&str, &str) {
+    match npm_spec.rfind('@') {
+        Some(idx) if idx > 0 => (&npm_spec[..idx], &npm_spec[idx + 1..]),
+        _ => (npm_spec, "*"),
+    }
 }
 
 /// Check if a version matches a semver range.
@@ -81,15 +87,11 @@ pub fn normalize_spec(name: &str, spec: &str) -> (String, String) {
 /// assert!(matches("*", "1.2.3"));
 /// ```
 pub fn matches(range: &str, version: &str) -> bool {
-    // Handle npm: alias prefix
-    let range = if range.starts_with("npm:") {
-        if let Some(idx) = range.rfind('@') {
-            &range[idx + 1..]
-        } else {
-            "*"
-        }
-    } else {
-        range
+    // Handle npm: alias prefix via the shared splitter so scoped aliases
+    // (`npm:@scope/pkg`) don't get sliced at the scope marker.
+    let range = match range.strip_prefix("npm:") {
+        Some(npm_spec) => split_npm_alias(npm_spec).1,
+        None => range,
     };
 
     // Wildcard matches everything
@@ -139,6 +141,18 @@ pub fn max_satisfying<'a>(versions: impl Iterator<Item = &'a str>, range: &str) 
     }
 }
 
+/// [`max_satisfying`] over a pre-parsed, descending-sorted list: the first
+/// match is the maximum, so this early-exits instead of parsing and scanning
+/// every version per spec. Pair with the per-package memoized sort
+/// (`FullManifest::sorted_parsed_versions`).
+pub fn max_satisfying_sorted_desc<'a>(sorted: &'a [Version], range: &str) -> Option<&'a Version> {
+    let req = VersionReq::parse_from_npm(range).ok()?;
+    if range == "*" {
+        return sorted.first();
+    }
+    sorted.iter().find(|v| req.matches(v))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +186,14 @@ mod tests {
         assert!(matches("npm:lodash@^4.0.0", "4.17.21"));
         assert!(!matches("npm:lodash@^4.0.0", "3.10.0"));
         assert!(matches("npm:lodash", "4.17.21")); // No version = *
+    }
+
+    #[test]
+    fn test_scoped_npm_alias() {
+        assert!(matches("npm:@scope/pkg@^1.0.0", "1.2.3"));
+        assert!(!matches("npm:@scope/pkg@^2.0.0", "1.2.3"));
+        // Version-less scoped alias: the scope `@` is not a separator => *
+        assert!(matches("npm:@scope/pkg", "1.2.3"));
     }
 
     #[test]
@@ -211,48 +233,48 @@ mod tests {
         // npm alias
         assert_eq!(
             normalize_spec("string-width-cjs", "npm:string-width@^4.2.0"),
-            ("string-width".to_string(), "^4.2.0".to_string())
+            (Cow::Borrowed("string-width"), Cow::Borrowed("^4.2.0"))
         );
 
         // npm alias without version
         assert_eq!(
             normalize_spec("lodash-cjs", "npm:lodash"),
-            ("lodash".to_string(), "*".to_string())
+            (Cow::Borrowed("lodash"), Cow::Borrowed("*"))
         );
 
         // scoped npm alias
         assert_eq!(
             normalize_spec("my-pkg", "npm:@scope/pkg@^1.0.0"),
-            ("@scope/pkg".to_string(), "^1.0.0".to_string())
+            (Cow::Borrowed("@scope/pkg"), Cow::Borrowed("^1.0.0"))
         );
 
         // scoped npm alias without version
         assert_eq!(
             normalize_spec("my-pkg", "npm:@scope/pkg"),
-            ("@scope/pkg".to_string(), "*".to_string())
+            (Cow::Borrowed("@scope/pkg"), Cow::Borrowed("*"))
         );
 
         // workspace reference
         assert_eq!(
             normalize_spec("my-lib", "workspace:*"),
-            ("my-lib".to_string(), "*".to_string())
+            (Cow::Borrowed("my-lib"), Cow::Borrowed("*"))
         );
 
         assert_eq!(
             normalize_spec("my-lib", "workspace:^1.0.0"),
-            ("my-lib".to_string(), "^1.0.0".to_string())
+            (Cow::Borrowed("my-lib"), Cow::Borrowed("^1.0.0"))
         );
 
         // regular spec (unchanged)
         assert_eq!(
             normalize_spec("lodash", "^4.0.0"),
-            ("lodash".to_string(), "^4.0.0".to_string())
+            (Cow::Borrowed("lodash"), Cow::Borrowed("^4.0.0"))
         );
 
         // scoped package regular spec
         assert_eq!(
             normalize_spec("@types/node", "^18.0.0"),
-            ("@types/node".to_string(), "^18.0.0".to_string())
+            (Cow::Borrowed("@types/node"), Cow::Borrowed("^18.0.0"))
         );
     }
 }

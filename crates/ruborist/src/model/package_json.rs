@@ -6,8 +6,9 @@
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use super::compatibility::PlatformConstraint;
 use super::util::deserialize_or_default;
 
 /// Deserialize a `scripts` map, silently dropping entries whose values are not
@@ -70,9 +71,15 @@ pub struct PackageJson {
     )]
     pub engines: Option<HashMap<String, String>>,
 
-    /// Binary definitions (string or object)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bin: Option<Value>,
+    /// Binary definitions (string or object). Same typed wire shape as
+    /// `CoreVersionManifest`/`LockPackage`; malformed values read as `None`
+    /// (= no binaries), matching npm.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub bin: Option<BinField>,
 
     /// Package license
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,13 +89,23 @@ pub struct PackageJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scripts: Option<HashMap<String, String>>,
 
-    /// OS constraints
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub os: Option<Vec<String>>,
+    /// OS constraints. Same typed wire shape as
+    /// `CoreVersionManifest`/`LockPackage`; malformed values read as `None`
+    /// (= unconstrained), matching npm.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub os: Option<PlatformConstraint>,
 
-    /// CPU constraints
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cpu: Option<Vec<String>>,
+    /// CPU constraints (same string-or-array tolerance as `os`).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_or_default"
+    )]
+    pub cpu: Option<PlatformConstraint>,
 
     /// Has install scripts
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,7 +113,7 @@ pub struct PackageJson {
 
     /// Distribution info (from registry)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dist: Option<DistInfo>,
+    pub dist: Option<crate::model::manifest::Dist>,
 
     /// Package description
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,7 +195,7 @@ pub struct PackageInstallView {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub bin: Option<Value>,
+    pub bin: Option<BinField>,
     #[serde(default, deserialize_with = "deserialize_string_map")]
     pub scripts: HashMap<String, String>,
 }
@@ -188,7 +205,7 @@ impl PackageInstallView {
     pub fn bin_entries(&self) -> Vec<(String, String)> {
         self.bin
             .as_ref()
-            .map(|bin| parse_bin_field(bin, &self.name))
+            .map(|bin| bin.entries(&self.name))
             .unwrap_or_default()
     }
 }
@@ -220,26 +237,44 @@ pub struct EnginesView {
     pub engines: Option<HashMap<String, String>>,
 }
 
-/// Parse bin field from JSON Value.
-/// Handles both string and object formats, filters out empty paths.
-pub fn parse_bin_field(bin: &Value, package_name: &str) -> Vec<(String, String)> {
-    bin.as_object()
-        .map(|obj| {
-            obj.iter()
-                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
-                .collect()
-        })
-        .or_else(|| {
-            bin.as_str()
-                .map(|s| vec![(package_name.to_string(), s.to_string())])
-        })
-        .unwrap_or_default()
+/// npm's polymorphic `bin` field, as it appears on every wire (package.json,
+/// registry version manifests, lockfiles).
+///
+/// npm's grammar is exactly two shapes: a bare string (the package exposes one
+/// binary named after itself) or a name→path map. This untagged enum captures
+/// exactly those forms; anything else fails deserialization, which carrier
+/// fields map to `None` (= no binaries).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BinField {
+    /// `"bin": "./cli.js"` — one binary named after the package.
+    Single(String),
+    /// `"bin": {"name": "./path"}` — explicit name→path map. `BTreeMap`, not
+    /// `HashMap`: this round-trips into package-lock.json, so key order must be
+    /// deterministic (a multi-binary package like `typescript` → tsc/tsserver
+    /// must serialize identically every run).
+    Map(BTreeMap<String, String>),
+}
+
+impl BinField {
+    /// Get binary entries as (name, path) pairs, dropping entries with an empty
+    /// path. For [`BinField::Single`] the binary is named after `package_name`.
+    pub fn entries(&self, package_name: &str) -> Vec<(String, String)> {
+        match self {
+            BinField::Single(path) => vec![(package_name.to_string(), path.clone())],
+            BinField::Map(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        }
         .into_iter()
         .filter(|(_, path)| !path.is_empty())
         .collect()
+    }
 }
 
 /// License configuration (can be string or object).
+///
+/// The on-disk package.json shape of npm's polymorphic license field; see
+/// [`super::package_lock::License`] for the lockfile shape and how the three
+/// representations divide the wire contexts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum LicenseConfig {
@@ -273,30 +308,6 @@ pub struct PublishConfig {
     /// Package access level ("public" or "restricted")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<String>,
-}
-
-/// Distribution information from registry.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DistInfo {
-    /// Tarball URL
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tarball: Option<String>,
-
-    /// Integrity hash (SRI format)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub integrity: Option<String>,
-
-    /// SHA-1 hash (legacy)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub shasum: Option<String>,
-
-    /// File count
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_count: Option<u32>,
-
-    /// Unpacked size
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unpacked_size: Option<u64>,
 }
 
 /// Empty map constant for convenience methods that return references.
@@ -382,7 +393,7 @@ impl PackageJson {
     pub fn bin_entries(&self) -> Vec<(String, String)> {
         self.bin
             .as_ref()
-            .map(|bin| parse_bin_field(bin, &self.name))
+            .map(|bin| bin.entries(&self.name))
             .unwrap_or_default()
     }
 }
@@ -391,6 +402,30 @@ impl PackageJson {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// npm's spec says os/cpu are string arrays, but the CLI tolerates bare
+    /// strings and real packages ship both — parsing must accept both shapes
+    /// (a string-form `os` used to fail the whole PackageJson parse).
+    #[test]
+    fn test_os_cpu_accept_string_and_array() {
+        let array_form = json!({
+            "name": "a", "version": "1.0.0",
+            "os": ["!win32"], "cpu": ["x64", "arm64"]
+        });
+        let pkg = PackageJson::from_value(&array_form).unwrap();
+        assert_eq!(
+            pkg.os,
+            Some(PlatformConstraint::Many(vec!["!win32".to_string()]))
+        );
+
+        let string_form = json!({
+            "name": "b", "version": "1.0.0",
+            "os": "linux", "cpu": "x64"
+        });
+        let pkg = PackageJson::from_value(&string_form).unwrap();
+        assert_eq!(pkg.os, Some(PlatformConstraint::One("linux".to_string())));
+        assert_eq!(pkg.cpu, Some(PlatformConstraint::One("x64".to_string())));
+    }
 
     #[test]
     fn test_parse_simple_package() {
@@ -510,6 +545,52 @@ mod tests {
         let entries = pkg.bin_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "tool1");
+    }
+
+    #[test]
+    fn test_bin_field_entries() {
+        // String form names the binary after the package.
+        let single = BinField::Single("./cli.js".to_string());
+        assert_eq!(
+            single.entries("my-cli"),
+            vec![("my-cli".to_string(), "./cli.js".to_string())]
+        );
+
+        // Map form keeps its own names.
+        let map = BinField::Map(BTreeMap::from([(
+            "a".to_string(),
+            "./index.js".to_string(),
+        )]));
+        assert_eq!(
+            map.entries("ignored"),
+            vec![("a".to_string(), "./index.js".to_string())]
+        );
+
+        // Empty paths are dropped in both forms.
+        assert!(BinField::Single(String::new()).entries("my-cli").is_empty());
+        let map = BinField::Map(BTreeMap::from([
+            ("tool".to_string(), "./bin/tool.js".to_string()),
+            ("empty".to_string(), String::new()),
+        ]));
+        let entries = map.entries("ignored");
+        assert_eq!(
+            entries,
+            vec![("tool".to_string(), "./bin/tool.js".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_bin_non_string_value_tolerated() {
+        // A map with a non-string value is not representable as BinField; the
+        // whole parse must still succeed with bin = None (npm coerces such a
+        // value to "" then drops it — same observable result: no binaries).
+        let value = json!({
+            "name": "my-cli",
+            "bin": { "x": 123 }
+        });
+        let pkg = PackageJson::from_value(&value).unwrap();
+        assert!(pkg.bin.is_none());
+        assert!(pkg.bin_entries().is_empty());
     }
 
     #[test]

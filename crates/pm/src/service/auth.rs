@@ -10,6 +10,13 @@ fn registry_api(registry: &str, path: &str) -> String {
     format!("{}{}", registry.trim_end_matches('/'), path)
 }
 
+/// npm `escapedName`: only the `/` in a scoped name is percent-encoded, so
+/// `@scope/name` → `@scope%2fname` and `pkg` stays `pkg` (npm does the same
+/// via `npa.resolve().escapedName`).
+pub(crate) fn escaped_package_name(package_name: &str) -> String {
+    package_name.replace('/', "%2f")
+}
+
 /// Extract host from registry URL for use as config key suffix.
 ///
 /// "https://registry.npmjs.org/" -> "registry.npmjs.org"
@@ -104,7 +111,7 @@ pub async fn require_token(registry: &str) -> Result<String> {
 ///
 /// `on_login_url` is called with the URL the user must visit to authenticate.
 pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Result<String> {
-    let client = client();
+    let client = client()?;
 
     let response = client
         .post(registry_api(registry, "/-/v1/login"))
@@ -142,7 +149,7 @@ pub async fn web_login(registry: &str, on_login_url: impl FnOnce(&str)) -> Resul
 /// Returns **202** while pending, **200** with a `token` field on success.
 /// Respects the `retry-after` header; times out after 5 minutes.
 pub async fn poll_done_url(done_url: &str) -> Result<String> {
-    let client = client();
+    let client = client()?;
     let timeout = std::time::Duration::from_secs(300);
     let start = std::time::Instant::now();
     let mut interval = std::time::Duration::from_secs(5);
@@ -180,7 +187,7 @@ pub async fn poll_done_url(done_url: &str) -> Result<String> {
 
 /// Query current identity from the registry.
 pub async fn whoami(registry: &str, token: &str) -> Result<String> {
-    let response = client()
+    let response = client()?
         .get(registry_api(registry, "/-/whoami"))
         .bearer_auth(token)
         .send()
@@ -205,7 +212,7 @@ pub async fn whoami(registry: &str, token: &str) -> Result<String> {
 
 /// Logout: invalidate the token on the server and remove from local config.
 pub async fn logout(registry: &str, token: &str) -> Result<()> {
-    let response = client()
+    let response = client()?
         .delete(registry_api(registry, &format!("/-/user/token/{}", token)))
         .bearer_auth(token)
         .send()

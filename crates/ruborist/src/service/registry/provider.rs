@@ -21,6 +21,7 @@ use super::super::manifest_provider::{
 };
 use super::UnifiedRegistry;
 use crate::model::manifest::{CoreVersionManifest, extract_core_version_off_runtime};
+use crate::resolver::semver::matches as semver_matches;
 use crate::traits::registry::RegistryError;
 
 impl UnifiedRegistry {
@@ -109,6 +110,7 @@ impl ManifestProvider for UnifiedRegistry {
                             },
                             etag,
                             last_updated: super::current_timestamp_secs(),
+                            parsed_versions: Default::default(),
                         });
                         self.store.store_versions(&name, versions);
                         ManifestFullData::Full {
@@ -117,6 +119,21 @@ impl ManifestProvider for UnifiedRegistry {
                         }
                     }
                     ProviderFullManifestBytes::NotModified { versions } => {
+                        // Selective pre-warm, mirroring the parse worker: when
+                        // the requesting spec won't settle via the dist-tag /
+                        // latest shortcuts, the driver is about to need the
+                        // full sorted version list — build it here, on this
+                        // spawned fetch task, not on the driver.
+                        if let Some(spec) = &spec {
+                            let dist_tags = &versions.versions.dist_tags;
+                            let shortcut_settles = dist_tags.contains_key(spec.as_str())
+                                || dist_tags
+                                    .get("latest")
+                                    .is_some_and(|latest| semver_matches(spec, latest));
+                            if !shortcut_settles {
+                                versions.sorted_parsed_versions();
+                            }
+                        }
                         ManifestFullData::Versions(versions)
                     }
                 };

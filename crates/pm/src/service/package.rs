@@ -10,7 +10,6 @@ use std::rc::Rc;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::ScriptsView;
-use utoo_ruborist::model::package_json::parse_bin_field;
 
 use super::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
 use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
@@ -181,7 +180,7 @@ impl PackageService {
             let bin_files = lock_package
                 .bin
                 .as_ref()
-                .map(|bin| parse_bin_field(bin, &package_name))
+                .map(|bin| bin.entries(&package_name))
                 .unwrap_or_default();
             let has_bin = !bin_files.is_empty();
 
@@ -192,21 +191,11 @@ impl PackageService {
                 continue;
             }
 
-            // Skip packages that don't meet the filter criteria. A link node is
-            // never dropped here on the `has_scripts` test (it carries no script
-            // marker in the lock); its scripts are read from disk below.
-            if scripts == ScriptPolicy::Ignore && !has_bin {
-                continue; // scripts mode: only process packages with binaries
-            }
-            if scripts == ScriptPolicy::Run && !has_scripts && !has_bin && !is_link {
-                continue; // full mode: process packages with scripts or binaries
+            if !Self::passes_script_policy(scripts, has_scripts, has_bin, is_link) {
+                continue;
             }
 
-            // Check platform compatibility
-            let is_compatible = lock_package.cpu.as_ref().is_none_or(is_cpu_compatible)
-                && lock_package.os.as_ref().is_none_or(is_os_compatible);
-
-            if !is_compatible {
+            if !Self::entry_platform_compatible(lock_package) {
                 tracing::debug!("Package {path} is not compatible with current platform");
                 continue;
             }
@@ -219,33 +208,18 @@ impl PackageService {
                 continue;
             }
 
-            // Read lifecycle scripts from package.json only if needed. A
-            // workspace link contributes bin linking only — leave its scripts
-            // empty so `create_execution_queues` never queues them (owned by
-            // `process_workspace_install_hooks`).
-            let lifecycle_scripts =
-                if !is_workspace_link && (has_scripts || scripts == ScriptPolicy::Run) {
-                    match Self::read_lifecycle_scripts(&package_path).await {
-                        Ok(s) => s,
-                        // A `file:` link can resolve to a missing or degenerate
-                        // `package.json` (e.g. a conflict artifact keyed
-                        // `node_modules/` with an empty name). Treat that as "no
-                        // scripts" rather than failing the whole install; a real
-                        // dependency with an unreadable manifest still errors.
-                        Err(_) if is_link => LifecycleScripts::default(),
-                        Err(e) => {
-                            return Err(e).with_context(|| {
-                                format!("Failed to read scripts for package: {path}")
-                            });
-                        }
-                    }
-                } else {
-                    LifecycleScripts::default()
-                };
+            let lifecycle_scripts = Self::entry_lifecycle_scripts(
+                &package_path,
+                path,
+                scripts,
+                has_scripts,
+                is_link,
+                is_workspace_link,
+            )
+            .await?;
 
             // Check if this package is an optional dependency (based on edge type)
-            let is_optional =
-                lock_package.optional == Some(true) || lock_package.dev_optional == Some(true);
+            let is_optional = lock_package.is_optional();
 
             let package_info = PackageInfo {
                 path: package_path,
@@ -258,6 +232,58 @@ impl PackageService {
             packages.push((package_info, is_optional));
         }
         Ok(packages)
+    }
+
+    /// Early policy filter for one lock entry (npm's `#retrieveNodesByType`).
+    ///
+    /// A link node is never dropped on the `has_scripts` test — it carries no
+    /// script marker in the lock; its scripts are read from disk afterwards.
+    fn passes_script_policy(
+        scripts: ScriptPolicy,
+        has_scripts: bool,
+        has_bin: bool,
+        is_link: bool,
+    ) -> bool {
+        match scripts {
+            // scripts-ignored mode: only packages with binaries matter.
+            ScriptPolicy::Ignore => has_bin,
+            // full mode: packages with scripts, binaries, or link nodes.
+            ScriptPolicy::Run => has_scripts || has_bin || is_link,
+        }
+    }
+
+    /// Platform gate for one lock entry (absent os/cpu = compatible).
+    fn entry_platform_compatible(lock_package: &LockPackage) -> bool {
+        lock_package.cpu.as_ref().is_none_or(is_cpu_compatible)
+            && lock_package.os.as_ref().is_none_or(is_os_compatible)
+    }
+
+    /// Read one entry's lifecycle scripts from its on-disk package.json, when
+    /// the policy needs them.
+    ///
+    /// A workspace link contributes bin linking only — its scripts stay empty
+    /// so `create_execution_queues` never queues them (they are owned by
+    /// `process_workspace_install_hooks`). A `file:` link can resolve to a
+    /// missing or degenerate `package.json` (e.g. a conflict artifact keyed
+    /// `node_modules/` with an empty name); that reads as "no scripts" rather
+    /// than failing the install, while a real dependency with an unreadable
+    /// manifest still errors.
+    async fn entry_lifecycle_scripts(
+        package_path: &Path,
+        path: &str,
+        scripts: ScriptPolicy,
+        has_scripts: bool,
+        is_link: bool,
+        is_workspace_link: bool,
+    ) -> Result<LifecycleScripts> {
+        if is_workspace_link || !(has_scripts || scripts == ScriptPolicy::Run) {
+            return Ok(LifecycleScripts::default());
+        }
+        match Self::read_lifecycle_scripts(package_path).await {
+            Ok(s) => Ok(s),
+            Err(_) if is_link => Ok(LifecycleScripts::default()),
+            Err(e) => Err(e).with_context(|| format!("Failed to read scripts for package: {path}")),
+        }
     }
 
     /// Create execution queues with bins_only parameter support
@@ -274,26 +300,14 @@ impl PackageService {
 
             // Script queues - skip in bins_only mode
             if scripts == ScriptPolicy::Run {
-                if package
-                    .lifecycle_scripts
-                    .get_script(LifecycleHook::Preinstall)
-                    .is_some()
-                {
-                    queues.preinstall.push((Rc::clone(&package), is_optional));
-                }
-                if package
-                    .lifecycle_scripts
-                    .get_script(LifecycleHook::Install)
-                    .is_some()
-                {
-                    queues.install.push((Rc::clone(&package), is_optional));
-                }
-                if package
-                    .lifecycle_scripts
-                    .get_script(LifecycleHook::Postinstall)
-                    .is_some()
-                {
-                    queues.postinstall.push((Rc::clone(&package), is_optional));
+                for (hook, queue) in [
+                    (LifecycleHook::Preinstall, &mut queues.preinstall),
+                    (LifecycleHook::Install, &mut queues.install),
+                    (LifecycleHook::Postinstall, &mut queues.postinstall),
+                ] {
+                    if package.lifecycle_scripts.get_script(hook).is_some() {
+                        queue.push((Rc::clone(&package), is_optional));
+                    }
                 }
             }
 
@@ -355,8 +369,6 @@ impl PackageService {
         queue: &[(Rc<PackageInfo>, bool)],
         hook: LifecycleHook,
     ) -> Result<()> {
-        use futures;
-
         let queue_start = std::time::Instant::now();
         tracing::debug!("Starting {} queue with {} scripts", hook, queue.len());
 
@@ -405,7 +417,9 @@ impl PackageService {
         for (is_optional, result) in script_results {
             if let Err(e) = result {
                 if is_optional {
-                    tracing::warn!("Optional dependency script failed (ignored): {e}");
+                    // `{:#}` prints the full cause chain — this warn is the only
+                    // signal the user gets that an optional dep's script failed.
+                    tracing::warn!("Optional dependency script failed (ignored): {e:#}");
                 } else {
                     return Err(e);
                 }
@@ -443,8 +457,6 @@ impl PackageService {
     ///      try_join_all/rayon parallelism only saved an additional 2-3ms over
     ///      sync, well within stddev — not worth the concurrency complexity.
     async fn execute_binary_linking(queue: &[(Rc<PackageInfo>, bool)]) -> Result<()> {
-        use std::collections::HashSet;
-
         // Sort by package path for deterministic dedupe winners across runs
         // (`collect_packages_from_lock` walks a HashMap, so input order is
         // non-deterministic without this).
@@ -509,6 +521,15 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
     use tempfile::TempDir;
+    use utoo_ruborist::manifest::BinField;
+
+    /// Test helper: build a single-binary `BinField::Map`.
+    fn bin_map(name: &str, path: &str) -> Option<BinField> {
+        Some(BinField::Map(std::collections::BTreeMap::from([(
+            name.to_string(),
+            path.to_string(),
+        )])))
+    }
 
     #[tokio::test]
     async fn test_process_project_hooks_basic() {
@@ -832,9 +853,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_queues_skips_missing_bin_file() {
-        use std::fs;
-        use tempfile::TempDir;
-
         // Create a temporary directory for the fake package
         let temp_dir = TempDir::new().unwrap();
         let package_path = temp_dir.path();
@@ -876,11 +894,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_with_scripts() {
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
 
         // Create test packages in memory
@@ -893,7 +906,7 @@ mod tests {
                 name: Some("full-package".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"cli": "bin/cli.js"})),
+                bin: bin_map("cli", "bin/cli.js"),
                 has_install_script: Some(true),
                 ..LockPackage::default()
             },
@@ -906,7 +919,7 @@ mod tests {
                 name: Some("bin-only".to_string()),
                 version: Some("2.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 ..LockPackage::default()
             },
@@ -1002,12 +1015,6 @@ mod tests {
     /// `file:` link (not a workspace) keeps running its scripts.
     #[tokio::test]
     async fn test_collect_packages_from_lock_skips_workspace_hooks() {
-        use crate::model::package::LifecycleHook;
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
         let mut packages = HashMap::new();
 
@@ -1017,7 +1024,7 @@ mod tests {
             LockPackage {
                 name: Some("lib-a".to_string()),
                 version: Some("1.0.0".to_string()),
-                bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
+                bin: bin_map("lib-a-cli", "bin/cli.js"),
                 has_install_script: Some(true),
                 ..LockPackage::default()
             },
@@ -1032,7 +1039,7 @@ mod tests {
                 name: Some("lib-a".to_string()),
                 link: Some(true),
                 resolved: Some("lib-a".to_string()),
-                bin: Some(json!({"lib-a-cli": "bin/cli.js"})),
+                bin: bin_map("lib-a-cli", "bin/cli.js"),
                 ..LockPackage::default()
             },
         );
@@ -1151,10 +1158,6 @@ mod tests {
     /// `conflict-bundle-file-dep` e2e crash.
     #[tokio::test]
     async fn test_collect_tolerates_link_with_missing_manifest() {
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
         // The link's path resolves to the node_modules dir itself, which exists
         // but holds no package.json.
@@ -1185,11 +1188,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_platform_compatibility() {
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
 
         let mut packages = HashMap::new();
@@ -1201,9 +1199,9 @@ mod tests {
                 name: Some("win-only".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "tool.exe"})),
+                bin: bin_map("tool", "tool.exe"),
                 has_install_script: Some(false),
-                os: Some(json!(["win32"])), // Only Windows
+                os: Some(serde_json::from_value(json!(["win32"])).unwrap()), // Only Windows
                 ..LockPackage::default()
             },
         );
@@ -1215,7 +1213,7 @@ mod tests {
                 name: Some("cross-platform".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "tool.js"})),
+                bin: bin_map("tool", "tool.js"),
                 has_install_script: Some(false),
                 ..LockPackage::default()
             },
@@ -1262,11 +1260,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_packages_from_lock_optional_flag() {
-        use serde_json::json;
-        use std::collections::HashMap;
-        use tempfile::TempDir;
-        use utoo_ruborist::lock::{LockPackage, PackageLock};
-
         let temp_dir = TempDir::new().unwrap();
 
         let mut packages = HashMap::new();
@@ -1278,7 +1271,7 @@ mod tests {
                 name: Some("regular-pkg".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 optional: None,
                 ..LockPackage::default()
@@ -1292,7 +1285,7 @@ mod tests {
                 name: Some("optional-pkg".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 optional: Some(true),
                 ..LockPackage::default()
@@ -1306,7 +1299,7 @@ mod tests {
                 name: Some("dev-optional-pkg".to_string()),
                 version: Some("1.0.0".to_string()),
                 resolved: Some("registry-url".to_string()),
-                bin: Some(json!({"tool": "index.js"})),
+                bin: bin_map("tool", "index.js"),
                 has_install_script: Some(false),
                 dev_optional: Some(true),
                 ..LockPackage::default()
@@ -1364,9 +1357,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_script_queue_optional_failure_ignored() {
-        use std::fs;
-        use tempfile::TempDir;
-
         // Create a temporary directory for the test package
         let temp_dir = TempDir::new().unwrap();
         let package_path = temp_dir.path();

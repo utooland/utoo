@@ -429,10 +429,10 @@ impl SchedulerState {
 
     fn pump_downloads(&mut self) {
         // Bound downloaded tarballs waiting for extraction so network prefetch
-        // cannot outrun CPU/disk extraction and pile up Bytes. The backlog is
-        // unaffected by this pump, so gating once up front matches the original
-        // per-iteration check.
-        if self.extract_backlog() >= self.download_limit {
+        // cannot outrun CPU/disk extraction and pile up Bytes. The extract
+        // backlog (queued + in-flight) is unaffected by this pump, so gating
+        // once up front matches the original per-iteration check.
+        if self.extract_queue.len() + self.extract_active.len() >= self.download_limit {
             return;
         }
         let done = &self.download_done;
@@ -459,10 +459,6 @@ impl SchedulerState {
                 StageReport::Download { package, result }
             }));
         }
-    }
-
-    fn extract_backlog(&self) -> usize {
-        self.extract_queue.len() + self.extract_active.len()
     }
 
     fn pump_extracts(&mut self) {

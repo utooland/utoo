@@ -1,8 +1,9 @@
-use crate::service::dependency_graph::LockGraphService;
-use anyhow::{Context, Result};
-use petgraph::graph::NodeIndex;
-use std::collections::BTreeMap;
 use std::path::Path;
+
+use anyhow::{Context, Result};
+
+use crate::service::dependency_graph::{LockGraphService, build_dep_tree};
+use crate::util::format_print::print_dep_tree;
 
 /// List dependency information, similar to npm list
 pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
@@ -38,82 +39,11 @@ fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Re
     Ok(())
 }
 
-#[derive(Debug)]
-struct DepTreeNode {
-    index: NodeIndex,
-    children: BTreeMap<NodeIndex, DepTreeNode>,
-}
-
-fn build_dep_tree(paths: &[Vec<NodeIndex>]) -> DepTreeNode {
-    let mut root = DepTreeNode {
-        index: NodeIndex::end(),
-        children: BTreeMap::new(),
-    };
-    for path in paths {
-        let mut node = &mut root;
-        for &idx in path.iter().rev() {
-            node = node.children.entry(idx).or_insert_with(|| DepTreeNode {
-                index: idx,
-                children: BTreeMap::new(),
-            });
-        }
-    }
-    root
-}
-
-fn print_dep_tree(
-    node: &DepTreeNode,
-    graph: &LockGraphService,
-    prefix: &str,
-    is_last: bool,
-    highlight: &[&str],
-) {
-    let is_root = node.index == NodeIndex::end();
-    if !is_root {
-        let branch = if is_last {
-            "└──"
-        } else {
-            "├───┬"
-        };
-        if let Some(pkg) = graph.get_graph().node_weight(node.index) {
-            let name = pkg.name();
-            let version = pkg.version();
-            let is_highlight = highlight.iter().any(|&h| name.starts_with(h));
-            let display = format!("{}@{}", name, version);
-            if is_highlight {
-                if !pkg.path.is_empty() {
-                    println!(
-                        "{}{} \x1b[33m{}\x1b[0m -> {}",
-                        prefix, branch, display, pkg.path
-                    );
-                } else {
-                    println!("{prefix}{branch} \x1b[33m{display}\x1b[0m");
-                }
-            } else if !pkg.path.is_empty() {
-                println!("{}{} {} -> {}", prefix, branch, display, pkg.path);
-            } else {
-                println!("{prefix}{branch} {display}");
-            }
-        }
-    }
-    let len = node.children.len();
-    for (i, child) in node.children.values().enumerate() {
-        let is_last_child = i == len - 1;
-        let new_prefix = if is_root {
-            String::new()
-        } else {
-            format!("{}{}", prefix, if is_last { "    " } else { "│   " })
-        };
-        print_dep_tree(child, graph, &new_prefix, is_last_child, highlight);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::service::dependency_graph::LockGraphService;
-    use petgraph::graph::NodeIndex;
     use utoo_ruborist::lock::{LockPackage, LockPackageNode};
+
+    use super::*;
 
     fn make_lock_package(name: &str, version: &str) -> LockPackage {
         LockPackage {
@@ -148,19 +78,6 @@ mod tests {
         graph.graph.add_edge(b_idx, a_idx, ());
         graph.graph.add_edge(c_idx, b_idx, ());
         graph
-    }
-
-    #[test]
-    fn test_build_dep_tree() {
-        let paths = vec![vec![
-            NodeIndex::new(3),
-            NodeIndex::new(2),
-            NodeIndex::new(1),
-            NodeIndex::new(0),
-        ]];
-        let tree = build_dep_tree(&paths);
-        // root should have one child (a)
-        assert_eq!(tree.children.len(), 1);
     }
 
     #[test]

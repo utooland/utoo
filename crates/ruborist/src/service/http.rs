@@ -82,6 +82,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::service::dns::shared_resolver;
+
 /// Cuts hung TCP/TLS handshakes that would otherwise pin a conn-slot
 /// indefinitely — `service::fetch`'s retry layer only fires on a reqwest
 /// error, which silently-stalled sockets never raise.
@@ -188,8 +191,6 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
 
     #[cfg(not(target_arch = "wasm32"))]
     let builder = {
-        use crate::service::dns::shared_resolver;
-
         let mut builder = builder
             .no_proxy()
             .dns_resolver(shared_resolver())

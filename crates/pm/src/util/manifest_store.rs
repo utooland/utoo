@@ -20,7 +20,7 @@ use std::thread::JoinHandle;
 
 use async_trait::async_trait;
 use serde::Serialize;
-use utoo_ruborist::model::manifest::CoreVersionManifest;
+use utoo_ruborist::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
 use crate::util::json::{read_json_file, write_compact_sync};
@@ -205,6 +205,7 @@ mod tests {
                     },
                     etag: Some("etag".to_string()),
                     last_updated: 1,
+                    parsed_versions: Default::default(),
                 }),
             );
             store.store_version_manifest(

@@ -3,7 +3,6 @@ use crate::helper::tree_builder::TreeBuilder;
 use crate::util::cache::matches_pattern;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use utoo_ruborist::graph::EdgeType;
@@ -213,22 +212,30 @@ impl WorkspaceService {
         }
     }
 
-    /// Build workspace topology and generate JSON output for file writing
-    pub async fn build_workspace_json(cwd: &Path) -> Result<serde_json::Value> {
+    /// Build workspace topology and generate the typed `workspace.json` output.
+    pub async fn build_workspace_json(cwd: &Path) -> Result<WorkspaceJson> {
         let topology = Self::build_workspace_topology(cwd).await?;
-
-        let edges_json: Vec<serde_json::Value> = topology
-            .edges
-            .iter()
-            .map(|edge| json!([&edge.from, &edge.to]))
-            .collect();
-
-        Ok(json!({
-            "nodeList": topology.nodes,
-            "edges": edges_json,
-            "topology": topology.topology,
-        }))
+        Ok(WorkspaceJson {
+            node_list: topology.nodes,
+            edges: topology
+                .edges
+                .into_iter()
+                .map(|edge| [edge.from, edge.to])
+                .collect(),
+            topology: topology.topology,
+        })
     }
+}
+
+/// On-disk `workspace.json`: the workspace dependency graph as node list,
+/// `[from, to]` edge pairs, and topological layers. Field declaration order
+/// is the serialized key order.
+#[derive(Debug, Serialize)]
+pub struct WorkspaceJson {
+    #[serde(rename = "nodeList")]
+    pub node_list: Vec<WorkspaceNode>,
+    pub edges: Vec<[String; 2]>,
+    pub topology: Vec<Vec<String>>,
 }
 
 /// Expand user-provided workspace filters into a deduplicated set of
@@ -283,7 +290,6 @@ fn project_topology_layers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::fs;
     use tempfile::tempdir;
 
@@ -375,10 +381,9 @@ mod tests {
         println!("{result:?}");
         assert!(result.is_ok(), "build_workspace_json should succeed");
         let json = result.unwrap();
-        let edges = json.get("edges").unwrap().as_array().unwrap();
         // Edges should be [["A", "B"]], meaning B depends on A
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0], json!(["A", "B"]));
+        assert_eq!(json.edges.len(), 1);
+        assert_eq!(json.edges[0], ["A".to_string(), "B".to_string()]);
     }
 
     #[test]

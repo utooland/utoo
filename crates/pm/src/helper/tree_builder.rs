@@ -6,10 +6,11 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use serde_json::{Value, json};
-use utoo_ruborist::builder::{DevDeps, EdgeContext, add_edges_from, add_workspace_member};
+use utoo_ruborist::builder::{
+    DevDeps, EdgeContext, add_edges_from, add_workspace_member, resolve_workspace_member_edges,
+};
 use utoo_ruborist::graph::{DependencyGraph, EdgeType};
-use utoo_ruborist::resolver::runtime::install_runtime;
+use utoo_ruborist::runtime::install_runtime_from_map;
 
 use crate::helper::ruborist_context::Context as FsContext;
 use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
@@ -35,12 +36,10 @@ impl TreeBuilder {
         let root_node = graph
             .get_node(graph.root_index)
             .expect("root node must exist");
-        // Convert engines HashMap to Value for install_runtime (legacy compatibility)
-        let engines_value = match root_node.manifest.engines() {
-            Some(engines) => json!(engines),
-            None => Value::Null,
+        let deps = match root_node.manifest.engines() {
+            Some(engines) => install_runtime_from_map(engines),
+            None => return Ok(()),
         };
-        let deps = install_runtime(&engines_value);
         for (name, version) in deps {
             graph.add_dependency_edge(graph.root_index, name, version, EdgeType::Optional);
         }
@@ -101,6 +100,9 @@ impl TreeBuilder {
                 &edge_ctx,
             );
         }
+        // Settle importer-declared workspace: edges so topology consumers see
+        // resolved member edges, matching the install graph's init shape.
+        resolve_workspace_member_edges(graph);
 
         Ok(())
     }

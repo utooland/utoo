@@ -26,6 +26,13 @@ The `next.js/` directory is a **git submodule** (`utooland/next.js`) providing T
 | `ruborist` | Dependency resolution helper for PM |
 | `utoo-wasm` | WebAssembly bindings for `@utoo/web` |
 
+### Crate Layout & Publishing Policy
+
+- **Exactly two crates are published to crates.io**: `utoo-pm` and `utoo-ruborist` (see `cargo-publish.yml`). Everything a published crate depends on must itself be on crates.io — never add an internal-only (`publish = false`) crate to their dependency trees. `pack-*` crates are internal-only (shipped to npm via `pack-napi`); `utoo-wasm` ships to npm as `@utoo/web`.
+- **Modules over crates**: shared domains (spec parsing, npm-flavored semver, HTTP/net policy, package cache/tar store) live as modules inside `utoo-ruborist`, not as separate crates. Promote a module to a crate (`utoo-npm-args`, `utoo-semver`, `utoo-net`, `utoo-pm-store`) only when a consumer independent of pm/ruborist appears — promotion adds it to the crates.io publish chain (topological order, before its dependents).
+- **WASM visibility rule**: `utoo-wasm` must never (transitively) compile pm-only code. Native-only functionality stays behind the `http-tarball` / `native-git` features, which `utoo-wasm` does not enable.
+- **Façade rule**: downstream crates (`pm`, `utoo-wasm`) consume `utoo-ruborist` only via the curated re-export modules in its `lib.rs` (`graph`, `manifest`, `lock`, `registry`, `runtime`, `workspace`, `builder`, `semver`, `progress`, `compat`, `git`, `http`) plus the genuinely public modules `spec`, `service`, `util`. Never import through `utoo_ruborist::resolver::` / `::model::` / `::traits::` paths — add a re-export to the façade instead. Keep the façade minimal: remove re-exports that lose their last consumer.
+
 ### TypeScript Packages (`packages/`)
 
 | Package | Purpose |

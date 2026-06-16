@@ -101,9 +101,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
 
     tracing::info!("Publishing to {} with tag {}", opts.registry, opts.tag);
 
-    // Scoped packages: encode `/` as `%2f` so the registry sees a single path
-    // segment (npm does the same via `npa.resolve().escapedName`).
-    let escaped_name = pack_result.name.replace('/', "%2f");
+    let escaped_name = auth::escaped_package_name(&pack_result.name);
     let url = format!("{}/{}", opts.registry.trim_end_matches('/'), escaped_name);
 
     let response = send_with_web_auth_retry(&url, &token, &payload, opts.otp).await?;
@@ -165,7 +163,7 @@ async fn send_with_web_auth_retry(
     payload: &PublishPayload,
     otp: Option<&str>,
 ) -> Result<reqwest::Response> {
-    let response = build_publish_request(url, token, payload, otp)
+    let response = build_publish_request(url, token, payload, otp)?
         .send()
         .await
         .context("Failed to send publish request")?;
@@ -193,7 +191,7 @@ async fn send_with_web_auth_retry(
     let web_otp = auth::poll_done_url(done_url).await?;
     tracing::info!("Authentication successful, retrying publish...");
 
-    build_publish_request(url, token, payload, Some(&web_otp))
+    build_publish_request(url, token, payload, Some(&web_otp))?
         .send()
         .await
         .context("Failed to send publish request (retry after web auth)")
@@ -205,8 +203,8 @@ fn build_publish_request(
     token: &str,
     payload: &PublishPayload,
     otp: Option<&str>,
-) -> RequestBuilder {
-    let mut req = crate::util::http::client()
+) -> Result<RequestBuilder> {
+    let mut req = crate::util::http::client()?
         .put(url)
         .header("content-type", "application/json")
         .header("npm-auth-type", "web")
@@ -216,5 +214,5 @@ fn build_publish_request(
     if let Some(otp) = otp {
         req = req.header("npm-otp", otp);
     }
-    req
+    Ok(req)
 }

@@ -1027,6 +1027,11 @@ pub struct SchemaStyleConfig {
     #[schemars(description = "Enable automatic CSS Modules transform")]
     pub auto_css_modules: Option<bool>,
 
+    /// CSS Modules configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "CSS Modules configuration")]
+    pub css_modules: Option<SchemaCssModulesConfig>,
+
     /// Inline PostCSS configuration passed directly to the PostCSS transform
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Inline PostCSS configuration")]
@@ -1046,6 +1051,16 @@ pub struct SchemaStyleConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Inline CSS configuration")]
     pub inline_css: Option<serde_json::Value>,
+}
+
+/// CSS Modules configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaCssModulesConfig {
+    /// CSS Modules local class name pattern
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "CSS Modules local class name pattern")]
+    pub local_ident_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

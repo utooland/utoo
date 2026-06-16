@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 
@@ -7,12 +9,15 @@ use dashmap::DashMap;
 
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::registry::is_npm_registry;
 use utoo_ruborist::spec::Catalogs;
 
 use super::cli_enum::{ConfigScope, OmitType};
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
 use super::json::load_package_json;
+#[cfg(windows)]
+use super::platform_const::drive_root;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 
 static REGISTRY: LazyLock<ConfigValue<String>> =
@@ -260,7 +265,6 @@ fn is_cross_device(cache: &Path, project: &Path) -> bool {
 /// cache dir itself may not exist yet.
 #[cfg(unix)]
 fn nearest_device(path: &Path) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
     let mut current = Some(path);
     while let Some(p) = current {
         if let Ok(meta) = std::fs::metadata(p) {
@@ -273,7 +277,6 @@ fn nearest_device(path: &Path) -> Option<u64> {
 
 #[cfg(windows)]
 fn is_cross_device(cache: &Path, project: &Path) -> bool {
-    use super::platform_const::drive_root;
     match (drive_root(cache), drive_root(project)) {
         (Some(a), Some(b)) => a != b,
         _ => false,
@@ -373,8 +376,6 @@ static SUPPORTS_SEMVER: OnceLock<bool> = OnceLock::new();
 /// `utoo` processes may race on the global config, potentially losing entries.
 /// This is a known limitation — entries will be re-probed on the next run.
 pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest::Client>) -> bool {
-    use utoo_ruborist::registry::is_npm_registry;
-
     // Known: npm registry does not support semver queries
     if is_npm_registry(registry_url) {
         tracing::debug!("npm registry detected, skipping semver probe");
@@ -407,7 +408,7 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
         let client = match client {
             Some(c) => c,
             None => {
-                owned_client = client_builder()
+                owned_client = client_builder()?
                     .timeout(std::time::Duration::from_secs(5))
                     .build()?;
                 &owned_client
@@ -419,11 +420,11 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
             .send()
             .await?;
         tracing::debug!("Semver probe response: {} for {}", resp.status(), probe_url);
-        Ok::<bool, reqwest::Error>(resp.status().is_success())
+        anyhow::Ok(resp.status().is_success())
     }
     .await
-    .unwrap_or_else(|e: reqwest::Error| {
-        tracing::debug!("Semver probe failed: {}", e);
+    .unwrap_or_else(|e| {
+        tracing::debug!("Semver probe failed: {e:#}");
         false
     });
 

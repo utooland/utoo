@@ -8,14 +8,15 @@ use crate::model::manifest::{CoreVersionManifest, FullManifest, VersionsRef};
 use crate::model::node::EdgeType;
 use crate::resolver::edges::DependencyEdgeInfo;
 use crate::resolver::registry::ResolveError;
-use crate::resolver::version::resolve_target_version;
+use crate::resolver::version::resolve_target_version_lazy;
 
 use super::state::{ManifestState, PackageVersions};
 
-fn resolve_version_from_versions<RE>(
+fn resolve_version_from_versions<'a, RE>(
     edge: &DependencyEdgeInfo,
     package_name: &str,
     versions: VersionsRef<'_>,
+    sorted: impl FnOnce() -> &'a [deno_semver::Version],
     real_spec: &str,
 ) -> Result<Option<String>, ResolveError<RE>> {
     if versions.versions.is_empty() {
@@ -25,7 +26,7 @@ fn resolve_version_from_versions<RE>(
         return Err(ResolveError::NoVersions(package_name.to_string()));
     }
 
-    let version = match resolve_target_version(versions, real_spec) {
+    let version = match resolve_target_version_lazy(versions, sorted, real_spec) {
         Ok(version) => version,
         Err(_) if edge.edge_type == EdgeType::Optional => return Ok(None),
         Err(e) => {
@@ -154,8 +155,13 @@ fn select_full_manifest<RE>(
         Some(PackageVersions::Failed(error)) => Ok(EdgeStep::Fail(format!("{name}: {error}"))),
         Some(PackageVersions::Full(full)) => {
             let full = Arc::clone(full);
-            let Some(version) =
-                resolve_version_from_versions::<RE>(edge, name, (&*full).into(), spec)?
+            let Some(version) = resolve_version_from_versions::<RE>(
+                edge,
+                name,
+                (&*full).into(),
+                || full.sorted_parsed_versions(),
+                spec,
+            )?
             else {
                 return Ok(EdgeStep::Skip);
             };
@@ -169,8 +175,13 @@ fn select_full_manifest<RE>(
         }
         Some(PackageVersions::List(list)) => {
             let list = Arc::clone(list);
-            let Some(version) =
-                resolve_version_from_versions::<RE>(edge, name, (&*list).into(), spec)?
+            let Some(version) = resolve_version_from_versions::<RE>(
+                edge,
+                name,
+                (&*list).into(),
+                || list.sorted_parsed_versions(),
+                spec,
+            )?
             else {
                 return Ok(EdgeStep::Skip);
             };

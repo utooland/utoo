@@ -41,9 +41,11 @@ pub async fn ping_registry(client: &reqwest::Client, registry_url: &str) -> Ping
 
 /// Select fastest registry by concurrent ping
 pub async fn select_fastest_registry() -> String {
-    let client = client_builder()
-        .timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))
-        .build();
+    let client = client_builder().and_then(|b| {
+        b.timeout(std::time::Duration::from_millis(PING_TIMEOUT_MS))
+            .build()
+            .map_err(anyhow::Error::from)
+    });
 
     let client = match client {
         Ok(c) => c,
@@ -54,11 +56,8 @@ pub async fn select_fastest_registry() -> String {
     };
 
     let registries = [REGISTRY_NPMMIRROR, REGISTRY_NPMJS];
-    let futures: Vec<_> = registries
-        .iter()
-        .map(|r| ping_registry(&client, r))
-        .collect();
-    let results = futures::future::join_all(futures).await;
+    let results =
+        futures::future::join_all(registries.iter().map(|r| ping_registry(&client, r))).await;
 
     let (registry, latency_info) = match results
         .into_iter()

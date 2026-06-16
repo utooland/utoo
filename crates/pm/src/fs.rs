@@ -4,7 +4,12 @@
 //! This module serves as a dispatch layer, making it easy to migrate to tokio-fs-ext
 //! while maintaining fallbacks for APIs not yet supported.
 
-// Some exports are only used on specific platforms (e.g., hard_link/copy on non-Unix)
+// Blanket allow because the consumer set of these re-exports is
+// platform-conditional. The specific offenders: `hard_link` and `copy` are
+// only called from the non-macOS clone fallback, `symlink` is unix-only,
+// `symlink_dir`/`symlink_file` are windows-only — so on any single target a
+// subset is "unused". If you remove a re-export's last caller on ALL
+// platforms, delete the re-export too; this allow will not flag it for you.
 #![allow(unused_imports)]
 
 // Re-export tokio-fs-ext APIs
