@@ -259,6 +259,62 @@ utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo warm install failed
 echo -e "${GREEN}PASS: file: warm install successful${NC}"
 cd ../../..
 
+# Case 8.5b: file: tarball located OUTSIDE the project root.
+# Regression: such a tarball's root-relative lockfile entry carries `..`
+# (e.g. "file:../../pkgs/foo.tgz"). BFS hashes the cache slot from the
+# canonical absolute path, but install re-absolutizes the `..`-laden lockfile
+# path; if the slot key isn't normalized the two disagree and the clone fails
+# with "file tarball cache not found". The in-tree fixture above can't catch
+# this because its path has no `..`.
+echo -e "${YELLOW}Case 8.5b: file: tarball outside project root${NC}"
+EXT_DIR=$(mktemp -d)
+mkdir -p "$EXT_DIR/src/ext-tarball-pkg"
+cat > "$EXT_DIR/src/ext-tarball-pkg/package.json" <<'EOF'
+{ "name": "ext-tarball-pkg", "version": "5.6.7", "main": "index.js" }
+EOF
+echo "module.exports = 567;" > "$EXT_DIR/src/ext-tarball-pkg/index.js"
+( cd "$EXT_DIR/src/ext-tarball-pkg" && npm pack --silent >/dev/null 2>&1 \
+  && mv ext-tarball-pkg-*.tgz "$EXT_DIR/ext-tarball-pkg.tgz" )
+mkdir -p "$EXT_DIR/app"
+cat > "$EXT_DIR/app/package.json" <<EOF
+{
+  "name": "ext-tarball-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": { "ext-tarball-pkg": "file:$EXT_DIR/ext-tarball-pkg.tgz" }
+}
+EOF
+rm -rf ~/.cache/nm/ext-tarball-pkg
+( cd "$EXT_DIR/app" && utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: install failed for tarball outside project root${NC}"; rm -rf "$EXT_DIR"; exit 1; }
+if [ ! -f "$EXT_DIR/app/node_modules/ext-tarball-pkg/package.json" ]; then
+    echo -e "${RED}FAIL: ext-tarball-pkg not materialized into node_modules${NC}"; rm -rf "$EXT_DIR"; exit 1
+fi
+ACTUAL=$(node -e "console.log(require('$EXT_DIR/app/node_modules/ext-tarball-pkg/package.json').version)")
+if [ "$ACTUAL" != "5.6.7" ]; then
+    echo -e "${RED}FAIL: ext-tarball-pkg expected v5.6.7, got $ACTUAL${NC}"; rm -rf "$EXT_DIR"; exit 1
+fi
+# Lockfile must stay portable: a root-relative `file:` path with `..`.
+# Check the *form*, not a substring: when cwd and the tarball spec disagree on
+# a symlinked prefix (e.g. macOS /var vs /private/var) the relative path climbs
+# to the filesystem root and re-descends, so it legitimately *contains* the abs
+# dir as a substring while still being relative. Absolute = the part after
+# `file:` starts at a root (`/` on unix, `C:` on windows).
+node -e '
+const lock = require("'"$EXT_DIR"'/app/package-lock.json");
+const tar = lock.packages["node_modules/ext-tarball-pkg"] || {};
+const r = tar.resolved || "";
+if (!r.startsWith("file:")) {
+  console.error("ext-tarball-pkg resolved should be a file: path, got", tar.resolved); process.exit(1);
+}
+const p = r.slice(5);
+if (p[0] === "/" || /^[A-Za-z]:/.test(p)) {
+  console.error("ext-tarball-pkg resolved should be root-relative, not absolute:", tar.resolved); process.exit(1);
+}
+' || { echo -e "${RED}FAIL: lockfile entry wrong for outside-root tarball${NC}"; rm -rf "$EXT_DIR"; exit 1; }
+rm -rf "$EXT_DIR"
+echo -e "${GREEN}PASS: file: tarball outside project root installs${NC}"
+
 # Case 8.6: stale lockfile is detected and regenerated on `ut install`
 #
 # package.json declares two deps; we seed an empty lockfile. A correct

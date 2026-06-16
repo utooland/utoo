@@ -84,15 +84,13 @@
 //!
 //! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
 
-use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
-use sha2::{Digest, Sha256};
 use tokio_retry::RetryIf;
 
-use super::common::{DedupCache, dedup_init};
+use super::common::{DedupCache, dedup_init, http_cache_slot};
 use super::tar::commit_tarball_bytes;
 use crate::model::manifest::CoreVersionManifest;
 use crate::service::fetch::{
@@ -103,32 +101,6 @@ use crate::traits::registry::ResolvedPackage;
 
 /// Session-scoped dedup cache: one fetch per URL even under concurrent BFS.
 pub(crate) type HttpFetchCache = DedupCache<CoreVersionManifest>;
-
-/// `<prefix><16 hex>` from `sha256(bytes)`. Used by the two non-registry
-/// cache slots (`_http_<url>`, `_file_<path>`) to stay visually distinct
-/// from `<name>/<version>/` and 40-char git commit shas.
-fn cache_slot(prefix: &str, bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(prefix.len() + 16);
-    out.push_str(prefix);
-    for b in &digest[..8] {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
-
-pub fn http_cache_slot(url: &str) -> String {
-    cache_slot("_http_", url.as_bytes())
-}
-
-/// Cache slot for a local tarball keyed on its absolute path. Path is
-/// normalized via `Path::components()` first so BFS (`base.join("./foo.tgz")`)
-/// and install (`cwd.join("foo.tgz")` from a root-relative lockfile entry)
-/// hash to the same slot.
-pub fn file_cache_slot(abs_path: &Path) -> String {
-    let normalized: PathBuf = abs_path.components().collect();
-    cache_slot("_file_", normalized.as_os_str().as_encoded_bytes())
-}
 
 fn fetch_and_extract_blocking(
     cache_dir: &Path,
@@ -236,17 +208,6 @@ mod tests {
             .unwrap();
         compressed.truncate(n);
         Bytes::from(compressed)
-    }
-
-    #[test]
-    fn slot_name_is_stable_and_url_specific() {
-        let a = http_cache_slot("https://example.com/foo.tgz");
-        let b = http_cache_slot("https://example.com/foo.tgz");
-        let c = http_cache_slot("https://example.com/foo.tgz?v=2");
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert!(a.starts_with("_http_"));
-        assert_eq!(a.len(), "_http_".len() + 16);
     }
 
     #[test]
