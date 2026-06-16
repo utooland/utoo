@@ -295,13 +295,20 @@ if [ "$ACTUAL" != "5.6.7" ]; then
     echo -e "${RED}FAIL: ext-tarball-pkg expected v5.6.7, got $ACTUAL${NC}"; rm -rf "$EXT_DIR"; exit 1
 fi
 # Lockfile must stay portable: a root-relative `file:` path with `..`.
+# Check the *form*, not a substring: when cwd and the tarball spec disagree on
+# a symlinked prefix (e.g. macOS /var vs /private/var) the relative path climbs
+# to the filesystem root and re-descends, so it legitimately *contains* the abs
+# dir as a substring while still being relative. Absolute = the part after
+# `file:` starts at a root (`/` on unix, `C:` on windows).
 node -e '
 const lock = require("'"$EXT_DIR"'/app/package-lock.json");
 const tar = lock.packages["node_modules/ext-tarball-pkg"] || {};
-if (typeof tar.resolved !== "string" || !tar.resolved.startsWith("file:")) {
+const r = tar.resolved || "";
+if (!r.startsWith("file:")) {
   console.error("ext-tarball-pkg resolved should be a file: path, got", tar.resolved); process.exit(1);
 }
-if (tar.resolved.includes("'"$EXT_DIR"'")) {
+const p = r.slice(5);
+if (p[0] === "/" || /^[A-Za-z]:/.test(p)) {
   console.error("ext-tarball-pkg resolved should be root-relative, not absolute:", tar.resolved); process.exit(1);
 }
 ' || { echo -e "${RED}FAIL: lockfile entry wrong for outside-root tarball${NC}"; rm -rf "$EXT_DIR"; exit 1; }
