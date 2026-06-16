@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use utoo_ruborist::http::{file_cache_slot, http_cache_slot};
+use utoo_ruborist::cache_slot::{file_cache_slot, http_cache_slot};
 use utoo_ruborist::spec::Protocol;
 
 use super::cache::get_cache_dir;

@@ -84,15 +84,13 @@
 //!
 //! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
 
-use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
-use sha2::{Digest, Sha256};
 use tokio_retry::RetryIf;
 
-use super::common::{DedupCache, dedup_init};
+use super::common::{DedupCache, dedup_init, http_cache_slot};
 use super::tar::commit_tarball_bytes;
 use crate::model::manifest::CoreVersionManifest;
 use crate::service::fetch::{
@@ -103,63 +101,6 @@ use crate::traits::registry::ResolvedPackage;
 
 /// Session-scoped dedup cache: one fetch per URL even under concurrent BFS.
 pub(crate) type HttpFetchCache = DedupCache<CoreVersionManifest>;
-
-/// `<prefix><16 hex>` from `sha256(bytes)`. Used by the two non-registry
-/// cache slots (`_http_<url>`, `_file_<path>`) to stay visually distinct
-/// from `<name>/<version>/` and 40-char git commit shas.
-fn cache_slot(prefix: &str, bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(prefix.len() + 16);
-    out.push_str(prefix);
-    for b in &digest[..8] {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
-
-pub fn http_cache_slot(url: &str) -> String {
-    cache_slot("_http_", url.as_bytes())
-}
-
-/// Cache slot for a local tarball keyed on its absolute path. The path is
-/// lexically normalized first so BFS and install hash to the same slot.
-///
-/// BFS resolves the tarball from a canonical absolute path
-/// (`base.join("/abs/foo.tgz")`), but install re-absolutizes a *root-relative*
-/// lockfile entry (`cwd.join("../../foo.tgz")`) whenever the tarball lives
-/// outside the project root. `Path::components()` collapses `.` and redundant
-/// separators but **keeps `..`**, so those two spellings of the same file would
-/// otherwise hash to different slots and the install-time lookup would miss.
-/// [`lexically_normalize`] collapses `..` so both spellings agree.
-pub fn file_cache_slot(abs_path: &Path) -> String {
-    let normalized = lexically_normalize(abs_path);
-    cache_slot("_file_", normalized.as_os_str().as_encoded_bytes())
-}
-
-/// Collapse `.` and `..` purely lexically (no filesystem access, so it works
-/// for not-yet-existing paths and stays identical across BFS and install).
-///
-/// `..` pops the preceding normal component but never climbs past a root or
-/// prefix; a leading `..` in a relative path is preserved.
-fn lexically_normalize(path: &Path) -> PathBuf {
-    use std::path::Component;
-
-    let mut stack: Vec<Component> = Vec::new();
-    for comp in path.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => match stack.last() {
-                Some(Component::Normal(_)) => {
-                    stack.pop();
-                }
-                Some(Component::RootDir | Component::Prefix(_)) => {}
-                _ => stack.push(comp),
-            },
-            _ => stack.push(comp),
-        }
-    }
-    stack.iter().map(|c| c.as_os_str()).collect()
-}
 
 fn fetch_and_extract_blocking(
     cache_dir: &Path,
@@ -270,17 +211,6 @@ mod tests {
     }
 
     #[test]
-    fn slot_name_is_stable_and_url_specific() {
-        let a = http_cache_slot("https://example.com/foo.tgz");
-        let b = http_cache_slot("https://example.com/foo.tgz");
-        let c = http_cache_slot("https://example.com/foo.tgz?v=2");
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert!(a.starts_with("_http_"));
-        assert_eq!(a.len(), "_http_".len() + 16);
-    }
-
-    #[test]
     fn extracts_to_url_hashed_slot() {
         let tmp = tempfile::tempdir().unwrap();
         let pkg = br#"{"name":"demo","version":"1.2.3","scripts":{"install":"echo hi"}}"#;
@@ -344,44 +274,6 @@ mod tests {
         let bytes = make_targz(&[("package/README.md", b"hi")]);
         let err = fetch_and_extract_blocking(tmp.path(), "u", bytes).unwrap_err();
         assert!(err.to_string().contains("package.json not found"));
-    }
-
-    #[test]
-    fn file_slot_is_stable_across_dotdot_spellings() {
-        // BFS resolves from a canonical absolute path; install re-absolutizes a
-        // root-relative lockfile entry, which carries `..` when the tarball
-        // lives outside the project root. Both must hash to the same slot.
-        let canonical = Path::new("/tmp/pkgs/foo.tgz");
-        let via_dotdot = Path::new("/tmp/pkgs/app/../../pkgs/foo.tgz");
-        let via_curdir = Path::new("/tmp/pkgs/./foo.tgz");
-
-        assert_eq!(file_cache_slot(canonical), file_cache_slot(via_dotdot));
-        assert_eq!(file_cache_slot(canonical), file_cache_slot(via_curdir));
-        assert!(file_cache_slot(canonical).starts_with("_file_"));
-
-        // Distinct tarballs still get distinct slots.
-        assert_ne!(
-            file_cache_slot(canonical),
-            file_cache_slot(Path::new("/tmp/pkgs/bar.tgz"))
-        );
-    }
-
-    #[test]
-    fn lexically_normalize_collapses_dotdot_without_climbing_root() {
-        assert_eq!(
-            lexically_normalize(Path::new("/a/b/../c")),
-            PathBuf::from("/a/c")
-        );
-        // Excess `..` saturates at the root rather than escaping it.
-        assert_eq!(
-            lexically_normalize(Path::new("/a/../../../b")),
-            PathBuf::from("/b")
-        );
-        // Leading `..` in a relative path is preserved (nothing to pop).
-        assert_eq!(
-            lexically_normalize(Path::new("../a/b")),
-            PathBuf::from("../a/b")
-        );
     }
 
     #[test]

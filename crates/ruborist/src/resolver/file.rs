@@ -12,8 +12,8 @@ use anyhow::Context as _;
 use petgraph::graph::NodeIndex;
 
 use super::builder::ProcessResult;
+use super::common::file_cache_slot;
 use super::edges::DependencyEdgeInfo;
-use super::http::file_cache_slot;
 use super::tar::commit_tarball_bytes;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::manifest::NodeManifest;

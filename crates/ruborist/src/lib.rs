@@ -105,10 +105,12 @@ pub mod git {
     pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
-/// Non-registry tarball cache-slot helpers (http + local file).
-pub mod http {
+/// Non-registry tarball cache-slot helpers: http(s) tarballs keyed by URL,
+/// local `file:` tarballs keyed by absolute path. Implemented in
+/// `resolver::common` alongside the slot-commit protocol.
+pub mod cache_slot {
     #[cfg(feature = "http-tarball")]
-    pub use crate::resolver::http::{file_cache_slot, http_cache_slot};
+    pub use crate::resolver::common::{file_cache_slot, http_cache_slot};
 }
 
 /// Tar + gzip primitives and the atomic cache-slot commit protocol.
