@@ -718,17 +718,20 @@ try {
             overrides    = @{ "is-number" = "file:./local-is-number" }
         } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
 
-        $ovdOut = utoo install --registry=https://registry.npmjs.org --ignore-scripts 2>&1
+        # Join to a single string: `2>&1` yields an array of lines, and
+        # `-match`/`-notmatch` over an array filter elements (truthy) rather
+        # than test a boolean.
+        $ovdOut = (utoo install --registry=https://registry.npmjs.org --ignore-scripts 2>&1 | Out-String)
         if ($LASTEXITCODE -eq 0) {
-            $ovdOut | Out-Host
+            Write-Host $ovdOut
             throw "file: directory override should not install successfully"
         }
         if ($ovdOut -notmatch "directory overrides") {
-            $ovdOut | Out-Host
+            Write-Host $ovdOut
             throw "file: directory override gave the wrong error (want 'directory overrides … use a tarball')"
         }
         if ($ovdOut -match "No matching version") {
-            $ovdOut | Out-Host
+            Write-Host $ovdOut
             throw "file: directory override regressed into a registry version lookup (404)"
         }
         Write-Green "PASS: overrides -> file: directory errors clearly"
