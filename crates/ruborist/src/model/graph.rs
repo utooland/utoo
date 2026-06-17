@@ -497,13 +497,22 @@ impl DependencyGraph {
     /// creates a node when it resolves an edge to it), so this is the identity
     /// — it only prunes on the reuse path, where seeded-but-orphaned nodes
     /// remain physically attached under the append-only graph invariant.
+    ///
+    /// Link nodes are seeded unconditionally: a workspace's `node_modules/<name>`
+    /// symlink (`add_workspace_member`) has no incoming *resolved dependency*
+    /// edge — the importer edge resolves to the `Workspace` node, not the link —
+    /// so the traversal would never reach it and the symlink entry would be
+    /// pruned from the lock (dropping the on-disk link). Lockfile seeding never
+    /// re-creates link nodes (`lock_codec` skips link entries) and the only
+    /// links in the graph are built for *currently declared* workspaces / `file:`
+    /// deps, so every link present is live and must be kept.
     pub fn reachable_nodes(&self) -> HashSet<NodeIndex> {
         let mut reachable: HashSet<NodeIndex> = self
             .graph
             .node_indices()
             .filter(|&i| {
                 self.get_node(i)
-                    .is_some_and(|n| n.is_root() || n.is_workspace())
+                    .is_some_and(|n| n.is_root() || n.is_workspace() || n.is_link())
             })
             .collect();
         let mut stack: Vec<NodeIndex> = reachable.iter().copied().collect();

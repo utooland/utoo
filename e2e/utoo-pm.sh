@@ -1681,6 +1681,62 @@ echo -e "${GREEN}PASS: package-lock.json reuse warm re-install is a no-op${NC}"
 cd ../../../
 
 # ═══════════════════════════════════════════════════════════════
+# Case: lockfile reuse keeps a workspace's node_modules symlink
+# ═══════════════════════════════════════════════════════════════
+# A workspace member is reified as a `node_modules/<name>` symlink (a lock entry
+# with "link": true). On the reuse path the resolved-tree prune must keep that
+# link: its only graph edge is physical (the importer edge resolves to the
+# Workspace node, not the link), so a reachability sweep over resolved edges
+# alone would drop it — deleting the symlink and breaking `import "<member>"`
+# and every `workspace:*` dependent. Regression guard for monorepos.
+echo -e "${YELLOW}Case: lockfile reuse keeps workspace symlink${NC}"
+cd e2e/pm/lockfile-reuse-ws
+rm -rf node_modules packages/*/node_modules package-lock.json
+rm -rf ~/.cache/nm
+# Restore the fixture root manifest (a prior run may have added is-number).
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse-ws",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "reuse-foo": "workspace:*",
+    "debug": "4.3.4"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: baseline install failed for lockfile-reuse-ws${NC}"; exit 1; }
+node -e '
+const link = require("./package-lock.json").packages["node_modules/reuse-foo"];
+if (!link || link.link !== true) { console.error("baseline lock missing workspace symlink entry"); process.exit(1); }
+' || { echo -e "${RED}FAIL: baseline lock has no workspace symlink entry${NC}"; exit 1; }
+
+# Add a leaf dependency through the reuse path.
+utoo install is-number@7.0.0 --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: add is-number failed for lockfile-reuse-ws${NC}"; exit 1; }
+
+node -e '
+const pkgs = require("./package-lock.json").packages;
+const link = pkgs["node_modules/reuse-foo"];
+if (!link || link.link !== true) {
+  console.error("REGRESSION: workspace symlink entry node_modules/reuse-foo was pruned on the reuse path");
+  process.exit(1);
+}
+if (!pkgs["packages/foo"]) { console.error("workspace member packages/foo missing"); process.exit(1); }
+if (!pkgs["node_modules/is-number"]) { console.error("is-number not added"); process.exit(1); }
+console.log("workspace symlink preserved; is-number added");
+' || { echo -e "${RED}FAIL: reuse path dropped the workspace symlink${NC}"; exit 1; }
+# The on-disk symlink must exist too (clean_deps prunes node_modules to the lock).
+if [ ! -L node_modules/reuse-foo ]; then
+    echo -e "${RED}FAIL: node_modules/reuse-foo symlink missing on disk after reuse install${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: lockfile reuse keeps workspace symlink${NC}"
+cd ../../../
+
+# ═══════════════════════════════════════════════════════════════
 # Case: overrides target a local file: tarball (nested + direct)
 # ═══════════════════════════════════════════════════════════════
 # An override value may be any spec npm accepts — including a local `file:`

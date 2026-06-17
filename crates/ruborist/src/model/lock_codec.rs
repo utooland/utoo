@@ -499,6 +499,73 @@ mod tests {
         );
     }
 
+    /// A workspace's `node_modules/<name>` symlink must survive pruning on the
+    /// reuse path. `add_workspace_member` attaches a `Link` node whose only
+    /// incoming edge is physical (the importer edge resolves to the `Workspace`
+    /// node, not the link), so a reachability sweep over resolved edges alone
+    /// would drop it — deleting the symlink that makes the member importable by
+    /// name. Regression test for that.
+    #[test]
+    fn test_prune_keeps_workspace_link() {
+        use crate::resolver::builder::{add_workspace_member, resolve_workspace_member_edges};
+
+        let root_path = PathBuf::from("/proj");
+        let mut root_pkg = PackageJson::new("wsroot", "1.0.0");
+        root_pkg.dependencies = Some(HashMap::from([
+            ("foo".to_string(), "workspace:*".to_string()),
+            ("a".to_string(), "^1.0.0".to_string()),
+        ]));
+        let mut graph = DependencyGraph::from_package_json(root_path.clone(), root_pkg.clone());
+        let root = graph.root_index;
+        let ctx = EdgeContext::new(PeerDeps::Skip, DevDeps::Include);
+        add_edges_from(&mut graph, root, &root_pkg, &ctx);
+
+        // Attach workspace member `foo` — this creates both the Workspace node
+        // (`packages/foo`) and its `node_modules/foo` Link node.
+        let foo_pkg = PackageJson::new("foo", "1.0.0");
+        add_workspace_member(
+            &mut graph,
+            root,
+            "foo",
+            root_path.join("packages/foo"),
+            &foo_pkg,
+            &ctx,
+        );
+        resolve_workspace_member_edges(&mut graph);
+
+        // Seed a prior lock that pins the regular dep `a` (workspace links are
+        // never seeded — they're rebuilt by `add_workspace_member` above).
+        let mut packages = HashMap::new();
+        packages.insert(String::new(), root_entry(&[("a", "^1.0.0")]));
+        packages.insert("node_modules/a".to_string(), lock_entry("1.0.0", &[]));
+        let lock = PackageLock::new("wsroot", "1.0.0", packages);
+        lock_to_graph(&mut graph, &lock, &root_path);
+
+        // Settle the root's live edges (reuse probe stand-in).
+        let pending: Vec<_> = graph
+            .get_dependency_edges(root)
+            .into_iter()
+            .filter(|(_, dep)| !dep.valid)
+            .map(|(id, dep)| (id, dep.name.clone(), dep.spec.clone()))
+            .collect();
+        for (id, name, spec) in pending {
+            if let FindResult::Reuse(target) = graph.find_compatible_node(root, &name, &spec) {
+                graph.mark_dependency_resolved(id, target);
+            }
+        }
+
+        let (pruned, _) = graph.serialize_to_packages_pruned(&root_path);
+        let link = pruned
+            .get("node_modules/foo")
+            .expect("workspace symlink entry must survive prune");
+        assert_eq!(link.link, Some(true), "kept entry is the symlink");
+        assert!(pruned.contains_key("packages/foo"), "workspace member kept");
+        assert!(
+            pruned.contains_key("node_modules/a"),
+            "pinned regular dep kept"
+        );
+    }
+
     #[test]
     fn test_resolve_dep_target_hoist_chain() {
         let mut index = HashMap::new();
