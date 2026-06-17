@@ -653,43 +653,33 @@ async fn resolve_override_file_tarball<E>(
     }
     #[cfg(feature = "http-tarball")]
     {
-        let file_err = |source: anyhow::Error| ResolveError::File {
+        let file_err = |source| ResolveError::File {
             spec: override_spec.to_string(),
             source,
         };
-        let base = graph
+        // The root node is a construction-time invariant; resolve the override's
+        // path against it (overrides are root-declared).
+        let abs = graph
             .get_node(graph.root_index)
-            .map(|n| n.path.clone())
-            .ok_or_else(|| ResolveError::Unsupported {
-                spec: override_spec.to_string(),
-                reason: "root project directory unavailable for file: override",
-            })?;
-        let abs = base.join(path);
-
-        let meta = match std::fs::metadata(&abs) {
-            Ok(m) => m,
-            Err(_) if *edge_type == EdgeType::Optional => return Ok(None),
-            Err(e) => {
-                return Err(file_err(
-                    anyhow::Error::new(e)
-                        .context(format!("file: override target {}", abs.display())),
-                ));
-            }
-        };
-        if meta.is_dir() {
-            return Err(ResolveError::Unsupported {
+            .expect("root node is always present")
+            .path
+            .join(path);
+        match std::fs::metadata(&abs) {
+            Ok(m) if m.is_dir() => Err(ResolveError::Unsupported {
                 spec: override_spec.to_string(),
                 reason: "file: directory overrides (symlink) are not supported — use a tarball (.tgz)",
-            });
+            }),
+            // Same local-tarball read+parse the normal file-dep resolver uses.
+            Ok(_) => match crate::resolver::tar::read_local_tarball_manifest(abs).await {
+                Ok(m) => Ok(Some(Arc::new(m))),
+                Err(_) if *edge_type == EdgeType::Optional => Ok(None),
+                Err(source) => Err(file_err(source)),
+            },
+            Err(_) if *edge_type == EdgeType::Optional => Ok(None),
+            Err(e) => Err(file_err(
+                anyhow::Error::new(e).context(format!("file: override target {}", abs.display())),
+            )),
         }
-
-        // Same local-tarball read+parse the normal file-dep resolver uses.
-        let manifest = match crate::resolver::tar::read_local_tarball_manifest(abs).await {
-            Ok(m) => m,
-            Err(_) if *edge_type == EdgeType::Optional => return Ok(None),
-            Err(source) => return Err(file_err(source)),
-        };
-        Ok(Some(Arc::new(manifest)))
     }
 }
 
