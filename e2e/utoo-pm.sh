@@ -1577,6 +1577,110 @@ echo -e "${GREEN}PASS: package-lock.json reuse keeps existing tree stable${NC}"
 cd ../../../
 
 # ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse prunes a removed dep's orphaned subtree
+# ═══════════════════════════════════════════════════════════════
+# Reusing the lock must not pin packages forever: when a dependency is removed
+# from package.json, it AND any transitive that only it pulled in must drop out
+# of the lock (they become unreachable from root). Baseline carries debug (→ ms)
+# and is-odd (→ is-number); removing is-odd must prune both is-odd and the now-
+# orphaned is-number, while debug + ms survive untouched. Exercises the orphan
+# pruning that runs over the reachable set during serialization.
+echo -e "${YELLOW}Case: package-lock.json reuse prunes a removed dep${NC}"
+cd e2e/pm/lockfile-reuse
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "4.3.4",
+    "is-odd": "3.0.1"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: baseline install failed for prune case${NC}"; exit 1; }
+node -e '
+const p = require("./package-lock.json").packages;
+for (const k of ["node_modules/debug","node_modules/ms","node_modules/is-odd","node_modules/is-number"]) {
+  if (!p[k]) { console.error("baseline missing " + k); process.exit(1); }
+}
+' || { echo -e "${RED}FAIL: prune baseline did not contain the expected tree${NC}"; exit 1; }
+cp package-lock.json package-lock.before.json
+
+# Remove is-odd from the manifest, then reinstall via the reuse path.
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "4.3.4"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: reinstall after removal failed${NC}"; exit 1; }
+node -e '
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+// is-odd and its now-orphaned transitive is-number must be gone.
+for (const k of ["node_modules/is-odd", "node_modules/is-number"]) {
+  if (after[k]) { console.error("REGRESSION: " + k + " not pruned after removal"); process.exit(1); }
+}
+// debug + ms are still declared/reachable and must be byte-identical.
+for (const k of ["node_modules/debug", "node_modules/ms"]) {
+  if (!after[k]) { console.error("REGRESSION: lost " + k); process.exit(1); }
+  if (after[k].version !== before[k].version || after[k].resolved !== before[k].resolved) {
+    console.error("REGRESSION: " + k + " changed during prune"); process.exit(1);
+  }
+}
+console.log("prune: is-odd + orphaned is-number removed, debug + ms preserved");
+' || { echo -e "${RED}FAIL: removing a dep did not prune its orphaned subtree${NC}"; exit 1; }
+rm -f package-lock.before.json
+echo -e "${GREEN}PASS: package-lock.json reuse prunes a removed dep${NC}"
+cd ../../../
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — warm re-install is a faithful no-op
+# ═══════════════════════════════════════════════════════════════
+# Reseeding the prior tree and re-resolving an unchanged manifest must converge
+# to a byte-identical lock — no version churn, no reordering, no re-pin. A diff
+# here would mean the reuse path doesn't faithfully reproduce what a cold
+# resolve produced.
+echo -e "${YELLOW}Case: package-lock.json reuse warm re-install is a no-op${NC}"
+cd e2e/pm/lockfile-reuse
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "4.3.4"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: cold install failed for no-op case${NC}"; exit 1; }
+cp package-lock.json package-lock.cold.json
+# Second install: nothing changed, so the reuse path must rewrite (or keep) an
+# identical lock.
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: warm reinstall failed for no-op case${NC}"; exit 1; }
+if ! diff -q package-lock.cold.json package-lock.json >/dev/null; then
+    echo -e "${RED}FAIL: warm re-install changed the lockfile (reuse is not a faithful no-op)${NC}"
+    diff package-lock.cold.json package-lock.json | head -40
+    exit 1
+fi
+rm -f package-lock.cold.json
+echo -e "${GREEN}PASS: package-lock.json reuse warm re-install is a no-op${NC}"
+cd ../../../
+
+# ═══════════════════════════════════════════════════════════════
 # Case: overrides target a local file: tarball (nested + direct)
 # ═══════════════════════════════════════════════════════════════
 # An override value may be any spec npm accepts — including a local `file:`
