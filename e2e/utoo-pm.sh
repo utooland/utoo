@@ -1521,6 +1521,8 @@ cd ../../../
 # entry that regressed.
 echo -e "${YELLOW}Case: latest binary-mirror-config parses under our schema${NC}"
 BMC_DIR=$(mktemp -d)
+# Remove the temp dir even if an assertion below exits the script mid-case.
+trap 'rm -rf "$BMC_DIR"' EXIT
 cat > "$BMC_DIR/package.json" << 'EOF'
 {
   "name": "binary-mirror-config-parse-test",
@@ -1549,6 +1551,7 @@ fi
 rm -f bmc.out
 popd
 rm -rf "$BMC_DIR"
+trap - EXIT
 echo -e "${GREEN}PASS: latest binary-mirror-config parses cleanly${NC}"
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

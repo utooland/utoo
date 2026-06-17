@@ -117,34 +117,48 @@ where
     })
 }
 
-static CONFIG: OnceCell<BinaryMirrorConfig> = OnceCell::const_new();
+/// Cached config load result. Holds the failure too: `get_or_try_init` leaves
+/// the cell empty on `Err`, so a persistent failure (offline / registry down /
+/// upstream schema drift) would re-fetch once per package — `load_config` is
+/// called for *every* node in the tree. Caching `Result` memoizes both outcomes
+/// for the whole install. The error is a `String` (anyhow's `Error` is neither
+/// `Clone` nor `Sync`-friendly to hand out by reference repeatedly).
+static CONFIG: OnceCell<Result<BinaryMirrorConfig, String>> = OnceCell::const_new();
 /// Cached result of whether we should skip binary mirror envs
 static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
+async fn fetch_and_parse_config() -> Result<BinaryMirrorConfig> {
+    // Go through the registry client so URL construction and private-registry
+    // auth are handled in one place rather than hand-rolled.
+    // `binary-mirror-config@latest` is a normal version manifest whose
+    // `mirrors` field carries the config.
+    let bytes = RuboristContext::registry()
+        .await
+        .fetch_version_manifest_bytes("binary-mirror-config", "latest")
+        .await
+        .context("Failed to fetch binary mirror config")?;
+    let config: BinaryMirrorConfig =
+        serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")?;
+    // A successful parse is the only signal that the mirror layer is live; the
+    // failure path is a swallowed debug log, so without this the whole layer
+    // can silently go dark on upstream schema drift.
+    tracing::debug!(
+        "Binary mirror config loaded: {} china package entries",
+        config.mirrors.china.packages.len()
+    );
+    Ok(config)
+}
+
 async fn load_config() -> Result<&'static BinaryMirrorConfig> {
     CONFIG
-        .get_or_try_init(|| async {
-            // Go through the registry client so URL construction and private-
-            // registry auth are handled in one place rather than hand-rolled.
-            // `binary-mirror-config@latest` is a normal version manifest whose
-            // `mirrors` field carries the config.
-            let bytes = RuboristContext::registry()
-                .await
-                .fetch_version_manifest_bytes("binary-mirror-config", "latest")
-                .await
-                .context("Failed to fetch binary mirror config")?;
-            let config: BinaryMirrorConfig =
-                serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")?;
-            // A successful parse is the only signal that the mirror layer is
-            // live; the failure path is a swallowed debug log, so without this
-            // the whole layer can silently go dark on upstream schema drift.
-            tracing::debug!(
-                "Binary mirror config loaded: {} china package entries",
-                config.mirrors.china.packages.len()
-            );
-            Ok(config)
+        .get_or_init(|| async {
+            // Keep the full context chain in the cached message — the failure
+            // path only surfaces as a debug log, so the inner cause matters.
+            fetch_and_parse_config().await.map_err(|e| format!("{e:#}"))
         })
         .await
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn update_binary_config(pkg: &mut Value, binary_mirror: &BinaryMirror) {
