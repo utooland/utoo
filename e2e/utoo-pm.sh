@@ -1625,4 +1625,53 @@ rm -rf "$OVD_DIR"
 trap - EXIT
 echo -e "${GREEN}PASS: overrides → file: directory errors clearly${NC}"
 
+# ═══════════════════════════════════════════════════════════════
+# Case: latest binary-mirror-config still parses under our schema
+# ═══════════════════════════════════════════════════════════════
+# `binary-mirror-config`'s `mirrors.china` map is parsed into a strongly-typed
+# schema (crates/pm/src/service/binary.rs). The whole map deserializes as one
+# unit, so a single drifted entry fails the parse and silently disables the
+# China mirror layer for every package — `get_envs()`/`update_package_binary()`
+# swallow the error as a debug log. (`flow-bin` ships `replaceHost` as a bare
+# string, not an array, which previously broke the parse.)
+#
+# Guard against upstream drift: install against a non-npm registry (npm.org has
+# no mirror layer and is skipped) with --verbose, then assert the config loaded
+# and did NOT fail to parse. flow-bin is the dep on purpose — it is the exact
+# entry that regressed.
+echo -e "${YELLOW}Case: latest binary-mirror-config parses under our schema${NC}"
+BMC_DIR=$(mktemp -d)
+# Remove the temp dir even if an assertion below exits the script mid-case.
+trap 'rm -rf "$BMC_DIR"' EXIT
+cat > "$BMC_DIR/package.json" << 'EOF'
+{
+  "name": "binary-mirror-config-parse-test",
+  "version": "1.0.0",
+  "dependencies": {
+    "flow-bin": "0.180.0"
+  }
+}
+EOF
+pushd "$BMC_DIR"
+# --ignore-scripts keeps this fast (no native binary download); the mirror
+# config is loaded on the clone path regardless of script execution.
+utoo install --registry=https://registry.npmmirror.com --ignore-scripts --verbose 2>&1 \
+  | tee bmc.out \
+  || { echo -e "${RED}FAIL: utoo install failed for binary-mirror-config parse test${NC}"; cat bmc.out; exit 1; }
+if grep -q "Failed to parse binary mirror config" bmc.out; then
+    echo -e "${RED}FAIL: latest binary-mirror-config no longer matches our schema (mirrors.china drift)${NC}"
+    grep "binary mirror" bmc.out
+    exit 1
+fi
+if ! grep -q "Binary mirror config loaded:" bmc.out; then
+    echo -e "${RED}FAIL: binary-mirror-config was never parsed (registry unreachable or mirror layer skipped)${NC}"
+    cat bmc.out
+    exit 1
+fi
+rm -f bmc.out
+popd
+rm -rf "$BMC_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: latest binary-mirror-config parses cleanly${NC}"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

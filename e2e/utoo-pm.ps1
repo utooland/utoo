@@ -742,4 +742,52 @@ finally {
     Remove-Item -Recurse -Force $ovdDir -ErrorAction SilentlyContinue
 }
 
+
+# ═══════════════════════════════════════════════════════════════
+# Case: latest binary-mirror-config still parses under our schema
+# ═══════════════════════════════════════════════════════════════
+# `binary-mirror-config`'s `mirrors.china` map is parsed into a strongly-typed
+# schema (crates/pm/src/service/binary.rs). The whole map deserializes as one
+# unit, so a single drifted entry fails the parse and silently disables the
+# China mirror layer for every package — `get_envs()`/`update_package_binary()`
+# swallow the error as a debug log. (`flow-bin` ships `replaceHost` as a bare
+# string, not an array, which previously broke the parse.)
+#
+# Guard against upstream drift: install against a non-npm registry (npm.org has
+# no mirror layer and is skipped) with --verbose, then assert the config loaded
+# and did NOT fail to parse. flow-bin is the dep on purpose — it is the exact
+# entry that regressed.
+Write-Yellow "Case: latest binary-mirror-config parses under our schema"
+$bmcDir = Join-Path $env:TEMP "utoo-e2e-bmc-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $bmcDir -Force | Out-Null
+    @{
+        name         = "binary-mirror-config-parse-test"
+        version      = "1.0.0"
+        dependencies = @{ "flow-bin" = "0.180.0" }
+    } | ConvertTo-Json | Set-Content "$bmcDir\package.json"
+
+    Push-Location $bmcDir
+    try {
+        # --ignore-scripts keeps this fast (no native binary download); the
+        # mirror config is loaded on the clone path regardless of script exec.
+        $bmcOut = utoo install --registry=https://registry.npmmirror.com --ignore-scripts --verbose 2>&1
+        $bmcOut | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "utoo install failed for binary-mirror-config parse test" }
+
+        if ($bmcOut -match "Failed to parse binary mirror config") {
+            throw "latest binary-mirror-config no longer matches our schema (mirrors.china drift)"
+        }
+        if (-not ($bmcOut -match "Binary mirror config loaded:")) {
+            throw "binary-mirror-config was never parsed (registry unreachable or mirror layer skipped)"
+        }
+
+        Write-Green "PASS: latest binary-mirror-config parses cleanly"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $bmcDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"
