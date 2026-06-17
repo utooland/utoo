@@ -709,18 +709,11 @@ async fn resolve_override_file_tarball<E>(
             });
         }
 
-        let pinned = format!("file:{}", abs.display());
-        let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-            let bytes = std::fs::read(&abs)
-                .map_err(|e| anyhow::anyhow!("failed to read tarball {}: {e}", abs.display()))?;
-            crate::resolver::tar::parse_tarball_manifest(&bytes, pinned)
-        })
-        .await
-        {
-            Ok(Ok(m)) => m,
-            Ok(Err(_)) | Err(_) if *edge_type == EdgeType::Optional => return Ok(None),
-            Ok(Err(source)) => return Err(file_err(source)),
-            Err(join) => return Err(file_err(join.into())),
+        // Same local-tarball read+parse the normal file-dep resolver uses.
+        let manifest = match crate::resolver::tar::read_local_tarball_manifest(abs).await {
+            Ok(m) => m,
+            Err(_) if *edge_type == EdgeType::Optional => return Ok(None),
+            Err(source) => return Err(file_err(source)),
         };
         Ok(Some(Arc::new(manifest)))
     }
