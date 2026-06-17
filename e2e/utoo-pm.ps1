@@ -694,4 +694,49 @@ finally {
     Remove-Item -Recurse -Force $ovDir -ErrorAction SilentlyContinue
 }
 
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides → file: DIRECTORY must fail with a clear error
+# ═══════════════════════════════════════════════════════════════
+# A `file:` directory dep installs as a symlink (Link node, no manifest), which
+# the manifest-returning override path can't express. It must fail with an
+# actionable "use a tarball" message rather than silently resolving it as a
+# registry version (→ 404). Guards the boundary against a regression.
+Write-Yellow "Case: overrides -> file: directory errors clearly"
+$ovdDir = Join-Path $env:TEMP "utoo-e2e-override-dir-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$ovdDir\local-is-number" -Force | Out-Null
+    @{ name = "is-number"; version = "9.9.9"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$ovdDir\local-is-number\package.json"
+    Set-Content "$ovdDir\local-is-number\index.js" "module.exports = () => 'DIR';"
+
+    Push-Location $ovdDir
+    try {
+        @{
+            name         = "ov-file-dir-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-number" = "file:./local-is-number" }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+        $ovdOut = utoo install --registry=https://registry.npmjs.org --ignore-scripts 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $ovdOut | Out-Host
+            throw "file: directory override should not install successfully"
+        }
+        if ($ovdOut -notmatch "directory overrides") {
+            $ovdOut | Out-Host
+            throw "file: directory override gave the wrong error (want 'directory overrides … use a tarball')"
+        }
+        if ($ovdOut -match "No matching version") {
+            $ovdOut | Out-Host
+            throw "file: directory override regressed into a registry version lookup (404)"
+        }
+        Write-Green "PASS: overrides -> file: directory errors clearly"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $ovdDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"

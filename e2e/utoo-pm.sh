@@ -1578,4 +1578,51 @@ rm -rf "$OV_DIR"
 trap - EXIT
 echo -e "${GREEN}PASS: overrides → local file: tarball (nested + direct)${NC}"
 
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides → file: DIRECTORY must fail with a clear error
+# ═══════════════════════════════════════════════════════════════
+# A `file:` directory dep installs as a symlink (Link node, no manifest), which
+# the manifest-returning override path can't express. Rather than silently
+# resolving it as a registry version (→ 404) or leaking placement into the
+# resolver, it must fail with an actionable "use a tarball" message. Guards the
+# boundary so a future change can't regress it into a confusing 404.
+echo -e "${YELLOW}Case: overrides → file: directory errors clearly${NC}"
+OVD_DIR=$(mktemp -d)
+trap 'rm -rf "$OVD_DIR"' EXIT
+mkdir -p "$OVD_DIR/local-is-number"
+cat > "$OVD_DIR/local-is-number/package.json" << 'EOF'
+{ "name": "is-number", "version": "9.9.9", "main": "index.js" }
+EOF
+echo "module.exports = () => 'DIR';" > "$OVD_DIR/local-is-number/index.js"
+cat > "$OVD_DIR/package.json" << 'EOF'
+{
+  "name": "ov-file-dir-test",
+  "version": "1.0.0",
+  "dependencies": { "is-odd": "3.0.1" },
+  "overrides": { "is-number": "file:./local-is-number" }
+}
+EOF
+pushd "$OVD_DIR"
+if utoo install --registry=https://registry.npmjs.org --ignore-scripts > ovd.out 2>&1; then
+    echo -e "${RED}FAIL: file: directory override should not install successfully${NC}"
+    cat ovd.out
+    exit 1
+fi
+# Must be the clear directory-override error, not a registry 404 / version miss.
+if ! grep -qi "directory overrides" ovd.out; then
+    echo -e "${RED}FAIL: file: directory override gave the wrong error (want 'directory overrides … use a tarball')${NC}"
+    cat ovd.out
+    exit 1
+fi
+if grep -qi "No matching version" ovd.out; then
+    echo -e "${RED}FAIL: file: directory override regressed into a registry version lookup (404)${NC}"
+    cat ovd.out
+    exit 1
+fi
+rm -f ovd.out
+popd
+rm -rf "$OVD_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: overrides → file: directory errors clearly${NC}"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
