@@ -78,6 +78,44 @@ pub fn get_registry() -> String {
     REGISTRY.get_sync()
 }
 
+/// Scheme + host(+port) origin of an http(s) URL — e.g. `https://registry.npmjs.org`
+/// from `https://registry.npmjs.org/foo/-/foo-1.0.0.tgz`. `None` for non-http URLs.
+fn url_origin(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    Some(&url[..url.len() - rest.len() + host_end])
+}
+
+/// Whether `resolved` is a tarball served by a trusted registry (the configured
+/// registry, or a well-known public one), so it is safe to materialize into the
+/// shared `<name>/<version>` global cache slot.
+///
+/// A registry download URL and a user-declared remote-tarball URL are
+/// indistinguishable in an npm `package-lock.json` (both are `https://….tgz`,
+/// the lockfile stores no source tag). We resolve that ambiguity by origin:
+/// only a tarball whose host is a trusted registry may enter the shared cache;
+/// any other https tarball is an untrusted remote tarball and is fetched +
+/// extracted directly into `node_modules`, never the global store — which also
+/// removes the cross-cache poisoning risk of an attacker URL self-declaring a
+/// `name@version` that collides with a real registry package.
+pub fn is_registry_tarball(resolved: &str) -> bool {
+    let Some(origin) = url_origin(resolved) else {
+        return false;
+    };
+    let configured = get_registry();
+    let trusted = [
+        url_origin(&configured),
+        url_origin(super::registry::REGISTRY_NPMMIRROR),
+        url_origin(super::registry::REGISTRY_NPMJS),
+    ];
+    trusted
+        .into_iter()
+        .flatten()
+        .any(|t| origin.eq_ignore_ascii_case(t))
+}
+
 static CATALOGS: tokio::sync::OnceCell<Catalogs> = tokio::sync::OnceCell::const_new();
 
 pub async fn get_catalogs() -> Catalogs {
@@ -461,6 +499,46 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use tempfile::TempDir;
+
+    #[test]
+    fn url_origin_extracts_scheme_and_host() {
+        assert_eq!(
+            url_origin("https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz"),
+            Some("https://registry.npmjs.org")
+        );
+        assert_eq!(
+            url_origin("http://cdn.example.com:8080/x.tgz"),
+            Some("http://cdn.example.com:8080")
+        );
+        assert_eq!(
+            url_origin("https://registry.npmjs.org"),
+            Some("https://registry.npmjs.org")
+        );
+        assert_eq!(url_origin("file:/abs/x.tgz"), None);
+        assert_eq!(url_origin("git+https://github.com/u/r.git#abc"), None);
+    }
+
+    #[test]
+    fn is_registry_tarball_trusts_known_registries_only() {
+        // Well-known public registries → trusted (shared cache allowed).
+        assert!(is_registry_tarball(
+            "https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz"
+        ));
+        assert!(is_registry_tarball(
+            "https://registry.npmmirror.com/abbrev/-/abbrev-2.0.0.tgz"
+        ));
+        // A remote tarball from an arbitrary host → NOT trusted (direct extract,
+        // never the shared `<name>/<version>` slot).
+        assert!(!is_registry_tarball(
+            "https://cdn.example.com/foo-1.0.0.tgz"
+        ));
+        // A registry-host *lookalike* path on an untrusted host stays untrusted.
+        assert!(!is_registry_tarball(
+            "https://evil.example.com/abbrev/-/abbrev-2.0.0.tgz"
+        ));
+        // Non-http resolveds are not registry tarballs.
+        assert!(!is_registry_tarball("file:../foo.tgz"));
+    }
 
     use super::super::config_file::ConfigValueParser;
 

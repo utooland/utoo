@@ -1,8 +1,9 @@
 //! `file:` dependency resolution — directory links and local tarballs.
 //!
 //! The non-registry sibling of [`super::git`] and [`super::http`]: a `file:`
-//! dir becomes a Link node inline; a `file:` tarball is committed into the
-//! shared cache-slot contract and rejoins the normal BFS placement flow.
+//! dir becomes a Link node inline; a `file:` tarball has its manifest parsed
+//! in BFS (no global cache) and rejoins the normal BFS placement flow. The
+//! tarball content is extracted directly into `node_modules` at install time.
 
 use std::ops::ControlFlow;
 use std::path::Path;
@@ -12,9 +13,8 @@ use anyhow::Context as _;
 use petgraph::graph::NodeIndex;
 
 use super::builder::ProcessResult;
-use super::common::file_cache_slot;
 use super::edges::DependencyEdgeInfo;
-use super::tar::commit_tarball_bytes;
+use super::tar::parse_tarball_manifest;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
@@ -22,9 +22,10 @@ use crate::resolver::registry::ResolveError;
 use crate::traits::registry::ResolvedPackage;
 
 /// Handle a `file:` dep: dir → Link node inline (returns
-/// `ControlFlow::Break`); tarball → stream bytes through the shared
-/// `commit_tarball_bytes` and hand the `ResolvedPackage` back to the
-/// normal BFS flow via `ControlFlow::Continue`.
+/// `ControlFlow::Break`); tarball → read the local bytes, parse the manifest
+/// via [`parse_tarball_manifest`] (no global cache), and hand the
+/// `ResolvedPackage` back to the normal BFS flow via `ControlFlow::Continue`.
+/// The tarball content is materialized into `node_modules` at install time.
 #[cfg(feature = "http-tarball")]
 pub(crate) async fn process_file_dep<E>(
     graph: &mut DependencyGraph,
@@ -32,7 +33,6 @@ pub(crate) async fn process_file_dep<E>(
     conflict_parent: NodeIndex,
     edge: &DependencyEdgeInfo,
     path_spec: &str,
-    cache_dir: Option<&Path>,
 ) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
     let file_err = |source: anyhow::Error| ResolveError::File {
         spec: edge.spec.clone(),
@@ -84,15 +84,11 @@ pub(crate) async fn process_file_dep<E>(
         return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
     }
 
-    let cache_dir = cache_dir
-        .ok_or_else(|| file_err(anyhow::anyhow!("cache_dir required for file: tarball")))?
-        .to_path_buf();
-    let slot = file_cache_slot(&abs);
     let pinned = format!("file:{}", abs.display());
     let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let bytes = std::fs::read(&abs)
             .with_context(|| format!("failed to read tarball {}", abs.display()))?;
-        commit_tarball_bytes(&cache_dir, &bytes, pinned, &slot)
+        parse_tarball_manifest(&bytes, pinned)
     })
     .await
     {

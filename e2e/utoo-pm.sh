@@ -195,13 +195,79 @@ for pkg in abbrev ini isexe; do
     fi
 done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
+
 cd ../../..
 
+# Case 8.3b: a NON-registry HTTP(S) tarball (served from a host that is NOT a
+# trusted registry) must install directly into node_modules and must NOT create
+# ANY global cache entry. Classification is by host: the lockfile stores no
+# source tag, so a tarball whose origin is not the configured/well-known
+# registry is treated as a remote tarball and materialized straight into the
+# tree (single-path model), never the shared `<name>/<version>` cache.
+#
+# The other http fixture (Case 8.2/8.3) deliberately points at
+# registry.npmjs.org — a *trusted* registry host — so those URLs are classified
+# as registry downloads and DO use the cache; they exercise the URL-pinned
+# lockfile path, not the non-registry direct-extract path. We serve this case's
+# tarball from 127.0.0.1 (untrusted host) to exercise direct-extract + no-leak.
+echo -e "${YELLOW}Case 8.3b: non-registry HTTP tarball stays out of the global cache${NC}"
+HTTP_DIR=$(mktemp -d)
+HTTP_CACHE=$(mktemp -d)
+mkdir -p "$HTTP_DIR/pkg/remote-http-pkg"
+cat > "$HTTP_DIR/pkg/remote-http-pkg/package.json" <<'EOF'
+{ "name": "remote-http-pkg", "version": "4.5.6", "main": "index.js" }
+EOF
+echo "module.exports = 456;" > "$HTTP_DIR/pkg/remote-http-pkg/index.js"
+( cd "$HTTP_DIR/pkg/remote-http-pkg" && npm pack --silent >/dev/null 2>&1 \
+  && mv remote-http-pkg-*.tgz "$HTTP_DIR/remote-http-pkg.tgz" )
+# Serve the tarball dir on a random localhost port (untrusted, non-registry host).
+HTTP_PORT=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close();})')
+node -e '
+const http=require("http"), fs=require("fs"), path=require("path");
+const dir=process.argv[1], port=Number(process.argv[2]);
+http.createServer((req,res)=>{
+  const f=path.join(dir, path.basename(req.url));
+  fs.readFile(f,(e,d)=>{ if(e){res.statusCode=404;res.end("nf");} else {res.end(d);} });
+}).listen(port,"127.0.0.1");
+' "$HTTP_DIR" "$HTTP_PORT" &
+HTTP_PID=$!
+# Give the server a moment to bind.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS "http://127.0.0.1:$HTTP_PORT/remote-http-pkg.tgz" -o /dev/null 2>/dev/null; then break; fi
+  sleep 0.3
+done
+mkdir -p "$HTTP_DIR/app"
+cat > "$HTTP_DIR/app/package.json" <<EOF
+{ "name": "remote-http-app", "version": "1.0.0", "private": true,
+  "dependencies": { "remote-http-pkg": "http://127.0.0.1:$HTTP_PORT/remote-http-pkg.tgz" } }
+EOF
+http_cleanup() { kill "$HTTP_PID" 2>/dev/null; rm -rf "$HTTP_DIR" "$HTTP_CACHE"; }
+( cd "$HTTP_DIR/app" && UTOO_CACHE_DIR="$HTTP_CACHE" utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: non-registry http tarball install failed${NC}"; http_cleanup; exit 1; }
+if [ ! -f "$HTTP_DIR/app/node_modules/remote-http-pkg/package.json" ]; then
+    echo -e "${RED}FAIL: remote-http-pkg not materialized into node_modules${NC}"; http_cleanup; exit 1
+fi
+ACTUAL=$(node -e "console.log(require('$HTTP_DIR/app/node_modules/remote-http-pkg/package.json').version)")
+if [ "$ACTUAL" != "4.5.6" ]; then
+    echo -e "${RED}FAIL: remote-http-pkg expected v4.5.6, got $ACTUAL${NC}"; http_cleanup; exit 1
+fi
+# No global cache entry for this package at all (no `<version>` slot, no `_http_`).
+if [ -d "$HTTP_CACHE/remote-http-pkg" ]; then
+    echo -e "${RED}FAIL: remote-http-pkg leaked into the global cache at $HTTP_CACHE/remote-http-pkg${NC}"
+    ls -la "$HTTP_CACHE/remote-http-pkg"; http_cleanup; exit 1
+fi
+http_cleanup
+echo -e "${GREEN}PASS: non-registry HTTP tarball stays out of the global cache${NC}"
+
 # Case 8.4: file: dependency install. Directory deps install as a SYMLINK
-# (npm-compatible); tarball deps extract + clone from the cache slot.
+# (npm-compatible); tarball deps are extracted directly into node_modules
+# (non-registry source — never the global cache).
 echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"
 cd e2e/pm/file-deps
 rm -rf node_modules package-lock.json
+# Neither file: dep enters the global cache: the dir dep installs as a symlink
+# and the tarball dep is extracted directly into node_modules. Clean any slot a
+# prior pm build may have left so a stale entry can't mask a regression.
 rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for file-deps${NC}"; exit 1; }
 for pkg in local-dir-pkg local-tarball-pkg; do
@@ -220,9 +286,9 @@ if [ "$LINK_TARGET" != "../local-dir" ]; then
     echo -e "${RED}FAIL: local-dir-pkg symlink points to '$LINK_TARGET', expected '../local-dir'${NC}"
     exit 1
 fi
-# Tarball dep must be a real directory (clone from cache), not a symlink.
+# Tarball dep must be a real directory (direct-extract), not a symlink.
 if [ -L "node_modules/local-tarball-pkg" ]; then
-    echo -e "${RED}FAIL: local-tarball-pkg should be a real directory (clone), got a symlink${NC}"
+    echo -e "${RED}FAIL: local-tarball-pkg should be a real directory (direct-extract), got a symlink${NC}"
     exit 1
 fi
 ACTUAL=$(node -e "console.log(require('./node_modules/local-dir-pkg/package.json').version)")
@@ -260,12 +326,12 @@ echo -e "${GREEN}PASS: file: warm install successful${NC}"
 cd ../../..
 
 # Case 8.5b: file: tarball located OUTSIDE the project root.
-# Regression: such a tarball's root-relative lockfile entry carries `..`
-# (e.g. "file:../../pkgs/foo.tgz"). BFS hashes the cache slot from the
-# canonical absolute path, but install re-absolutizes the `..`-laden lockfile
-# path; if the slot key isn't normalized the two disagree and the clone fails
-# with "file tarball cache not found". The in-tree fixture above can't catch
-# this because its path has no `..`.
+# Such a tarball's root-relative lockfile entry carries `..`
+# (e.g. "file:../../pkgs/foo.tgz"); install re-absolutizes it against cwd and
+# extracts the tarball directly into node_modules. The in-tree fixture above
+# can't exercise the `..` re-absolutization because its path has none. Run under
+# an isolated cache so we can also assert the tarball never enters the global
+# cache (non-registry source — single-path direct extract).
 echo -e "${YELLOW}Case 8.5b: file: tarball outside project root${NC}"
 EXT_DIR=$(mktemp -d)
 mkdir -p "$EXT_DIR/src/ext-tarball-pkg"
@@ -284,15 +350,20 @@ cat > "$EXT_DIR/app/package.json" <<EOF
   "dependencies": { "ext-tarball-pkg": "file:$EXT_DIR/ext-tarball-pkg.tgz" }
 }
 EOF
-rm -rf ~/.cache/nm/ext-tarball-pkg
-( cd "$EXT_DIR/app" && utoo install --ignore-scripts ) \
-  || { echo -e "${RED}FAIL: install failed for tarball outside project root${NC}"; rm -rf "$EXT_DIR"; exit 1; }
+EXT_CACHE=$(mktemp -d)
+( cd "$EXT_DIR/app" && UTOO_CACHE_DIR="$EXT_CACHE" utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: install failed for tarball outside project root${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1; }
 if [ ! -f "$EXT_DIR/app/node_modules/ext-tarball-pkg/package.json" ]; then
-    echo -e "${RED}FAIL: ext-tarball-pkg not materialized into node_modules${NC}"; rm -rf "$EXT_DIR"; exit 1
+    echo -e "${RED}FAIL: ext-tarball-pkg not materialized into node_modules${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1
+fi
+# Non-registry tarball must NOT create any global cache entry.
+if [ -d "$EXT_CACHE/ext-tarball-pkg" ]; then
+    echo -e "${RED}FAIL: ext-tarball-pkg leaked into the global cache at $EXT_CACHE/ext-tarball-pkg${NC}"
+    ls -la "$EXT_CACHE/ext-tarball-pkg"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1
 fi
 ACTUAL=$(node -e "console.log(require('$EXT_DIR/app/node_modules/ext-tarball-pkg/package.json').version)")
 if [ "$ACTUAL" != "5.6.7" ]; then
-    echo -e "${RED}FAIL: ext-tarball-pkg expected v5.6.7, got $ACTUAL${NC}"; rm -rf "$EXT_DIR"; exit 1
+    echo -e "${RED}FAIL: ext-tarball-pkg expected v5.6.7, got $ACTUAL${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1
 fi
 # Lockfile must stay portable: a root-relative `file:` path with `..`.
 # Check the *form*, not a substring: when cwd and the tarball spec disagree on
@@ -311,8 +382,8 @@ const p = r.slice(5);
 if (p[0] === "/" || /^[A-Za-z]:/.test(p)) {
   console.error("ext-tarball-pkg resolved should be root-relative, not absolute:", tar.resolved); process.exit(1);
 }
-' || { echo -e "${RED}FAIL: lockfile entry wrong for outside-root tarball${NC}"; rm -rf "$EXT_DIR"; exit 1; }
-rm -rf "$EXT_DIR"
+' || { echo -e "${RED}FAIL: lockfile entry wrong for outside-root tarball${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1; }
+rm -rf "$EXT_DIR" "$EXT_CACHE"
 echo -e "${GREEN}PASS: file: tarball outside project root installs${NC}"
 
 # Case 8.6: stale lockfile is detected and regenerated on `ut install`
