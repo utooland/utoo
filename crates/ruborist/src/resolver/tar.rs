@@ -202,6 +202,22 @@ pub(crate) fn parse_tarball_manifest(
     Ok(manifest)
 }
 
+/// Read a local `.tgz` from `abs` and parse its manifest, pinned to
+/// `file:<abs>` (the marker install uses to materialize it). The blocking
+/// read + inflate runs on the blocking pool. Shared by the normal file-dep
+/// resolver ([`super::file::process_file_dep`]) and override file-tarball
+/// resolution so both read local tarballs the same way.
+pub(crate) async fn read_local_tarball_manifest(abs: PathBuf) -> Result<CoreVersionManifest> {
+    let pinned = format!("file:{}", abs.display());
+    tokio::task::spawn_blocking(move || -> Result<CoreVersionManifest> {
+        let bytes = std::fs::read(&abs)
+            .with_context(|| format!("failed to read tarball {}", abs.display()))?;
+        parse_tarball_manifest(&bytes, pinned)
+    })
+    .await
+    .map_err(|e| anyhow!("tarball read task failed: {e}"))?
+}
+
 /// Extract a non-registry tarball's contents directly into `dest` (a
 /// `node_modules/<pkg>` directory), stripping the leading npm wrapper component
 /// (typically `package/`). Writes no `_resolved` marker and does not touch the
