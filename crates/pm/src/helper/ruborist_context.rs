@@ -135,8 +135,16 @@ impl Context {
 /// to a full cold resolve, so an unusable lockfile only costs a warning.
 async fn load_baseline(cwd: &Path) -> Option<PackageLock> {
     let lock_path = cwd.join("package-lock.json");
-    if !fs::try_exists(&lock_path).await.unwrap_or(false) {
-        return None;
+    match fs::try_exists(&lock_path).await {
+        Ok(true) => {}
+        Ok(false) => return None,
+        // A stat error (e.g. a permission issue) is not "no lockfile" — surface
+        // it as a warning instead of silently cold-resolving, but still fall
+        // back rather than failing the whole install on a transient glitch.
+        Err(e) => {
+            tracing::warn!("cannot stat package-lock.json (will cold-resolve): {e:#}");
+            return None;
+        }
     }
     match load_package_lock_json_from_path(cwd).await {
         Ok(lock) => Some(lock),

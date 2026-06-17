@@ -510,16 +510,14 @@ impl DependencyGraph {
         while let Some(node) = stack.pop() {
             // Walk resolved dependency edges by their target index only — no need
             // for `get_resolved_dependencies`, which would clone each dep name.
-            let targets: Vec<NodeIndex> = self
-                .graph
-                .edges_directed(node, Outgoing)
-                .filter_map(|edge| match edge.weight() {
-                    GraphEdge::Dependency(dep) if dep.valid => dep.to,
-                    _ => None,
-                })
-                .collect();
-            for target in targets {
-                if reachable.insert(target) {
+            // `reachable`/`stack` are locals, so iterate the edges directly rather
+            // than collecting targets into a per-node Vec.
+            for edge in self.graph.edges_directed(node, Outgoing) {
+                if let GraphEdge::Dependency(dep) = edge.weight()
+                    && dep.valid
+                    && let Some(target) = dep.to
+                    && reachable.insert(target)
+                {
                     stack.push(target);
                 }
             }

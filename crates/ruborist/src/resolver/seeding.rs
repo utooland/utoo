@@ -67,7 +67,9 @@ pub fn seed_graph_from_lock(graph: &mut DependencyGraph, lock: &PackageLock, roo
         // links are re-resolved from the live importer edge when still declared.
         .filter(|(path, pkg)| !path.is_empty() && !pkg.is_link())
         .collect();
-    entries.sort_by_key(|(path, _)| lock_path_depth(path));
+    // `sort_by_cached_key` evaluates `lock_path_depth` (string matching) once
+    // per entry rather than O(N log N) times.
+    entries.sort_by_cached_key(|(path, _)| lock_path_depth(path));
 
     // Record (path, node) for the second pass so edges resolve against the
     // fully-populated index (a dep can hoist to any ancestor's node_modules).
