@@ -1,31 +1,24 @@
 //! HTTP(S) tarball resolver for `https://…/pkg.tgz` dependency specs.
 //!
-//! # Why BFS extracts up-front (like git) instead of deferring to install
+//! # Why BFS only reads the manifest (no global cache)
 //!
-//! A naive "just parse the manifest in BFS, let pm re-download at install
-//! time" design looks simpler but has two problems:
+//! A non-registry remote tarball is indistinguishable from a registry
+//! download URL in an npm `package-lock.json` — both are `https://….tgz`,
+//! and the lockfile stores no source tag. Routing such a tarball into the
+//! shared `<name>/<version>` global cache would let an attacker-controlled
+//! URL self-declare any `name@version` and poison the slot the registry
+//! uses for a real package (there is no `dist.integrity` to verify against
+//! on a cache hit).
 //!
-//! 1. **Cache-slot collision**. pm's `download_to_cache` keys on
-//!    `<name>/<version>/`. A URL-supplied tarball can self-declare any
-//!    `name@version`, so an attacker-controlled URL can poison the same
-//!    slot the npm registry uses for `lodash@4.17.21`. There is no
-//!    `dist.integrity` to verify against on cache hit.
-//!
-//! 2. **Double download**. BFS downloads the tarball to read its manifest,
-//!    then throws the bytes away; install downloads the same URL again to
-//!    extract it.
-//!
-//! We fix both by extracting in BFS to a **URL-hashed** cache slot —
-//! `<cache>/<name>/_http_<sha256(url)[:16]>/`. URL is the natural content
-//! address (there is no etag/integrity to rely on, but the URL is what the
-//! user committed to in package.json), so it plays the same role `<sha>`
-//! plays for git. Install's `resolve_cache_path` checks this slot *before*
-//! falling through to the registry cache path, so registry tarballs stay
-//! unchanged while HTTP tarballs never re-download.
-//!
-//! Same-URL content changes **are not detected** — npm-land convention is
-//! that tarball URLs are immutable. Users who break that rotate the URL or
-//! run `utoo clean`.
+//! So non-registry tarballs never enter the global cache. BFS downloads the
+//! tarball only to parse its manifest (name/version/deps + the pinned
+//! `dist.tarball`) so transitive resolution can continue; the bytes are
+//! dropped. At install time pm re-fetches the URL and extracts the contents
+//! **directly** into `node_modules/<pkg>` (see
+//! [`crate::tar::extract_tarball_to_dir`]). HTTP tarballs are therefore
+//! downloaded twice (manifest in BFS, content at install) — accepted, as
+//! remote tarballs are rare and this removes the cache-poisoning and
+//! path-hashed-slot-staleness problems entirely.
 //!
 //! # Flow
 //!
@@ -34,64 +27,40 @@
 //!                                    │
 //!  ┌── BFS resolution (this module) ──────────────────────────────────────────┐
 //!  │                                 ▼                                        │
-//!  │  resolve_http_dep(cache_dir, url, &fetch_cache)                          │
+//!  │  resolve_http_dep(url, &fetch_cache)                                     │
 //!  │       │                                                                  │
 //!  │       ▼                                                                  │
-//!  │  HttpFetchCache  ── dedup_init  ★                                        │
-//!  │       │           (one fetch per URL across BFS)                         │
+//!  │  HttpFetchCache  ── dedup_init  ★  (one fetch per URL across BFS)        │
+//!  │       │                                                                  │
 //!  │       ▼                                                                  │
 //!  │  download_tarball  ── FetchError + classify_*  ☆                         │
-//!  │       │                                                                  │
-//!  │       ▼  Bytes                                                           │
-//!  │  spawn_blocking → fetch_and_extract_blocking:                            │
-//!  │       gzip_decompress (libdeflater)                                      │
-//!  │       scan_tarball  (single pass; collects entries + finds pkg.json)     │
-//!  │       finalize_non_registry_manifest  ★                                  │
-//!  │       package_dir = <cache>/<name>/_http_<sha256(url)[:16]>/             │
-//!  │       commit_cache_dir_atomic  ★  (stage → rename → _resolved marker)   │
+//!  │       │  Bytes                                                           │
+//!  │       ▼                                                                  │
+//!  │  parse_tarball_manifest (no extraction; finalize_non_registry_manifest)  │
 //!  │       │                                                                  │
 //!  │       ▼                                                                  │
 //!  │  ResolvedPackage { dist.tarball = url, … }    ── bytes dropped here      │
 //!  └───────│──────────────────────────────────────────────────────────────────┘
 //!          ▼  (lockfile)
-//!  ┌── Install phase (pm/util/downloader.rs) ─────────────────────────────────┐
-//!  │  resolve_cache_path(name, version, url)                                  │
-//!  │       ├─ is_git_url?           → git_cache_lookup                        │
-//!  │       ├─ http_tarball_cache_lookup  → <name>/_http_<hash>/_resolved → ✓ │
-//!  │       └─ (fall through)        → download_to_cache  (registry path)     │
-//!  │                                                                          │
-//!  │  cloner:  clonefile (mac) / hardlink (linux)                             │
-//!  │       ~/.cache/nm/<name>/_http_<hash>/package/  →  node_modules/<name>/  │
+//!  ┌── Install phase (pm) ─────────────────────────────────────────────────────┐
+//!  │  non-registry tarball → re-download URL → extract_tarball_to_dir into     │
+//!  │  node_modules/<pkg> (no global cache slot)                                │
 //!  └──────────────────────────────────────────────────────────────────────────┘
-//!
-//!  Cache layout:
-//!
-//!    ~/.cache/nm/
-//!    └── foo/
-//!        ├── 1.2.3/                       registry tarball slot (untouched)
-//!        └── _http_<sha256(url)[:16]>/    HTTP tarball slot
-//!            ├── _resolved
-//!            └── package/
-//!                └── package.json
 //!
 //!  Legend:
 //!    ★ shared with the git resolver via `super::common`
 //!      (DedupCache, dedup_init, finalize_non_registry_manifest,
-//!       validate_package_name, commit_cache_dir_atomic)
+//!       validate_package_name)
 //!    ☆ shared with registry manifest fetching via `crate::service::fetch`
 //!      (FetchError, classify_reqwest_error, classify_status, retry_strategy)
 //! ```
-//!
-//! [`download_to_cache`]: https://github.com/utooland/utoo/blob/main/crates/pm/src/util/downloader.rs
-
-use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use tokio_retry::RetryIf;
 
-use super::common::{DedupCache, dedup_init, http_cache_slot};
-use super::tar::commit_tarball_bytes;
+use super::common::{DedupCache, dedup_init};
+use super::tar::parse_tarball_manifest;
 use crate::model::manifest::CoreVersionManifest;
 use crate::service::fetch::{
     FetchError, classify_reqwest_error, classify_status, is_retryable, retry_strategy,
@@ -101,19 +70,6 @@ use crate::traits::registry::ResolvedPackage;
 
 /// Session-scoped dedup cache: one fetch per URL even under concurrent BFS.
 pub(crate) type HttpFetchCache = DedupCache<CoreVersionManifest>;
-
-fn fetch_and_extract_blocking(
-    cache_dir: &Path,
-    url: &str,
-    tarball_bytes: Bytes,
-) -> Result<CoreVersionManifest> {
-    commit_tarball_bytes(
-        cache_dir,
-        tarball_bytes.as_ref(),
-        url.to_string(),
-        &http_cache_slot(url),
-    )
-}
 
 // ============================================================================
 // Async download + retry
@@ -153,27 +109,22 @@ async fn download_tarball(url: &str) -> Result<Bytes> {
 // High-level resolver — called by BFS `process_dependency`
 // ============================================================================
 
-/// Resolve an HTTP tarball spec to a [`ResolvedPackage`] and seed the cache.
+/// Resolve an HTTP tarball spec to a [`ResolvedPackage`].
 ///
-/// BFS extracts to `<cache_dir>/<name>/_http_<hash>/` so the install phase
-/// finds a cache hit and never re-downloads.
+/// Downloads the tarball only to parse its manifest; the bytes are not cached.
+/// The tarball content is materialized directly into `node_modules` at install
+/// time, so non-registry tarballs never enter the global cache.
 pub(crate) async fn resolve_http_dep(
-    cache_dir: Option<&Path>,
     url: &str,
     fetch_cache: &HttpFetchCache,
 ) -> Result<ResolvedPackage> {
-    let cache_dir =
-        cache_dir.ok_or_else(|| anyhow!("cache_dir required for http dependency resolution"))?;
-
     let url_owned = url.to_string();
-    let cache_dir_owned = cache_dir.to_path_buf();
     let manifest = dedup_init(fetch_cache, url_owned.clone(), move || async move {
         let bytes = download_tarball(&url_owned).await?;
-        tokio::task::spawn_blocking(move || {
-            fetch_and_extract_blocking(&cache_dir_owned, &url_owned, bytes)
-        })
-        .await
-        .context("http tarball extractor task failed")?
+        let url_for_blocking = url_owned.clone();
+        tokio::task::spawn_blocking(move || parse_tarball_manifest(&bytes, url_for_blocking))
+            .await
+            .context("http tarball manifest parse task failed")?
     })
     .await?;
 
@@ -211,74 +162,27 @@ mod tests {
     }
 
     #[test]
-    fn extracts_to_url_hashed_slot() {
-        let tmp = tempfile::tempdir().unwrap();
+    fn parses_manifest_with_pinned_url() {
         let pkg = br#"{"name":"demo","version":"1.2.3","scripts":{"install":"echo hi"}}"#;
         let bytes = make_targz(&[("package/package.json", pkg)]);
         let url = "https://example.com/demo.tgz";
 
-        let manifest = fetch_and_extract_blocking(tmp.path(), url, bytes).unwrap();
+        let manifest = parse_tarball_manifest(&bytes, url.to_string()).unwrap();
         assert_eq!(manifest.name, "demo");
         assert_eq!(manifest.version, "1.2.3");
         assert_eq!(manifest.has_install_script, Some(true));
         assert_eq!(manifest.dist.tarball.as_deref(), Some(url));
-
-        let expected_dir = tmp.path().join("demo").join(http_cache_slot(url));
-        assert!(expected_dir.join("_resolved").exists());
-        assert!(expected_dir.join("package").join("package.json").exists());
-    }
-
-    #[test]
-    fn different_urls_get_separate_slots_same_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let pkg = br#"{"name":"demo","version":"1.0.0"}"#;
-        let url_a = "https://a.example.com/demo.tgz";
-        let url_b = "https://b.example.com/demo.tgz";
-
-        fetch_and_extract_blocking(
-            tmp.path(),
-            url_a,
-            make_targz(&[("package/package.json", pkg)]),
-        )
-        .unwrap();
-        fetch_and_extract_blocking(
-            tmp.path(),
-            url_b,
-            make_targz(&[("package/package.json", pkg)]),
-        )
-        .unwrap();
-
-        let slot_a = tmp.path().join("demo").join(http_cache_slot(url_a));
-        let slot_b = tmp.path().join("demo").join(http_cache_slot(url_b));
-        assert_ne!(slot_a, slot_b);
-        assert!(slot_a.join("_resolved").exists());
-        assert!(slot_b.join("_resolved").exists());
-    }
-
-    #[test]
-    fn warm_cache_is_idempotent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let bytes = make_targz(&[(
-            "package/package.json",
-            br#"{"name":"demo","version":"0.0.1"}"#,
-        )]);
-        let url = "https://example.com/x.tgz";
-
-        fetch_and_extract_blocking(tmp.path(), url, bytes.clone()).unwrap();
-        fetch_and_extract_blocking(tmp.path(), url, bytes).unwrap();
     }
 
     #[test]
     fn rejects_tarball_without_package_json() {
-        let tmp = tempfile::tempdir().unwrap();
         let bytes = make_targz(&[("package/README.md", b"hi")]);
-        let err = fetch_and_extract_blocking(tmp.path(), "u", bytes).unwrap_err();
+        let err = parse_tarball_manifest(&bytes, "u".to_string()).unwrap_err();
         assert!(err.to_string().contains("package.json not found"));
     }
 
     #[test]
     fn shallowest_package_json_wins() {
-        let tmp = tempfile::tempdir().unwrap();
         let bytes = make_targz(&[
             (
                 "package/sub/package.json",
@@ -289,7 +193,7 @@ mod tests {
                 br#"{"name":"demo","version":"1.0.0"}"#,
             ),
         ]);
-        let manifest = fetch_and_extract_blocking(tmp.path(), "u", bytes).unwrap();
+        let manifest = parse_tarball_manifest(&bytes, "u".to_string()).unwrap();
         assert_eq!(manifest.name, "demo");
         assert_eq!(manifest.version, "1.0.0");
     }

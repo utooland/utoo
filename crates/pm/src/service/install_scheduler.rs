@@ -9,11 +9,12 @@ use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
 
 use crate::service::auth;
 use crate::util::cloner::{PackageClone, clone_package_sync};
-use crate::util::downloader::{download_bytes, is_registry_tarball_url};
+use crate::util::downloader::download_bytes;
 use crate::util::package_cache::{
-    ExtractOutcome, extract_to_cache, registry_cache_lookup, resolve_seeded_cache_path,
+    CachePlan, ExtractOutcome, extract_non_registry_to_target, extract_to_cache,
+    registry_cache_lookup, resolve_cache_plan,
 };
-use crate::util::user_config::get_manifests_concurrency_limit_sync;
+use crate::util::user_config::{get_manifests_concurrency_limit_sync, is_registry_tarball};
 
 /// Build event receiver that forwards download prefetch work to the scheduler.
 pub(crate) struct InstallEventReceiver<R: EventReceiver> {
@@ -89,7 +90,7 @@ enum Command {
 enum StageReport {
     CacheResolved {
         spec: CloneSpec,
-        result: Result<Option<PathBuf>, String>,
+        result: Result<CachePlan, String>,
     },
     Download {
         package: PackageRef,
@@ -98,6 +99,13 @@ enum StageReport {
     Extract {
         key: String,
         result: Result<ExtractOutcome, String>,
+    },
+    /// A non-registry tarball was fetched/read and extracted directly into its
+    /// `node_modules` target (no global cache). The target is fully materialized,
+    /// so this completes the clone for that target outright.
+    DirectExtract {
+        target: PathBuf,
+        result: Result<(), String>,
     },
     Clone {
         target: PathBuf,
@@ -159,7 +167,11 @@ impl InstallSchedulerHandle {
 
 impl InstallScheduler {
     pub(crate) fn prefetch_download(&self, name: String, version: String, tarball_url: String) {
-        if !is_registry_tarball_url(&tarball_url) {
+        // Only registry-host tarballs use the global download cache; git and
+        // non-registry (file:/untrusted-https) tarballs are not prefetched here
+        // (git is cloned in BFS; non-registry tarballs are materialized straight
+        // into node_modules at clone time).
+        if !is_registry_tarball(&tarball_url) {
             return;
         }
         let _ = self.tx.send(Command::PrefetchDownload(PackageRef {
@@ -259,6 +271,9 @@ struct SchedulerState {
     download_queue: VecDeque<PackageRef>,
     extract_active: HashSet<String>,
     extract_queue: VecDeque<DownloadedPackage>,
+    direct_extract_limit: usize,
+    direct_extract_active: HashSet<PathBuf>,
+    direct_extract_queue: VecDeque<CloneSpec>,
     clone_done: HashSet<PathBuf>,
     clone_active: HashSet<PathBuf>,
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
@@ -285,6 +300,9 @@ impl SchedulerState {
             download_queue: VecDeque::new(),
             extract_active: HashSet::new(),
             extract_queue: VecDeque::new(),
+            direct_extract_limit: extract_concurrency_limit(),
+            direct_extract_active: HashSet::new(),
+            direct_extract_queue: VecDeque::new(),
             clone_done: HashSet::new(),
             clone_active: HashSet::new(),
             clone_waiters: HashMap::new(),
@@ -301,6 +319,7 @@ impl SchedulerState {
         loop {
             self.pump_downloads();
             self.pump_extracts();
+            self.pump_direct_extracts();
             self.pump_clones();
 
             if self.shutdown && self.is_idle() {
@@ -353,9 +372,11 @@ impl SchedulerState {
     fn is_idle(&self) -> bool {
         self.download_queue.is_empty()
             && self.extract_queue.is_empty()
+            && self.direct_extract_queue.is_empty()
             && self.clone_queue.is_empty()
             && self.download_active.is_empty()
             && self.extract_active.is_empty()
+            && self.direct_extract_active.is_empty()
             && self.clone_active.is_empty()
             && self.async_ops.is_empty()
     }
@@ -396,7 +417,7 @@ impl SchedulerState {
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
         let task_spec = spec.clone();
         self.async_ops.push(tokio::spawn(async move {
-            let result = resolve_seeded_cache_path(
+            let result = resolve_cache_plan(
                 &task_spec.package.name,
                 &task_spec.package.version,
                 &task_spec.package.tarball_url,
@@ -514,11 +535,40 @@ impl SchedulerState {
         }
     }
 
+    /// Materialize non-registry tarballs ([`CachePlan::DirectExtract`]) straight
+    /// into their `node_modules` target. Bounded the same way as registry
+    /// extraction; each completed target is reported via `DirectExtract` and
+    /// finalizes that clone outright (no global cache, no cloner step).
+    fn pump_direct_extracts(&mut self) {
+        let done = &self.clone_done;
+        let admitted = admit_stage(
+            &mut self.direct_extract_queue,
+            &mut self.direct_extract_active,
+            self.direct_extract_limit,
+            |spec| spec.target.clone(),
+            |key| done.contains(key),
+        );
+        for (spec, target) in admitted {
+            self.async_ops.push(tokio::spawn(async move {
+                let result =
+                    extract_non_registry_to_target(&spec.package.tarball_url, &spec.target)
+                        .await
+                        .map_err(|e| format!("{e:#}"));
+                StageReport::DirectExtract { target, result }
+            }));
+        }
+    }
+
     fn handle_report(&mut self, done: StageReport) {
         match done {
             StageReport::CacheResolved { spec, result } => match result {
-                Ok(Some(cache_path)) => self.clone_queue.push_back(ReadyClone { spec, cache_path }),
-                Ok(None) => self.ensure_download(spec.package.clone(), Some(spec)),
+                Ok(CachePlan::GitCache(cache_path)) => {
+                    self.clone_queue.push_back(ReadyClone { spec, cache_path })
+                }
+                Ok(CachePlan::RegistryDownload) => {
+                    self.ensure_download(spec.package.clone(), Some(spec))
+                }
+                Ok(CachePlan::DirectExtract) => self.direct_extract_queue.push_back(spec),
                 Err(error) => self.complete_clone(spec.target, Err(error)),
             },
             StageReport::Download { package, result } => {
@@ -552,6 +602,16 @@ impl SchedulerState {
                     Err(e) => Err(e),
                 };
                 self.complete_download(key, path_result);
+            }
+            StageReport::DirectExtract { target, result } => {
+                self.direct_extract_active.remove(&target);
+                // A direct extract writes the package straight into node_modules
+                // (no cloner step), so count it as a clone for the install summary
+                // and finalize the clone for this target.
+                let clone_result = result.inspect(|()| {
+                    self.counts.cloned += 1;
+                });
+                self.complete_clone(target, clone_result);
             }
             StageReport::Clone { target, result } => {
                 self.clone_active.remove(&target);

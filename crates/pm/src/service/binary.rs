@@ -49,9 +49,15 @@ struct BinaryMirror {
     #[serde(skip_serializing_if = "Option::is_none")]
     host: Option<String>,
     /// Hosts to rewrite to `host` (used when `replaceHostMap` is absent).
+    /// cnpm ships this in both shapes — a single host string (e.g. `flow-bin`)
+    /// or an array — so accept either and normalize to a list. A strict
+    /// `Vec<String>` would reject the bare-string form and, because the whole
+    /// `mirrors.china` map deserializes as one unit, fail the entire config
+    /// parse — silently disabling mirroring for every package.
     #[serde(
         rename = "replaceHost",
         default,
+        deserialize_with = "deserialize_string_or_vec",
         skip_serializing_if = "Option::is_none"
     )]
     replace_host: Option<Vec<String>>,
@@ -90,25 +96,69 @@ struct BinaryMirror {
     extra: Map<String, Value>,
 }
 
-static CONFIG: OnceCell<BinaryMirrorConfig> = OnceCell::const_new();
+/// Accept npm's `replaceHost` in either shape — a single host string or an
+/// array of host strings — normalizing to `Vec<String>`. See the field doc on
+/// [`BinaryMirror::replace_host`] for why the bare-string form must not fail
+/// the parse.
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<StringOrVec>::deserialize(deserializer)? {
+        Some(StringOrVec::One(s)) => Some(vec![s]),
+        Some(StringOrVec::Many(v)) => Some(v),
+        None => None,
+    })
+}
+
+/// Cached config load result. Holds the failure too: `get_or_try_init` leaves
+/// the cell empty on `Err`, so a persistent failure (offline / registry down /
+/// upstream schema drift) would re-fetch once per package — `load_config` is
+/// called for *every* node in the tree. Caching `Result` memoizes both outcomes
+/// for the whole install. The error is a `String` (anyhow's `Error` is neither
+/// `Clone` nor `Sync`-friendly to hand out by reference repeatedly).
+static CONFIG: OnceCell<Result<BinaryMirrorConfig, String>> = OnceCell::const_new();
 /// Cached result of whether we should skip binary mirror envs
 static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
+async fn fetch_and_parse_config() -> Result<BinaryMirrorConfig> {
+    // Go through the registry client so URL construction and private-registry
+    // auth are handled in one place rather than hand-rolled.
+    // `binary-mirror-config@latest` is a normal version manifest whose
+    // `mirrors` field carries the config.
+    let bytes = RuboristContext::registry()
+        .await
+        .fetch_version_manifest_bytes("binary-mirror-config", "latest")
+        .await
+        .context("Failed to fetch binary mirror config")?;
+    let config: BinaryMirrorConfig =
+        serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")?;
+    // A successful parse is the only signal that the mirror layer is live; the
+    // failure path is a swallowed debug log, so without this the whole layer
+    // can silently go dark on upstream schema drift.
+    tracing::debug!(
+        "Binary mirror config loaded: {} china package entries",
+        config.mirrors.china.packages.len()
+    );
+    Ok(config)
+}
+
 async fn load_config() -> Result<&'static BinaryMirrorConfig> {
     CONFIG
-        .get_or_try_init(|| async {
-            // Go through the registry client so URL construction and private-
-            // registry auth are handled in one place rather than hand-rolled.
-            // `binary-mirror-config@latest` is a normal version manifest whose
-            // `mirrors` field carries the config.
-            let bytes = RuboristContext::registry()
-                .await
-                .fetch_version_manifest_bytes("binary-mirror-config", "latest")
-                .await
-                .context("Failed to fetch binary mirror config")?;
-            serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")
+        .get_or_init(|| async {
+            // Keep the full context chain in the cached message — the failure
+            // path only surfaces as a debug log, so the inner cause matters.
+            fetch_and_parse_config().await.map_err(|e| format!("{e:#}"))
         })
         .await
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn update_binary_config(pkg: &mut Value, binary_mirror: &BinaryMirror) {
@@ -580,5 +630,82 @@ mod tests {
         // Should not change version
         assert_eq!(updated_pkg["name"], "fsevents");
         assert_eq!(updated_pkg["version"], "2.3.3");
+    }
+
+    #[test]
+    fn test_replace_host_accepts_string_and_array() {
+        // `flow-bin` ships the bare-string form; it must parse and normalize
+        // to a single-element list so the rewrite logic treats it like any
+        // other host list.
+        let single = serde_json::from_value::<BinaryMirror>(json!({
+            "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+            "host": "https://cdn.npmmirror.com/binaries/flow/v"
+        }))
+        .unwrap();
+        assert_eq!(
+            single.replace_host.as_deref(),
+            Some(&["https://github.com/facebook/flow/releases/download/v".to_string()][..])
+        );
+
+        // The array form keeps every entry.
+        let many = serde_json::from_value::<BinaryMirror>(json!({
+            "replaceHost": ["a.com", "b.com"],
+            "host": "new.com"
+        }))
+        .unwrap();
+        assert_eq!(
+            many.replace_host.as_deref(),
+            Some(&["a.com".to_string(), "b.com".to_string()][..])
+        );
+
+        // Absent → None.
+        let none = serde_json::from_value::<BinaryMirror>(json!({ "host": "new.com" })).unwrap();
+        assert!(none.replace_host.is_none());
+    }
+
+    #[test]
+    fn test_china_config_with_string_replace_host_does_not_fail_parse() {
+        // A single string-form `replaceHost` entry (the real `flow-bin` shape)
+        // must not fail the whole `mirrors.china` parse — otherwise mirroring
+        // is silently disabled for every package, including the `ENVS` block.
+        let config = serde_json::from_value::<BinaryMirrorConfig>(json!({
+            "mirrors": {
+                "china": {
+                    "ENVS": { "SASS_BINARY_SITE": "https://cdn.npmmirror.com/binaries/node-sass" },
+                    "flow-bin": {
+                        "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+                        "host": "https://cdn.npmmirror.com/binaries/flow/v"
+                    },
+                    "sharp": {
+                        "replaceHostFiles": ["install/libvips.js"],
+                        "replaceHostMap": {
+                            "https://github.com/lovell/sharp-libvips/releases/download/":
+                                "https://cdn.npmmirror.com/binaries/sharp-libvips/"
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("config with string-form replaceHost must parse");
+
+        assert_eq!(
+            config
+                .mirrors
+                .china
+                .envs
+                .get("SASS_BINARY_SITE")
+                .map(String::as_str),
+            Some("https://cdn.npmmirror.com/binaries/node-sass")
+        );
+        assert_eq!(
+            config
+                .mirrors
+                .china
+                .packages
+                .get("flow-bin")
+                .and_then(|m| m.replace_host.as_deref()),
+            Some(&["https://github.com/facebook/flow/releases/download/v".to_string()][..])
+        );
+        assert!(config.mirrors.china.packages.contains_key("sharp"));
     }
 }

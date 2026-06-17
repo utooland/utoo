@@ -195,13 +195,79 @@ for pkg in abbrev ini isexe; do
     fi
 done
 echo -e "${GREEN}PASS: HTTP tarball warm install successful${NC}"
+
 cd ../../..
 
+# Case 8.3b: a NON-registry HTTP(S) tarball (served from a host that is NOT a
+# trusted registry) must install directly into node_modules and must NOT create
+# ANY global cache entry. Classification is by host: the lockfile stores no
+# source tag, so a tarball whose origin is not the configured/well-known
+# registry is treated as a remote tarball and materialized straight into the
+# tree (single-path model), never the shared `<name>/<version>` cache.
+#
+# The other http fixture (Case 8.2/8.3) deliberately points at
+# registry.npmjs.org — a *trusted* registry host — so those URLs are classified
+# as registry downloads and DO use the cache; they exercise the URL-pinned
+# lockfile path, not the non-registry direct-extract path. We serve this case's
+# tarball from 127.0.0.1 (untrusted host) to exercise direct-extract + no-leak.
+echo -e "${YELLOW}Case 8.3b: non-registry HTTP tarball stays out of the global cache${NC}"
+HTTP_DIR=$(mktemp -d)
+HTTP_CACHE=$(mktemp -d)
+mkdir -p "$HTTP_DIR/pkg/remote-http-pkg"
+cat > "$HTTP_DIR/pkg/remote-http-pkg/package.json" <<'EOF'
+{ "name": "remote-http-pkg", "version": "4.5.6", "main": "index.js" }
+EOF
+echo "module.exports = 456;" > "$HTTP_DIR/pkg/remote-http-pkg/index.js"
+( cd "$HTTP_DIR/pkg/remote-http-pkg" && npm pack --silent >/dev/null 2>&1 \
+  && mv remote-http-pkg-*.tgz "$HTTP_DIR/remote-http-pkg.tgz" )
+# Serve the tarball dir on a random localhost port (untrusted, non-registry host).
+HTTP_PORT=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close();})')
+node -e '
+const http=require("http"), fs=require("fs"), path=require("path");
+const dir=process.argv[1], port=Number(process.argv[2]);
+http.createServer((req,res)=>{
+  const f=path.join(dir, path.basename(req.url));
+  fs.readFile(f,(e,d)=>{ if(e){res.statusCode=404;res.end("nf");} else {res.end(d);} });
+}).listen(port,"127.0.0.1");
+' "$HTTP_DIR" "$HTTP_PORT" &
+HTTP_PID=$!
+# Give the server a moment to bind.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS "http://127.0.0.1:$HTTP_PORT/remote-http-pkg.tgz" -o /dev/null 2>/dev/null; then break; fi
+  sleep 0.3
+done
+mkdir -p "$HTTP_DIR/app"
+cat > "$HTTP_DIR/app/package.json" <<EOF
+{ "name": "remote-http-app", "version": "1.0.0", "private": true,
+  "dependencies": { "remote-http-pkg": "http://127.0.0.1:$HTTP_PORT/remote-http-pkg.tgz" } }
+EOF
+http_cleanup() { kill "$HTTP_PID" 2>/dev/null; rm -rf "$HTTP_DIR" "$HTTP_CACHE"; }
+( cd "$HTTP_DIR/app" && UTOO_CACHE_DIR="$HTTP_CACHE" utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: non-registry http tarball install failed${NC}"; http_cleanup; exit 1; }
+if [ ! -f "$HTTP_DIR/app/node_modules/remote-http-pkg/package.json" ]; then
+    echo -e "${RED}FAIL: remote-http-pkg not materialized into node_modules${NC}"; http_cleanup; exit 1
+fi
+ACTUAL=$(node -e "console.log(require('$HTTP_DIR/app/node_modules/remote-http-pkg/package.json').version)")
+if [ "$ACTUAL" != "4.5.6" ]; then
+    echo -e "${RED}FAIL: remote-http-pkg expected v4.5.6, got $ACTUAL${NC}"; http_cleanup; exit 1
+fi
+# No global cache entry for this package at all (no `<version>` slot, no `_http_`).
+if [ -d "$HTTP_CACHE/remote-http-pkg" ]; then
+    echo -e "${RED}FAIL: remote-http-pkg leaked into the global cache at $HTTP_CACHE/remote-http-pkg${NC}"
+    ls -la "$HTTP_CACHE/remote-http-pkg"; http_cleanup; exit 1
+fi
+http_cleanup
+echo -e "${GREEN}PASS: non-registry HTTP tarball stays out of the global cache${NC}"
+
 # Case 8.4: file: dependency install. Directory deps install as a SYMLINK
-# (npm-compatible); tarball deps extract + clone from the cache slot.
+# (npm-compatible); tarball deps are extracted directly into node_modules
+# (non-registry source — never the global cache).
 echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"
 cd e2e/pm/file-deps
 rm -rf node_modules package-lock.json
+# Neither file: dep enters the global cache: the dir dep installs as a symlink
+# and the tarball dep is extracted directly into node_modules. Clean any slot a
+# prior pm build may have left so a stale entry can't mask a regression.
 rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for file-deps${NC}"; exit 1; }
 for pkg in local-dir-pkg local-tarball-pkg; do
@@ -220,9 +286,9 @@ if [ "$LINK_TARGET" != "../local-dir" ]; then
     echo -e "${RED}FAIL: local-dir-pkg symlink points to '$LINK_TARGET', expected '../local-dir'${NC}"
     exit 1
 fi
-# Tarball dep must be a real directory (clone from cache), not a symlink.
+# Tarball dep must be a real directory (direct-extract), not a symlink.
 if [ -L "node_modules/local-tarball-pkg" ]; then
-    echo -e "${RED}FAIL: local-tarball-pkg should be a real directory (clone), got a symlink${NC}"
+    echo -e "${RED}FAIL: local-tarball-pkg should be a real directory (direct-extract), got a symlink${NC}"
     exit 1
 fi
 ACTUAL=$(node -e "console.log(require('./node_modules/local-dir-pkg/package.json').version)")
@@ -260,12 +326,12 @@ echo -e "${GREEN}PASS: file: warm install successful${NC}"
 cd ../../..
 
 # Case 8.5b: file: tarball located OUTSIDE the project root.
-# Regression: such a tarball's root-relative lockfile entry carries `..`
-# (e.g. "file:../../pkgs/foo.tgz"). BFS hashes the cache slot from the
-# canonical absolute path, but install re-absolutizes the `..`-laden lockfile
-# path; if the slot key isn't normalized the two disagree and the clone fails
-# with "file tarball cache not found". The in-tree fixture above can't catch
-# this because its path has no `..`.
+# Such a tarball's root-relative lockfile entry carries `..`
+# (e.g. "file:../../pkgs/foo.tgz"); install re-absolutizes it against cwd and
+# extracts the tarball directly into node_modules. The in-tree fixture above
+# can't exercise the `..` re-absolutization because its path has none. Run under
+# an isolated cache so we can also assert the tarball never enters the global
+# cache (non-registry source — single-path direct extract).
 echo -e "${YELLOW}Case 8.5b: file: tarball outside project root${NC}"
 EXT_DIR=$(mktemp -d)
 mkdir -p "$EXT_DIR/src/ext-tarball-pkg"
@@ -284,15 +350,20 @@ cat > "$EXT_DIR/app/package.json" <<EOF
   "dependencies": { "ext-tarball-pkg": "file:$EXT_DIR/ext-tarball-pkg.tgz" }
 }
 EOF
-rm -rf ~/.cache/nm/ext-tarball-pkg
-( cd "$EXT_DIR/app" && utoo install --ignore-scripts ) \
-  || { echo -e "${RED}FAIL: install failed for tarball outside project root${NC}"; rm -rf "$EXT_DIR"; exit 1; }
+EXT_CACHE=$(mktemp -d)
+( cd "$EXT_DIR/app" && UTOO_CACHE_DIR="$EXT_CACHE" utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: install failed for tarball outside project root${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1; }
 if [ ! -f "$EXT_DIR/app/node_modules/ext-tarball-pkg/package.json" ]; then
-    echo -e "${RED}FAIL: ext-tarball-pkg not materialized into node_modules${NC}"; rm -rf "$EXT_DIR"; exit 1
+    echo -e "${RED}FAIL: ext-tarball-pkg not materialized into node_modules${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1
+fi
+# Non-registry tarball must NOT create any global cache entry.
+if [ -d "$EXT_CACHE/ext-tarball-pkg" ]; then
+    echo -e "${RED}FAIL: ext-tarball-pkg leaked into the global cache at $EXT_CACHE/ext-tarball-pkg${NC}"
+    ls -la "$EXT_CACHE/ext-tarball-pkg"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1
 fi
 ACTUAL=$(node -e "console.log(require('$EXT_DIR/app/node_modules/ext-tarball-pkg/package.json').version)")
 if [ "$ACTUAL" != "5.6.7" ]; then
-    echo -e "${RED}FAIL: ext-tarball-pkg expected v5.6.7, got $ACTUAL${NC}"; rm -rf "$EXT_DIR"; exit 1
+    echo -e "${RED}FAIL: ext-tarball-pkg expected v5.6.7, got $ACTUAL${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1
 fi
 # Lockfile must stay portable: a root-relative `file:` path with `..`.
 # Check the *form*, not a substring: when cwd and the tarball spec disagree on
@@ -311,8 +382,8 @@ const p = r.slice(5);
 if (p[0] === "/" || /^[A-Za-z]:/.test(p)) {
   console.error("ext-tarball-pkg resolved should be root-relative, not absolute:", tar.resolved); process.exit(1);
 }
-' || { echo -e "${RED}FAIL: lockfile entry wrong for outside-root tarball${NC}"; rm -rf "$EXT_DIR"; exit 1; }
-rm -rf "$EXT_DIR"
+' || { echo -e "${RED}FAIL: lockfile entry wrong for outside-root tarball${NC}"; rm -rf "$EXT_DIR" "$EXT_CACHE"; exit 1; }
+rm -rf "$EXT_DIR" "$EXT_CACHE"
 echo -e "${GREEN}PASS: file: tarball outside project root installs${NC}"
 
 # Case 8.6: stale lockfile is detected and regenerated on `ut install`
@@ -1433,5 +1504,174 @@ if (pTimeout.dev === true) {
 ' || { echo -e "${RED}FAIL: prod-reachable dep marked dev in lockfile${NC}"; exit 1; }
 echo -e "${GREEN}PASS: prod-reachable devDependency correctly not marked dev${NC}"
 cd ../../../
+
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides target a local file: tarball (nested + direct)
+# ═══════════════════════════════════════════════════════════════
+# An override value may be any spec npm accepts — including a local `file:`
+# tarball — not just a registry version. Override resolution used to send the
+# target straight to the registry as a version, so `file:x.tgz` became a bogus
+# version lookup → 404 and the whole install aborted. Here a transitive dep
+# (is-number, pulled in by is-odd) is overridden to a locally packed tarball,
+# both via a nested rule (is-odd > is-number) and a direct rule; the local
+# build (version 9.9.9, sentinel export) must land in node_modules.
+echo -e "${YELLOW}Case: overrides → local file: tarball${NC}"
+OV_DIR=$(mktemp -d)
+trap 'rm -rf "$OV_DIR"' EXIT
+mkdir -p "$OV_DIR/src/is-number"
+cat > "$OV_DIR/src/is-number/package.json" << 'EOF'
+{ "name": "is-number", "version": "9.9.9", "main": "index.js" }
+EOF
+echo "module.exports = () => 'OVERRIDE-LOCAL-TGZ';" > "$OV_DIR/src/is-number/index.js"
+( cd "$OV_DIR/src/is-number" && npm pack --silent >/dev/null 2>&1 \
+  && mv is-number-9.9.9.tgz "$OV_DIR/is-number.tgz" ) \
+  || { echo -e "${RED}FAIL: could not pack is-number tarball${NC}"; exit 1; }
+
+cat > "$OV_DIR/package.json" << 'EOF'
+{
+  "name": "ov-file-tarball-test",
+  "version": "1.0.0",
+  "dependencies": { "is-odd": "3.0.1" },
+  "overrides": { "is-odd": { "is-number": "file:./is-number.tgz" } }
+}
+EOF
+pushd "$OV_DIR"
+utoo install --registry=https://registry.npmjs.org --ignore-scripts \
+  || { echo -e "${RED}FAIL: utoo install failed for nested file: tarball override${NC}"; exit 1; }
+OV_VER=$(node -p "require('./node_modules/is-number/package.json').version" 2>/dev/null)
+if [ "$OV_VER" != "9.9.9" ]; then
+    echo -e "${RED}FAIL: nested override did not resolve to local tarball (is-number=$OV_VER, want 9.9.9)${NC}"
+    exit 1
+fi
+OV_OUT=$(node -p "require('./node_modules/is-number')()" 2>/dev/null)
+if [ "$OV_OUT" != "OVERRIDE-LOCAL-TGZ" ]; then
+    echo -e "${RED}FAIL: overridden is-number content wrong (got '$OV_OUT')${NC}"
+    exit 1
+fi
+# Lockfile must pin the tarball as file:, not a registry version.
+node -e '
+const lock = require("./package-lock.json");
+const e = lock.packages["node_modules/is-number"] || {};
+const r = e.resolved || "";
+if (!r.startsWith("file:")) { console.error("is-number not pinned to file: tarball, got", r); process.exit(1); }
+' || { echo -e "${RED}FAIL: lockfile did not pin overridden is-number to file: tarball${NC}"; exit 1; }
+
+# Direct (non-nested) override form must work too.
+cat > package.json << 'EOF'
+{
+  "name": "ov-file-tarball-test",
+  "version": "1.0.0",
+  "dependencies": { "is-odd": "3.0.1" },
+  "overrides": { "is-number": "file:./is-number.tgz" }
+}
+EOF
+rm -rf node_modules package-lock.json
+utoo install --registry=https://registry.npmjs.org --ignore-scripts \
+  || { echo -e "${RED}FAIL: utoo install failed for direct file: tarball override${NC}"; exit 1; }
+OV_VER2=$(node -p "require('./node_modules/is-number/package.json').version" 2>/dev/null)
+if [ "$OV_VER2" != "9.9.9" ]; then
+    echo -e "${RED}FAIL: direct override did not resolve to local tarball (is-number=$OV_VER2, want 9.9.9)${NC}"
+    exit 1
+fi
+popd
+rm -rf "$OV_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: overrides → local file: tarball (nested + direct)${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides → file: DIRECTORY must fail with a clear error
+# ═══════════════════════════════════════════════════════════════
+# A `file:` directory dep installs as a symlink (Link node, no manifest), which
+# the manifest-returning override path can't express. Rather than silently
+# resolving it as a registry version (→ 404) or leaking placement into the
+# resolver, it must fail with an actionable "use a tarball" message. Guards the
+# boundary so a future change can't regress it into a confusing 404.
+echo -e "${YELLOW}Case: overrides → file: directory errors clearly${NC}"
+OVD_DIR=$(mktemp -d)
+trap 'rm -rf "$OVD_DIR"' EXIT
+mkdir -p "$OVD_DIR/local-is-number"
+cat > "$OVD_DIR/local-is-number/package.json" << 'EOF'
+{ "name": "is-number", "version": "9.9.9", "main": "index.js" }
+EOF
+echo "module.exports = () => 'DIR';" > "$OVD_DIR/local-is-number/index.js"
+cat > "$OVD_DIR/package.json" << 'EOF'
+{
+  "name": "ov-file-dir-test",
+  "version": "1.0.0",
+  "dependencies": { "is-odd": "3.0.1" },
+  "overrides": { "is-number": "file:./local-is-number" }
+}
+EOF
+pushd "$OVD_DIR"
+if utoo install --registry=https://registry.npmjs.org --ignore-scripts > ovd.out 2>&1; then
+    echo -e "${RED}FAIL: file: directory override should not install successfully${NC}"
+    cat ovd.out
+    exit 1
+fi
+# Must be the clear directory-override error, not a registry 404 / version miss.
+if ! grep -qi "directory overrides" ovd.out; then
+    echo -e "${RED}FAIL: file: directory override gave the wrong error (want 'directory overrides … use a tarball')${NC}"
+    cat ovd.out
+    exit 1
+fi
+if grep -qi "No matching version" ovd.out; then
+    echo -e "${RED}FAIL: file: directory override regressed into a registry version lookup (404)${NC}"
+    cat ovd.out
+    exit 1
+fi
+rm -f ovd.out
+popd
+rm -rf "$OVD_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: overrides → file: directory errors clearly${NC}"
+
+# ═══════════════════════════════════════════════════════════════
+# Case: latest binary-mirror-config still parses under our schema
+# ═══════════════════════════════════════════════════════════════
+# `binary-mirror-config`'s `mirrors.china` map is parsed into a strongly-typed
+# schema (crates/pm/src/service/binary.rs). The whole map deserializes as one
+# unit, so a single drifted entry fails the parse and silently disables the
+# China mirror layer for every package — `get_envs()`/`update_package_binary()`
+# swallow the error as a debug log. (`flow-bin` ships `replaceHost` as a bare
+# string, not an array, which previously broke the parse.)
+#
+# Guard against upstream drift: install against a non-npm registry (npm.org has
+# no mirror layer and is skipped) with --verbose, then assert the config loaded
+# and did NOT fail to parse. flow-bin is the dep on purpose — it is the exact
+# entry that regressed.
+echo -e "${YELLOW}Case: latest binary-mirror-config parses under our schema${NC}"
+BMC_DIR=$(mktemp -d)
+# Remove the temp dir even if an assertion below exits the script mid-case.
+trap 'rm -rf "$BMC_DIR"' EXIT
+cat > "$BMC_DIR/package.json" << 'EOF'
+{
+  "name": "binary-mirror-config-parse-test",
+  "version": "1.0.0",
+  "dependencies": {
+    "flow-bin": "0.180.0"
+  }
+}
+EOF
+pushd "$BMC_DIR"
+# --ignore-scripts keeps this fast (no native binary download); the mirror
+# config is loaded on the clone path regardless of script execution.
+utoo install --registry=https://registry.npmmirror.com --ignore-scripts --verbose 2>&1 \
+  | tee bmc.out \
+  || { echo -e "${RED}FAIL: utoo install failed for binary-mirror-config parse test${NC}"; cat bmc.out; exit 1; }
+if grep -q "Failed to parse binary mirror config" bmc.out; then
+    echo -e "${RED}FAIL: latest binary-mirror-config no longer matches our schema (mirrors.china drift)${NC}"
+    grep "binary mirror" bmc.out
+    exit 1
+fi
+if ! grep -q "Binary mirror config loaded:" bmc.out; then
+    echo -e "${RED}FAIL: binary-mirror-config was never parsed (registry unreachable or mirror layer skipped)${NC}"
+    cat bmc.out
+    exit 1
+fi
+rm -f bmc.out
+popd
+rm -rf "$BMC_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: latest binary-mirror-config parses cleanly${NC}"
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

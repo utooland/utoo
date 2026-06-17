@@ -54,20 +54,20 @@ async fn resolve_git_dep(
 /// Dispatch an HTTP(S) tarball spec to the real resolver when the
 /// `http-tarball` feature is enabled, otherwise error with a hint.
 ///
-/// BFS extracts to `<cache_dir>/<name>/_http_<url_hash>/` so install-phase
-/// skips re-download; see [`super::http`] module docs.
+/// BFS only reads the tarball's manifest; the content is materialized into
+/// `node_modules` at install time, never the global cache. See
+/// [`super::http`] module docs.
 async fn resolve_http_dep(
-    cache_dir: Option<&std::path::Path>,
     url: &str,
     fetch_cache: &HttpFetchCache,
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::http::resolve_http_dep(cache_dir, url, fetch_cache).await
+        crate::resolver::http::resolve_http_dep(url, fetch_cache).await
     }
     #[cfg(not(feature = "http-tarball"))]
     {
-        let _ = (cache_dir, fetch_cache);
+        let _ = fetch_cache;
         anyhow::bail!(
             "HTTP tarball resolution not available for '{url}' (enable the 'http-tarball' feature)"
         )
@@ -302,21 +302,25 @@ pub enum ProcessResult {
 /// Shared optional-edge policy for the non-registry resolvers (git/http): a
 /// failed optional edge logs and resolves to `Skipped`; a load-bearing one
 /// returns the spec-specific error built by `wrap`.
-fn absorb_optional_failure<E>(
-    edge: &DependencyEdgeInfo,
+/// Collapse a non-registry resolver's result: success → `Some`; an *optional*
+/// edge's failure → `None` (caller skips / falls back); a load-bearing failure
+/// → the wrapped cause. Lets [`resolve_remote_spec`] keep each protocol arm to a
+/// single expression.
+fn resolve_or_skip<E>(
+    result: anyhow::Result<ResolvedPackage>,
+    edge_type: &EdgeType,
+    name: &str,
+    spec: &str,
     kind: &str,
-    err: anyhow::Error,
     wrap: impl FnOnce(anyhow::Error) -> ResolveError<E>,
-) -> Result<ProcessResult, ResolveError<E>> {
-    if edge.edge_type == EdgeType::Optional {
-        tracing::debug!(
-            "Skipped optional {kind} dependency {}@{}",
-            edge.name,
-            edge.spec
-        );
-        Ok(ProcessResult::Skipped)
-    } else {
-        Err(wrap(err))
+) -> Result<Option<ResolvedPackage>, ResolveError<E>> {
+    match result {
+        Ok(pkg) => Ok(Some(pkg)),
+        Err(e) if *edge_type == EdgeType::Optional => {
+            tracing::debug!("Skipping optional {kind} dependency {name}@{spec}: {e}");
+            Ok(None)
+        }
+        Err(e) => Err(wrap(e)),
     }
 }
 
@@ -363,31 +367,6 @@ pub async fn process_dependency<R: ManifestProvider>(
             // new PackageSpec variant — no silent fall-through to the wrong resolver.
             let parsed_spec = PackageSpec::from(edge_info.spec.as_str());
             let resolved: ResolvedPackage = match &parsed_spec {
-                PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
-                    // TODO: add spec => version expiry check so stale git caches
-                    // are invalidated (e.g. branch refs that have moved forward).
-                    match resolve_git_dep(
-                        config.cache_dir.as_deref(),
-                        &parsed_spec,
-                        &edge_info.name,
-                        &config.git_clone_cache,
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(e) => {
-                            return absorb_optional_failure(
-                                edge_info,
-                                "non-registry",
-                                e,
-                                |source| ResolveError::Git {
-                                    url: edge_info.spec.clone(),
-                                    source,
-                                },
-                            );
-                        }
-                    }
-                }
                 PackageSpec::Local {
                     protocol: Protocol::Workspace,
                     ..
@@ -431,15 +410,8 @@ pub async fn process_dependency<R: ManifestProvider>(
                 } => {
                     #[cfg(feature = "http-tarball")]
                     {
-                        match process_file_dep(
-                            graph,
-                            node_index,
-                            conflict_parent,
-                            edge_info,
-                            path,
-                            config.cache_dir.as_deref(),
-                        )
-                        .await?
+                        match process_file_dep(graph, node_index, conflict_parent, edge_info, path)
+                            .await?
                         {
                             std::ops::ControlFlow::Break(r) => return Ok(r),
                             std::ops::ControlFlow::Continue(pkg) => pkg,
@@ -460,31 +432,21 @@ pub async fn process_dependency<R: ManifestProvider>(
                         reason: "local (link:/portal:) dependencies are not yet supported",
                     });
                 }
-                PackageSpec::Http { url } => {
-                    match resolve_http_dep(
-                        config.cache_dir.as_deref(),
-                        url,
-                        &config.http_fetch_cache,
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(e) => {
-                            return absorb_optional_failure(edge_info, "HTTP", e, |source| {
-                                ResolveError::Http {
-                                    url: url.clone(),
-                                    source,
-                                }
-                            });
-                        }
-                    }
-                }
-                PackageSpec::Registry { .. } => {
-                    match resolve_registry_dep(
+                // All remote protocols share one resolver — see
+                // [`resolve_remote_spec`]. The exhaustive listing (no `_`) keeps
+                // a new PackageSpec variant a compile error rather than silently
+                // routing it to the wrong resolver.
+                PackageSpec::Registry { .. }
+                | PackageSpec::Http { .. }
+                | PackageSpec::Git { .. }
+                | PackageSpec::GitHub { .. } => {
+                    match resolve_remote_spec(
                         registry,
-                        &edge_info.name,
+                        &parsed_spec,
                         &edge_info.spec,
+                        &edge_info.name,
                         &edge_info.edge_type,
+                        config,
                     )
                     .await?
                     {
@@ -501,7 +463,8 @@ pub async fn process_dependency<R: ManifestProvider>(
                 }
             };
 
-            // Check override using resolved version (not original spec).
+            // Apply any override against the resolved version (not the original
+            // spec). Non-registry override targets resolve here too.
             // No manifest cache on this path — non-registry specs are rare.
             let resolved = match resolve_override(
                 graph,
@@ -509,6 +472,7 @@ pub async fn process_dependency<R: ManifestProvider>(
                 node_index,
                 edge_info,
                 &resolved.version,
+                config,
                 None,
             )
             .await?
@@ -528,23 +492,85 @@ pub async fn process_dependency<R: ManifestProvider>(
     }
 }
 
+/// Resolve a registry / git / http(s) spec to a package, mirroring the protocol
+/// dispatch in [`process_dependency`]. `None` means an *optional* edge's
+/// resolution failed and the caller should skip / fall back. Shared by the
+/// normal dependency path and override resolution so both treat these protocols
+/// identically.
+///
+/// `file:` is intentionally excluded: its base dir (the edge's parent for a
+/// normal dep, the root project for an override) and its dir→Link placement
+/// differ between the two callers, so each routes `file:` through
+/// [`process_file_dep`] with its own `node_index`.
+async fn resolve_remote_spec<R: ManifestProvider>(
+    registry: &R,
+    parsed: &PackageSpec,
+    raw_spec: &str,
+    name: &str,
+    edge_type: &EdgeType,
+    config: &BuildDepsConfig,
+) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>> {
+    match parsed {
+        // The registry path keeps receiving the raw spec so `npm:` alias /
+        // dist-tag / range handling is identical regardless of caller.
+        PackageSpec::Registry { .. } => {
+            resolve_registry_dep(registry, name, raw_spec, edge_type).await
+        }
+        PackageSpec::Http { url } => resolve_or_skip(
+            resolve_http_dep(url, &config.http_fetch_cache).await,
+            edge_type,
+            name,
+            raw_spec,
+            "HTTP",
+            |source| ResolveError::Http {
+                url: url.clone(),
+                source,
+            },
+        ),
+        PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => resolve_or_skip(
+            resolve_git_dep(
+                config.cache_dir.as_deref(),
+                parsed,
+                name,
+                &config.git_clone_cache,
+            )
+            .await,
+            edge_type,
+            name,
+            raw_spec,
+            "git",
+            |source| ResolveError::Git {
+                url: raw_spec.to_string(),
+                source,
+            },
+        ),
+        // Callers route file:/link:/workspace:/catalog: elsewhere; reaching here
+        // is an internal routing bug, not a user error.
+        PackageSpec::Local { .. } => Err(ResolveError::Unsupported {
+            spec: raw_spec.to_string(),
+            reason: "internal: resolve_remote_spec received a non-remote spec",
+        }),
+    }
+}
+
 /// Resolve a dependency override for `edge` against the already-resolved
-/// version. Single implementation shared by the demand driver and the
-/// non-registry/sequential-fallback path in [`process_dependency`].
+/// version, routing the override *target* by protocol like a normal dependency
+/// spec (registry range / `file:` tarball / http(s) tarball / git — not just a
+/// registry version, which used to turn `file:x.tgz` overrides into bogus 404s).
+/// Shared by the demand driver and [`process_dependency`].
 ///
-/// Returns `Some(manifest)` when an override rule matched and resolved, and
-/// `None` when no rule applies or the override failed to resolve — npm
-/// semantics fall back to the original resolution rather than erroring.
-///
-/// With `state`, the per-run manifest cache is consulted and populated so
-/// sibling edges single-flight the override and the overridden manifest
-/// persists to the project cache.
+/// Always yields a *manifest* (or `None` to fall back to the original), so the
+/// callers place it like any registry node and stay agnostic of the protocol.
+/// `file:` *directory* overrides would need a self-placed Link node the manifest
+/// contract can't carry, so they are an explicit error. With `state`, the
+/// per-run manifest cache single-flights the override across sibling edges.
 pub(crate) async fn resolve_override<R: ManifestProvider>(
     graph: &DependencyGraph,
     registry: &R,
     parent: NodeIndex,
     edge: &DependencyEdgeInfo,
     resolved_version: &str,
+    config: &BuildDepsConfig,
     mut state: Option<&mut ManifestState>,
 ) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<R::Error>> {
     let Some(override_spec) = graph.check_override(parent, &edge.name, Some(resolved_version))
@@ -565,18 +591,95 @@ pub(crate) async fn resolve_override<R: ManifestProvider>(
         resolved_version,
         override_spec
     );
-    match resolve_registry_dep(registry, &edge.name, &override_spec, &edge.edge_type).await? {
-        Some(overridden) => {
-            if let Some(state) = state {
-                state.cache_version(
-                    edge.name.clone(),
-                    override_spec,
-                    Arc::clone(&overridden.manifest),
-                );
-            }
-            Ok(Some(overridden.manifest))
+
+    let parsed = PackageSpec::from(override_spec.as_str());
+    let resolved = match &parsed {
+        // `file:` overrides resolve relative to the ROOT project (overrides are
+        // root-declared; a transitive parent is usually a registry node with no
+        // `file:` base).
+        PackageSpec::Local {
+            protocol: Protocol::File,
+            path,
+        } => {
+            resolve_override_file_tarball::<R::Error>(graph, &edge.edge_type, &override_spec, path)
+                .await?
         }
-        None => Ok(None),
+        PackageSpec::Local { .. } => {
+            return Err(ResolveError::Unsupported {
+                spec: override_spec,
+                reason: "link:/portal:/workspace: overrides are not supported",
+            });
+        }
+        // registry / http / git share the normal-dependency resolver.
+        _ => resolve_remote_spec(
+            registry,
+            &parsed,
+            &override_spec,
+            &edge.name,
+            &edge.edge_type,
+            config,
+        )
+        .await?
+        .map(|pkg| pkg.manifest),
+    };
+
+    // Optional edge whose override failed to resolve → fall back to the original.
+    let Some(manifest) = resolved else {
+        return Ok(None);
+    };
+    if let Some(state) = state {
+        state.cache_version(edge.name.clone(), override_spec, Arc::clone(&manifest));
+    }
+    Ok(Some(manifest))
+}
+
+/// Resolve a `file:` override target to a manifest, relative to the root project
+/// (overrides are root-declared). A tarball → manifest pinned to `file:<abs>`; a
+/// directory → error (it would need a Link node the manifest contract can't
+/// carry). Read-only, so the resolver stays decoupled from placement.
+async fn resolve_override_file_tarball<E>(
+    graph: &DependencyGraph,
+    edge_type: &EdgeType,
+    override_spec: &str,
+    path: &str,
+) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<E>> {
+    #[cfg(not(feature = "http-tarball"))]
+    {
+        let _ = (graph, edge_type, path);
+        Err(ResolveError::Unsupported {
+            spec: override_spec.to_string(),
+            reason: "file: overrides require the 'http-tarball' feature",
+        })
+    }
+    #[cfg(feature = "http-tarball")]
+    {
+        let file_err = |source| ResolveError::File {
+            spec: override_spec.to_string(),
+            source,
+        };
+        // The root node is a construction-time invariant; resolve the override's
+        // path against it (overrides are root-declared).
+        let abs = graph
+            .get_node(graph.root_index)
+            .expect("root node is always present")
+            .path
+            .join(path);
+        match std::fs::metadata(&abs) {
+            Ok(m) if m.is_dir() => Err(ResolveError::Unsupported {
+                spec: override_spec.to_string(),
+                reason: "file: directory overrides (symlink) are not supported — use a tarball (.tgz)",
+            }),
+            // Same local-tarball read+parse the normal file-dep resolver uses.
+            Ok(_) => match crate::resolver::tar::read_local_tarball_manifest(abs).await {
+                Ok(m) => Ok(Some(Arc::new(m))),
+                Err(_) if *edge_type == EdgeType::Optional => Ok(None),
+                Err(source) => Err(file_err(source)),
+            },
+            Err(_) if *edge_type == EdgeType::Optional => Ok(None),
+            Err(e) => Err(file_err(
+                anyhow::Error::new(e).context(format!("file: override target {}", abs.display())),
+            )),
+        }
     }
 }
 

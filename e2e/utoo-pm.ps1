@@ -628,4 +628,166 @@ finally {
     Remove-Item -Recurse -Force $extDir -ErrorAction SilentlyContinue
 }
 
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides target a local file: tarball (nested + direct)
+# ═══════════════════════════════════════════════════════════════
+# An override value may be any spec npm accepts — including a local `file:`
+# tarball — not just a registry version. Override resolution used to send the
+# target straight to the registry as a version, so `file:x.tgz` became a bogus
+# version lookup → 404 and the whole install aborted. Here a transitive dep
+# (is-number, pulled in by is-odd) is overridden to a locally packed tarball,
+# both via a nested rule (is-odd > is-number) and a direct rule.
+Write-Yellow "Case: overrides -> local file: tarball (nested + direct)"
+$ovDir = Join-Path $env:TEMP "utoo-e2e-override-tgz-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$ovDir\src\is-number" -Force | Out-Null
+    @{ name = "is-number"; version = "9.9.9"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$ovDir\src\is-number\package.json"
+    Set-Content "$ovDir\src\is-number\index.js" "module.exports = () => 'OVERRIDE-LOCAL-TGZ';"
+
+    Push-Location "$ovDir\src\is-number"
+    try {
+        npm pack 2>&1 | Out-Null
+        $tgz = Get-ChildItem "is-number-*.tgz" | Select-Object -First 1
+        Move-Item $tgz.FullName "$ovDir\is-number.tgz"
+    }
+    finally { Pop-Location }
+
+    Push-Location $ovDir
+    try {
+        # Nested rule: is-odd > is-number -> file: tarball.
+        @{
+            name         = "ov-file-tarball-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-odd" = @{ "is-number" = "file:./is-number.tgz" } }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+        utoo install --registry=https://registry.npmjs.org --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for nested file: tarball override" }
+        $ver = (node -p "require('./node_modules/is-number/package.json').version").Trim()
+        if ($ver -ne "9.9.9") { throw "nested override did not resolve to local tarball (is-number=$ver, want 9.9.9)" }
+        $out = (node -p "require('./node_modules/is-number')()").Trim()
+        if ($out -ne "OVERRIDE-LOCAL-TGZ") { throw "overridden is-number content wrong (got '$out')" }
+        node -e "const l=require('./package-lock.json');const r=(l.packages['node_modules/is-number']||{}).resolved||'';if(!r.startsWith('file:')){console.error('is-number not pinned to file: tarball, got',r);process.exit(1);}"
+        if ($LASTEXITCODE -ne 0) { throw "lockfile did not pin overridden is-number to file: tarball" }
+
+        # Direct (non-nested) rule must work too.
+        @{
+            name         = "ov-file-tarball-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-number" = "file:./is-number.tgz" }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+        Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+
+        utoo install --registry=https://registry.npmjs.org --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for direct file: tarball override" }
+        $ver2 = (node -p "require('./node_modules/is-number/package.json').version").Trim()
+        if ($ver2 -ne "9.9.9") { throw "direct override did not resolve to local tarball (is-number=$ver2, want 9.9.9)" }
+
+        Write-Green "PASS: overrides -> local file: tarball (nested + direct)"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $ovDir -ErrorAction SilentlyContinue
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides → file: DIRECTORY must fail with a clear error
+# ═══════════════════════════════════════════════════════════════
+# A `file:` directory dep installs as a symlink (Link node, no manifest), which
+# the manifest-returning override path can't express. It must fail with an
+# actionable "use a tarball" message rather than silently resolving it as a
+# registry version (→ 404). Guards the boundary against a regression.
+Write-Yellow "Case: overrides -> file: directory errors clearly"
+$ovdDir = Join-Path $env:TEMP "utoo-e2e-override-dir-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$ovdDir\local-is-number" -Force | Out-Null
+    @{ name = "is-number"; version = "9.9.9"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$ovdDir\local-is-number\package.json"
+    Set-Content "$ovdDir\local-is-number\index.js" "module.exports = () => 'DIR';"
+
+    Push-Location $ovdDir
+    try {
+        @{
+            name         = "ov-file-dir-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-number" = "file:./local-is-number" }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+        # Join to a single string: `2>&1` yields an array of lines, and
+        # `-match`/`-notmatch` over an array filter elements (truthy) rather
+        # than test a boolean.
+        $ovdOut = (utoo install --registry=https://registry.npmjs.org --ignore-scripts 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host $ovdOut
+            throw "file: directory override should not install successfully"
+        }
+        if ($ovdOut -notmatch "directory overrides") {
+            Write-Host $ovdOut
+            throw "file: directory override gave the wrong error (want 'directory overrides … use a tarball')"
+        }
+        if ($ovdOut -match "No matching version") {
+            Write-Host $ovdOut
+            throw "file: directory override regressed into a registry version lookup (404)"
+        }
+        Write-Green "PASS: overrides -> file: directory errors clearly"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $ovdDir -ErrorAction SilentlyContinue
+}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Case: latest binary-mirror-config still parses under our schema
+# ═══════════════════════════════════════════════════════════════
+# `binary-mirror-config`'s `mirrors.china` map is parsed into a strongly-typed
+# schema (crates/pm/src/service/binary.rs). The whole map deserializes as one
+# unit, so a single drifted entry fails the parse and silently disables the
+# China mirror layer for every package — `get_envs()`/`update_package_binary()`
+# swallow the error as a debug log. (`flow-bin` ships `replaceHost` as a bare
+# string, not an array, which previously broke the parse.)
+#
+# Guard against upstream drift: install against a non-npm registry (npm.org has
+# no mirror layer and is skipped) with --verbose, then assert the config loaded
+# and did NOT fail to parse. flow-bin is the dep on purpose — it is the exact
+# entry that regressed.
+Write-Yellow "Case: latest binary-mirror-config parses under our schema"
+$bmcDir = Join-Path $env:TEMP "utoo-e2e-bmc-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $bmcDir -Force | Out-Null
+    @{
+        name         = "binary-mirror-config-parse-test"
+        version      = "1.0.0"
+        dependencies = @{ "flow-bin" = "0.180.0" }
+    } | ConvertTo-Json | Set-Content "$bmcDir\package.json"
+
+    Push-Location $bmcDir
+    try {
+        # --ignore-scripts keeps this fast (no native binary download); the
+        # mirror config is loaded on the clone path regardless of script exec.
+        $bmcOut = utoo install --registry=https://registry.npmmirror.com --ignore-scripts --verbose 2>&1
+        $bmcOut | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "utoo install failed for binary-mirror-config parse test" }
+
+        if ($bmcOut -match "Failed to parse binary mirror config") {
+            throw "latest binary-mirror-config no longer matches our schema (mirrors.china drift)"
+        }
+        if (-not ($bmcOut -match "Binary mirror config loaded:")) {
+            throw "binary-mirror-config was never parsed (registry unreachable or mirror layer skipped)"
+        }
+
+        Write-Green "PASS: latest binary-mirror-config parses cleanly"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $bmcDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"
