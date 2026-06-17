@@ -167,10 +167,22 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
 /// - `added`: packages linked into `node_modules/` this run
 /// - `reused`: tarballs served from the local cache (no network)
 /// - `downloaded`: tarballs fetched from the registry
-pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
+pub fn print_install_counts(
+    added: usize,
+    reused: usize,
+    downloaded: usize,
+    elapsed: Option<Duration>,
+) {
     let bytes = install_progress::DOWNLOADED_BYTES.load(Ordering::Relaxed);
     let traffic = if bytes > 0 {
-        format!(" ({})", install_progress::human_bytes(bytes as f64))
+        // Average over the whole clone phase (download+extract+link wall time),
+        // so it reflects effective throughput rather than peak burst.
+        let avg = elapsed
+            .map(|d| d.as_secs_f64())
+            .filter(|s| *s > 0.0)
+            .map(|s| format!(" @ {}/s", install_progress::human_bytes(bytes as f64 / s)))
+            .unwrap_or_default();
+        format!(" ({}{})", install_progress::human_bytes(bytes as f64), avg)
     } else {
         String::new()
     };
@@ -204,7 +216,11 @@ fn spawn_render_task() -> tokio::task::JoinHandle<()> {
             interval.tick().await;
             let snap = install_progress::snapshot();
             let speed = meter.sample(snap.bytes);
-            PROGRESS_BAR.set_message(install_progress::compose_message(&snap, speed));
+            // Volatile activity goes in the flexible wide message; the network /
+            // stage summary goes in the prefix, which the template pins to the
+            // right edge so it stays readable while the activity churns.
+            PROGRESS_BAR.set_message(install_progress::compose_activity(&snap));
+            PROGRESS_BAR.set_prefix(install_progress::compose_summary(&snap, speed));
         }
     })
 }
@@ -223,13 +239,18 @@ pub fn start_progress_bar() {
     }
     install_progress::reset_phase_state();
     PROGRESS_BAR.reset();
-    // Clear the previous phase's finish message so it doesn't linger on the
-    // fresh bar until the render task's first tick.
+    // Clear the previous phase's finish message/summary so neither lingers on
+    // the fresh bar until the render task's first tick.
     PROGRESS_BAR.set_message("");
+    PROGRESS_BAR.set_prefix("");
+    // `{wide_msg}` (volatile activity) expands to fill, pushing `{prefix}` (the
+    // network/stage summary) to the right edge so it holds a stable position.
     PROGRESS_BAR.set_style(
-        ProgressStyle::with_template("{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg}")
-            .unwrap()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        ProgressStyle::with_template(
+            "{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg} {prefix}",
+        )
+        .unwrap()
+        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
     );
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::stderr());
     PROGRESS_BAR.enable_steady_tick(Duration::from_millis(100));

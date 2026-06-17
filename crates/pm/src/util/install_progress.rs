@@ -1,11 +1,13 @@
 //! Shared live-progress state for the install pipeline.
 //!
-//! The download/extract/clone stages and the lifecycle-script queues update
-//! these counters from wherever they run (tokio tasks, rayon workers); a
-//! single render task — owned by `logger::start_progress_bar` — samples them
-//! every ~120ms via [`snapshot`] and composes the spinner message with
-//! [`compose_message`]. Writers never touch indicatif directly, so hot paths
-//! stay lock-free and per-event `set_message` contention disappears.
+//! The downloader feeds a cumulative byte counter and an in-flight download
+//! gauge, and the lifecycle-script queues register running scripts, from
+//! wherever they run (tokio tasks, rayon workers); a single render task —
+//! owned by `logger::start_progress_bar` —
+//! samples this every ~120ms via [`snapshot`] and composes the spinner line
+//! with [`compose_activity`] (left) and [`compose_summary`] (right). Writers
+//! never touch indicatif directly, so hot paths stay lock-free and per-event
+//! `set_message` contention disappears.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -18,36 +20,25 @@ use owo_colors::OwoColorize;
 /// chunks arrive, so retries count their real traffic).
 pub static DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
 
+/// In-flight tarball downloads. Surfaced as `N downloading` so the live request
+/// concurrency stays visible; unlike the per-stage extract/link gauges this one
+/// holds steady at the download limit through the whole network phase.
 static DOWNLOADING: AtomicUsize = AtomicUsize::new(0);
-static EXTRACTING: AtomicUsize = AtomicUsize::new(0);
-static LINKING: AtomicUsize = AtomicUsize::new(0);
 
-/// In-flight gauge for one pipeline stage; decrements on drop so early
-/// returns and panics can't leak a slot.
-pub struct GaugeGuard(&'static AtomicUsize);
+/// Increments [`DOWNLOADING`] for the lifetime of one download; decrements on
+/// drop so an early return or panic can't leak a slot.
+pub struct DownloadGuard;
 
-impl GaugeGuard {
-    pub fn downloading() -> Self {
-        Self::enter(&DOWNLOADING)
-    }
-
-    pub fn extracting() -> Self {
-        Self::enter(&EXTRACTING)
-    }
-
-    pub fn linking() -> Self {
-        Self::enter(&LINKING)
-    }
-
-    fn enter(gauge: &'static AtomicUsize) -> Self {
-        gauge.fetch_add(1, Ordering::Relaxed);
-        Self(gauge)
+impl DownloadGuard {
+    pub fn enter() -> Self {
+        DOWNLOADING.fetch_add(1, Ordering::Relaxed);
+        Self
     }
 }
 
-impl Drop for GaugeGuard {
+impl Drop for DownloadGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
+        DOWNLOADING.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -96,9 +87,8 @@ impl Drop for ScriptGuard {
     }
 }
 
-/// Reset per-phase state (activity line, script registry). Byte and stage
-/// counters are left alone: gauges drain via guards and bytes are cumulative
-/// for the whole run.
+/// Reset per-phase state (activity line, script registry). The byte counter is
+/// left alone: it is cumulative for the whole run.
 pub fn reset_phase_state() {
     set_activity("");
     if let Ok(mut scripts) = RUNNING_SCRIPTS.lock() {
@@ -114,13 +104,12 @@ pub struct ScriptDisplay {
     pub more: usize,
 }
 
-/// Point-in-time copy of all progress state; [`compose_message`] renders it
-/// without touching any global, so composition is a pure function.
+/// Point-in-time copy of all progress state; [`compose_activity`] and
+/// [`compose_summary`] render it without touching any global, so composition
+/// stays a pure function.
 pub struct Snapshot {
     pub bytes: u64,
     pub downloading: usize,
-    pub extracting: usize,
-    pub linking: usize,
     pub script: Option<ScriptDisplay>,
     pub activity: String,
 }
@@ -141,8 +130,6 @@ pub fn snapshot() -> Snapshot {
     Snapshot {
         bytes: DOWNLOADED_BYTES.load(Ordering::Relaxed),
         downloading: DOWNLOADING.load(Ordering::Relaxed),
-        extracting: EXTRACTING.load(Ordering::Relaxed),
-        linking: LINKING.load(Ordering::Relaxed),
         script,
         activity,
     }
@@ -193,35 +180,44 @@ impl SpeedMeter {
     }
 }
 
-/// Compose the spinner message from a [`Snapshot`].
+/// The volatile left segment: what's happening *right now* — the
+/// longest-running lifecycle script (with elapsed time and a `N more` tail), or
+/// else the latest activity line (`lodash resolved`). This changes once per
+/// package, so it lives in the spinner's flexible `wide_msg` where it can
+/// truncate without shifting the right-pinned [`compose_summary`].
+pub fn compose_activity(snap: &Snapshot) -> String {
+    let Some(script) = &snap.script else {
+        return snap.activity.clone();
+    };
+    let mut part = script.label.clone();
+    if script.elapsed_secs >= 1 {
+        part.push_str(&format!(
+            " {}",
+            format!("[{}s]", script.elapsed_secs).dimmed()
+        ));
+    }
+    if script.more > 0 {
+        part.push_str(&format!(" · {}", format!("{} more", script.more).dimmed()));
+    }
+    part
+}
+
+/// The stable right segment, pinned to the right edge (via the bar's `prefix`)
+/// so it holds a steady position while the activity churns: cumulative network
+/// throughput plus live download concurrency.
 ///
-/// `speed` is bytes/sec from [`SpeedMeter`]; values below 1 B/s are hidden.
-/// The network segment only renders while downloads are in flight — once the
-/// pipeline drains, the running total would just be stale noise next to the
-/// script display (the final `+ N downloaded (X MB)` summary already reports
-/// it). Segments, most important first (indicatif truncates the tail):
+/// Cumulative bytes only grow and the download count holds at the limit through
+/// the network phase, so this stays put — deliberately *not* the extract/link
+/// gauges, which blink on/off as worker batches drain. `speed` is bytes/sec
+/// from [`SpeedMeter`], hidden below 1 B/s so it drops off cleanly once
+/// downloads finish. Empty before any byte arrives and no download is in flight
+/// (e.g. the resolve phase, or a fully warm cache):
 ///
-/// `esbuild postinstall [12s] · 2 more · ↓ 23.4 MB 8.2 MB/s · 5 downloading · 8 linking`
-pub fn compose_message(snap: &Snapshot, speed: f64) -> String {
+/// `↓ 23.4 MB 8.2 MB/s · 12 downloading`
+pub fn compose_summary(snap: &Snapshot, speed: f64) -> String {
     let mut parts: Vec<String> = Vec::new();
 
-    if let Some(script) = &snap.script {
-        let mut part = script.label.clone();
-        if script.elapsed_secs >= 1 {
-            part.push_str(&format!(
-                " {}",
-                format!("[{}s]", script.elapsed_secs).dimmed()
-            ));
-        }
-        parts.push(part);
-        if script.more > 0 {
-            parts.push(format!("{}", format!("{} more", script.more).dimmed()));
-        }
-    } else if !snap.activity.is_empty() {
-        parts.push(snap.activity.clone());
-    }
-
-    if snap.bytes > 0 && snap.downloading > 0 {
+    if snap.bytes > 0 {
         let mut net = format!("↓ {}", human_bytes(snap.bytes as f64));
         if speed >= 1.0 {
             net.push_str(&format!(
@@ -232,18 +228,11 @@ pub fn compose_message(snap: &Snapshot, speed: f64) -> String {
         parts.push(net);
     }
 
-    let mut stages: Vec<String> = Vec::new();
     if snap.downloading > 0 {
-        stages.push(format!("{} downloading", snap.downloading));
-    }
-    if snap.extracting > 0 {
-        stages.push(format!("{} extracting", snap.extracting));
-    }
-    if snap.linking > 0 {
-        stages.push(format!("{} linking", snap.linking));
-    }
-    if !stages.is_empty() {
-        parts.push(format!("{}", stages.join(" · ").dimmed()));
+        parts.push(format!(
+            "{}",
+            format!("{} downloading", snap.downloading).dimmed()
+        ));
     }
 
     parts.join(" · ")
@@ -275,8 +264,6 @@ mod tests {
         Snapshot {
             bytes: 0,
             downloading: 0,
-            extracting: 0,
-            linking: 0,
             script: None,
             activity: String::new(),
         }
@@ -292,17 +279,6 @@ mod tests {
     }
 
     #[test]
-    fn test_gauge_guard_balances() {
-        assert_eq!(DOWNLOADING.load(Ordering::Relaxed), 0);
-        {
-            let _a = GaugeGuard::downloading();
-            let _b = GaugeGuard::downloading();
-            assert_eq!(DOWNLOADING.load(Ordering::Relaxed), 2);
-        }
-        assert_eq!(DOWNLOADING.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
     fn test_snapshot_surfaces_oldest_script() {
         let _a = track_script("a postinstall".to_string());
         let _b = track_script("b postinstall".to_string());
@@ -312,14 +288,14 @@ mod tests {
     }
 
     #[test]
-    fn test_compose_message_activity_only() {
+    fn test_compose_activity_only() {
         let mut snap = empty_snapshot();
         snap.activity = "resolving react".to_string();
-        assert_eq!(compose_message(&snap, 0.0), "resolving react");
+        assert_eq!(compose_activity(&snap), "resolving react");
     }
 
     #[test]
-    fn test_compose_message_script_over_activity() {
+    fn test_compose_activity_script_over_activity() {
         let mut snap = empty_snapshot();
         snap.activity = "resolving react".to_string();
         snap.script = Some(ScriptDisplay {
@@ -327,11 +303,28 @@ mod tests {
             elapsed_secs: 12,
             more: 2,
         });
-        let msg = compose_message(&snap, 0.0);
+        let msg = compose_activity(&snap);
         assert!(msg.contains("esbuild postinstall"), "got: {msg}");
         assert!(msg.contains("[12s]"), "got: {msg}");
         assert!(msg.contains("2 more"), "got: {msg}");
         assert!(!msg.contains("resolving react"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_compose_summary_throughput_and_concurrency() {
+        let mut snap = empty_snapshot();
+        snap.bytes = 23_400_000;
+        snap.downloading = 12;
+        let msg = compose_summary(&snap, 8_200_000.0);
+        assert!(msg.contains("↓ 23.4 MB"), "got: {msg}");
+        assert!(msg.contains("8.2 MB/s"), "got: {msg}");
+        assert!(msg.contains("12 downloading"), "got: {msg}");
+        // Empty before any byte arrives and nothing is downloading (resolve
+        // phase / warm cache).
+        assert_eq!(compose_summary(&empty_snapshot(), 0.0), "");
+        // Speed drops off below 1 B/s; download count drops off once drained.
+        snap.downloading = 0;
+        assert_eq!(compose_summary(&snap, 0.0), "↓ 23.4 MB");
     }
 
     #[test]

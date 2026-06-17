@@ -373,11 +373,17 @@ impl InstallService {
 
         let counts = scheduler_handle.shutdown().await;
         install_result?;
-        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
+        let clone_elapsed = link_start.elapsed();
+        finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
 
-        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
+        print_install_counts(
+            counts.cloned,
+            counts.reused,
+            counts.downloaded,
+            Some(clone_elapsed),
+        );
         Ok(())
     }
 
@@ -452,7 +458,8 @@ impl InstallService {
         let reify = reify_packages(&groups, &root_path, &omit, &scheduler).await;
         let counts = scheduler_handle.shutdown().await;
         reify.context("Failed to install global package")?;
-        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
+        let clone_elapsed = link_start.elapsed();
+        finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
         // Dependency lifecycle only — preinstall/install/postinstall + bin
         // linking for the tool and its deps. No project/workspace hooks, so no
@@ -478,7 +485,12 @@ impl InstallService {
             .await
             .context("Failed to link binary files to global")?;
 
-        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
+        print_install_counts(
+            counts.cloned,
+            counts.reused,
+            counts.downloaded,
+            Some(clone_elapsed),
+        );
         Ok(())
     }
 }

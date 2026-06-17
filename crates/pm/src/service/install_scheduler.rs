@@ -493,7 +493,6 @@ impl SchedulerState {
         );
         for (downloaded, key) in admitted {
             self.async_ops.push(tokio::spawn(async move {
-                let _gauge = crate::util::install_progress::GaugeGuard::extracting();
                 let result = extract_to_cache(
                     &downloaded.package.name,
                     &downloaded.package.version,
@@ -518,7 +517,6 @@ impl SchedulerState {
         for (job, target) in admitted {
             let clone_done_tx = self.clone_done_tx.clone();
             rayon::spawn(move || {
-                let _gauge = crate::util::install_progress::GaugeGuard::linking();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     clone_package_sync(&PackageClone {
                         name: &job.spec.package.name,

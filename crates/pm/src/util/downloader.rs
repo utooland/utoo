@@ -8,7 +8,7 @@ use reqwest::{Client, StatusCode};
 use tokio_retry::RetryIf;
 use utoo_ruborist::spec::Protocol;
 
-use super::install_progress::{DOWNLOADED_BYTES, GaugeGuard};
+use super::install_progress::{DOWNLOADED_BYTES, DownloadGuard};
 use super::retry::{RetryableError, build_download_client, create_retry_strategy};
 
 // Global downloader client. Concurrency and duplicate work are controlled by
@@ -54,8 +54,9 @@ pub async fn download_bytes(url: &str, auth_token: Option<&str>) -> Result<Bytes
                 StatusCode::OK => {
                     // Stream chunks instead of buffering the whole body in one
                     // await: each chunk feeds the live byte counter the spinner
-                    // renders as `↓ 23.4 MB (8.2 MB/s)`.
-                    let _gauge = GaugeGuard::downloading();
+                    // renders as `↓ 23.4 MB 8.2 MB/s`. The guard surfaces this
+                    // request in the `N downloading` concurrency count.
+                    let _gauge = DownloadGuard::enter();
                     // Capacity hint only — capped so a bogus Content-Length
                     // can't force a huge allocation; BytesMut grows as needed.
                     const MAX_PREALLOC: u64 = 32 * 1024 * 1024;
@@ -69,7 +70,9 @@ pub async fn download_bytes(url: &str, auth_token: Option<&str>) -> Result<Bytes
                         buf.extend_from_slice(&chunk);
                     }
                     if attempt > 0 {
-                        tracing::info!("Retry succeeded on attempt {}: {url}", attempt + 1);
+                        // Debug, not info: a succeeded retry is normal recovery,
+                        // not worth a console line that interrupts the spinner.
+                        tracing::debug!("Retry succeeded on attempt {}: {url}", attempt + 1);
                     }
                     Ok(buf.freeze())
                 }
