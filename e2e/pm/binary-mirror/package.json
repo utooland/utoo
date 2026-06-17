@@ -1,0 +1,9 @@
+{
+  "name": "e2e-binary-mirror",
+  "version": "1.0.0",
+  "private": true,
+  "description": "e2e: binary-mirror-config must parse against registry.npmmirror.com (regression for the strict-typed config that failed to parse and re-fetched per package)",
+  "dependencies": {
+    "utf-8-validate": "^6.0.3"
+  }
+}

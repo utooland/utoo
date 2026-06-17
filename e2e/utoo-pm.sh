@@ -1434,4 +1434,38 @@ if (pTimeout.dev === true) {
 echo -e "${GREEN}PASS: prod-reachable devDependency correctly not marked dev${NC}"
 cd ../../../
 
+# ═══════════════════════════════════════════════════════════════
+# Case: binary-mirror-config parses against registry.npmmirror.com
+# ═══════════════════════════════════════════════════════════════
+# npmmirror serves the canonical `binary-mirror-config`, whose
+# `flow-bin.replaceHost` is a bare string. Typing it strictly as `Vec<String>`
+# made the whole config fail to parse, and because the failure was not cached,
+# every cloned package re-fetched the config (hundreds of serialized network
+# round-trips → install crawled). Guard: against npmmirror the config must
+# parse, so the per-package "Binary mirror config unavailable" debug line must
+# never appear.
+echo -e "${YELLOW}Case: binary-mirror-config parses on registry.npmmirror.com${NC}"
+cd e2e/pm/binary-mirror
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+BMC_MARKER="$(mktemp)"
+utoo install --ignore-scripts --registry=https://registry.npmmirror.com \
+  || { echo -e "${RED}FAIL: utoo install failed for binary-mirror (npmmirror)${NC}"; exit 1; }
+[ -d node_modules/utf-8-validate ] \
+  || { echo -e "${RED}FAIL: utf-8-validate not installed via npmmirror${NC}"; exit 1; }
+# Scan this run's debug log(s) for the config-parse-failure spam. Each `utoo`
+# invocation writes one $TMPDIR/utoo-<ts>.log; pick those newer than the marker.
+BMC_FAILS=0
+for log in $(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'utoo-*.log' -newer "$BMC_MARKER" 2>/dev/null); do
+  n=$(grep -c "Binary mirror config unavailable" "$log" 2>/dev/null || true)
+  BMC_FAILS=$((BMC_FAILS + n))
+done
+rm -f "$BMC_MARKER"
+if [ "$BMC_FAILS" -ne 0 ]; then
+  echo -e "${RED}FAIL: binary-mirror-config failed to parse on npmmirror ($BMC_FAILS occurrences) — strict-type regression${NC}"
+  exit 1
+fi
+echo -e "${GREEN}PASS: binary-mirror-config parsed on npmmirror (no per-package re-fetch)${NC}"
+cd ../../../
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

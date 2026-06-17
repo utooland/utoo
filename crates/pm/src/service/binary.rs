@@ -4,10 +4,11 @@ use crate::util::json::read_json_file;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::result::Result as StdResult;
 use std::sync::OnceLock;
 use tokio::sync::OnceCell;
 use utoo_ruborist::registry::is_npm_registry;
@@ -43,6 +44,27 @@ struct ChinaMirror {
     packages: BTreeMap<String, BinaryMirror>,
 }
 
+/// npm's `binary-mirror-config` lets `replaceHost`/`replaceHostFiles` be either
+/// a single string or an array of strings (e.g. `flow-bin.replaceHost` is a
+/// bare string). Normalize both shapes to a `Vec<String>`; a strict
+/// `Option<Vec<String>>` would reject the string form and fail the whole parse.
+fn de_string_or_seq<'de, D>(deserializer: D) -> StdResult<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrSeq {
+        String(String),
+        Seq(Vec<String>),
+    }
+    Ok(match Option::<StringOrSeq>::deserialize(deserializer)? {
+        None => None,
+        Some(StringOrSeq::String(s)) => Some(vec![s]),
+        Some(StringOrSeq::Seq(v)) => Some(v),
+    })
+}
+
 /// Per-package binary mirror settings.
 #[derive(Debug, Default, Clone, Deserialize, serde::Serialize)]
 struct BinaryMirror {
@@ -52,6 +74,7 @@ struct BinaryMirror {
     #[serde(
         rename = "replaceHost",
         default,
+        deserialize_with = "de_string_or_seq",
         skip_serializing_if = "Option::is_none"
     )]
     replace_host: Option<Vec<String>>,
@@ -60,6 +83,7 @@ struct BinaryMirror {
     #[serde(
         rename = "replaceHostFiles",
         default,
+        deserialize_with = "de_string_or_seq",
         skip_serializing_if = "Option::is_none"
     )]
     replace_host_files: Option<Vec<String>>,
@@ -90,25 +114,36 @@ struct BinaryMirror {
     extra: Map<String, Value>,
 }
 
-static CONFIG: OnceCell<BinaryMirrorConfig> = OnceCell::const_new();
+/// Cached config-load outcome. Stores `Result` rather than the bare config so
+/// a fetch/parse *failure* is memoized too: `get_or_try_init` would discard an
+/// `Err` and re-run the closure on the next call, and `update_package_binary`
+/// is called once per package — a single bad config would otherwise trigger a
+/// `binary-mirror-config` network fetch for every package in the tree.
+static CONFIG: OnceCell<Result<BinaryMirrorConfig, String>> = OnceCell::const_new();
 /// Cached result of whether we should skip binary mirror envs
 static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
 async fn load_config() -> Result<&'static BinaryMirrorConfig> {
     CONFIG
-        .get_or_try_init(|| async {
+        .get_or_init(|| async {
             // Go through the registry client so URL construction and private-
             // registry auth are handled in one place rather than hand-rolled.
             // `binary-mirror-config@latest` is a normal version manifest whose
             // `mirrors` field carries the config.
-            let bytes = RuboristContext::registry()
+            let bytes = match RuboristContext::registry()
                 .await
                 .fetch_version_manifest_bytes("binary-mirror-config", "latest")
                 .await
-                .context("Failed to fetch binary mirror config")?;
-            serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")
+            {
+                Ok(bytes) => bytes,
+                Err(e) => return Err(format!("Failed to fetch binary mirror config: {e:#}")),
+            };
+            serde_json::from_slice(&bytes)
+                .map_err(|e| format!("Failed to parse binary mirror config: {e}"))
         })
         .await
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn update_binary_config(pkg: &mut Value, binary_mirror: &BinaryMirror) {
@@ -474,6 +509,57 @@ mod tests {
             get_replace_host_files(&binary_mirror),
             vec!["lib/index.js", "lib/install.js"]
         );
+    }
+
+    #[test]
+    fn test_replace_host_accepts_string_or_array() {
+        // npm's config has `flow-bin.replaceHost` as a bare string; the strict
+        // `Vec<String>` form used to fail the whole config parse here.
+        let from_string = serde_json::from_value::<BinaryMirror>(json!({
+            "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+            "replaceHostFiles": "lib/install.js"
+        }))
+        .unwrap();
+        assert_eq!(
+            from_string.replace_host.as_deref(),
+            Some(["https://github.com/facebook/flow/releases/download/v".to_string()].as_slice())
+        );
+        assert_eq!(
+            from_string.replace_host_files.as_deref(),
+            Some(["lib/install.js".to_string()].as_slice())
+        );
+
+        let from_array = serde_json::from_value::<BinaryMirror>(json!({
+            "replaceHost": ["a.com", "b.com"]
+        }))
+        .unwrap();
+        assert_eq!(
+            from_array.replace_host.as_deref(),
+            Some(["a.com".to_string(), "b.com".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn test_full_config_with_string_replace_host_parses() {
+        // A whole-config parse must not fail just because one entry uses the
+        // string form of `replaceHost` (regression: it disabled mirroring for
+        // every package and re-fetched the config per package).
+        let config: BinaryMirrorConfig = serde_json::from_value(json!({
+            "mirrors": {
+                "china": {
+                    "ENVS": { "SASS_BINARY_SITE": "https://npmmirror.com/mirrors/node-sass" },
+                    "flow-bin": {
+                        "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+                        "host": "https://npmmirror.com/mirrors/flow"
+                    },
+                    "sharp": { "replaceHostFiles": ["lib/libvips.js"] }
+                }
+            }
+        }))
+        .unwrap();
+        assert!(config.mirrors.china.packages.contains_key("flow-bin"));
+        assert!(config.mirrors.china.packages.contains_key("sharp"));
+        assert!(config.mirrors.china.envs.contains_key("SASS_BINARY_SITE"));
     }
 
     #[tokio::test]
