@@ -1,9 +1,10 @@
 //! Tar + gzip helpers shared by the HTTP and file tarball resolvers.
 //!
-//! Both resolvers need to parse an npm-style `package/`-prefixed tarball
-//! into in-memory [`TarEntry`]s (so the manifest can be inspected before
-//! deciding where to commit) and then emit those entries atomically into
-//! a cache slot.
+//! Both resolvers parse an npm-style `package/`-prefixed tarball into
+//! in-memory [`TarEntry`]s. Non-registry tarballs (http/file) never enter
+//! the global cache: BFS reads only their manifest via
+//! [`parse_tarball_manifest`], and install materializes their contents
+//! straight into `node_modules` via [`extract_tarball_to_dir`].
 //!
 //! The low-level primitives — [`estimate_uncompressed_size`],
 //! [`gzip_decompress`], [`is_safe_tar_entry_path`], and
@@ -19,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
-use super::common::{commit_cache_dir_atomic, finalize_non_registry_manifest};
+use super::common::finalize_non_registry_manifest;
 use crate::model::manifest::CoreVersionManifest;
 
 /// Decoded tar entry held in memory until the package name/version is known
@@ -180,37 +181,76 @@ pub fn estimate_uncompressed_size(gzip_bytes: &[u8]) -> usize {
     }
 }
 
-/// Shared tarball-commit pipeline used by the http and file tarball
-/// resolvers.
+/// Parse and finalize a non-registry tarball's manifest **without** extracting
+/// it anywhere.
 ///
-/// Decompresses `gzip_bytes`, parses the embedded `package.json`, stamps
-/// `pinned_url` onto `dist.tarball` via `finalize_non_registry_manifest`,
-/// and atomically commits the extracted tree to
-/// `<cache_dir>/<name>/<slot>/package/`.
-///
-/// Cache is idempotent: the `_resolved` marker short-circuits re-extraction
-/// on warm runs. Returns the finalized manifest so BFS can produce a
-/// [`crate::traits::registry::ResolvedPackage`].
-pub(crate) fn commit_tarball_bytes(
-    cache_dir: &Path,
+/// BFS only needs the manifest (name/version/deps + the pinned `dist.tarball`)
+/// to keep resolving; the tarball *content* for a non-registry dep is never
+/// cached in the global store — it is fetched and extracted directly into
+/// `node_modules` at install time. This keeps untrusted remote/local tarballs
+/// out of the shared `<name>/<version>` cache.
+pub(crate) fn parse_tarball_manifest(
     gzip_bytes: &[u8],
     pinned_url: String,
-    slot: &str,
 ) -> Result<CoreVersionManifest> {
     let decompressed = gzip_decompress(gzip_bytes)?;
-    let (entries, manifest_blob) = scan_tarball(&decompressed)?;
+    let (_entries, manifest_blob) = scan_tarball(&decompressed)?;
 
     let mut manifest: CoreVersionManifest = serde_json::from_slice(&manifest_blob)
         .context("failed to parse package.json from tarball")?;
     finalize_non_registry_manifest(&mut manifest, pinned_url)?;
-
-    let package_dir = cache_dir.join(&manifest.name).join(slot);
-    if package_dir.join("_resolved").exists() {
-        return Ok(manifest);
-    }
-    commit_cache_dir_atomic(&package_dir, |stage| write_entries(&entries, stage))?;
-
     Ok(manifest)
+}
+
+/// Read a local `.tgz` from `abs` and parse its manifest, pinned to
+/// `file:<abs>` (the marker install uses to materialize it). The blocking
+/// read + inflate runs on the blocking pool. Shared by the normal file-dep
+/// resolver ([`super::file::process_file_dep`]) and override file-tarball
+/// resolution so both read local tarballs the same way.
+pub(crate) async fn read_local_tarball_manifest(abs: PathBuf) -> Result<CoreVersionManifest> {
+    let pinned = format!("file:{}", abs.display());
+    tokio::task::spawn_blocking(move || -> Result<CoreVersionManifest> {
+        let bytes = std::fs::read(&abs)
+            .with_context(|| format!("failed to read tarball {}", abs.display()))?;
+        parse_tarball_manifest(&bytes, pinned)
+    })
+    .await
+    .map_err(|e| anyhow!("tarball read task failed: {e}"))?
+}
+
+/// Extract a non-registry tarball's contents directly into `dest` (a
+/// `node_modules/<pkg>` directory), stripping the leading npm wrapper component
+/// (typically `package/`). Writes no `_resolved` marker and does not touch the
+/// global cache — it materializes the package straight into the tree at install
+/// time. This is the single materialization path for http(s) remote tarballs and
+/// local `file:` tarballs, which (unlike registry/git deps) never enter the
+/// shared `<name>/<version>` global cache store.
+pub fn extract_tarball_to_dir(gzip_bytes: &[u8], dest: &Path) -> Result<()> {
+    let decompressed = gzip_decompress(gzip_bytes)?;
+    let (entries, _manifest_blob) = scan_tarball(&decompressed)?;
+
+    // npm tarballs nest everything under a single top-level dir (`package/`);
+    // strip that first component so contents land at `dest` root.
+    let stripped: Vec<TarEntry> = entries
+        .into_iter()
+        .filter_map(|mut e| {
+            let mut comps = e.rel_path.components();
+            comps.next()?; // drop the wrapper dir
+            let rest: PathBuf = comps.collect();
+            if rest.as_os_str().is_empty() {
+                return None; // the wrapper dir entry itself
+            }
+            e.rel_path = rest;
+            Some(e)
+        })
+        .collect();
+
+    if dest.exists() {
+        let _ = std::fs::remove_dir_all(dest);
+    }
+    std::fs::create_dir_all(dest)
+        .with_context(|| format!("failed to create {}", dest.display()))?;
+    write_entries(&stripped, dest)
 }
 
 /// Decompress a gzip stream with libdeflate, sizing the output buffer from

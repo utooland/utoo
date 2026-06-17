@@ -105,12 +105,6 @@ pub mod git {
     pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
 }
 
-/// Non-registry tarball cache-slot helpers (http + local file).
-pub mod http {
-    #[cfg(feature = "http-tarball")]
-    pub use crate::resolver::http::{file_cache_slot, http_cache_slot};
-}
-
 /// Tar + gzip primitives and the atomic cache-slot commit protocol.
 ///
 /// Shared with pm's install-phase extractor
@@ -125,7 +119,7 @@ pub mod tar {
     pub use crate::resolver::common::commit_cache_dir_atomic;
     #[cfg(feature = "http-tarball")]
     pub use crate::resolver::tar::{
-        MAX_UNCOMPRESSED_BYTES, estimate_uncompressed_size, gzip_decompress,
-        is_safe_tar_entry_path, normalize_entry_mode,
+        MAX_UNCOMPRESSED_BYTES, estimate_uncompressed_size, extract_tarball_to_dir,
+        gzip_decompress, is_safe_tar_entry_path, normalize_entry_mode,
     };
 }

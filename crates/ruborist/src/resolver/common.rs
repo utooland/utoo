@@ -1,4 +1,4 @@
-//! Shared helpers for native, non-registry resolvers (git, http tarball).
+//! Shared helpers for native, non-registry resolvers (git, http/file tarball).
 //!
 //! - [`DedupCache<T>`] — session-scoped single-flight cache (alias for
 //!   [`OnceMap`](crate::util::OnceMap)) so concurrent fetches of the same key
@@ -11,7 +11,9 @@
 //!
 //! Consumers:
 //!   `super::git`   — caches at `<cache>/<name>/<commit_sha>/`
-//!   `super::http`  — caches at `<cache>/<name>/_http_<url_hash>/`
+//!   `super::http`/`super::file` — read only the tarball manifest in BFS; the
+//!     tarball *content* is materialized directly into `node_modules` at
+//!     install time and never enters the global cache.
 
 use std::path::PathBuf;
 

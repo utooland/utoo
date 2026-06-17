@@ -232,6 +232,11 @@ pub async fn get_server_module_options_context(
     } else {
         SourceMapsType::None
     };
+    let css_modules_pattern = styles
+        .css_modules
+        .as_ref()
+        .and_then(|css_modules| css_modules.local_ident_pattern());
+
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             source_maps,
@@ -245,6 +250,7 @@ pub async fn get_server_module_options_context(
         css: CssOptionsContext {
             source_maps,
             module_css_condition: Some(module_styles_rule_condition()),
+            css_modules_pattern,
             ..Default::default()
         },
         environment: Some(env),
