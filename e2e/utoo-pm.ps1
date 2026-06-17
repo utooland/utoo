@@ -628,4 +628,70 @@ finally {
     Remove-Item -Recurse -Force $extDir -ErrorAction SilentlyContinue
 }
 
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides target a local file: tarball (nested + direct)
+# ═══════════════════════════════════════════════════════════════
+# An override value may be any spec npm accepts — including a local `file:`
+# tarball — not just a registry version. Override resolution used to send the
+# target straight to the registry as a version, so `file:x.tgz` became a bogus
+# version lookup → 404 and the whole install aborted. Here a transitive dep
+# (is-number, pulled in by is-odd) is overridden to a locally packed tarball,
+# both via a nested rule (is-odd > is-number) and a direct rule.
+Write-Yellow "Case: overrides -> local file: tarball (nested + direct)"
+$ovDir = Join-Path $env:TEMP "utoo-e2e-override-tgz-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$ovDir\src\is-number" -Force | Out-Null
+    @{ name = "is-number"; version = "9.9.9"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$ovDir\src\is-number\package.json"
+    Set-Content "$ovDir\src\is-number\index.js" "module.exports = () => 'OVERRIDE-LOCAL-TGZ';"
+
+    Push-Location "$ovDir\src\is-number"
+    try {
+        npm pack 2>&1 | Out-Null
+        $tgz = Get-ChildItem "is-number-*.tgz" | Select-Object -First 1
+        Move-Item $tgz.FullName "$ovDir\is-number.tgz"
+    }
+    finally { Pop-Location }
+
+    Push-Location $ovDir
+    try {
+        # Nested rule: is-odd > is-number -> file: tarball.
+        @{
+            name         = "ov-file-tarball-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-odd" = @{ "is-number" = "file:./is-number.tgz" } }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+        utoo install --registry=https://registry.npmjs.org --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for nested file: tarball override" }
+        $ver = (node -p "require('./node_modules/is-number/package.json').version").Trim()
+        if ($ver -ne "9.9.9") { throw "nested override did not resolve to local tarball (is-number=$ver, want 9.9.9)" }
+        $out = (node -p "require('./node_modules/is-number')()").Trim()
+        if ($out -ne "OVERRIDE-LOCAL-TGZ") { throw "overridden is-number content wrong (got '$out')" }
+        node -e "const l=require('./package-lock.json');const r=(l.packages['node_modules/is-number']||{}).resolved||'';if(!r.startsWith('file:')){console.error('is-number not pinned to file: tarball, got',r);process.exit(1);}"
+        if ($LASTEXITCODE -ne 0) { throw "lockfile did not pin overridden is-number to file: tarball" }
+
+        # Direct (non-nested) rule must work too.
+        @{
+            name         = "ov-file-tarball-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-number" = "file:./is-number.tgz" }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+        Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+
+        utoo install --registry=https://registry.npmjs.org --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for direct file: tarball override" }
+        $ver2 = (node -p "require('./node_modules/is-number/package.json').version").Trim()
+        if ($ver2 -ne "9.9.9") { throw "direct override did not resolve to local tarball (is-number=$ver2, want 9.9.9)" }
+
+        Write-Green "PASS: overrides -> local file: tarball (nested + direct)"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $ovDir -ErrorAction SilentlyContinue
+}
+
 Write-Green "All e2e tests passed successfully!"

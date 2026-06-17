@@ -245,6 +245,7 @@ where
             parent,
             edge,
             &manifest.version,
+            self.config,
             Some(state),
         )
         .await

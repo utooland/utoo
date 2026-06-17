@@ -496,6 +496,7 @@ pub async fn process_dependency<R: ManifestProvider>(
                 node_index,
                 edge_info,
                 &resolved.version,
+                config,
                 None,
             )
             .await?
@@ -532,6 +533,7 @@ pub(crate) async fn resolve_override<R: ManifestProvider>(
     parent: NodeIndex,
     edge: &DependencyEdgeInfo,
     resolved_version: &str,
+    config: &BuildDepsConfig,
     mut state: Option<&mut ManifestState>,
 ) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<R::Error>> {
     let Some(override_spec) = graph.check_override(parent, &edge.name, Some(resolved_version))
@@ -552,18 +554,191 @@ pub(crate) async fn resolve_override<R: ManifestProvider>(
         resolved_version,
         override_spec
     );
-    match resolve_registry_dep(registry, &edge.name, &override_spec, &edge.edge_type).await? {
-        Some(overridden) => {
+
+    match resolve_override_spec(
+        graph,
+        registry,
+        &edge.name,
+        &override_spec,
+        &edge.edge_type,
+        config,
+    )
+    .await?
+    {
+        Some(manifest) => {
             if let Some(state) = state {
-                state.cache_version(
-                    edge.name.clone(),
-                    override_spec,
-                    Arc::clone(&overridden.manifest),
-                );
+                state.cache_version(edge.name.clone(), override_spec, Arc::clone(&manifest));
             }
-            Ok(Some(overridden.manifest))
+            Ok(Some(manifest))
         }
         None => Ok(None),
+    }
+}
+
+/// Resolve an override *target* spec to a manifest, routing by protocol exactly
+/// like a normal dependency spec ([`process_dependency`]). An override value may
+/// be any spec npm accepts — a registry range, a `file:` tarball, an http(s)
+/// tarball, or a git URL — not just a registry version. The previous
+/// registry-only resolution turned `file:x.tgz` / URL overrides into bogus
+/// registry version lookups (→ 404), silently aborting the whole install.
+///
+/// Returns `Ok(None)` when an optional edge's override fails to resolve (npm
+/// falls back to the original resolution); `Err` for a load-bearing failure.
+/// All supported protocols yield a manifest that the caller places like any
+/// registry node — a `file:`/http tarball manifest carries a pinned
+/// `dist.tarball`, materialized into `node_modules` at install time.
+async fn resolve_override_spec<R: ManifestProvider>(
+    graph: &DependencyGraph,
+    registry: &R,
+    name: &str,
+    override_spec: &str,
+    edge_type: &EdgeType,
+    config: &BuildDepsConfig,
+) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<R::Error>> {
+    // Optional-edge failures fall back to the original resolution; load-bearing
+    // failures surface the wrapped cause.
+    fn optional_or_err<E>(
+        edge_type: &EdgeType,
+        name: &str,
+        spec: &str,
+        kind: &str,
+        wrap: impl FnOnce(anyhow::Error) -> ResolveError<E>,
+        err: anyhow::Error,
+    ) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<E>> {
+        if *edge_type == EdgeType::Optional {
+            tracing::debug!("Skipping optional {kind} override {name}@{spec}: {err}");
+            Ok(None)
+        } else {
+            Err(wrap(err))
+        }
+    }
+
+    let parsed = PackageSpec::from(override_spec);
+    match &parsed {
+        // `parsed` only selects the resolver; the registry path keeps receiving
+        // the raw `override_spec` so `npm:` alias / dist-tag / range handling is
+        // identical to the normal registry route.
+        PackageSpec::Registry { .. } => {
+            Ok(
+                resolve_registry_dep(registry, name, override_spec, edge_type)
+                    .await?
+                    .map(|r| r.manifest),
+            )
+        }
+        PackageSpec::Http { url } => match resolve_http_dep(url, &config.http_fetch_cache).await {
+            Ok(r) => Ok(Some(r.manifest)),
+            Err(e) => optional_or_err(
+                edge_type,
+                name,
+                override_spec,
+                "HTTP",
+                |source| ResolveError::Http {
+                    url: url.clone(),
+                    source,
+                },
+                e,
+            ),
+        },
+        PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
+            match resolve_git_dep(
+                config.cache_dir.as_deref(),
+                &parsed,
+                name,
+                &config.git_clone_cache,
+            )
+            .await
+            {
+                Ok(r) => Ok(Some(r.manifest)),
+                Err(e) => optional_or_err(
+                    edge_type,
+                    name,
+                    override_spec,
+                    "git",
+                    |source| ResolveError::Git {
+                        url: override_spec.to_string(),
+                        source,
+                    },
+                    e,
+                ),
+            }
+        }
+        PackageSpec::Local {
+            protocol: Protocol::File,
+            path,
+        } => resolve_override_file_tarball(graph, edge_type, override_spec, path).await,
+        PackageSpec::Local { .. } => Err(ResolveError::Unsupported {
+            spec: override_spec.to_string(),
+            reason: "link:/portal:/workspace: overrides are not supported",
+        }),
+    }
+}
+
+/// Resolve a `file:` override target. Overrides are declared in the root
+/// package.json, so the path is resolved relative to the root project dir (not
+/// the overridden edge's parent). A tarball is parsed into a manifest with a
+/// pinned `file:<abs>` tarball; a directory would need a symlink (Link) node,
+/// which the override path can't place, so it is an explicit error rather than
+/// a misleading registry lookup.
+async fn resolve_override_file_tarball<E>(
+    graph: &DependencyGraph,
+    edge_type: &EdgeType,
+    override_spec: &str,
+    path: &str,
+) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<E>> {
+    #[cfg(not(feature = "http-tarball"))]
+    {
+        let _ = (graph, edge_type, path);
+        Err(ResolveError::Unsupported {
+            spec: override_spec.to_string(),
+            reason: "file: overrides require the 'http-tarball' feature",
+        })
+    }
+    #[cfg(feature = "http-tarball")]
+    {
+        let file_err = |source: anyhow::Error| ResolveError::File {
+            spec: override_spec.to_string(),
+            source,
+        };
+        let base = graph
+            .get_node(graph.root_index)
+            .map(|n| n.path.clone())
+            .ok_or_else(|| ResolveError::Unsupported {
+                spec: override_spec.to_string(),
+                reason: "root project directory unavailable for file: override",
+            })?;
+        let abs = base.join(path);
+
+        let meta = match std::fs::metadata(&abs) {
+            Ok(m) => m,
+            Err(_) if *edge_type == EdgeType::Optional => return Ok(None),
+            Err(e) => {
+                return Err(file_err(
+                    anyhow::Error::new(e)
+                        .context(format!("file: override target {}", abs.display())),
+                ));
+            }
+        };
+        if meta.is_dir() {
+            return Err(ResolveError::Unsupported {
+                spec: override_spec.to_string(),
+                reason: "file: directory overrides (symlink) are not supported — use a tarball (.tgz)",
+            });
+        }
+
+        let pinned = format!("file:{}", abs.display());
+        let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let bytes = std::fs::read(&abs)
+                .map_err(|e| anyhow::anyhow!("failed to read tarball {}: {e}", abs.display()))?;
+            crate::resolver::tar::parse_tarball_manifest(&bytes, pinned)
+        })
+        .await
+        {
+            Ok(Ok(m)) => m,
+            Ok(Err(_)) | Err(_) if *edge_type == EdgeType::Optional => return Ok(None),
+            Ok(Err(source)) => return Err(file_err(source)),
+            Err(join) => return Err(file_err(join.into())),
+        };
+        Ok(Some(Arc::new(manifest)))
     }
 }
 
