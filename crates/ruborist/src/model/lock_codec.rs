@@ -1,18 +1,25 @@
-//! Seed a [`DependencyGraph`] from an existing `package-lock.json`.
+//! The `DependencyGraph` ↔ `package-lock.json` codec.
 //!
-//! This is the inverse of [`crate::model::package_lock::serialize_to_packages`]:
-//! it reconstructs the *already-resolved* tree encoded by the lockfile so the
-//! demand resolver only has to do work for the **delta** — newly added,
-//! changed, or removed direct dependencies — instead of recomputing (and, under
-//! concurrent placement, reshuffling) the whole tree.
+//! Two inverse directions, kept together so the round-trip is one unit:
+//! - **serialize** (graph → lock): [`graph_to_lock`] / [`graph_to_lock_filtered`],
+//!   re-exported from [`super::package_lock`] where the `LockPackage`-building
+//!   impl lives.
+//! - **deserialize** (lock → graph): [`lock_to_graph`], below.
 //!
-//! How it composes with graph init:
+//! ## Why deserialize exists
+//!
+//! Reconstructing the *already-resolved* tree encoded by the lockfile lets the
+//! demand resolver do work only for the **delta** — newly added, changed, or
+//! removed direct dependencies — instead of recomputing (and, under concurrent
+//! placement, reshuffling) the whole tree.
+//!
+//! How [`lock_to_graph`] composes with graph init:
 //! - The caller (`service::api::build_deps`) has already created the root node,
 //!   added the root's **live** dependency edges from the current `package.json`
 //!   (unresolved), attached workspace members, and settled `workspace:` edges.
-//! - [`seed_graph_from_lock`] then inserts every *regular* (non-root,
-//!   non-link) lockfile entry as a pinned node at its locked physical path, with
-//!   a synthetic manifest derived from the lock entry, and seeds that node's
+//! - [`lock_to_graph`] then inserts every *regular* (non-root, non-link)
+//!   lockfile entry as a pinned node at its locked physical path, with a
+//!   synthetic manifest derived from the lock entry, and seeds that node's
 //!   recorded dependency edges as **already resolved**.
 //!
 //! The BFS that follows only enqueues *unresolved* edges (the live importer
@@ -21,7 +28,7 @@
 //! never re-examined. Anything the loop re-resolves (a bumped direct dep) is
 //! placed fresh and shadows the stale seeded node in the last-wins child index;
 //! the stale node then falls out of the reachable set and is dropped by the
-//! pruning pass at serialize time.
+//! pruning pass ([`graph_to_lock_filtered`]) at serialize time.
 //!
 //! [`try_reuse_dependency`]: crate::resolver::placement::try_reuse_dependency
 
@@ -36,14 +43,23 @@ use crate::model::manifest::{CoreVersionManifest, Dist};
 use crate::model::node::EdgeType;
 use crate::model::package_lock::{License, LockPackage, PackageLock};
 
-/// Seed `graph` with the resolved tree encoded by `lock`.
+// The serialize half of the codec. The `LockPackage`-building impl stays in
+// `package_lock` (next to the types and their private helpers); these aliases
+// give the codec a single, symmetric surface alongside [`lock_to_graph`].
+pub use crate::model::package_lock::{
+    serialize_to_packages as graph_to_lock,
+    serialize_to_packages_filtered as graph_to_lock_filtered,
+};
+
+/// Deserialize: seed `graph` with the resolved tree encoded by `lock` (the
+/// inverse of [`graph_to_lock`]).
 ///
 /// `root_path` is the absolute workspace root the lockfile lives at; seeded node
 /// paths are built relative to it. The root and any workspace members are
 /// expected to already exist in `graph` (added by the caller) — they are looked
 /// up by their lockfile path and used as physical parents for the entries that
 /// nest under them, but never recreated.
-pub fn seed_graph_from_lock(graph: &mut DependencyGraph, lock: &PackageLock, root_path: &Path) {
+pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path: &Path) {
     // Map a lockfile path (e.g. `""`, `node_modules/a`, `packages/ws`) to the
     // node that occupies it. Pre-populated with the importers the caller built
     // (root + workspace members) so nested entries can find their parent.
@@ -310,7 +326,7 @@ mod tests {
             &EdgeContext::new(PeerDeps::Skip, DevDeps::Include),
         );
 
-        seed_graph_from_lock(&mut graph, lock, &root_path);
+        lock_to_graph(&mut graph, lock, &root_path);
 
         // Settle the root's live edges the way the BFS's reuse probe would.
         let pending: Vec<_> = graph
@@ -437,7 +453,7 @@ mod tests {
             &root_pkg,
             &EdgeContext::new(PeerDeps::Skip, DevDeps::Include),
         );
-        seed_graph_from_lock(&mut graph, &lock, &root_path);
+        lock_to_graph(&mut graph, &lock, &root_path);
 
         // The live edge can't reuse the seeded a@1.0.0 (spec mismatch).
         let (edge_id, _, _) = graph

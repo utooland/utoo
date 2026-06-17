@@ -67,7 +67,7 @@ pub struct BuildDepsOptions<G, R> {
     pub catalogs: Catalogs,
     /// An existing `package-lock.json` to reuse as the resolved-tree baseline.
     /// When present, the graph is seeded with this tree (see
-    /// `resolver::seeding::seed_graph_from_lock`) so the resolver only does work for the delta —
+    /// `model::lock_codec::lock_to_graph`) so the resolver only does work for the delta —
     /// added/changed/removed direct deps — and the prior tree's layout is
     /// preserved verbatim. `None` falls back to a full cold resolve. The
     /// lockfile supersedes `project_cache` on this path: it already pins every
@@ -200,7 +200,7 @@ where
     //     by the lock is reused with no network I/O.
     let reuse_baseline = baseline.is_some();
     if let Some(lock) = baseline {
-        crate::resolver::seeding::seed_graph_from_lock(&mut graph, &lock, &root_path);
+        crate::model::lock_codec::lock_to_graph(&mut graph, &lock, &root_path);
     }
 
     // 4. The host supplies the stateless registry client (URL, store, semver,

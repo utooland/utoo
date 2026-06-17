@@ -36,7 +36,6 @@ pub mod node_types;
 pub mod placement;
 pub mod registry;
 pub mod runtime;
-pub mod seeding;
 pub mod semver;
 #[cfg(feature = "http-tarball")]
 pub(crate) mod tar;
