@@ -9,14 +9,14 @@
 //! use utoo_ruborist::service::{build_deps, BuildDepsOptions};
 //! use utoo_ruborist::progress::NoopReceiver;
 //!
-//! let output = build_deps(BuildDepsOptions::new(
+//! let lock = build_deps(BuildDepsOptions::new(
 //!     PathBuf::from("."),
 //!     my_glob,
 //!     NoopReceiver,
 //! )).await?;
 //!
 //! // Serialize to JSON
-//! let json = serde_json::to_string_pretty(&output.lock)?;
+//! let json = serde_json::to_string_pretty(&lock)?;
 //! ```
 
 use std::collections::HashMap;
@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 
-use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use crate::model::graph::DependencyGraph;
@@ -32,7 +31,7 @@ use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, add_workspace_member,
-    build_deps_with_config_output, resolve_workspace_member_edges,
+    build_deps_with_config, resolve_workspace_member_edges,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -51,9 +50,6 @@ pub struct BuildDepsOptions<G, R> {
     /// Tarball cache directory passed through to non-registry resolvers
     /// (http/tarball, native-git). Unrelated to manifest disk cache.
     pub cache_dir: Option<PathBuf>,
-    /// Project-level warm cache pre-loaded by the host. Seeds the demand
-    /// resolver's manifest cache so a warm install skips re-fetching.
-    pub project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
     /// How to handle peer dependencies.
@@ -65,6 +61,13 @@ pub struct BuildDepsOptions<G, R> {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
+    /// An existing `package-lock.json` to reuse as the resolved-tree baseline.
+    /// When present, the graph is seeded with this tree (see
+    /// `model::lock_codec::lock_to_graph`) so the resolver only does work for the delta —
+    /// added/changed/removed direct deps — and the prior tree's layout is
+    /// preserved verbatim. `None` (or an internally inconsistent lock, see
+    /// `lock_codec::lock_is_consistent`) falls back to a full cold resolve.
+    pub baseline: Option<PackageLock>,
 }
 
 impl<G, R> BuildDepsOptions<G, R> {
@@ -80,41 +83,30 @@ impl<G, R> BuildDepsOptions<G, R> {
                 .registry("https://registry.npmmirror.com")
                 .build(),
             cache_dir: None,
-            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob,
             receiver,
             catalogs: HashMap::new(),
+            baseline: None,
         }
     }
 }
 
-/// Output of [`build_deps`].
-///
-/// `project_cache` carries the manifests resolved during this run; the host
-/// decides whether and where to persist it (typically to
-/// `node_modules/.utoo-manifest.json`). It is empty when no resolutions
-/// happened.
-pub struct BuildDepsOutput {
-    pub lock: PackageLock,
-    pub project_cache: ProjectCacheData,
-}
-
-/// Build dependency tree from an **in-memory root manifest** `pkg` and return
-/// [`BuildDepsOutput`]. `options.cwd` is the resolution root, already resolved by
-/// the caller — a normal install reads it via [`read_root_manifest`]; a global
-/// install (`utoo install -g`, `utoo x`) synthesizes a private root
+/// Build dependency tree from an **in-memory root manifest** `pkg` and return the
+/// resolved `package-lock.json`. `options.cwd` is the resolution root, already
+/// resolved by the caller — a normal install reads it via [`read_root_manifest`];
+/// a global install (`utoo install -g`, `utoo x`) synthesizes a private root
 /// `{ dependencies: { <tool>: <spec> } }` so the tool resolves as a *dependency*
 /// (no `prepare`/`prepublish`, no `devDependencies`). It:
 /// 1. Injects runtime dependencies (node-bin packages from engines.install-node)
 /// 2. Builds the graph and adds root + workspace edges
 /// 3. Resolves all dependencies using the registry
-/// 4. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
+/// 4. Returns the package lock
 pub async fn build_deps<G, R>(
     options: BuildDepsOptions<G, R>,
     mut pkg: PackageJson,
-) -> Result<BuildDepsOutput>
+) -> Result<PackageLock>
 where
     G: Glob + Clone,
     R: EventReceiver,
@@ -123,13 +115,28 @@ where
         cwd: root_path,
         registry,
         cache_dir,
-        project_cache,
         concurrency,
         peer_deps,
         glob,
         receiver,
         catalogs,
+        baseline,
     } = options;
+
+    // Only reuse a baseline that is internally complete. An incomplete lock
+    // (hand-edited, a partial install, or a foreign lock shaped unlike ours)
+    // would seed dangling transitive edges — listed in the re-emitted lock but
+    // never installed — so fall back to a cold resolve instead of reusing it.
+    let mut reuse_baseline = match &baseline {
+        Some(lock) if crate::model::lock_codec::lock_is_consistent(lock) => true,
+        Some(_) => {
+            tracing::warn!(
+                "package-lock.json is internally inconsistent; cold-resolving instead of reusing it"
+            );
+            false
+        }
+        None => false,
+    };
 
     // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
@@ -145,70 +152,96 @@ where
         }
     }
 
-    // 2. Initialize dependency graph + root dependency edges (catalog: specs
-    //    resolved at edge creation).
-    let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
-    let root_index = graph.root_index;
-    let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
-    add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
-
-    // 3. Discover and add workspace packages. A synthetic global-install root has
-    //    no `workspaces` field, so this returns immediately without touching disk.
-    let discovery = WorkspaceDiscovery::new(glob);
-    let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
-    for workspace in workspaces {
-        tracing::debug!(
-            "Added workspace: {} at {:?}",
-            workspace.name,
-            workspace.path
-        );
-        add_workspace_member(
-            &mut graph,
-            root_index,
-            &workspace.name,
-            workspace.path,
-            &workspace.package_json,
-            &edge_ctx,
-        );
-    }
-    // Settle all importer-declared workspace: edges now that every member is
-    // attached — the BFS never sees a workspace: spec on the happy path.
-    resolve_workspace_member_edges(&mut graph);
-
-    // 4. The host supplies the stateless registry client (URL, store, semver,
-    //    auth) pre-built. The warm `project_cache` seeds the demand resolver's
-    //    manifest cache directly via `BuildDepsConfig::project_cache` below.
+    // The host supplies the stateless registry client (URL, store, semver, auth)
+    // pre-built.
     tracing::debug!(
         "Using registry: {} (semver: {})",
         registry.registry_url(),
         registry.supports_semver(),
     );
 
-    let mut config = BuildDepsConfig::default()
-        .with_peer_deps(peer_deps)
-        .with_concurrency(concurrency)
-        .with_catalogs(catalogs)
-        .with_project_cache(project_cache);
-    if let Some(dir) = cache_dir {
-        config = config.with_cache_dir(dir);
+    // Build → resolve → emit. Runs at most twice: if reuse produced a tree the
+    // incremental path can't make sound (a `node_modules` slot occupied by two
+    // reachable nodes — a bumped direct dep whose old version a transitive still
+    // pins, which can't be re-nested under a frozen seeded edge), discard the
+    // baseline and cold-resolve. The retry rebuilds a fresh graph, so no seeded
+    // state leaks across.
+    loop {
+        // 2. Initialize dependency graph + root dependency edges (catalog: specs
+        //    resolved at edge creation).
+        let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
+        let root_index = graph.root_index;
+        let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
+        add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
+
+        // 3. Discover and add workspace packages. A synthetic global-install root
+        //    has no `workspaces` field, so this returns immediately without disk.
+        let discovery = WorkspaceDiscovery::new(glob.clone());
+        let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
+        for workspace in workspaces {
+            tracing::debug!(
+                "Added workspace: {} at {:?}",
+                workspace.name,
+                workspace.path
+            );
+            add_workspace_member(
+                &mut graph,
+                root_index,
+                &workspace.name,
+                workspace.path,
+                &workspace.package_json,
+                &edge_ctx,
+            );
+        }
+        // Settle all importer-declared workspace: edges now that every member is
+        // attached — the BFS never sees a workspace: spec on the happy path.
+        resolve_workspace_member_edges(&mut graph);
+
+        // 3b. Seed the resolved tree from the existing lockfile (if any). Importer
+        //     edges stay unresolved (live, from the current manifests) so the BFS
+        //     resolves only the delta against the seeded nodes; everything pinned
+        //     by the lock is reused with no network I/O.
+        if reuse_baseline && let Some(lock) = &baseline {
+            crate::model::lock_codec::lock_to_graph(&mut graph, lock, &root_path);
+        }
+
+        let mut config = BuildDepsConfig::default()
+            .with_peer_deps(peer_deps)
+            .with_concurrency(concurrency)
+            .with_catalogs(catalogs.clone());
+        if let Some(dir) = &cache_dir {
+            config = config.with_cache_dir(dir.clone());
+        }
+
+        // Preserve the typed error via `Error::new` + `.context(...)` so CLI
+        // renderers (e.g. pm's format_print) can downcast and pretty-print the
+        // dependency chain carried by `ResolveError::WithChain`.
+        build_deps_with_config(&mut graph, &registry, config, &receiver)
+            .await
+            .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
+
+        // On the reuse path, prune nodes the BFS left orphaned (removed deps,
+        // versions shadowed by a re-resolved bump) before emitting the lock.
+        let (packages, _total) = if reuse_baseline {
+            let reachable = graph.reachable_nodes();
+            if graph.has_slot_collision(&reachable) {
+                tracing::warn!(
+                    "lockfile reuse left a node_modules slot conflict; cold-resolving instead"
+                );
+                reuse_baseline = false;
+                continue;
+            }
+            crate::model::package_lock::serialize_to_packages_filtered(
+                &graph,
+                &root_path,
+                Some(&reachable),
+            )
+        } else {
+            graph.serialize_to_packages(&root_path)
+        };
+
+        return Ok(PackageLock::new(&pkg.name, &pkg.version, packages));
     }
-
-    // Preserve the typed error via `Error::new` + `.context(...)` so CLI
-    // renderers (e.g. pm's format_print) can downcast and pretty-print the
-    // dependency chain carried by `ResolveError::WithChain`.
-    let manifest_cache = build_deps_with_config_output(&mut graph, &registry, config, &receiver)
-        .await
-        .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
-
-    let (packages, _total) = graph.serialize_to_packages(&root_path);
-
-    // Export the manifests resolved this run for the host to persist.
-    let project_cache = ProjectCacheData::from_resolved(manifest_cache.entries);
-
-    Ok(BuildDepsOutput {
-        lock: PackageLock::new(&pkg.name, &pkg.version, packages),
-        project_cache,
-    })
 }
 
 /// Resolve the workspace root for `cwd` and read its `package.json`. The
@@ -245,12 +278,12 @@ mod tests {
                 .registry("https://registry.npmmirror.com")
                 .build(),
             cache_dir: None,
-            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
             catalogs: HashMap::new(),
+            baseline: None,
         };
 
         assert_eq!(options.concurrency, 20);
@@ -273,52 +306,20 @@ mod tests {
                 .registry("https://registry.npmmirror.com")
                 .build(),
             cache_dir: None,
-            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
             receiver: NoopReceiver,
             catalogs: HashMap::new(),
+            baseline: None,
         };
         let mut pkg = PackageJson::new("utoo-global", "0.0.0");
         pkg.private = Some(true);
 
-        let output = build_deps(options, pkg)
+        let lock = build_deps(options, pkg)
             .await
             .expect("in-memory synthetic root should resolve offline");
-        assert!(output.lock.packages.contains_key(""), "root entry present");
-        assert_eq!(output.lock.packages.len(), 1, "no deps → only the root");
-    }
-
-    #[test]
-    fn test_project_cache_export_scoped_packages() {
-        // Test that scoped packages are correctly parsed when exporting project cache
-        // This ensures "@babel/core@^7.0.0" is parsed as ("@babel/core", "^7.0.0")
-        // not ("", "babel/core@^7.0.0")
-        let test_cases = [
-            // (input, expected_name, expected_spec)
-            ("@babel/core@^7.0.0", "@babel/core", "^7.0.0"),
-            ("@types/node@^18.0.0", "@types/node", "^18.0.0"),
-            ("@scope/pkg@1.0.0", "@scope/pkg", "1.0.0"),
-            ("lodash@^4.17.0", "lodash", "^4.17.0"),
-            ("express@4.18.0", "express", "4.18.0"),
-        ];
-
-        for (input, expected_name, expected_spec) in test_cases {
-            let (name, spec) = crate::model::util::parse_package_spec(input);
-            assert_eq!(
-                name, expected_name,
-                "Failed for input '{}': expected name '{}', got '{}'",
-                input, expected_name, name
-            );
-            assert_eq!(
-                spec, expected_spec,
-                "Failed for input '{}': expected spec '{}', got '{}'",
-                input, expected_spec, spec
-            );
-        }
-
-        let buggy_result = "@babel/core@^7.0.0".split_once('@');
-        assert_eq!(buggy_result, Some(("", "babel/core@^7.0.0")));
+        assert!(lock.packages.contains_key(""), "root entry present");
+        assert_eq!(lock.packages.len(), 1, "no deps → only the root");
     }
 }

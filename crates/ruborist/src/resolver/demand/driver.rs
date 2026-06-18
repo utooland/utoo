@@ -27,7 +27,7 @@ use super::queue::{FetchDone, FetchKey};
 use super::queue::{FetchFuture, FetchQueues};
 use super::schedule::{schedule_fetch, schedule_transitive_prefetches};
 use super::select::{EdgeStep, ResolutionMode, WaitKey, select_edge};
-use super::state::{ManifestState, PackageVersions, ResolverManifestCache, WaitingEdge};
+use super::state::{ManifestState, PackageVersions, WaitingEdge};
 use crate::model::node::PeerDeps;
 use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone};
 use crate::traits::registry::RegistryError;
@@ -223,14 +223,12 @@ where
 
     /// Apply a dependency override for `edge`, returning the manifest to install.
     ///
-    /// The override is routed through the per-run manifest cache: a sibling
-    /// edge's already-resolved override is reused (single-flight within the
-    /// run), and a freshly-resolved one is recorded so it persists to the
-    /// project cache. Without this, every edge sharing an override re-fetches
-    /// it and the overridden manifest is omitted from the warm cache, forcing a
-    /// network round-trip on every subsequent install. Falls back to the
-    /// original manifest when no override applies or the override fails to
-    /// resolve.
+    /// The override is routed through the per-run manifest cache so sibling
+    /// edges sharing the same override resolve it once (single-flight within the
+    /// run) instead of each re-fetching it. Across runs the overridden version
+    /// is pinned in the lockfile and seeded by the reuse path, so it isn't
+    /// re-resolved on the next install either. Falls back to the original
+    /// manifest when no override applies or the override fails to resolve.
     async fn apply_override(
         &self,
         graph: &mut DependencyGraph,
@@ -297,14 +295,13 @@ where
 /// as they complete and feeds resolved versions back into the graph so the next
 /// level can be discovered. [`ManifestState`] owns the per-run manifest cache,
 /// waiters, and inflight de-duplication; [`FetchQueues`] prioritises on-demand
-/// fetches over speculative prefetches. Returns the warmed manifest cache so the
-/// caller can reuse it.
+/// fetches over speculative prefetches.
 pub(crate) async fn run_main_loop_bfs<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
-) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+) -> Result<(), ResolveError<R::Error>>
 where
     // `R` is the I/O boundary (a manifest provider); its error must be `Send`
     // because fetch jobs are polled on a `FuturesUnordered`. `E` receives
@@ -323,13 +320,7 @@ where
         supports_semver,
     };
 
-    let mut state = ManifestState::seeded(
-        config
-            .project_cache
-            .as_ref()
-            .map(|pc| pc.resolved_manifests())
-            .unwrap_or_default(),
-    );
+    let mut state = ManifestState::default();
     let mut queues = FetchQueues::default();
     let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
 
@@ -416,7 +407,7 @@ where
         current_level = next_level;
     }
 
-    Ok(state.into_resolver_cache())
+    Ok(())
 }
 
 // ---- Orchestration: state transitions over the store + queue ----
@@ -587,7 +578,7 @@ mod tests {
     use crate::model::node::DevDeps;
     use crate::model::package_json::PackageJson;
     use crate::resolver::builder::{
-        add_edges_from, add_workspace_member, build_deps_with_config_output, resolve,
+        add_edges_from, add_workspace_member, build_deps_with_config, resolve,
     };
     use crate::resolver::edges::EdgeContext;
     use crate::service::{ManifestJob, ManifestJobDone};
@@ -812,7 +803,7 @@ mod tests {
         );
 
         let config = BuildDepsConfig::default().with_peer_deps(PeerDeps::Skip);
-        build_deps_with_config_output(&mut graph, &registry, config, &NoopReceiver)
+        build_deps_with_config(&mut graph, &registry, config, &NoopReceiver)
             .await
             .unwrap();
         let (packages, _) = graph.serialize_to_packages(&PathBuf::from("."));
@@ -841,7 +832,7 @@ mod tests {
 
     #[test]
     fn apply_version_success_caches_and_wakes_waiter() {
-        let mut state = ManifestState::seeded(Vec::new());
+        let mut state = ManifestState::default();
         let mut queues = FetchQueues::default();
         let mut ready = VecDeque::new();
         state.park_on_version(
@@ -869,7 +860,7 @@ mod tests {
 
     #[test]
     fn apply_version_failure_records_and_wakes_waiter() {
-        let mut state = ManifestState::seeded(Vec::new());
+        let mut state = ManifestState::default();
         let mut queues = FetchQueues::default();
         let mut ready = VecDeque::new();
         state.park_on_version(
@@ -900,7 +891,7 @@ mod tests {
 
     #[test]
     fn apply_version_success_schedules_transitive_prefetch() {
-        let mut state = ManifestState::seeded(Vec::new());
+        let mut state = ManifestState::default();
         let mut queues = FetchQueues::default();
         let mut ready = VecDeque::new();
 

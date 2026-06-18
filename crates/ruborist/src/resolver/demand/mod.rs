@@ -16,4 +16,4 @@ mod select;
 mod state;
 
 pub(crate) use driver::run_main_loop_bfs;
-pub(crate) use state::{ManifestState, ResolverManifestCache};
+pub(crate) use state::ManifestState;

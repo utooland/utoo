@@ -470,6 +470,102 @@ impl DependencyGraph {
         super::package_lock::serialize_to_packages(self, root_path)
     }
 
+    /// Serialize to package-lock.json format, dropping any node not reachable
+    /// from the importers via resolved dependency edges. Used on the
+    /// lockfile-reuse path, where seeding inserts the whole prior tree and the
+    /// BFS may leave some of it orphaned: a removed direct dependency's subtree,
+    /// or a node shadowed by a re-resolved (bumped) version. See
+    /// [`reachable_nodes`](Self::reachable_nodes).
+    #[inline]
+    pub fn serialize_to_packages_pruned(
+        &self,
+        root_path: &Path,
+    ) -> (HashMap<String, super::package_lock::LockPackage>, i32) {
+        super::package_lock::serialize_to_packages_filtered(
+            self,
+            root_path,
+            Some(&self.reachable_nodes()),
+        )
+    }
+
+    /// The set of nodes reachable from the importers (root + workspace members)
+    /// by following **resolved** dependency edges. This is the same traversal
+    /// [`compute_node_types`](crate::resolver::node_types::compute_node_types)
+    /// uses to assign node types, so "has a type" and "is reachable" agree.
+    ///
+    /// On a cold resolve every placed node is reachable (the resolver only
+    /// creates a node when it resolves an edge to it), so this is the identity
+    /// — it only prunes on the reuse path, where seeded-but-orphaned nodes
+    /// remain physically attached under the append-only graph invariant.
+    ///
+    /// Link nodes are seeded unconditionally: a workspace's `node_modules/<name>`
+    /// symlink (`add_workspace_member`) has no incoming *resolved dependency*
+    /// edge — the importer edge resolves to the `Workspace` node, not the link —
+    /// so the traversal would never reach it and the symlink entry would be
+    /// pruned from the lock (dropping the on-disk link). Lockfile seeding never
+    /// re-creates link nodes (`lock_codec` skips link entries) and the only
+    /// links in the graph are built for *currently declared* workspaces / `file:`
+    /// deps, so every link present is live and must be kept.
+    pub fn reachable_nodes(&self) -> HashSet<NodeIndex> {
+        let mut reachable: HashSet<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&i| {
+                self.get_node(i)
+                    .is_some_and(|n| n.is_root() || n.is_workspace() || n.is_link())
+            })
+            .collect();
+        let mut stack: Vec<NodeIndex> = reachable.iter().copied().collect();
+        while let Some(node) = stack.pop() {
+            // Walk resolved dependency edges by their target index only — no need
+            // for `get_resolved_dependencies`, which would clone each dep name.
+            // `reachable`/`stack` are locals, so iterate the edges directly rather
+            // than collecting targets into a per-node Vec.
+            for edge in self.graph.edges_directed(node, Outgoing) {
+                if let GraphEdge::Dependency(dep) = edge.weight()
+                    && dep.valid
+                    && let Some(target) = dep.to
+                    && reachable.insert(target)
+                {
+                    stack.push(target);
+                }
+            }
+        }
+        reachable
+    }
+
+    /// Whether any `node_modules` slot — a physical parent plus the directory
+    /// name a child serializes under — is occupied by more than one *reachable*
+    /// node.
+    ///
+    /// The reuse path can reach this state: a direct-dep version bump places a
+    /// fresh node at the parent's slot while a still-pinned transitive's frozen
+    /// seeded edge keeps the shadowed old node reachable at the *same* slot. The
+    /// graph can't re-nest the old copy (its dependents' edges are frozen at seed
+    /// time), so serialization would emit two entries at one lock key — last-wins
+    /// by traversal order, hence nondeterministic and internally inconsistent.
+    /// The caller treats a positive here as "baseline unusable" and cold-resolves.
+    ///
+    /// Keyed by `(is_workspace, name)`: a workspace member's `Workspace` node
+    /// (serialized `packages/<m>`) and its `node_modules/<m>` link/regular sibling
+    /// share a name but not a slot, so they must not count as a collision.
+    pub fn has_slot_collision(&self, reachable: &HashSet<NodeIndex>) -> bool {
+        for &parent in reachable {
+            let mut slots: HashSet<(bool, &str)> = HashSet::new();
+            for child in self.get_physical_children(parent) {
+                if !reachable.contains(&child) {
+                    continue;
+                }
+                if let Some(node) = self.get_node(child)
+                    && !slots.insert((node.is_workspace(), node.name.as_str()))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Find compatible node in parent chain for dependency resolution.
     ///
     /// For unconditional overrides (spec == "*"), uses the override target_spec.
