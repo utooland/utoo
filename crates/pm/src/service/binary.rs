@@ -2,14 +2,12 @@ use crate::fs;
 use crate::util::json::read_json_file;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::OnceLock;
-use utoo_ruborist::registry::is_npm_registry;
+use std::sync::{LazyLock, OnceLock};
 use utoo_ruborist::semver::matches;
 
 /// The `binary-mirror-config` package (cnpm), parsed from its version
@@ -128,7 +126,7 @@ where
 /// failure (the unit test below), never the user's broken install, and needs
 /// zero network. Re-sync this file with the package's `mirrors` field whenever a
 /// new `binary-mirror-config` version is published.
-static CONFIG: Lazy<BinaryMirrorConfig> = Lazy::new(|| {
+static CONFIG: LazyLock<BinaryMirrorConfig> = LazyLock::new(|| {
     let config: BinaryMirrorConfig =
         serde_json::from_str(include_str!("binary-mirror-config.json"))
             .expect("bundled binary-mirror-config.json must parse (covered by a unit test)");
@@ -140,10 +138,6 @@ static CONFIG: Lazy<BinaryMirrorConfig> = Lazy::new(|| {
 });
 /// Cached result of whether we should skip binary mirror envs
 static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
-
-fn load_config() -> &'static BinaryMirrorConfig {
-    &CONFIG
-}
 
 fn update_binary_config(pkg: &mut Value, binary_mirror: &BinaryMirror) {
     // Get existing binary configuration
@@ -342,12 +336,12 @@ async fn handle_cypress(
 }
 
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
-    // npm.org has no China mirror layer — skip alongside `get_envs`.
+    // Only rewrite binary hosts on the npmmirror registry the config targets.
     if should_skip_binary_mirror() {
         return Ok(());
     }
 
-    let Some(binary_mirror) = load_config().mirrors.china.packages.get(name) else {
+    let Some(binary_mirror) = CONFIG.mirrors.china.packages.get(name) else {
         return Ok(());
     };
 
@@ -390,24 +384,41 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// The bundled config redirects binary downloads to npmmirror's China CDNs, so
+/// it is only correct on the npmmirror registry. Apply it there and skip
+/// everywhere else: official npm has no mirror layer, and other registries
+/// (yarnpkg, GitHub Packages, private/non-China mirrors) would otherwise get
+/// China CDN hosts and ~30 China mirror env vars forced onto downloads they
+/// never opted into.
+///
+/// Earlier this fetched the config from the *configured* registry, so the gate
+/// could be "skip official npm" — a registry that didn't serve the config
+/// 404'd and was skipped implicitly. With the config bundled there is no such
+/// fetch, so the gate is made explicit here.
 fn should_skip_binary_mirror() -> bool {
     *SKIP_BINARY_MIRROR.get_or_init(|| {
         let registry = get_registry();
-        let skip = is_npm_registry(&registry);
+        let skip = !is_china_mirror_registry(&registry);
         if skip {
-            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
+            tracing::debug!("Skipping binary mirror for non-npmmirror registry: {registry}");
         }
         skip
     })
 }
 
+/// Whether `registry` is the npmmirror China registry the bundled mirror config
+/// targets. Matches the host so a path suffix or trailing slash still counts.
+fn is_china_mirror_registry(registry: &str) -> bool {
+    registry.contains("npmmirror.com")
+}
+
 pub fn get_envs() -> Option<&'static BTreeMap<String, String>> {
-    // Skip binary mirror envs when using official npm registry
+    // Only inject China mirror envs on the npmmirror registry the config targets.
     if should_skip_binary_mirror() {
         return None;
     }
 
-    let envs = &load_config().mirrors.china.envs;
+    let envs = &CONFIG.mirrors.china.envs;
     (!envs.is_empty()).then_some(envs)
 }
 
@@ -416,6 +427,18 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_only_npmmirror_gets_binary_mirror() {
+        // The bundled config rewrites to npmmirror CDNs, so it applies only on
+        // npmmirror — not official npm, and not other registries that would get
+        // China hosts forced onto downloads they never opted into.
+        assert!(is_china_mirror_registry("https://registry.npmmirror.com"));
+        assert!(is_china_mirror_registry("https://registry.npmmirror.com/"));
+        assert!(!is_china_mirror_registry("https://registry.npmjs.org"));
+        assert!(!is_china_mirror_registry("https://registry.yarnpkg.com"));
+        assert!(!is_china_mirror_registry("https://npm.pkg.github.com"));
+    }
 
     /// The bundled config is the source of truth at runtime, so a re-sync that
     /// drifts from our strict schema must fail here (in CI) rather than silently

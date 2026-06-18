@@ -781,15 +781,17 @@ finally {
 
 
 # ═══════════════════════════════════════════════════════════════
-# Case: bundled binary-mirror-config applies on a non-npm registry
+# Case: bundled binary-mirror-config applies on the npmmirror registry
 # ═══════════════════════════════════════════════════════════════
 # `binary-mirror-config` is bundled at build time (crates/pm/src/service/
 # binary-mirror-config.json) — no runtime fetch — and its parse under our strict
 # schema is guarded by a unit test. This case is the integration check: install
-# against a non-npm registry (npm.org is skipped) with --verbose and assert the
-# bundled mirror layer loaded for a mirror-matched package. flow-bin is the dep
-# on purpose — its bare-string `replaceHost` is the entry that once broke parse.
-Write-Yellow "Case: bundled binary-mirror-config applies on a non-npm registry"
+# against npmmirror (the only registry the bundled config targets) with --verbose
+# and assert the bundled mirror layer initialized during the install (the debug
+# line fires when the config is first read on a non-skipped package). flow-bin is
+# the dep on purpose — its bare-string `replaceHost` is the entry that once broke
+# parse.
+Write-Yellow "Case: bundled binary-mirror-config applies on npmmirror"
 $bmcDir = Join-Path $env:TEMP "utoo-e2e-bmc-$(Get-Random)"
 try {
     New-Item -ItemType Directory -Path $bmcDir -Force | Out-Null
