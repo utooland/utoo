@@ -9,7 +9,7 @@
 //!
 //!     http · retry · downloader ───────────────► network (registry, tarballs)
 //!     cloner · extractor · linker ─────────────► node_modules + ~/.cache/nm
-//!     package_cache · project_cache ·
+//!     package_cache ·
 //!       manifest_store ────────────────────────► on-disk caches
 //!     user_config · config_file ───────────────► ~/.utoo config + CLI flags
 //!     git_resolver ──(binds cache dir)─────────► utoo_ruborist::git
@@ -32,7 +32,6 @@ pub mod logger;
 pub mod manifest_store;
 pub mod package_cache;
 pub mod platform_const;
-pub mod project_cache;
 pub mod registry;
 pub mod retry;
 pub mod sysconf;

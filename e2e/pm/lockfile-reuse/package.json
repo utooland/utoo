@@ -1,0 +1,8 @@
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "debug": "4.3.4"
+  }
+}

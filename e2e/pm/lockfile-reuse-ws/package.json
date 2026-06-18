@@ -1,0 +1,12 @@
+{
+  "name": "lockfile-reuse-ws",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "dependencies": {
+    "reuse-foo": "workspace:*",
+    "debug": "4.3.4"
+  }
+}

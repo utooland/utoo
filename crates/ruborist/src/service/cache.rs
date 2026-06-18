@@ -4,16 +4,13 @@
 //! per-run manifest store, and persistent storage (disk, remote KV, …) is
 //! delegated to a [`super::store::ManifestStore`] supplied by the host. This
 //! module holds the shared, pure-data types: [`VersionsInfo`]/[`Versions`]
-//! (persisted by `ManifestStore` for ETag validation) and the project-level
-//! cache ([`ProjectCacheData`]) that hosts load/save and pass through
-//! `BuildDepsOptions` / `BuildDepsOutput`.
+//! (persisted by `ManifestStore` for ETag validation).
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::manifest::{CoreVersionManifest, VersionsRef};
+use crate::model::manifest::VersionsRef;
 
 /// Lightweight versions info, persisted by `ManifestStore` for ETag validation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,71 +54,5 @@ impl<'a> From<&'a Versions> for VersionsRef<'a> {
             versions: &v.version_list,
             dist_tags: &v.dist_tags,
         }
-    }
-}
-
-// ============================================================================
-// Project-level cache (per-project resolved packages)
-// ============================================================================
-
-/// Project-level cache data.
-///
-/// Stores resolved package information for a specific project. Hosts persist
-/// this (typically as `node_modules/.utoo-manifest.json`) and pass it back via
-/// `BuildDepsOptions::project_cache`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProjectCacheData {
-    /// package name -> per-package cache
-    #[serde(default)]
-    pub cache: HashMap<String, ProjectPackageCache>,
-}
-
-/// Per-package cache in project cache.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProjectPackageCache {
-    /// spec -> resolved version
-    #[serde(default)]
-    pub specs: HashMap<String, String>,
-    /// version -> manifest
-    #[serde(default)]
-    pub manifests: HashMap<String, CoreVersionManifest>,
-}
-
-impl ProjectCacheData {
-    /// Flatten into neutral `(name, spec, manifest)` tuples for seeding an
-    /// in-memory resolver store. The store stays unaware of this on-disk shape.
-    pub(crate) fn resolved_manifests(&self) -> Vec<(String, String, Arc<CoreVersionManifest>)> {
-        let mut out = Vec::new();
-        for (name, pkg) in &self.cache {
-            // Build one Arc per resolved version, then share it across every
-            // spec pointing at that version — sibling ranges commonly collapse
-            // to the same version, so this avoids cloning the manifest per spec.
-            let version_arcs: HashMap<&String, Arc<CoreVersionManifest>> = pkg
-                .manifests
-                .iter()
-                .map(|(version, manifest)| (version, Arc::new(manifest.clone())))
-                .collect();
-            for (spec, version) in &pkg.specs {
-                if let Some(arc) = version_arcs.get(version) {
-                    out.push((name.clone(), spec.clone(), Arc::clone(arc)));
-                }
-            }
-        }
-        out
-    }
-
-    /// Rebuild from the resolver's neutral `(name, spec, manifest)` tuples,
-    /// indexing each manifest under both its spec and its resolved version.
-    pub(crate) fn from_resolved(entries: Vec<(String, String, Arc<CoreVersionManifest>)>) -> Self {
-        let mut data = Self::default();
-        for (name, spec, manifest) in entries {
-            let version = manifest.version.clone();
-            let pkg = data.cache.entry(name).or_default();
-            pkg.specs.insert(spec, version.clone());
-            pkg.manifests
-                .entry(version)
-                .or_insert_with(|| (*manifest).clone());
-        }
-        data
     }
 }

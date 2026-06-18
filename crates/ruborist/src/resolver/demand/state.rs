@@ -18,14 +18,6 @@ use crate::service::VersionsInfo;
 /// Defined here — the store owns the waiter payload — and shared by the driver.
 pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
-/// Resolved version manifests produced by one run, as neutral
-/// `(name, spec, manifest)` tuples. The persistence layer (`ProjectCacheData`)
-/// adapts these to/from disk; the store itself stays format-agnostic.
-#[derive(Default)]
-pub(crate) struct ResolverManifestCache {
-    pub(crate) entries: Vec<(String, String, Arc<CoreVersionManifest>)>,
-}
-
 /// The version-manifest slot: resolved entries, edges parked on them, and
 /// failures, keyed by package name then spec.
 ///
@@ -106,33 +98,6 @@ pub(crate) struct ManifestState {
 }
 
 impl ManifestState {
-    /// Build a store pre-seeded with already-resolved `(name, spec, manifest)`
-    /// entries (e.g. from a warm project cache). The caller adapts whatever
-    /// persistence format it has into these neutral tuples.
-    pub(crate) fn seeded(entries: Vec<(String, String, Arc<CoreVersionManifest>)>) -> Self {
-        let mut state = Self::default();
-        for (name, spec, manifest) in entries {
-            state.cache_version(name, spec, manifest);
-        }
-        state
-    }
-
-    /// Drain the resolved version manifests as neutral tuples (for persistence).
-    pub(crate) fn into_resolver_cache(self) -> ResolverManifestCache {
-        ResolverManifestCache {
-            entries: self
-                .version
-                .cache
-                .into_iter()
-                .flat_map(|(name, by_spec)| {
-                    by_spec
-                        .into_iter()
-                        .map(move |(spec, manifest)| (name.clone(), spec, manifest))
-                })
-                .collect(),
-        }
-    }
-
     /// The cached version source for `name`, if any.
     pub(crate) fn package(&self, name: &str) -> Option<&PackageVersions> {
         self.packages.get(name)
@@ -306,24 +271,6 @@ mod tests {
             state.get_version_manifest("pkg", "1.2.3").unwrap().version,
             "1.2.3"
         );
-        assert_eq!(state.into_resolver_cache().entries.len(), 1);
-    }
-
-    #[test]
-    fn test_seeded_preloads_entries() {
-        let state = ManifestState::seeded(vec![(
-            "a".to_string(),
-            "^1".to_string(),
-            manifest("a", "1.0.0"),
-        )]);
-        assert_eq!(
-            state.get_version_manifest("a", "^1").unwrap().version,
-            "1.0.0"
-        );
-        assert_eq!(
-            state.get_version_manifest("a", "1.0.0").unwrap().version,
-            "1.0.0"
-        );
     }
 
     #[test]
@@ -333,24 +280,5 @@ mod tests {
         state.fail_version("pkg", "^1", "boom".to_string());
         assert_eq!(state.get_version_failure("pkg", "^1"), Some("boom"));
         assert!(state.is_version_settled("pkg", "^1"));
-    }
-
-    #[test]
-    fn test_into_resolver_cache_drains_both_keys() {
-        let mut state = ManifestState::default();
-        state.cache_version(
-            "pkg".to_string(),
-            "^1.0.0".to_string(),
-            manifest("pkg", "1.2.3"),
-        );
-        // Drains both the requested-spec and resolved-version entries.
-        let mut specs: Vec<String> = state
-            .into_resolver_cache()
-            .entries
-            .into_iter()
-            .map(|(_, spec, _)| spec)
-            .collect();
-        specs.sort();
-        assert_eq!(specs, ["1.2.3", "^1.0.0"]);
     }
 }

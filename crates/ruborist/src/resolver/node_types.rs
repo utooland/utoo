@@ -27,12 +27,16 @@ struct NodeFlags {
 /// - Root dependencies directly set the target node type
 /// - Prod dependencies propagate through prod edges
 /// - Dev/Optional flags propagate only when appropriate
+///
+/// Returns whether the target node's flags actually changed — the fixpoint uses
+/// this to decide whether to re-queue the target, without a second `get_node`
+/// read to diff (the mutable borrow here already has the before/after values).
 pub fn update_node_type_from_edge(
     graph: &mut DependencyGraph,
     from_index: NodeIndex,
     to_index: NodeIndex,
     edge_type: &EdgeType,
-) {
+) -> bool {
     // Extract source node information to avoid borrowing conflicts
     let source_flags = {
         let from_node = graph
@@ -50,6 +54,12 @@ pub fn update_node_type_from_edge(
     let to_node = graph
         .get_node_mut(to_index)
         .expect("Target node must exist in graph");
+    let before = (
+        to_node.is_prod,
+        to_node.is_dev,
+        to_node.is_optional,
+        to_node.is_peer,
+    );
 
     // Root node dependencies directly determine target type
     if source_flags.is_root {
@@ -103,6 +113,13 @@ pub fn update_node_type_from_edge(
             to_node.is_peer = true;
         }
     }
+
+    (
+        to_node.is_prod,
+        to_node.is_dev,
+        to_node.is_optional,
+        to_node.is_peer,
+    ) != before
 }
 
 /// Assign dependency types (prod/dev/optional/peer) across the whole graph.
@@ -153,15 +170,7 @@ pub fn compute_node_types(graph: &mut DependencyGraph) {
             .collect();
 
         for (to, edge_type) in edges {
-            let before = graph
-                .get_node(to)
-                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
-            update_node_type_from_edge(graph, src, to, &edge_type);
-            let after = graph
-                .get_node(to)
-                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
-
-            if before != after && queued.insert(to) {
+            if update_node_type_from_edge(graph, src, to, &edge_type) && queued.insert(to) {
                 worklist.push_back(to);
             }
         }

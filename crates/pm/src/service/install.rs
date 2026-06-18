@@ -12,7 +12,7 @@ use crate::helper::lock::{
     Package, UpdatePackageJsonOptions, extract_package_name, format_save_spec, group_by_depth,
     is_pkg_lock_outdated, resolve_package_spec, save_package_lock, update_package_json,
 };
-use crate::helper::ruborist_context::{Context, spawn_save_project_cache};
+use crate::helper::ruborist_context::Context;
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
@@ -224,15 +224,14 @@ async fn resolve_package_lock_with_scheduler(
     let (resolved_root, pkg) =
         utoo_ruborist::service::read_root_manifest(root_path, Context::glob()).await?;
     let options = Context::install_deps_options(resolved_root.clone(), scheduler).await;
-    let output = utoo_ruborist::service::build_deps(options, pkg).await?;
+    let lock = utoo_ruborist::service::build_deps(options, pkg).await?;
 
     // Persist at the resolved workspace root the lock was built against (not the
     // caller's possibly-nested `root_path`), so the lockfile and its root-relative
     // `resolved` paths stay consistent with where it lives.
-    save_package_lock(&resolved_root, &output.lock).await?;
-    spawn_save_project_cache(resolved_root, output.project_cache);
+    save_package_lock(&resolved_root, &lock).await?;
 
-    Ok(output.lock)
+    Ok(lock)
 }
 
 pub struct InstallService;
@@ -428,13 +427,7 @@ impl InstallService {
         let resolve_start = Instant::now();
         let options = Context::install_deps_options(root_path.clone(), scheduler.clone()).await;
         let lock = match utoo_ruborist::service::build_deps(options, pkg).await {
-            Ok(output) => {
-                // Persist the resolved manifests so the next global install into
-                // this prefix resolves warm (install_deps_options already loads
-                // this cache).
-                spawn_save_project_cache(root_path.clone(), output.project_cache);
-                output.lock
-            }
+            Ok(lock) => lock,
             Err(e) => {
                 scheduler_handle.shutdown().await;
                 return Err(e).context("Failed to resolve global package");
