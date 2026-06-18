@@ -1,0 +1,69 @@
+name: utoopm-binary-size
+
+# Reports the release `utoo` binary size on Linux + macOS and asserts that the
+# trimmed dependency set (no aws-lc-rs, no hickory) holds. Lets a size-focused
+# PR show the real shipped-artifact size on both platforms, since local builds
+# are usually one arch only. Manual + on PRs that touch the relevant crates.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/pm/**"
+      - "crates/ruborist/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/pm-binary-size.yml"
+
+jobs:
+  size:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+          targets: ${{ matrix.target }}
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Build release binary
+        run: cargo build --release --bin utoo --target ${{ matrix.target }} -p utoo-pm
+
+      - name: Report size
+        run: |
+          BIN="target/${{ matrix.target }}/release/utoo"
+          echo "## utoo release binary — ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh "$BIN"
+          BYTES=$(wc -c < "$BIN")
+          echo "- size: **$(numfmt --to=iec "$BYTES" 2>/dev/null || echo "$BYTES bytes")** ($BYTES bytes)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Assert trimmed dependency set
+        run: |
+          # These must NOT be linked: aws-lc (second crypto backend) and hickory
+          # (DNS resolver replaced by the custom getaddrinfo resolver).
+          fail=0
+          for crate in aws-lc-sys hickory-resolver hickory-proto; do
+            if cargo tree -p utoo-pm --target ${{ matrix.target }} -i "$crate" >/dev/null 2>&1; then
+              echo "::error::$crate is still linked — trimming regressed"
+              fail=1
+            else
+              echo "ok: $crate absent"
+            fi
+          done
+          # ring must be the sole TLS provider.
+          cargo tree -p utoo-pm --target ${{ matrix.target }} -i ring >/dev/null 2>&1 \
+            && echo "ok: ring present (sole TLS provider)" \
+            || { echo "::error::ring (TLS provider) missing"; fail=1; }
+          exit $fail
