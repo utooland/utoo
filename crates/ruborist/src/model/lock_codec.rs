@@ -20,6 +20,7 @@
 //!
 //! [`try_reuse_dependency`]: crate::resolver::placement::try_reuse_dependency
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -53,49 +54,46 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
         }
     }
 
-    // Importer paths already in the graph: the root (`""`) and every workspace
-    // member (`packages/<m>`), each pre-populated above. They must not be
-    // re-seeded — see the filter below.
-    let importer_paths: HashSet<String> = path_index.keys().cloned().collect();
-
-    // Insert entries parent-before-child so every physical parent already
-    // exists. Lockfile depth = number of `node_modules/` segments on the path.
-    let mut entries: Vec<(&String, &LockPackage)> = lock
+    // Normalize every lock key to its POSIX form up front and key the whole
+    // seeding pass off that. `path_index` already holds the importers under
+    // POSIX keys (`rel_lock_path` normalizes), and `parent_lock_path` /
+    // `path_index` lookups below all consume this key — so a lock written by an
+    // older utoo or a foreign tool with native separators (`packages\m`,
+    // `packages\m/node_modules/bar`) resolves its parents and skips its
+    // importers exactly like a POSIX one. Skip the entries the live graph
+    // already owns:
+    //   - the root (`""`),
+    //   - every link entry — workspace `node_modules/<name>` symlinks are
+    //     created by `add_workspace_member`, `file:<dir>` links are re-resolved
+    //     from the live importer edge,
+    //   - every workspace-member *source* entry (`packages/<m>`), already a
+    //     `Workspace` node in `path_index`. Re-seeding it would add a duplicate
+    //     plain node at the member's `node_modules/<name>` slot and clobber the
+    //     symlink lock entry in serialization, dropping the on-disk link.
+    let mut entries: Vec<(String, &LockPackage)> = lock
         .packages
         .iter()
-        // Skip three kinds of entry the live graph already owns:
-        //   - the root (`""`),
-        //   - every link entry — workspace `node_modules/<name>` symlinks are
-        //     created by `add_workspace_member`, `file:<dir>` links are
-        //     re-resolved from the live importer edge,
-        //   - every workspace-member *source* entry (`packages/<m>`), which
-        //     `add_workspace_member` already created as a `Workspace` node.
-        //     Re-seeding it would add a duplicate plain node at the same
-        //     `node_modules/<name>` slot as the member's link, and the two
-        //     collide in serialization — clobbering the symlink lock entry with
-        //     a full package copy and dropping the on-disk link.
-        //
-        // `importer_paths` keys are POSIX (`rel_lock_path` normalizes `\` to
-        // `/`), but a Windows lock can record a member's source entry with the
-        // native separator (`packages\m`), so normalize the key before matching.
-        .filter(|(path, pkg)| {
-            !path.is_empty() && !pkg.is_link() && !importer_paths.contains(&path.replace('\\', "/"))
-        })
+        .filter(|(path, pkg)| !path.is_empty() && !pkg.is_link())
+        .map(|(path, pkg)| (to_lock_key(path).into_owned(), pkg))
+        .filter(|(key, _)| !path_index.contains_key(key))
         .collect();
     // `sort_by_cached_key` evaluates `lock_path_depth` (string matching) once
-    // per entry rather than O(N log N) times.
-    entries.sort_by_cached_key(|(path, _)| lock_path_depth(path));
+    // per entry rather than O(N log N) times. Parent-before-child so every
+    // physical parent already exists when its children are inserted.
+    entries.sort_by_cached_key(|(key, _)| lock_path_depth(key));
 
-    // Record (path, node) for the second pass so edges resolve against the
-    // fully-populated index (a dep can hoist to any ancestor's node_modules).
-    let mut seeded: Vec<(String, NodeIndex)> = Vec::with_capacity(entries.len());
+    // Carry the `LockPackage` borrow into the second pass so edges resolve
+    // against the fully-populated index (a dep can hoist to any ancestor's
+    // node_modules) without re-keying into `lock.packages`.
+    let mut seeded: Vec<(String, NodeIndex, &LockPackage)> = Vec::with_capacity(entries.len());
 
-    for (path, pkg) in entries {
-        let Some(parent_index) = path_index.get(parent_lock_path(path)).copied() else {
+    for (key, pkg) in entries {
+        let Some(parent_index) = path_index.get(parent_lock_path(&key)).copied() else {
             // A parent that isn't in the graph means a malformed/partial lock;
             // skip this entry rather than panic — the BFS will resolve it fresh
-            // if the live tree still needs it.
-            tracing::debug!("seed: no parent for lock entry {path:?}, skipping");
+            // if the live tree still needs it. (`lock_is_consistent` already
+            // rejects such locks, so this is a defensive belt-and-braces skip.)
+            tracing::debug!("seed: no parent for lock entry {key:?}, skipping");
             continue;
         };
 
@@ -109,26 +107,35 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
         // name (for the manifest) comes from `get_name`; the slot name from the
         // path, falling back to the real name for paths with no `node_modules/`
         // segment (e.g. a workspace member).
-        let real_name = pkg.get_name(path);
-        let slot_name = LockPackage::path_to_pkg_name(path)
+        let real_name = pkg.get_name(&key);
+        let slot_name = LockPackage::path_to_pkg_name(&key)
             .map(str::to_string)
             .unwrap_or_else(|| real_name.clone());
         let manifest = Arc::new(lock_package_to_manifest(&real_name, pkg));
-        let node = PackageNode::from_version_manifest(slot_name, root_path.join(path), manifest);
+        let node = PackageNode::from_version_manifest(slot_name, root_path.join(&key), manifest);
         let index = graph.add_node(node);
         graph.add_physical_edge(parent_index, index);
-        path_index.insert(path.clone(), index);
-        seeded.push((path.clone(), index));
+        path_index.insert(key.clone(), index);
+        seeded.push((key, index, pkg));
     }
 
     // Second pass: seed each node's recorded dependency edges as resolved,
     // pointing at the node that occupies the hoisted slot the lock placed them
     // in. This keeps the seeded subtree connected without the BFS touching it.
-    for (path, index) in seeded {
-        let Some(pkg) = lock.packages.get(&path) else {
-            continue;
-        };
-        seed_resolved_edges(graph, &path, index, pkg, &path_index);
+    for (key, index, pkg) in seeded {
+        seed_resolved_edges(graph, &key, index, pkg, &path_index);
+    }
+}
+
+/// Normalize a lockfile path to its POSIX form (npm lock keys use `/`). Borrows
+/// when the path is already POSIX, so the common case allocates nothing. The one
+/// place separator normalization happens for reuse, shared by [`lock_to_graph`],
+/// [`lock_is_consistent`], and [`rel_lock_path`].
+fn to_lock_key(path: &str) -> Cow<'_, str> {
+    if path.contains('\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
     }
 }
 
@@ -221,15 +228,29 @@ fn resolve_dep_target(
 /// existence set includes link entries, so a cross-workspace dep satisfied
 /// through a `node_modules/<member>` symlink is not flagged.
 pub(crate) fn lock_is_consistent(lock: &PackageLock) -> bool {
-    let exists = |p: &str| lock.packages.contains_key(p);
+    // POSIX-normalized key set: an older utoo / foreign lock may record native
+    // separators, and seeding keys everything off the normalized form, so the
+    // gate must judge against the same view (else it could pass a lock whose
+    // nested keys seeding then fails to wire — a seeded-but-dangling edge).
+    let keys: HashSet<Cow<str>> = lock.packages.keys().map(|k| to_lock_key(k)).collect();
+    let exists = |p: &str| keys.contains(p);
     lock.packages.iter().all(|(path, pkg)| {
         if path.is_empty() || pkg.is_link() {
             return true;
         }
+        let key = to_lock_key(path);
+        // Every entry's physical parent must exist, or seeding finds no node to
+        // attach under and silently drops this subtree. The root ("") is
+        // implicit; a workspace-member source (`packages/<m>`) is a real entry,
+        // so it's in `keys`. A missing intermediate → cold-resolve instead.
+        let parent = parent_lock_path(&key);
+        if !parent.is_empty() && !keys.contains(parent) {
+            return false;
+        }
         pkg.dependencies
             .iter()
             .flatten()
-            .all(|(dep_name, _)| resolve_dep_path(path, dep_name, exists).is_some())
+            .all(|(dep_name, _)| resolve_dep_path(&key, dep_name, exists).is_some())
     })
 }
 
@@ -253,7 +274,7 @@ fn lock_path_depth(path: &str) -> usize {
 /// Returns `None` when `path` is not under `root_path`.
 fn rel_lock_path(path: &Path, root_path: &Path) -> Option<String> {
     let rel = path.strip_prefix(root_path).ok()?;
-    Some(rel.to_string_lossy().replace('\\', "/"))
+    Some(to_lock_key(&rel.to_string_lossy()).into_owned())
 }
 
 /// Build a [`CoreVersionManifest`] from a lockfile entry. The lock records
