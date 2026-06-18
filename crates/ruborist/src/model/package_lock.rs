@@ -2,7 +2,7 @@
 //!
 //! Shared types for serializing/deserializing npm lock files.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use petgraph::graph::NodeIndex;
@@ -16,14 +16,18 @@ use super::package_json::BinField;
 /// Serialize a string-keyed map with its keys in sorted order. The resolver
 /// fills these maps from `HashMap`s, whose iteration order is randomized per
 /// run, so without this the lock re-serializes in a different order every time —
-/// pure git churn, and a warm install that's no longer byte-identical. Collecting
-/// into a `BTreeMap` of borrows sorts the keys without cloning the values.
+/// pure git churn, and a warm install that's no longer byte-identical. Collect
+/// the borrows into a `Vec` and `sort_unstable` (one allocation + sort per map),
+/// rather than a `BTreeMap` that allocates a tree node per entry — this runs for
+/// every dependency map of every package on every install's serialize.
 fn sorted_map<S, V>(map: &HashMap<String, V>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
     V: Serialize,
 {
-    map.iter().collect::<BTreeMap<_, _>>().serialize(serializer)
+    let mut entries: Vec<(&String, &V)> = map.iter().collect();
+    entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    serializer.collect_map(entries)
 }
 
 /// [`sorted_map`] for an optional map field (paired with
@@ -33,9 +37,10 @@ where
     S: serde::Serializer,
     V: Serialize,
 {
-    map.as_ref()
-        .map(|m| m.iter().collect::<BTreeMap<_, _>>())
-        .serialize(serializer)
+    match map {
+        Some(m) => sorted_map(m, serializer),
+        None => serializer.serialize_none(),
+    }
 }
 use super::util::{PackageNameStr, deserialize_or_default};
 
