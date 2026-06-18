@@ -2,7 +2,7 @@
 //!
 //! Shared types for serializing/deserializing npm lock files.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use petgraph::graph::NodeIndex;
@@ -12,6 +12,31 @@ use super::compatibility::PlatformConstraint;
 use super::graph::DependencyGraph;
 use super::node::EdgeType;
 use super::package_json::BinField;
+
+/// Serialize a string-keyed map with its keys in sorted order. The resolver
+/// fills these maps from `HashMap`s, whose iteration order is randomized per
+/// run, so without this the lock re-serializes in a different order every time —
+/// pure git churn, and a warm install that's no longer byte-identical. Collecting
+/// into a `BTreeMap` of borrows sorts the keys without cloning the values.
+fn sorted_map<S, V>(map: &HashMap<String, V>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    V: Serialize,
+{
+    map.iter().collect::<BTreeMap<_, _>>().serialize(serializer)
+}
+
+/// [`sorted_map`] for an optional map field (paired with
+/// `skip_serializing_if = "Option::is_none"`, so `None` is omitted entirely).
+fn sorted_opt_map<S, V>(map: &Option<HashMap<String, V>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    V: Serialize,
+{
+    map.as_ref()
+        .map(|m| m.iter().collect::<BTreeMap<_, _>>())
+        .serialize(serializer)
+}
 use super::util::{PackageNameStr, deserialize_or_default};
 
 /// Represents a license field that can be either a string or an array of strings.
@@ -43,15 +68,27 @@ pub struct LockPackage {
     pub integrity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<License>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "sorted_opt_map"
+    )]
     pub dependencies: Option<HashMap<String, String>>,
-    #[serde(rename = "devDependencies", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "devDependencies",
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "sorted_opt_map"
+    )]
     pub dev_dependencies: Option<HashMap<String, String>>,
-    #[serde(rename = "peerDependencies", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "peerDependencies",
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "sorted_opt_map"
+    )]
     pub peer_dependencies: Option<HashMap<String, String>>,
     #[serde(
         rename = "optionalDependencies",
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "sorted_opt_map"
     )]
     pub optional_dependencies: Option<HashMap<String, String>>,
     #[serde(
@@ -63,7 +100,8 @@ pub struct LockPackage {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_or_default"
+        deserialize_with = "deserialize_or_default",
+        serialize_with = "sorted_opt_map"
     )]
     pub engines: Option<HashMap<String, String>>,
     #[serde(
@@ -78,7 +116,11 @@ pub struct LockPackage {
         deserialize_with = "deserialize_or_default"
     )]
     pub cpu: Option<PlatformConstraint>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "sorted_opt_map"
+    )]
     pub scripts: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer: Option<bool>,
@@ -188,6 +230,7 @@ pub struct PackageLock {
     pub lockfile_version: u32,
     #[serde(default)]
     pub requires: bool,
+    #[serde(serialize_with = "sorted_map")]
     pub packages: HashMap<String, LockPackage>,
 }
 
