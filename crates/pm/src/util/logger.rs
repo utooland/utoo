@@ -166,17 +166,13 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
 /// - `added`: packages linked into `node_modules/` this run
 /// - `reused`: tarballs served from the local cache (no network)
 /// - `downloaded`: tarballs fetched from the registry
-pub fn print_install_counts(
-    added: usize,
-    reused: usize,
-    downloaded: usize,
-    elapsed: Option<Duration>,
-) {
+pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
     let bytes = install_progress::downloaded_bytes();
     let traffic = if bytes > 0 {
-        // Average over the whole clone phase (download+extract+link wall time),
-        // so it reflects effective throughput rather than peak burst.
-        let avg = elapsed
+        // Average over the whole run (resolve + clone), matching the byte
+        // window: `downloaded_bytes` counts from `start_install_run`, including
+        // resolve-phase prefetch, so the divisor must start there too.
+        let avg = install_progress::run_elapsed()
             .map(|d| d.as_secs_f64())
             .filter(|s| *s > 0.0)
             .map(|s| format!(" @ {}/s", install_progress::human_bytes(bytes as f64 / s)))

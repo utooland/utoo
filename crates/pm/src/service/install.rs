@@ -379,12 +379,7 @@ impl InstallService {
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
 
-        print_install_counts(
-            counts.cloned,
-            counts.reused,
-            counts.downloaded,
-            Some(clone_elapsed),
-        );
+        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }
 
@@ -481,12 +476,7 @@ impl InstallService {
             .await
             .context("Failed to link binary files to global")?;
 
-        print_install_counts(
-            counts.cloned,
-            counts.reused,
-            counts.downloaded,
-            Some(clone_elapsed),
-        );
+        print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }
 }

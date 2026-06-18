@@ -12,7 +12,7 @@
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 use owo_colors::OwoColorize;
@@ -24,10 +24,18 @@ pub static DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
 /// Byte baseline captured at the start of the current logical install.
 static INSTALL_START_BYTES: AtomicU64 = AtomicU64::new(0);
 
+/// Wall-clock start of the current logical install, paired with the byte
+/// baseline so average-bandwidth reporting divides bytes and time over the
+/// *same* window (resolve-phase prefetch counts toward both, not just bytes).
+static INSTALL_START_TIME: Mutex<Option<Instant>> = Mutex::new(None);
+
 /// Start a new logical install run. The process-level byte counter keeps
 /// growing, while summaries and live progress report bytes after this baseline.
 pub fn start_install_run() {
     INSTALL_START_BYTES.store(DOWNLOADED_BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
+    if let Ok(mut start) = INSTALL_START_TIME.lock() {
+        *start = Some(Instant::now());
+    }
     reset_phase_state();
 }
 
@@ -36,6 +44,15 @@ pub fn downloaded_bytes() -> u64 {
     DOWNLOADED_BYTES
         .load(Ordering::Relaxed)
         .saturating_sub(INSTALL_START_BYTES.load(Ordering::Relaxed))
+}
+
+/// Elapsed time since [`start_install_run`], or `None` if no run has started.
+/// Pairs with [`downloaded_bytes`] for an average-throughput figure.
+pub fn run_elapsed() -> Option<Duration> {
+    INSTALL_START_TIME
+        .lock()
+        .ok()
+        .and_then(|start| start.map(|s| s.elapsed()))
 }
 
 /// In-flight tarball downloads. Surfaced as `N downloading` so the live request
@@ -277,9 +294,12 @@ pub fn human_bytes(bytes: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+
+    /// Serializes tests that touch process-global progress state
+    /// (`DOWNLOADED_BYTES`, the install baseline, and `RUNNING_SCRIPTS`), which
+    /// the default parallel test runner would otherwise race on.
+    static TEST_GUARD: Mutex<()> = Mutex::new(());
 
     fn empty_snapshot() -> Snapshot {
         Snapshot {
@@ -301,6 +321,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_surfaces_oldest_script() {
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let _a = track_script("a postinstall".to_string());
         let _b = track_script("b postinstall".to_string());
         let script = snapshot().script.expect("scripts registered");
@@ -350,6 +371,7 @@ mod tests {
 
     #[test]
     fn test_downloaded_bytes_are_per_install_run() {
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         DOWNLOADED_BYTES.store(1_000, Ordering::Relaxed);
         start_install_run();
         assert_eq!(downloaded_bytes(), 0);
