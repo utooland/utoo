@@ -1742,6 +1742,72 @@ echo -e "${GREEN}PASS: package-lock.json reuse warm re-install is a no-op${NC}"
 cd ../../../
 
 # ═══════════════════════════════════════════════════════════════
+# Case: bumping a shared dep past a transitive's range stays sound
+# ═══════════════════════════════════════════════════════════════
+# Baseline hoists is-number@6 at the root, shared by the root and is-odd@3.0.1
+# (which needs ^6). Bumping the root's own is-number to ^7 places is-number@7 at
+# the root slot while is-odd's seeded edge still pins is-number@6 there — two
+# reachable nodes in one node_modules slot, which the incremental path can't
+# re-nest. The resolver must detect that and cold-resolve, yielding the npm-
+# correct tree (is-number@7 hoisted, is-number@6 nested under is-odd) — and it
+# must be deterministic across repeats, not a last-wins coin flip.
+echo -e "${YELLOW}Case: reuse bump past a transitive's range cold-resolves cleanly${NC}"
+cd e2e/pm/lockfile-reuse
+rm -rf node_modules package-lock.json
+rm -rf ~/.cache/nm
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "is-number": "^6.0.0",
+    "is-odd": "3.0.1"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: baseline install failed for bump case${NC}"; exit 1; }
+node -e '
+const p = require("./package-lock.json").packages;
+if (p["node_modules/is-number"]?.version?.[0] !== "6") { console.error("baseline did not hoist is-number@6"); process.exit(1); }
+' || { echo -e "${RED}FAIL: bump baseline shape wrong${NC}"; exit 1; }
+# Bump the root's is-number to ^7 and reinstall through the reuse path.
+cat > package.json <<'PKG'
+{
+  "name": "lockfile-reuse",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "is-number": "^7.0.0",
+    "is-odd": "3.0.1"
+  }
+}
+PKG
+utoo install --ignore-scripts --registry=https://registry.npmjs.org \
+  || { echo -e "${RED}FAIL: bump reinstall failed${NC}"; exit 1; }
+node -e '
+const p = require("./package-lock.json").packages;
+const top = p["node_modules/is-number"]?.version;
+const nested = p["node_modules/is-odd/node_modules/is-number"]?.version;
+if (top?.[0] !== "7") { console.error("REGRESSION: root is-number not bumped to 7 (got " + top + ")"); process.exit(1); }
+if (nested?.[0] !== "6") { console.error("REGRESSION: is-odd did not nest is-number@6 (got " + nested + ")"); process.exit(1); }
+console.log("bump: is-number@7 hoisted, is-number@6 nested under is-odd");
+' || { echo -e "${RED}FAIL: bump produced an unsound tree${NC}"; exit 1; }
+cp package-lock.json package-lock.bump.json
+# Determinism: repeat installs must be byte-identical (no slot-collision coin flip).
+for _ in 1 2; do
+  utoo install --ignore-scripts --registry=https://registry.npmjs.org >/dev/null 2>&1 \
+    || { echo -e "${RED}FAIL: repeat install failed for bump case${NC}"; exit 1; }
+  if ! diff -q package-lock.bump.json package-lock.json >/dev/null; then
+    echo -e "${RED}FAIL: bump tree is nondeterministic across installs${NC}"; exit 1
+  fi
+done
+rm -f package-lock.bump.json
+echo -e "${GREEN}PASS: reuse bump past a transitive's range stays sound and deterministic${NC}"
+cd ../../../
+
+# ═══════════════════════════════════════════════════════════════
 # Case: lockfile reuse keeps a workspace's node_modules symlink
 # ═══════════════════════════════════════════════════════════════
 # A workspace member is reified as a `node_modules/<name>` symlink (a lock entry

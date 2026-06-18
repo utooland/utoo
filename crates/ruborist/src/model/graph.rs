@@ -534,6 +534,38 @@ impl DependencyGraph {
         reachable
     }
 
+    /// Whether any `node_modules` slot — a physical parent plus the directory
+    /// name a child serializes under — is occupied by more than one *reachable*
+    /// node.
+    ///
+    /// The reuse path can reach this state: a direct-dep version bump places a
+    /// fresh node at the parent's slot while a still-pinned transitive's frozen
+    /// seeded edge keeps the shadowed old node reachable at the *same* slot. The
+    /// graph can't re-nest the old copy (its dependents' edges are frozen at seed
+    /// time), so serialization would emit two entries at one lock key — last-wins
+    /// by traversal order, hence nondeterministic and internally inconsistent.
+    /// The caller treats a positive here as "baseline unusable" and cold-resolves.
+    ///
+    /// Keyed by `(is_workspace, name)`: a workspace member's `Workspace` node
+    /// (serialized `packages/<m>`) and its `node_modules/<m>` link/regular sibling
+    /// share a name but not a slot, so they must not count as a collision.
+    pub fn has_slot_collision(&self, reachable: &HashSet<NodeIndex>) -> bool {
+        for &parent in reachable {
+            let mut slots: HashSet<(bool, &str)> = HashSet::new();
+            for child in self.get_physical_children(parent) {
+                if !reachable.contains(&child) {
+                    continue;
+                }
+                if let Some(node) = self.get_node(child)
+                    && !slots.insert((node.is_workspace(), node.name.as_str()))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Find compatible node in parent chain for dependency resolution.
     ///
     /// For unconditional overrides (spec == "*"), uses the override target_spec.

@@ -127,7 +127,7 @@ where
     // (hand-edited, a partial install, or a foreign lock shaped unlike ours)
     // would seed dangling transitive edges — listed in the re-emitted lock but
     // never installed — so fall back to a cold resolve instead of reusing it.
-    let reuse_baseline = match &baseline {
+    let mut reuse_baseline = match &baseline {
         Some(lock) if crate::model::lock_codec::lock_is_consistent(lock) => true,
         Some(_) => {
             tracing::warn!(
@@ -152,76 +152,96 @@ where
         }
     }
 
-    // 2. Initialize dependency graph + root dependency edges (catalog: specs
-    //    resolved at edge creation).
-    let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
-    let root_index = graph.root_index;
-    let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
-    add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
-
-    // 3. Discover and add workspace packages. A synthetic global-install root has
-    //    no `workspaces` field, so this returns immediately without touching disk.
-    let discovery = WorkspaceDiscovery::new(glob);
-    let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
-    for workspace in workspaces {
-        tracing::debug!(
-            "Added workspace: {} at {:?}",
-            workspace.name,
-            workspace.path
-        );
-        add_workspace_member(
-            &mut graph,
-            root_index,
-            &workspace.name,
-            workspace.path,
-            &workspace.package_json,
-            &edge_ctx,
-        );
-    }
-    // Settle all importer-declared workspace: edges now that every member is
-    // attached — the BFS never sees a workspace: spec on the happy path.
-    resolve_workspace_member_edges(&mut graph);
-
-    // 3b. Seed the resolved tree from the existing lockfile (if any). Importer
-    //     edges stay unresolved (live, from the current manifests) so the BFS
-    //     resolves only the delta against the seeded nodes; everything pinned
-    //     by the lock is reused with no network I/O.
-    if reuse_baseline && let Some(lock) = &baseline {
-        crate::model::lock_codec::lock_to_graph(&mut graph, lock, &root_path);
-    }
-
-    // 4. The host supplies the stateless registry client (URL, store, semver,
-    //    auth) pre-built.
+    // The host supplies the stateless registry client (URL, store, semver, auth)
+    // pre-built.
     tracing::debug!(
         "Using registry: {} (semver: {})",
         registry.registry_url(),
         registry.supports_semver(),
     );
 
-    let mut config = BuildDepsConfig::default()
-        .with_peer_deps(peer_deps)
-        .with_concurrency(concurrency)
-        .with_catalogs(catalogs);
-    if let Some(dir) = cache_dir {
-        config = config.with_cache_dir(dir);
+    // Build → resolve → emit. Runs at most twice: if reuse produced a tree the
+    // incremental path can't make sound (a `node_modules` slot occupied by two
+    // reachable nodes — a bumped direct dep whose old version a transitive still
+    // pins, which can't be re-nested under a frozen seeded edge), discard the
+    // baseline and cold-resolve. The retry rebuilds a fresh graph, so no seeded
+    // state leaks across.
+    loop {
+        // 2. Initialize dependency graph + root dependency edges (catalog: specs
+        //    resolved at edge creation).
+        let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
+        let root_index = graph.root_index;
+        let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
+        add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
+
+        // 3. Discover and add workspace packages. A synthetic global-install root
+        //    has no `workspaces` field, so this returns immediately without disk.
+        let discovery = WorkspaceDiscovery::new(glob.clone());
+        let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
+        for workspace in workspaces {
+            tracing::debug!(
+                "Added workspace: {} at {:?}",
+                workspace.name,
+                workspace.path
+            );
+            add_workspace_member(
+                &mut graph,
+                root_index,
+                &workspace.name,
+                workspace.path,
+                &workspace.package_json,
+                &edge_ctx,
+            );
+        }
+        // Settle all importer-declared workspace: edges now that every member is
+        // attached — the BFS never sees a workspace: spec on the happy path.
+        resolve_workspace_member_edges(&mut graph);
+
+        // 3b. Seed the resolved tree from the existing lockfile (if any). Importer
+        //     edges stay unresolved (live, from the current manifests) so the BFS
+        //     resolves only the delta against the seeded nodes; everything pinned
+        //     by the lock is reused with no network I/O.
+        if reuse_baseline && let Some(lock) = &baseline {
+            crate::model::lock_codec::lock_to_graph(&mut graph, lock, &root_path);
+        }
+
+        let mut config = BuildDepsConfig::default()
+            .with_peer_deps(peer_deps)
+            .with_concurrency(concurrency)
+            .with_catalogs(catalogs.clone());
+        if let Some(dir) = &cache_dir {
+            config = config.with_cache_dir(dir.clone());
+        }
+
+        // Preserve the typed error via `Error::new` + `.context(...)` so CLI
+        // renderers (e.g. pm's format_print) can downcast and pretty-print the
+        // dependency chain carried by `ResolveError::WithChain`.
+        build_deps_with_config(&mut graph, &registry, config, &receiver)
+            .await
+            .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
+
+        // On the reuse path, prune nodes the BFS left orphaned (removed deps,
+        // versions shadowed by a re-resolved bump) before emitting the lock.
+        let (packages, _total) = if reuse_baseline {
+            let reachable = graph.reachable_nodes();
+            if graph.has_slot_collision(&reachable) {
+                tracing::warn!(
+                    "lockfile reuse left a node_modules slot conflict; cold-resolving instead"
+                );
+                reuse_baseline = false;
+                continue;
+            }
+            crate::model::package_lock::serialize_to_packages_filtered(
+                &graph,
+                &root_path,
+                Some(&reachable),
+            )
+        } else {
+            graph.serialize_to_packages(&root_path)
+        };
+
+        return Ok(PackageLock::new(&pkg.name, &pkg.version, packages));
     }
-
-    // Preserve the typed error via `Error::new` + `.context(...)` so CLI
-    // renderers (e.g. pm's format_print) can downcast and pretty-print the
-    // dependency chain carried by `ResolveError::WithChain`.
-    build_deps_with_config(&mut graph, &registry, config, &receiver)
-        .await
-        .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
-
-    // On the reuse path, prune nodes the BFS left orphaned (removed deps,
-    // versions shadowed by a re-resolved bump) before emitting the lock.
-    let (packages, _total) = if reuse_baseline {
-        graph.serialize_to_packages_pruned(&root_path)
-    } else {
-        graph.serialize_to_packages(&root_path)
-    };
-
-    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
 
 /// Resolve the workspace root for `cwd` and read its `package.json`. The

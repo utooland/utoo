@@ -954,4 +954,43 @@ try {
 }
 finally { Pop-Location }
 
+# ═══════════════════════════════════════════════════════════════
+# Case: bumping a shared dep past a transitive's range stays sound
+# ═══════════════════════════════════════════════════════════════
+# Baseline hoists is-number@6 (shared by the root and is-odd@3.0.1, which needs
+# ^6). Bumping the root's is-number to ^7 collides is-number@7 and the still-
+# pinned is-number@6 in one node_modules slot; the resolver must detect that and
+# cold-resolve to the npm-correct tree (is-number@7 hoisted, is-number@6 nested
+# under is-odd), deterministically across repeats.
+Write-Yellow "Case: reuse bump past a transitive's range cold-resolves cleanly"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ "is-number" = "^6.0.0"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for bump case" }
+    node -e "const p=require('./package-lock.json').packages;if(p['node_modules/is-number']?.version?.[0]!=='6'){console.error('baseline did not hoist is-number@6');process.exit(1)}"
+    if ($LASTEXITCODE -ne 0) { throw "bump baseline shape wrong" }
+
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ "is-number" = "^7.0.0"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "bump reinstall failed" }
+    node -e "const p=require('./package-lock.json').packages;const top=p['node_modules/is-number']?.version;const nested=p['node_modules/is-odd/node_modules/is-number']?.version;if(top?.[0]!=='7'){console.error('REGRESSION: root is-number not bumped to 7 (got '+top+')');process.exit(1)}if(nested?.[0]!=='6'){console.error('REGRESSION: is-odd did not nest is-number@6 (got '+nested+')');process.exit(1)}"
+    if ($LASTEXITCODE -ne 0) { throw "bump produced an unsound tree" }
+    Copy-Item package-lock.json package-lock.bump.json
+    foreach ($i in 1..2) {
+        utoo install --ignore-scripts --registry=https://registry.npmjs.org | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "repeat install failed for bump case" }
+        if ((Get-Content -Raw package-lock.bump.json) -ne (Get-Content -Raw package-lock.json)) {
+            throw "bump tree is nondeterministic across installs"
+        }
+    }
+    Remove-Item package-lock.bump.json, node_modules, package-lock.json -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Green "PASS: reuse bump past a transitive's range stays sound and deterministic"
+}
+finally { Pop-Location }
+
 Write-Green "All e2e tests passed successfully!"
