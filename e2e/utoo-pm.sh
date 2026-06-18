@@ -29,6 +29,41 @@ rm -rf ~/.cache/nm
 time utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x${NC}"; exit 1; }
 utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
+
+# Reuse path on a large real workspace: adding then removing a dependency must
+# touch only that dependency's subtree and round-trip the lockfile byte-for-byte
+# — never redraw the ~5900-entry tree or drop a workspace symlink. Regression
+# guard for the lockfile-reuse seeding bug surfaced while profiling ant-design/x:
+# an `npm:` alias was seeded under its real package name instead of its
+# node_modules slot, so the aliased copy collided with the genuine package, lost
+# its slot, was pruned, left a dangling edge, tripped the consistency gate, and
+# forced a non-deterministic full cold re-resolve on every other install.
+echo -e "${YELLOW}Case 1b: ant-design-x add/remove dependency keeps the tree stable${NC}"
+cp package-lock.json package-lock.baseline.json
+base_links=$(node -e 'const l=require("./package-lock.json").packages;console.log(Object.keys(l).filter(k=>l[k].link).length)')
+utoo install cowsay@1.5.0 --ignore-scripts || { echo -e "${RED}FAIL: add cowsay failed (ant-design-x)${NC}"; exit 1; }
+node -e '
+const base=require("./package-lock.baseline.json").packages, now=require("./package-lock.json").packages;
+const kb=new Set(Object.keys(base));
+const added=Object.keys(now).filter(k=>!kb.has(k));
+const removed=[...kb].filter(k=>!now[k]);
+if(!now["node_modules/cowsay"]){console.error("cowsay not added");process.exit(1);}
+if(removed.length){console.error("REGRESSION: adding cowsay dropped "+removed.length+" existing entries (tree explosion)");process.exit(1);}
+if(added.length>80){console.error("REGRESSION: adding cowsay grew the tree by "+added.length+" entries (expected only its subtree)");process.exit(1);}
+console.log("add: +"+added.length+" entries (cowsay subtree), 0 existing dropped");
+' || exit 1
+utoo uninstall cowsay --ignore-scripts || { echo -e "${RED}FAIL: remove cowsay failed (ant-design-x)${NC}"; exit 1; }
+now_links=$(node -e 'const l=require("./package-lock.json").packages;console.log(Object.keys(l).filter(k=>l[k].link).length)')
+if [ "$base_links" != "$now_links" ]; then
+  echo -e "${RED}FAIL: workspace symlinks changed ($base_links -> $now_links) after add/remove${NC}"; exit 1
+fi
+if ! diff -q package-lock.baseline.json package-lock.json >/dev/null; then
+  echo -e "${RED}FAIL: add+remove did not round-trip the lockfile (reuse churned the tree)${NC}"
+  diff package-lock.baseline.json package-lock.json | head -40
+  exit 1
+fi
+rm -f package-lock.baseline.json
+echo -e "${GREEN}PASS: ant-design-x add/remove keeps the tree stable (byte-identical round-trip)${NC}"
 cd ../../
 
 # Case 2: Clone and install ant-design
@@ -42,6 +77,32 @@ rm -rf ~/.cache/nm
 echo "Installing dependencies for ant-design..."
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
+
+# Same reuse round-trip guard on the large non-workspace tree (~5100 entries):
+# add a leaf dependency, then remove it, and the lockfile must return to a
+# byte-identical baseline — proving the reuse path preserves the existing tree
+# instead of redrawing (and reshuffling) it.
+echo -e "${YELLOW}Case 2b: ant-design add/remove dependency keeps the tree stable${NC}"
+cp package-lock.json package-lock.baseline.json
+utoo install cowsay@1.5.0 --ignore-scripts || { echo -e "${RED}FAIL: add cowsay failed (ant-design)${NC}"; exit 1; }
+node -e '
+const base=require("./package-lock.baseline.json").packages, now=require("./package-lock.json").packages;
+const kb=new Set(Object.keys(base));
+const added=Object.keys(now).filter(k=>!kb.has(k));
+const removed=[...kb].filter(k=>!now[k]);
+if(!now["node_modules/cowsay"]){console.error("cowsay not added");process.exit(1);}
+if(removed.length){console.error("REGRESSION: adding cowsay dropped "+removed.length+" existing entries (tree explosion)");process.exit(1);}
+if(added.length>80){console.error("REGRESSION: adding cowsay grew the tree by "+added.length+" entries (expected only its subtree)");process.exit(1);}
+console.log("add: +"+added.length+" entries (cowsay subtree), 0 existing dropped");
+' || exit 1
+utoo uninstall cowsay --ignore-scripts || { echo -e "${RED}FAIL: remove cowsay failed (ant-design)${NC}"; exit 1; }
+if ! diff -q package-lock.baseline.json package-lock.json >/dev/null; then
+  echo -e "${RED}FAIL: add+remove did not round-trip the lockfile (reuse churned the tree)${NC}"
+  diff package-lock.baseline.json package-lock.json | head -40
+  exit 1
+fi
+rm -f package-lock.baseline.json
+echo -e "${GREEN}PASS: ant-design add/remove keeps the tree stable (byte-identical round-trip)${NC}"
 cd ../../
 
 # Case 3: antd-test project install

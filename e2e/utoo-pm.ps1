@@ -35,6 +35,26 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "utoo rebuild failed for ant-design-x (next)" }
 
         Write-Green "PASS: ant-design-x (next) cloned and installed"
+
+        # Reuse round-trip guard: add then remove a dependency; the lockfile must
+        # return byte-identical, proving the reuse path preserves the existing
+        # ~5900-entry workspace tree (and its symlinks) instead of redrawing it.
+        Write-Yellow "Case 1b: ant-design-x add/remove dependency keeps the tree stable"
+        Copy-Item package-lock.json package-lock.baseline.json -Force
+        $baseLinks = node -e "const l=require('./package-lock.json').packages;console.log(Object.keys(l).filter(k=>l[k].link).length)"
+        utoo install cowsay@1.5.0 --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "add cowsay failed (ant-design-x)" }
+        node -e "const b=require('./package-lock.baseline.json').packages,n=require('./package-lock.json').packages;const kb=new Set(Object.keys(b));const added=Object.keys(n).filter(k=>!kb.has(k));const removed=[...kb].filter(k=>!n[k]);if(!n['node_modules/cowsay']){console.error('cowsay not added');process.exit(1)}if(removed.length){console.error('REGRESSION: adding cowsay dropped '+removed.length+' existing entries (tree explosion)');process.exit(1)}if(added.length>80){console.error('REGRESSION: adding cowsay grew the tree by '+added.length+' entries');process.exit(1)}console.log('add: +'+added.length+' entries (cowsay subtree), 0 existing dropped')"
+        if ($LASTEXITCODE -ne 0) { throw "adding cowsay exploded the tree (ant-design-x)" }
+        utoo uninstall cowsay --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "remove cowsay failed (ant-design-x)" }
+        $nowLinks = node -e "const l=require('./package-lock.json').packages;console.log(Object.keys(l).filter(k=>l[k].link).length)"
+        if ($baseLinks -ne $nowLinks) { throw "workspace symlinks changed ($baseLinks -> $nowLinks) after add/remove (ant-design-x)" }
+        if ((Get-FileHash package-lock.baseline.json).Hash -ne (Get-FileHash package-lock.json).Hash) {
+            throw "add+remove did not round-trip the lockfile (reuse churned the tree, ant-design-x)"
+        }
+        Remove-Item package-lock.baseline.json -Force
+        Write-Green "PASS: ant-design-x add/remove keeps the tree stable (byte-identical round-trip)"
     }
     finally {
         Pop-Location
@@ -59,8 +79,25 @@ try {
         # Use --ignore-scripts to skip prepare hook that causes @swc/core native binding issues on Windows
         utoo install --ignore-scripts
         if ($LASTEXITCODE -ne 0) { throw "utoo install failed for ant-design" }
-        
+
         Write-Green "PASS: ant-design cloned and installed"
+
+        # Same reuse round-trip guard on the large non-workspace tree (~5100
+        # entries): add a leaf dependency, then remove it, and the lockfile must
+        # return to a byte-identical baseline.
+        Write-Yellow "Case 2b: ant-design add/remove dependency keeps the tree stable"
+        Copy-Item package-lock.json package-lock.baseline.json -Force
+        utoo install cowsay@1.5.0 --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "add cowsay failed (ant-design)" }
+        node -e "const b=require('./package-lock.baseline.json').packages,n=require('./package-lock.json').packages;const kb=new Set(Object.keys(b));const added=Object.keys(n).filter(k=>!kb.has(k));const removed=[...kb].filter(k=>!n[k]);if(!n['node_modules/cowsay']){console.error('cowsay not added');process.exit(1)}if(removed.length){console.error('REGRESSION: adding cowsay dropped '+removed.length+' existing entries (tree explosion)');process.exit(1)}if(added.length>80){console.error('REGRESSION: adding cowsay grew the tree by '+added.length+' entries');process.exit(1)}console.log('add: +'+added.length+' entries (cowsay subtree), 0 existing dropped')"
+        if ($LASTEXITCODE -ne 0) { throw "adding cowsay exploded the tree (ant-design)" }
+        utoo uninstall cowsay --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "remove cowsay failed (ant-design)" }
+        if ((Get-FileHash package-lock.baseline.json).Hash -ne (Get-FileHash package-lock.json).Hash) {
+            throw "add+remove did not round-trip the lockfile (reuse churned the tree, ant-design)"
+        }
+        Remove-Item package-lock.baseline.json -Force
+        Write-Green "PASS: ant-design add/remove keeps the tree stable (byte-identical round-trip)"
     }
     finally {
         Pop-Location
