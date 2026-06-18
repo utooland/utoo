@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use utoo_ruborist::lock::PackageLock;
-use utoo_ruborist::service::{BuildDepsOptions, BuildDepsOutput, Glob, UnifiedRegistry};
+use utoo_ruborist::service::{BuildDepsOptions, Glob, UnifiedRegistry};
 use utoo_ruborist::workspace::WorkspaceDiscovery;
 
 use crate::fs;
@@ -13,7 +13,6 @@ use crate::util::cache::get_cache_dir;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::logger::ProgressReceiver;
 use crate::util::manifest_store::DiskManifestStore;
-use crate::util::project_cache;
 use crate::util::user_config::{
     get_catalogs, get_manifests_concurrency_limit, get_peer_deps, get_registry, get_supports_semver,
 };
@@ -52,23 +51,15 @@ impl Context {
 
         // Reuse an existing `package-lock.json` as the resolved-tree baseline:
         // the resolver seeds the prior tree and resolves only the delta, so
-        // `ut install <pkg>` adds a node instead of recomputing (and
-        // reshuffling) the whole tree. The lockfile pins every resolved
-        // manifest, so it supersedes the `.utoo-manifest.json` project cache —
-        // only fall back to that cache when there is no usable lockfile (a fresh
-        // project, or a global install with no lock).
+        // `ut install <pkg>` adds a node instead of recomputing (and reshuffling)
+        // the whole tree. A fresh project (or a global install with no lock)
+        // cold-resolves.
         let baseline = load_baseline(&cwd).await;
-        let project_cache = if baseline.is_some() {
-            None
-        } else {
-            Some(project_cache::load(&cwd).await)
-        };
 
         BuildDepsOptions {
             cwd,
             registry: Self::registry().await,
             cache_dir: Some(get_cache_dir()),
-            project_cache,
             concurrency: get_manifests_concurrency_limit().await,
             peer_deps: get_peer_deps().await,
             glob: TokioGlob,
@@ -87,16 +78,13 @@ impl Context {
         Self::deps_options(cwd, receiver).await
     }
 
-    /// Resolve dependency tree with plain ProgressReceiver. Returns
-    /// [`BuildDepsOutput`] (lock + project cache); the project cache is
-    /// persisted in the background.
-    pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<BuildDepsOutput> {
+    /// Resolve the dependency tree with a plain ProgressReceiver, returning the
+    /// `package-lock.json`.
+    pub async fn build_deps(cwd: PathBuf) -> anyhow::Result<PackageLock> {
         let (root_path, pkg) =
             utoo_ruborist::service::read_root_manifest(&cwd, Self::glob()).await?;
-        let options = Self::deps_options(root_path.clone(), ProgressReceiver).await;
-        let output = utoo_ruborist::service::build_deps(options, pkg).await?;
-        spawn_save_project_cache(root_path, output.project_cache.clone());
-        Ok(output)
+        let options = Self::deps_options(root_path, ProgressReceiver).await;
+        utoo_ruborist::service::build_deps(options, pkg).await
     }
 
     /// Create a UnifiedRegistry with standard configuration, including the
@@ -153,20 +141,4 @@ async fn load_baseline(cwd: &Path) -> Option<PackageLock> {
             None
         }
     }
-}
-
-/// Persist the project cache in the background — fire-and-forget so the
-/// resolver doesn't pay write latency on its critical path.
-pub(crate) fn spawn_save_project_cache(
-    cwd: PathBuf,
-    data: utoo_ruborist::service::ProjectCacheData,
-) {
-    if data.cache.is_empty() {
-        return;
-    }
-    tokio::spawn(async move {
-        if let Err(e) = project_cache::save(&cwd, &data).await {
-            tracing::warn!("Failed to save project cache: {e}");
-        }
-    });
 }

@@ -23,9 +23,9 @@ use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
-use crate::resolver::demand::{ManifestState, ResolverManifestCache, run_main_loop_bfs};
+use crate::resolver::demand::{ManifestState, run_main_loop_bfs};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::service::{ManifestProvider, ProjectCacheData};
+use crate::service::ManifestProvider;
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::ResolvedPackage;
@@ -123,9 +123,6 @@ pub struct BuildDepsConfig {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
-    /// Host-provided project cache used to seed the resolver-owned manifest
-    /// cache. Consumed by the demand mainloop.
-    pub project_cache: Option<ProjectCacheData>,
 }
 
 impl Default for BuildDepsConfig {
@@ -137,7 +134,6 @@ impl Default for BuildDepsConfig {
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
             catalogs: HashMap::new(),
-            project_cache: None,
         }
     }
 }
@@ -164,12 +160,6 @@ impl BuildDepsConfig {
     /// Set catalog definitions for `catalog:` protocol resolution.
     pub fn with_catalogs(mut self, catalogs: Catalogs) -> Self {
         self.catalogs = catalogs;
-        self
-    }
-
-    /// Seed the resolver-owned manifest cache with a host-provided project cache.
-    pub fn with_project_cache(mut self, project_cache: Option<ProjectCacheData>) -> Self {
-        self.project_cache = project_cache;
         self
     }
 }
@@ -756,6 +746,9 @@ where
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
+/// Demand-driven dependency resolution: a single BFS loop that schedules
+/// manifest jobs through the [`ManifestProvider`] while owning the per-run
+/// manifest cache, waiters, and in-flight de-duplication.
 pub async fn build_deps_with_config<R, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -766,33 +759,13 @@ where
     R: ManifestProvider,
     R::Error: Send,
 {
-    build_deps_with_config_output(graph, registry, config, receiver)
-        .await
-        .map(|_| ())
-}
-
-/// Demand-driven dependency resolution: a single BFS loop that schedules
-/// manifest jobs through the [`ManifestProvider`] while owning the per-run
-/// manifest cache, waiters, and in-flight de-duplication. Returns the
-/// manifests resolved this run for the host to persist.
-pub(crate) async fn build_deps_with_config_output<R, E>(
-    graph: &mut DependencyGraph,
-    registry: &R,
-    config: BuildDepsConfig,
-    receiver: &E,
-) -> Result<ResolverManifestCache, ResolveError<R::Error>>
-where
-    R: ManifestProvider,
-    R::Error: Send,
-    E: EventReceiver,
-{
     tracing::debug!(
         "Starting demand dependency build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
         config.concurrency
     );
 
-    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
+    run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
     // The BFS only builds graph structure; assign all node types in one pass now
     // that the tree is complete, so prod-ness reaches every transitive dep.
@@ -802,7 +775,7 @@ where
         total_nodes: graph.graph.node_count(),
     });
 
-    Ok(manifest_cache)
+    Ok(())
 }
 
 // ============================================================================

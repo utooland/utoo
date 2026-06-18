@@ -228,9 +228,8 @@ fn rel_lock_path(path: &Path, root_path: &Path) -> Option<String> {
 /// Build a [`CoreVersionManifest`] from a lockfile entry. The lock records
 /// everything the resolver and the round-trip serializer need for a pinned
 /// node: version, the tarball/integrity (as `dist`), the dependency maps, and
-/// the package metadata (`bin`/`engines`/`os`/`cpu`/`scripts`/`license`). This
-/// is why the on-disk `.utoo-manifest.json` project cache is redundant on the
-/// reuse path — the lockfile is itself the warm cache.
+/// the package metadata (`bin`/`engines`/`os`/`cpu`/`scripts`/`license`) — so
+/// the lockfile is itself the warm cache on the reuse path.
 fn lock_package_to_manifest(name: &str, pkg: &LockPackage) -> CoreVersionManifest {
     CoreVersionManifest {
         name: name.to_string(),

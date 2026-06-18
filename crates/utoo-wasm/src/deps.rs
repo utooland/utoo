@@ -46,7 +46,6 @@ pub async fn build_deps_from_file(
             .store(Arc::new(NoopStore))
             .build(),
         cache_dir: None,
-        project_cache: None,
         concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENCY),
         peer_deps: PeerDeps::Skip,
         glob: OpfsGlob,
@@ -57,5 +56,5 @@ pub async fn build_deps_from_file(
         baseline: None,
     };
 
-    build_deps(options, pkg).await.map(|output| output.lock)
+    build_deps(options, pkg).await
 }

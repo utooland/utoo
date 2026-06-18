@@ -66,18 +66,18 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
     if needs_regenerate {
         tracing::debug!("Resolving dependencies");
-        let output = Context::build_deps(root_path.to_path_buf()).await?;
+        let lock = Context::build_deps(root_path.to_path_buf()).await?;
 
         // Write to disk asynchronously in background
         let path = root_path.to_path_buf();
-        let lock_clone = output.lock.clone();
+        let lock_clone = lock.clone();
         tokio::spawn(async move {
             if let Err(e) = save_package_lock(&path, &lock_clone).await {
                 tracing::warn!("Failed to save package-lock.json: {e}");
             }
         });
 
-        return Ok(output.lock);
+        return Ok(lock);
     }
 
     // Load existing package-lock.json only when it's valid and up-to-date

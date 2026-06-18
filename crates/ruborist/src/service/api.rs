@@ -9,14 +9,14 @@
 //! use utoo_ruborist::service::{build_deps, BuildDepsOptions};
 //! use utoo_ruborist::progress::NoopReceiver;
 //!
-//! let output = build_deps(BuildDepsOptions::new(
+//! let lock = build_deps(BuildDepsOptions::new(
 //!     PathBuf::from("."),
 //!     my_glob,
 //!     NoopReceiver,
 //! )).await?;
 //!
 //! // Serialize to JSON
-//! let json = serde_json::to_string_pretty(&output.lock)?;
+//! let json = serde_json::to_string_pretty(&lock)?;
 //! ```
 
 use std::collections::HashMap;
@@ -24,7 +24,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 
-use super::cache::ProjectCacheData;
 use super::fs::Glob;
 use super::registry::UnifiedRegistry;
 use crate::model::graph::DependencyGraph;
@@ -32,7 +31,7 @@ use crate::model::package_json::PackageJson;
 use crate::model::package_lock::PackageLock;
 use crate::resolver::builder::{
     BuildDepsConfig, DevDeps, EdgeContext, PeerDeps, add_edges_from, add_workspace_member,
-    build_deps_with_config_output, resolve_workspace_member_edges,
+    build_deps_with_config, resolve_workspace_member_edges,
 };
 use crate::resolver::runtime::install_runtime_from_map;
 use crate::resolver::workspace::WorkspaceDiscovery;
@@ -51,9 +50,6 @@ pub struct BuildDepsOptions<G, R> {
     /// Tarball cache directory passed through to non-registry resolvers
     /// (http/tarball, native-git). Unrelated to manifest disk cache.
     pub cache_dir: Option<PathBuf>,
-    /// Project-level warm cache pre-loaded by the host. Seeds the demand
-    /// resolver's manifest cache so a warm install skips re-fetching.
-    pub project_cache: Option<ProjectCacheData>,
     /// Maximum concurrent network requests
     pub concurrency: usize,
     /// How to handle peer dependencies.
@@ -70,9 +66,7 @@ pub struct BuildDepsOptions<G, R> {
     /// `model::lock_codec::lock_to_graph`) so the resolver only does work for the delta —
     /// added/changed/removed direct deps — and the prior tree's layout is
     /// preserved verbatim. `None` (or an internally inconsistent lock, see
-    /// `lock_codec::lock_is_consistent`) falls back to a full cold resolve. When
-    /// the lock is actually reused it supersedes `project_cache` — it already
-    /// pins every resolved manifest — so `project_cache` is ignored on that path.
+    /// `lock_codec::lock_is_consistent`) falls back to a full cold resolve.
     pub baseline: Option<PackageLock>,
 }
 
@@ -89,7 +83,6 @@ impl<G, R> BuildDepsOptions<G, R> {
                 .registry("https://registry.npmmirror.com")
                 .build(),
             cache_dir: None,
-            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob,
@@ -100,31 +93,20 @@ impl<G, R> BuildDepsOptions<G, R> {
     }
 }
 
-/// Output of [`build_deps`].
-///
-/// `project_cache` carries the manifests resolved during this run; the host
-/// decides whether and where to persist it (typically to
-/// `node_modules/.utoo-manifest.json`). It is empty when no resolutions
-/// happened.
-pub struct BuildDepsOutput {
-    pub lock: PackageLock,
-    pub project_cache: ProjectCacheData,
-}
-
-/// Build dependency tree from an **in-memory root manifest** `pkg` and return
-/// [`BuildDepsOutput`]. `options.cwd` is the resolution root, already resolved by
-/// the caller — a normal install reads it via [`read_root_manifest`]; a global
-/// install (`utoo install -g`, `utoo x`) synthesizes a private root
+/// Build dependency tree from an **in-memory root manifest** `pkg` and return the
+/// resolved `package-lock.json`. `options.cwd` is the resolution root, already
+/// resolved by the caller — a normal install reads it via [`read_root_manifest`];
+/// a global install (`utoo install -g`, `utoo x`) synthesizes a private root
 /// `{ dependencies: { <tool>: <spec> } }` so the tool resolves as a *dependency*
 /// (no `prepare`/`prepublish`, no `devDependencies`). It:
 /// 1. Injects runtime dependencies (node-bin packages from engines.install-node)
 /// 2. Builds the graph and adds root + workspace edges
 /// 3. Resolves all dependencies using the registry
-/// 4. Returns a [`BuildDepsOutput`] with the package lock and the new project cache
+/// 4. Returns the package lock
 pub async fn build_deps<G, R>(
     options: BuildDepsOptions<G, R>,
     mut pkg: PackageJson,
-) -> Result<BuildDepsOutput>
+) -> Result<PackageLock>
 where
     G: Glob + Clone,
     R: EventReceiver,
@@ -133,7 +115,6 @@ where
         cwd: root_path,
         registry,
         cache_dir,
-        project_cache,
         concurrency,
         peer_deps,
         glob,
@@ -155,11 +136,6 @@ where
         }
         ok
     });
-
-    // The lockfile baseline pins every resolved manifest itself, so the
-    // separate manifest project cache is redundant — and seeding both would
-    // duplicate the warm state. Drop it only when we actually reuse the lock.
-    let project_cache = if reuse_baseline { None } else { project_cache };
 
     // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
@@ -214,8 +190,7 @@ where
     }
 
     // 4. The host supplies the stateless registry client (URL, store, semver,
-    //    auth) pre-built. The warm `project_cache` seeds the demand resolver's
-    //    manifest cache directly via `BuildDepsConfig::project_cache` below.
+    //    auth) pre-built.
     tracing::debug!(
         "Using registry: {} (semver: {})",
         registry.registry_url(),
@@ -225,8 +200,7 @@ where
     let mut config = BuildDepsConfig::default()
         .with_peer_deps(peer_deps)
         .with_concurrency(concurrency)
-        .with_catalogs(catalogs)
-        .with_project_cache(project_cache);
+        .with_catalogs(catalogs);
     if let Some(dir) = cache_dir {
         config = config.with_cache_dir(dir);
     }
@@ -234,7 +208,7 @@ where
     // Preserve the typed error via `Error::new` + `.context(...)` so CLI
     // renderers (e.g. pm's format_print) can downcast and pretty-print the
     // dependency chain carried by `ResolveError::WithChain`.
-    let manifest_cache = build_deps_with_config_output(&mut graph, &registry, config, &receiver)
+    build_deps_with_config(&mut graph, &registry, config, &receiver)
         .await
         .map_err(|e| anyhow::Error::new(e).context("Dependency resolution failed"))?;
 
@@ -246,13 +220,7 @@ where
         graph.serialize_to_packages(&root_path)
     };
 
-    // Export the manifests resolved this run for the host to persist.
-    let project_cache = ProjectCacheData::from_resolved(manifest_cache.entries);
-
-    Ok(BuildDepsOutput {
-        lock: PackageLock::new(&pkg.name, &pkg.version, packages),
-        project_cache,
-    })
+    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
 
 /// Resolve the workspace root for `cwd` and read its `package.json`. The
@@ -289,7 +257,6 @@ mod tests {
                 .registry("https://registry.npmmirror.com")
                 .build(),
             cache_dir: None,
-            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
@@ -318,7 +285,6 @@ mod tests {
                 .registry("https://registry.npmmirror.com")
                 .build(),
             cache_dir: None,
-            project_cache: None,
             concurrency: 20,
             peer_deps: PeerDeps::Skip,
             glob: NoopGlob,
@@ -329,42 +295,10 @@ mod tests {
         let mut pkg = PackageJson::new("utoo-global", "0.0.0");
         pkg.private = Some(true);
 
-        let output = build_deps(options, pkg)
+        let lock = build_deps(options, pkg)
             .await
             .expect("in-memory synthetic root should resolve offline");
-        assert!(output.lock.packages.contains_key(""), "root entry present");
-        assert_eq!(output.lock.packages.len(), 1, "no deps → only the root");
-    }
-
-    #[test]
-    fn test_project_cache_export_scoped_packages() {
-        // Test that scoped packages are correctly parsed when exporting project cache
-        // This ensures "@babel/core@^7.0.0" is parsed as ("@babel/core", "^7.0.0")
-        // not ("", "babel/core@^7.0.0")
-        let test_cases = [
-            // (input, expected_name, expected_spec)
-            ("@babel/core@^7.0.0", "@babel/core", "^7.0.0"),
-            ("@types/node@^18.0.0", "@types/node", "^18.0.0"),
-            ("@scope/pkg@1.0.0", "@scope/pkg", "1.0.0"),
-            ("lodash@^4.17.0", "lodash", "^4.17.0"),
-            ("express@4.18.0", "express", "4.18.0"),
-        ];
-
-        for (input, expected_name, expected_spec) in test_cases {
-            let (name, spec) = crate::model::util::parse_package_spec(input);
-            assert_eq!(
-                name, expected_name,
-                "Failed for input '{}': expected name '{}', got '{}'",
-                input, expected_name, name
-            );
-            assert_eq!(
-                spec, expected_spec,
-                "Failed for input '{}': expected spec '{}', got '{}'",
-                input, expected_spec, spec
-            );
-        }
-
-        let buggy_result = "@babel/core@^7.0.0".split_once('@');
-        assert_eq!(buggy_result, Some(("", "babel/core@^7.0.0")));
+        assert!(lock.packages.contains_key(""), "root entry present");
+        assert_eq!(lock.packages.len(), 1, "no deps → only the root");
     }
 }
