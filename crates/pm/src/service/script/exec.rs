@@ -39,7 +39,7 @@ async fn build_script_command(
         .env("npm_package_json", package.path.join("package.json"))
         .env("npm_config_global", get_install_scope().as_env_value());
 
-    if let Some(envs) = get_envs().await {
+    if let Some(envs) = get_envs() {
         tracing::debug!(
             "Injecting {} binary mirror envs for {}",
             envs.len(),

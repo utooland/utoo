@@ -781,20 +781,15 @@ finally {
 
 
 # ═══════════════════════════════════════════════════════════════
-# Case: latest binary-mirror-config still parses under our schema
+# Case: bundled binary-mirror-config applies on a non-npm registry
 # ═══════════════════════════════════════════════════════════════
-# `binary-mirror-config`'s `mirrors.china` map is parsed into a strongly-typed
-# schema (crates/pm/src/service/binary.rs). The whole map deserializes as one
-# unit, so a single drifted entry fails the parse and silently disables the
-# China mirror layer for every package — `get_envs()`/`update_package_binary()`
-# swallow the error as a debug log. (`flow-bin` ships `replaceHost` as a bare
-# string, not an array, which previously broke the parse.)
-#
-# Guard against upstream drift: install against a non-npm registry (npm.org has
-# no mirror layer and is skipped) with --verbose, then assert the config loaded
-# and did NOT fail to parse. flow-bin is the dep on purpose — it is the exact
-# entry that regressed.
-Write-Yellow "Case: latest binary-mirror-config parses under our schema"
+# `binary-mirror-config` is bundled at build time (crates/pm/src/service/
+# binary-mirror-config.json) — no runtime fetch — and its parse under our strict
+# schema is guarded by a unit test. This case is the integration check: install
+# against a non-npm registry (npm.org is skipped) with --verbose and assert the
+# bundled mirror layer loaded for a mirror-matched package. flow-bin is the dep
+# on purpose — its bare-string `replaceHost` is the entry that once broke parse.
+Write-Yellow "Case: bundled binary-mirror-config applies on a non-npm registry"
 $bmcDir = Join-Path $env:TEMP "utoo-e2e-bmc-$(Get-Random)"
 try {
     New-Item -ItemType Directory -Path $bmcDir -Force | Out-Null
@@ -810,16 +805,13 @@ try {
         # mirror config is loaded on the clone path regardless of script exec.
         $bmcOut = utoo install --registry=https://registry.npmmirror.com --ignore-scripts --verbose 2>&1
         $bmcOut | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw "utoo install failed for binary-mirror-config parse test" }
+        if ($LASTEXITCODE -ne 0) { throw "utoo install failed for binary-mirror-config test" }
 
-        if ($bmcOut -match "Failed to parse binary mirror config") {
-            throw "latest binary-mirror-config no longer matches our schema (mirrors.china drift)"
-        }
-        if (-not ($bmcOut -match "Binary mirror config loaded:")) {
-            throw "binary-mirror-config was never parsed (registry unreachable or mirror layer skipped)"
+        if (-not ($bmcOut -match "Bundled binary mirror config:")) {
+            throw "bundled binary-mirror-config was never applied (mirror layer skipped)"
         }
 
-        Write-Green "PASS: latest binary-mirror-config parses cleanly"
+        Write-Green "PASS: bundled binary-mirror-config applied"
     }
     finally { Pop-Location }
 }
