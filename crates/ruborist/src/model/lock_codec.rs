@@ -80,10 +80,22 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
             continue;
         };
 
-        let name = pkg.get_name(path);
-        let manifest = Arc::new(lock_package_to_manifest(&name, pkg));
-        let node =
-            PackageNode::from_version_manifest(name, root_path.join(path), Arc::clone(&manifest));
+        // A node's name is its node_modules *directory* segment — the slot key
+        // the cold resolver hoists and serializes by. For an `npm:` alias this
+        // differs from the package's real name: the entry at
+        // `node_modules/string-width-cjs` records `name: "string-width"`. Using
+        // the real name here would collide an aliased copy with the genuine
+        // package in the name-keyed child index — one loses its slot and is
+        // pruned, leaving a dangling dependency in the re-emitted lock. The real
+        // name (for the manifest) comes from `get_name`; the slot name from the
+        // path, falling back to the real name for paths with no `node_modules/`
+        // segment (e.g. a workspace member).
+        let real_name = pkg.get_name(path);
+        let slot_name = LockPackage::path_to_pkg_name(path)
+            .map(str::to_string)
+            .unwrap_or_else(|| real_name.clone());
+        let manifest = Arc::new(lock_package_to_manifest(&real_name, pkg));
+        let node = PackageNode::from_version_manifest(slot_name, root_path.join(path), manifest);
         let index = graph.add_node(node);
         graph.add_physical_edge(parent_index, index);
         path_index.insert(path.clone(), index);
