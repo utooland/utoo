@@ -223,14 +223,12 @@ where
 
     /// Apply a dependency override for `edge`, returning the manifest to install.
     ///
-    /// The override is routed through the per-run manifest cache: a sibling
-    /// edge's already-resolved override is reused (single-flight within the
-    /// run), and a freshly-resolved one is recorded so it persists to the
-    /// project cache. Without this, every edge sharing an override re-fetches
-    /// it and the overridden manifest is omitted from the warm cache, forcing a
-    /// network round-trip on every subsequent install. Falls back to the
-    /// original manifest when no override applies or the override fails to
-    /// resolve.
+    /// The override is routed through the per-run manifest cache so sibling
+    /// edges sharing the same override resolve it once (single-flight within the
+    /// run) instead of each re-fetching it. Across runs the overridden version
+    /// is pinned in the lockfile and seeded by the reuse path, so it isn't
+    /// re-resolved on the next install either. Falls back to the original
+    /// manifest when no override applies or the override fails to resolve.
     async fn apply_override(
         &self,
         graph: &mut DependencyGraph,
