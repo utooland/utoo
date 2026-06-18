@@ -790,4 +790,131 @@ finally {
     Remove-Item -Recurse -Force $bmcDir -ErrorAction SilentlyContinue
 }
 
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — adding a dep doesn't redraw the tree
+# ═══════════════════════════════════════════════════════════════
+# A fresh install writes the baseline lock. Adding one leaf dependency must
+# REUSE that lock: every prior package keeps its exact version and `resolved`,
+# and the only new entries belong to the added package's own subtree.
+Write-Yellow "Case: package-lock.json reuse keeps existing tree stable"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for lockfile-reuse" }
+    Copy-Item package-lock.json package-lock.before.json
+
+    # is-number@7.0.0 has no dependencies of its own (a leaf add).
+    utoo install is-number@7.0.0 --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "add is-number failed for lockfile-reuse" }
+
+    $check = @'
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+for (const [key, pkg] of Object.entries(before)) {
+  if (key === "" || pkg.link) continue;
+  const now = after[key];
+  if (!now) { console.error("REGRESSION: lost lock entry " + key); process.exit(1); }
+  if (now.version !== pkg.version) { console.error("REGRESSION: " + key + " version changed"); process.exit(1); }
+  if (now.resolved !== pkg.resolved) { console.error("REGRESSION: " + key + " resolved changed"); process.exit(1); }
+}
+if (!after["node_modules/is-number"]) { console.error("is-number not added to lockfile"); process.exit(1); }
+const newKeys = Object.keys(after).filter((k) => !(k in before));
+const unexpected = newKeys.filter((k) => k !== "node_modules/is-number");
+if (unexpected.length) { console.error("REGRESSION: unrelated entries added: " + unexpected.join(", ")); process.exit(1); }
+console.log("lock reuse: " + Object.keys(before).length + " preserved, +" + newKeys.length + " added");
+'@
+    Set-Content -Path check.js -Value $check
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "adding a dep redrew the existing lock tree" }
+    Remove-Item check.js, package-lock.before.json -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse keeps existing tree stable"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse prunes a removed dep's orphaned subtree
+# ═══════════════════════════════════════════════════════════════
+# Removing a dep must drop it AND any transitive only it pulled in. Baseline
+# carries debug (→ ms) and is-odd (→ is-number); removing is-odd prunes both
+# is-odd and the orphaned is-number, while debug + ms survive untouched.
+Write-Yellow "Case: package-lock.json reuse prunes a removed dep"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true;
+        dependencies = @{ debug = "4.3.4"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for prune case" }
+    $base = @'
+const p = require("./package-lock.json").packages;
+for (const k of ["node_modules/debug","node_modules/ms","node_modules/is-odd","node_modules/is-number"]) {
+  if (!p[k]) { console.error("baseline missing " + k); process.exit(1); }
+}
+'@
+    Set-Content -Path check.js -Value $base
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "prune baseline did not contain the expected tree" }
+    Copy-Item package-lock.json package-lock.before.json
+
+    # Remove is-odd, reinstall via the reuse path.
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "reinstall after removal failed" }
+    $check = @'
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+for (const k of ["node_modules/is-odd", "node_modules/is-number"]) {
+  if (after[k]) { console.error("REGRESSION: " + k + " not pruned after removal"); process.exit(1); }
+}
+for (const k of ["node_modules/debug", "node_modules/ms"]) {
+  if (!after[k]) { console.error("REGRESSION: lost " + k); process.exit(1); }
+  if (after[k].version !== before[k].version || after[k].resolved !== before[k].resolved) {
+    console.error("REGRESSION: " + k + " changed during prune"); process.exit(1);
+  }
+}
+console.log("prune: is-odd + orphaned is-number removed, debug + ms preserved");
+'@
+    Set-Content -Path check.js -Value $check
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "removing a dep did not prune its orphaned subtree" }
+    Remove-Item check.js, package-lock.before.json -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse prunes a removed dep"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — warm re-install is a faithful no-op
+# ═══════════════════════════════════════════════════════════════
+# Reseeding the prior tree and re-resolving an unchanged manifest must converge
+# to a byte-identical lock — no churn, no reordering, no re-pin.
+Write-Yellow "Case: package-lock.json reuse warm re-install is a no-op"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "cold install failed for no-op case" }
+    Copy-Item package-lock.json package-lock.cold.json
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "warm reinstall failed for no-op case" }
+    if ((Get-Content -Raw package-lock.cold.json) -ne (Get-Content -Raw package-lock.json)) {
+        throw "warm re-install changed the lockfile (reuse is not a faithful no-op)"
+    }
+    Remove-Item package-lock.cold.json, node_modules, package-lock.json -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse warm re-install is a no-op"
+}
+finally { Pop-Location }
+
 Write-Green "All e2e tests passed successfully!"
