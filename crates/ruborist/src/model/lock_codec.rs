@@ -1,34 +1,22 @@
-//! The `DependencyGraph` ↔ `package-lock.json` codec.
+//! Reconstruct a [`DependencyGraph`] from a `package-lock.json` — the inverse of
+//! [`super::package_lock::serialize_to_packages`].
 //!
-//! Two inverse directions, kept together so the round-trip is one unit:
-//! - **serialize** (graph → lock): [`graph_to_lock`] / [`graph_to_lock_filtered`],
-//!   re-exported from [`super::package_lock`] where the `LockPackage`-building
-//!   impl lives.
-//! - **deserialize** (lock → graph): [`lock_to_graph`], below.
+//! [`lock_to_graph`] seeds the *already-resolved* tree the lockfile encodes so
+//! the demand resolver only works the **delta** (added/changed/removed direct
+//! deps) instead of recomputing — and, under concurrent placement, reshuffling —
+//! the whole tree. [`lock_is_consistent`] gates that reuse: an internally
+//! incomplete lock cold-resolves instead of seeding dangling edges.
 //!
-//! ## Why deserialize exists
+//! Composition with graph init: the caller (`service::api::build_deps`) has
+//! already created the root, added its **live** (unresolved) dependency edges,
+//! attached workspace members, and settled `workspace:` edges. `lock_to_graph`
+//! then inserts every regular (non-root, non-link) lock entry as a pinned node
+//! with a synthetic manifest, and seeds its recorded dep edges as resolved.
 //!
-//! Reconstructing the *already-resolved* tree encoded by the lockfile lets the
-//! demand resolver do work only for the **delta** — newly added, changed, or
-//! removed direct dependencies — instead of recomputing (and, under concurrent
-//! placement, reshuffling) the whole tree.
-//!
-//! How [`lock_to_graph`] composes with graph init:
-//! - The caller (`service::api::build_deps`) has already created the root node,
-//!   added the root's **live** dependency edges from the current `package.json`
-//!   (unresolved), attached workspace members, and settled `workspace:` edges.
-//! - [`lock_to_graph`] then inserts every *regular* (non-root, non-link)
-//!   lockfile entry as a pinned node at its locked physical path, with a
-//!   synthetic manifest derived from the lock entry, and seeds that node's
-//!   recorded dependency edges as **already resolved**.
-//!
-//! The BFS that follows only enqueues *unresolved* edges (the live importer
-//! edges), and its pre-fetch reuse probe ([`try_reuse_dependency`]) matches them
-//! against the seeded nodes with no network I/O. Pinned transitive edges are
-//! never re-examined. Anything the loop re-resolves (a bumped direct dep) is
-//! placed fresh and shadows the stale seeded node in the last-wins child index;
-//! the stale node then falls out of the reachable set and is dropped by the
-//! pruning pass ([`graph_to_lock_filtered`]) at serialize time.
+//! The BFS then only enqueues the live unresolved edges; its reuse probe
+//! ([`try_reuse_dependency`]) matches them against seeded nodes with no I/O. A
+//! re-resolved (bumped) dep shadows its stale seeded node, which then falls out
+//! of the reachable set and is dropped by the prune at serialize time.
 //!
 //! [`try_reuse_dependency`]: crate::resolver::placement::try_reuse_dependency
 
@@ -43,16 +31,8 @@ use crate::model::manifest::{CoreVersionManifest, Dist};
 use crate::model::node::EdgeType;
 use crate::model::package_lock::{License, LockPackage, PackageLock};
 
-// The serialize half of the codec. The `LockPackage`-building impl stays in
-// `package_lock` (next to the types and their private helpers); these aliases
-// give the codec a single, symmetric surface alongside [`lock_to_graph`].
-pub use crate::model::package_lock::{
-    serialize_to_packages as graph_to_lock,
-    serialize_to_packages_filtered as graph_to_lock_filtered,
-};
-
-/// Deserialize: seed `graph` with the resolved tree encoded by `lock` (the
-/// inverse of [`graph_to_lock`]).
+/// Seed `graph` with the resolved tree encoded by `lock` (the inverse of
+/// [`super::package_lock::serialize_to_packages`]).
 ///
 /// `root_path` is the absolute workspace root the lockfile lives at; seeded node
 /// paths are built relative to it. The root and any workspace members are
