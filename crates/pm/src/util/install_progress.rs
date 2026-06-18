@@ -1,12 +1,13 @@
 //! Shared live-progress state for the install pipeline.
 //!
-//! The downloader feeds a cumulative byte counter and an in-flight download
-//! gauge, and the lifecycle-script queues register running scripts, from
-//! wherever they run (tokio tasks, rayon workers); a single render task —
-//! owned by `logger::start_progress_bar` —
-//! samples this every ~120ms via [`snapshot`] and composes the spinner line
-//! with [`compose_activity`] (left) and [`compose_summary`] (right). Writers
-//! never touch indicatif directly, so hot paths stay lock-free and per-event
+//! The downloader feeds a process-lifetime byte counter and an in-flight
+//! download gauge, and each install records a byte baseline so the renderer
+//! reports traffic for the current logical install only. Lifecycle-script queues
+//! register running scripts, from wherever they run (tokio tasks, rayon
+//! workers); a single render task — owned by `logger::start_progress_bar` —
+//! samples this every ~120ms via [`snapshot`] and composes the spinner line with
+//! [`compose_activity`] (left) and [`compose_summary`] (right). Writers never
+//! touch indicatif directly, so hot paths stay lock-free and per-event
 //! `set_message` contention disappears.
 
 use std::sync::Mutex;
@@ -16,9 +17,26 @@ use std::time::Instant;
 use once_cell::sync::Lazy;
 use owo_colors::OwoColorize;
 
-/// Cumulative tarball bytes fetched from the network this run (counted as
-/// chunks arrive, so retries count their real traffic).
+/// Process-lifetime tarball bytes fetched from the network (counted as chunks
+/// arrive, so retries count their real traffic).
 pub static DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Byte baseline captured at the start of the current logical install.
+static INSTALL_START_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// Start a new logical install run. The process-level byte counter keeps
+/// growing, while summaries and live progress report bytes after this baseline.
+pub fn start_install_run() {
+    INSTALL_START_BYTES.store(DOWNLOADED_BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
+    reset_phase_state();
+}
+
+/// Bytes downloaded since [`start_install_run`] was last called.
+pub fn downloaded_bytes() -> u64 {
+    DOWNLOADED_BYTES
+        .load(Ordering::Relaxed)
+        .saturating_sub(INSTALL_START_BYTES.load(Ordering::Relaxed))
+}
 
 /// In-flight tarball downloads. Surfaced as `N downloading` so the live request
 /// concurrency stays visible; unlike the per-stage extract/link gauges this one
@@ -87,8 +105,9 @@ impl Drop for ScriptGuard {
     }
 }
 
-/// Reset per-phase state (activity line, script registry). The byte counter is
-/// left alone: it is cumulative for the whole run.
+/// Reset per-phase state (activity line, script registry). The byte counter and
+/// install baseline are left alone so resolve-time prefetch traffic remains
+/// visible during the later clone/script phases of the same install.
 pub fn reset_phase_state() {
     set_activity("");
     if let Ok(mut scripts) = RUNNING_SCRIPTS.lock() {
@@ -128,7 +147,7 @@ pub fn snapshot() -> Snapshot {
         .map(|activity| activity.clone())
         .unwrap_or_default();
     Snapshot {
-        bytes: DOWNLOADED_BYTES.load(Ordering::Relaxed),
+        bytes: downloaded_bytes(),
         downloading: DOWNLOADING.load(Ordering::Relaxed),
         script,
         activity,
@@ -325,6 +344,19 @@ mod tests {
         // Speed drops off below 1 B/s; download count drops off once drained.
         snap.downloading = 0;
         assert_eq!(compose_summary(&snap, 0.0), "↓ 23.4 MB");
+    }
+
+    #[test]
+    fn test_downloaded_bytes_are_per_install_run() {
+        DOWNLOADED_BYTES.store(1_000, Ordering::Relaxed);
+        start_install_run();
+        assert_eq!(downloaded_bytes(), 0);
+
+        DOWNLOADED_BYTES.fetch_add(250, Ordering::Relaxed);
+        assert_eq!(downloaded_bytes(), 250);
+
+        start_install_run();
+        assert_eq!(downloaded_bytes(), 0);
     }
 
     #[test]

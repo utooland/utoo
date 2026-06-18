@@ -3,7 +3,6 @@ use std::env;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::util::install_progress;
@@ -173,7 +172,7 @@ pub fn print_install_counts(
     downloaded: usize,
     elapsed: Option<Duration>,
 ) {
-    let bytes = install_progress::DOWNLOADED_BYTES.load(Ordering::Relaxed);
+    let bytes = install_progress::downloaded_bytes();
     let traffic = if bytes > 0 {
         // Average over the whole clone phase (download+extract+link wall time),
         // so it reflects effective throughput rather than peak burst.
@@ -209,9 +208,7 @@ fn spawn_render_task() -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(120));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut meter = install_progress::SpeedMeter::new(
-            install_progress::DOWNLOADED_BYTES.load(Ordering::Relaxed),
-        );
+        let mut meter = install_progress::SpeedMeter::new(install_progress::downloaded_bytes());
         loop {
             interval.tick().await;
             let snap = install_progress::snapshot();
