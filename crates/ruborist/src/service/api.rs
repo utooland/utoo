@@ -127,15 +127,16 @@ where
     // (hand-edited, a partial install, or a foreign lock shaped unlike ours)
     // would seed dangling transitive edges — listed in the re-emitted lock but
     // never installed — so fall back to a cold resolve instead of reusing it.
-    let reuse_baseline = baseline.as_ref().is_some_and(|lock| {
-        let ok = crate::model::lock_codec::lock_is_consistent(lock);
-        if !ok {
+    let reuse_baseline = match &baseline {
+        Some(lock) if crate::model::lock_codec::lock_is_consistent(lock) => true,
+        Some(_) => {
             tracing::warn!(
                 "package-lock.json is internally inconsistent; cold-resolving instead of reusing it"
             );
+            false
         }
-        ok
-    });
+        None => false,
+    };
 
     // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
