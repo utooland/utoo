@@ -74,7 +74,13 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
         //     `node_modules/<name>` slot as the member's link, and the two
         //     collide in serialization — clobbering the symlink lock entry with
         //     a full package copy and dropping the on-disk link.
-        .filter(|(path, pkg)| !path.is_empty() && !pkg.is_link() && !importer_paths.contains(*path))
+        //
+        // `importer_paths` keys are POSIX (`rel_lock_path` normalizes `\` to
+        // `/`), but a Windows lock can record a member's source entry with the
+        // native separator (`packages\m`), so normalize the key before matching.
+        .filter(|(path, pkg)| {
+            !path.is_empty() && !pkg.is_link() && !importer_paths.contains(&path.replace('\\', "/"))
+        })
         .collect();
     // `sort_by_cached_key` evaluates `lock_path_depth` (string matching) once
     // per entry rather than O(N log N) times.
