@@ -35,6 +35,26 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "utoo rebuild failed for ant-design-x (next)" }
 
         Write-Green "PASS: ant-design-x (next) cloned and installed"
+
+        # Reuse round-trip guard: add then remove a dependency; the lockfile must
+        # return byte-identical, proving the reuse path preserves the existing
+        # ~5900-entry workspace tree (and its symlinks) instead of redrawing it.
+        Write-Yellow "Case 1b: ant-design-x add/remove dependency keeps the tree stable"
+        Copy-Item package-lock.json package-lock.baseline.json -Force
+        $baseLinks = node -e "const l=require('./package-lock.json').packages;console.log(Object.keys(l).filter(k=>l[k].link).length)"
+        utoo install cowsay@1.5.0 --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "add cowsay failed (ant-design-x)" }
+        node -e "const b=require('./package-lock.baseline.json').packages,n=require('./package-lock.json').packages;const kb=new Set(Object.keys(b));const added=Object.keys(n).filter(k=>!kb.has(k));const removed=[...kb].filter(k=>!n[k]);if(!n['node_modules/cowsay']){console.error('cowsay not added');process.exit(1)}if(removed.length){console.error('REGRESSION: adding cowsay dropped '+removed.length+' existing entries (tree explosion)');process.exit(1)}if(added.length>80){console.error('REGRESSION: adding cowsay grew the tree by '+added.length+' entries');process.exit(1)}console.log('add: +'+added.length+' entries (cowsay subtree), 0 existing dropped')"
+        if ($LASTEXITCODE -ne 0) { throw "adding cowsay exploded the tree (ant-design-x)" }
+        utoo uninstall cowsay --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "remove cowsay failed (ant-design-x)" }
+        $nowLinks = node -e "const l=require('./package-lock.json').packages;console.log(Object.keys(l).filter(k=>l[k].link).length)"
+        if ($baseLinks -ne $nowLinks) { throw "workspace symlinks changed ($baseLinks -> $nowLinks) after add/remove (ant-design-x)" }
+        if ((Get-FileHash package-lock.baseline.json).Hash -ne (Get-FileHash package-lock.json).Hash) {
+            throw "add+remove did not round-trip the lockfile (reuse churned the tree, ant-design-x)"
+        }
+        Remove-Item package-lock.baseline.json -Force
+        Write-Green "PASS: ant-design-x add/remove keeps the tree stable (byte-identical round-trip)"
     }
     finally {
         Pop-Location
@@ -59,8 +79,25 @@ try {
         # Use --ignore-scripts to skip prepare hook that causes @swc/core native binding issues on Windows
         utoo install --ignore-scripts
         if ($LASTEXITCODE -ne 0) { throw "utoo install failed for ant-design" }
-        
+
         Write-Green "PASS: ant-design cloned and installed"
+
+        # Same reuse round-trip guard on the large non-workspace tree (~5100
+        # entries): add a leaf dependency, then remove it, and the lockfile must
+        # return to a byte-identical baseline.
+        Write-Yellow "Case 2b: ant-design add/remove dependency keeps the tree stable"
+        Copy-Item package-lock.json package-lock.baseline.json -Force
+        utoo install cowsay@1.5.0 --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "add cowsay failed (ant-design)" }
+        node -e "const b=require('./package-lock.baseline.json').packages,n=require('./package-lock.json').packages;const kb=new Set(Object.keys(b));const added=Object.keys(n).filter(k=>!kb.has(k));const removed=[...kb].filter(k=>!n[k]);if(!n['node_modules/cowsay']){console.error('cowsay not added');process.exit(1)}if(removed.length){console.error('REGRESSION: adding cowsay dropped '+removed.length+' existing entries (tree explosion)');process.exit(1)}if(added.length>80){console.error('REGRESSION: adding cowsay grew the tree by '+added.length+' entries');process.exit(1)}console.log('add: +'+added.length+' entries (cowsay subtree), 0 existing dropped')"
+        if ($LASTEXITCODE -ne 0) { throw "adding cowsay exploded the tree (ant-design)" }
+        utoo uninstall cowsay --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "remove cowsay failed (ant-design)" }
+        if ((Get-FileHash package-lock.baseline.json).Hash -ne (Get-FileHash package-lock.json).Hash) {
+            throw "add+remove did not round-trip the lockfile (reuse churned the tree, ant-design)"
+        }
+        Remove-Item package-lock.baseline.json -Force
+        Write-Green "PASS: ant-design add/remove keeps the tree stable (byte-identical round-trip)"
     }
     finally {
         Pop-Location
@@ -789,5 +826,171 @@ try {
 finally {
     Remove-Item -Recurse -Force $bmcDir -ErrorAction SilentlyContinue
 }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — adding a dep doesn't redraw the tree
+# ═══════════════════════════════════════════════════════════════
+# A fresh install writes the baseline lock. Adding one leaf dependency must
+# REUSE that lock: every prior package keeps its exact version and `resolved`,
+# and the only new entries belong to the added package's own subtree.
+Write-Yellow "Case: package-lock.json reuse keeps existing tree stable"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for lockfile-reuse" }
+    Copy-Item package-lock.json package-lock.before.json
+
+    # is-number@7.0.0 has no dependencies of its own (a leaf add).
+    utoo install is-number@7.0.0 --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "add is-number failed for lockfile-reuse" }
+
+    $check = @'
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+for (const [key, pkg] of Object.entries(before)) {
+  if (key === "" || pkg.link) continue;
+  const now = after[key];
+  if (!now) { console.error("REGRESSION: lost lock entry " + key); process.exit(1); }
+  if (now.version !== pkg.version) { console.error("REGRESSION: " + key + " version changed"); process.exit(1); }
+  if (now.resolved !== pkg.resolved) { console.error("REGRESSION: " + key + " resolved changed"); process.exit(1); }
+}
+if (!after["node_modules/is-number"]) { console.error("is-number not added to lockfile"); process.exit(1); }
+const newKeys = Object.keys(after).filter((k) => !(k in before));
+const unexpected = newKeys.filter((k) => k !== "node_modules/is-number");
+if (unexpected.length) { console.error("REGRESSION: unrelated entries added: " + unexpected.join(", ")); process.exit(1); }
+console.log("lock reuse: " + Object.keys(before).length + " preserved, +" + newKeys.length + " added");
+'@
+    Set-Content -Path check.js -Value $check
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "adding a dep redrew the existing lock tree" }
+    Remove-Item check.js, package-lock.before.json -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse keeps existing tree stable"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse prunes a removed dep's orphaned subtree
+# ═══════════════════════════════════════════════════════════════
+# Removing a dep must drop it AND any transitive only it pulled in. Baseline
+# carries debug (→ ms) and is-odd (→ is-number); removing is-odd prunes both
+# is-odd and the orphaned is-number, while debug + ms survive untouched.
+Write-Yellow "Case: package-lock.json reuse prunes a removed dep"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true;
+        dependencies = @{ debug = "4.3.4"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for prune case" }
+    $base = @'
+const p = require("./package-lock.json").packages;
+for (const k of ["node_modules/debug","node_modules/ms","node_modules/is-odd","node_modules/is-number"]) {
+  if (!p[k]) { console.error("baseline missing " + k); process.exit(1); }
+}
+'@
+    Set-Content -Path check.js -Value $base
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "prune baseline did not contain the expected tree" }
+    Copy-Item package-lock.json package-lock.before.json
+
+    # Remove is-odd, reinstall via the reuse path.
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "reinstall after removal failed" }
+    $check = @'
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+for (const k of ["node_modules/is-odd", "node_modules/is-number"]) {
+  if (after[k]) { console.error("REGRESSION: " + k + " not pruned after removal"); process.exit(1); }
+}
+for (const k of ["node_modules/debug", "node_modules/ms"]) {
+  if (!after[k]) { console.error("REGRESSION: lost " + k); process.exit(1); }
+  if (after[k].version !== before[k].version || after[k].resolved !== before[k].resolved) {
+    console.error("REGRESSION: " + k + " changed during prune"); process.exit(1);
+  }
+}
+console.log("prune: is-odd + orphaned is-number removed, debug + ms preserved");
+'@
+    Set-Content -Path check.js -Value $check
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "removing a dep did not prune its orphaned subtree" }
+    Remove-Item check.js, package-lock.before.json -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse prunes a removed dep"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — warm re-install is a faithful no-op
+# ═══════════════════════════════════════════════════════════════
+# Reseeding the prior tree and re-resolving an unchanged manifest must converge
+# to a byte-identical lock — no churn, no reordering, no re-pin.
+Write-Yellow "Case: package-lock.json reuse warm re-install is a no-op"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "cold install failed for no-op case" }
+    Copy-Item package-lock.json package-lock.cold.json
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "warm reinstall failed for no-op case" }
+    if ((Get-Content -Raw package-lock.cold.json) -ne (Get-Content -Raw package-lock.json)) {
+        throw "warm re-install changed the lockfile (reuse is not a faithful no-op)"
+    }
+    Remove-Item package-lock.cold.json, node_modules, package-lock.json -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse warm re-install is a no-op"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: bumping a shared dep past a transitive's range stays sound
+# ═══════════════════════════════════════════════════════════════
+# Baseline hoists is-number@6 (shared by the root and is-odd@3.0.1, which needs
+# ^6). Bumping the root's is-number to ^7 collides is-number@7 and the still-
+# pinned is-number@6 in one node_modules slot; the resolver must detect that and
+# cold-resolve to the npm-correct tree (is-number@7 hoisted, is-number@6 nested
+# under is-odd), deterministically across repeats.
+Write-Yellow "Case: reuse bump past a transitive's range cold-resolves cleanly"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ "is-number" = "^6.0.0"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for bump case" }
+    node -e "const p=require('./package-lock.json').packages;if(p['node_modules/is-number']?.version?.[0]!=='6'){console.error('baseline did not hoist is-number@6');process.exit(1)}"
+    if ($LASTEXITCODE -ne 0) { throw "bump baseline shape wrong" }
+
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ "is-number" = "^7.0.0"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "bump reinstall failed" }
+    node -e "const p=require('./package-lock.json').packages;const top=p['node_modules/is-number']?.version;const nested=p['node_modules/is-odd/node_modules/is-number']?.version;if(top?.[0]!=='7'){console.error('REGRESSION: root is-number not bumped to 7 (got '+top+')');process.exit(1)}if(nested?.[0]!=='6'){console.error('REGRESSION: is-odd did not nest is-number@6 (got '+nested+')');process.exit(1)}"
+    if ($LASTEXITCODE -ne 0) { throw "bump produced an unsound tree" }
+    Copy-Item package-lock.json package-lock.bump.json
+    foreach ($i in 1..2) {
+        utoo install --ignore-scripts --registry=https://registry.npmjs.org | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "repeat install failed for bump case" }
+        if ((Get-Content -Raw package-lock.bump.json) -ne (Get-Content -Raw package-lock.json)) {
+            throw "bump tree is nondeterministic across installs"
+        }
+    }
+    Remove-Item package-lock.bump.json, node_modules, package-lock.json -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Green "PASS: reuse bump past a transitive's range stays sound and deterministic"
+}
+finally { Pop-Location }
 
 Write-Green "All e2e tests passed successfully!"

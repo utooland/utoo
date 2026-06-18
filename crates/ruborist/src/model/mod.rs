@@ -120,6 +120,7 @@
 pub mod compatibility;
 pub mod git;
 pub mod graph;
+pub mod lock_codec;
 pub mod manifest;
 pub mod node;
 pub mod override_match;
