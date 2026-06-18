@@ -14,6 +14,51 @@ permissions:
   contents: read
 
 jobs:
+  binary-size:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    name: utoopm-binary-size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Assert release dependency trim
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target
+          cargo tree -p utoo-pm --target x86_64-unknown-linux-gnu -e normal,build --prefix none > target/utoo-pm-release-tree.txt
+
+          if grep -E '^(h2|hickory-resolver|gix|aws-lc-rs) ' target/utoo-pm-release-tree.txt; then
+            echo "Unexpected heavyweight dependency found in utoo-pm release tree" >&2
+            exit 1
+          fi
+
+      - name: Build release binary
+        run: cargo build -p utoo-pm --release --bin utoo --target x86_64-unknown-linux-gnu
+
+      - name: Report binary size
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/x86_64-unknown-linux-gnu/release/utoo"
+          bytes="$(stat -c '%s' "$binary")"
+          {
+            echo "### utoo-pm binary size"
+            echo
+            echo "- target: x86_64-unknown-linux-gnu"
+            echo "- bytes: $bytes"
+            echo "- binary: $binary"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   test:
     if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     strategy:

@@ -136,52 +136,15 @@ pub(crate) fn get_client() -> Result<&'static reqwest::Client> {
     HTTP_CLIENT.as_ref().map_err(|e| anyhow!("{e}"))
 }
 
-/// Override reqwest's default `ring` with `aws-lc-rs` on macOS. Local
-/// M-series benchmarks show ~40 % faster cold resolves; CI bench-phases
-/// regresses on Linux/x86_64, so non-macOS targets keep ring via
-/// `rustls-tls-native-roots`.
-#[cfg(target_os = "macos")]
-fn build_rustls_config() -> Result<rustls::ClientConfig> {
-    // `install_default` consumes the provider by value, so we can't share
-    // it with the `Arc` below — `default_provider()` is cheap (a struct of
-    // function pointers), so the duplicate call is fine. Idempotent across
-    // the process; only the first call wins. Sets the default for any
-    // other rustls consumer (e.g. `gix`).
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-
-    let roots = rustls_native_certs::load_native_certs();
-    let mut root_store = rustls::RootCertStore::empty();
-    for cert in roots.certs {
-        // Tolerate individual bad roots so one broken cert in the OS
-        // trust store doesn't brick all requests.
-        let _ = root_store.add(cert);
-    }
-    if !roots.errors.is_empty() {
-        tracing::debug!(
-            "rustls-native-certs reported {} non-fatal load issues",
-            roots.errors.len()
-        );
-    }
-
-    let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
-        rustls::crypto::aws_lc_rs::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .context("rustls safe_default_protocol_versions")?
-    .with_root_certificates(root_store)
-    .with_no_client_auth();
-
-    Ok(config)
-}
-
 /// Create a [`reqwest::ClientBuilder`] with TLS, DNS caching, and proxy
 /// from environment variables.
 ///
 /// This is the shared base for all HTTP clients. Callers can further customize
 /// the builder (e.g. add `user_agent`, `http1_only`, timeouts) before building.
 ///
-/// On native targets: uses rustls TLS, caching DNS resolver, and reads proxy
-/// from `ALL_PROXY` > `HTTPS_PROXY` / `HTTP_PROXY` (and their lowercase variants).
+/// On native targets: uses reqwest's rustls TLS, caching DNS resolver, and
+/// reads proxy from `ALL_PROXY` > `HTTPS_PROXY` / `HTTP_PROXY` (and their
+/// lowercase variants).
 ///
 /// On WASM targets: returns a minimal builder (browser handles TLS, DNS, proxy).
 ///
@@ -201,11 +164,6 @@ pub fn client_builder() -> Result<reqwest::ClientBuilder> {
             // whole manifest fetch phase. An H1 pool lets concurrent
             // manifest requests open independent TCP streams instead.
             .http1_only();
-
-        #[cfg(target_os = "macos")]
-        {
-            builder = builder.use_preconfigured_tls(build_rustls_config()?);
-        }
 
         match env_var("ALL_PROXY") {
             Some(url) => {

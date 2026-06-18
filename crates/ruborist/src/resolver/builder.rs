@@ -30,7 +30,7 @@ use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::ResolvedPackage;
 
-/// Dispatch a git/github spec to the real `gix`-backed resolver when the
+/// Dispatch a git/github spec to the native resolver when the
 /// `native-git` feature is enabled, otherwise error with a hint.
 async fn resolve_git_dep(
     cache_dir: Option<&std::path::Path>,
