@@ -20,7 +20,7 @@
 //!
 //! [`try_reuse_dependency`]: crate::resolver::placement::try_reuse_dependency
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -53,15 +53,28 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
         }
     }
 
+    // Importer paths already in the graph: the root (`""`) and every workspace
+    // member (`packages/<m>`), each pre-populated above. They must not be
+    // re-seeded — see the filter below.
+    let importer_paths: HashSet<String> = path_index.keys().cloned().collect();
+
     // Insert entries parent-before-child so every physical parent already
     // exists. Lockfile depth = number of `node_modules/` segments on the path.
     let mut entries: Vec<(&String, &LockPackage)> = lock
         .packages
         .iter()
-        // Skip the root entry (already in the graph) and every link entry:
-        // workspace links are created by `add_workspace_member`, and `file:`
-        // links are re-resolved from the live importer edge when still declared.
-        .filter(|(path, pkg)| !path.is_empty() && !pkg.is_link())
+        // Skip three kinds of entry the live graph already owns:
+        //   - the root (`""`),
+        //   - every link entry — workspace `node_modules/<name>` symlinks are
+        //     created by `add_workspace_member`, `file:<dir>` links are
+        //     re-resolved from the live importer edge,
+        //   - every workspace-member *source* entry (`packages/<m>`), which
+        //     `add_workspace_member` already created as a `Workspace` node.
+        //     Re-seeding it would add a duplicate plain node at the same
+        //     `node_modules/<name>` slot as the member's link, and the two
+        //     collide in serialization — clobbering the symlink lock entry with
+        //     a full package copy and dropping the on-disk link.
+        .filter(|(path, pkg)| !path.is_empty() && !pkg.is_link() && !importer_paths.contains(*path))
         .collect();
     // `sort_by_cached_key` evaluates `lock_path_depth` (string matching) once
     // per entry rather than O(N log N) times.
