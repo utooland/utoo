@@ -69,9 +69,10 @@ pub struct BuildDepsOptions<G, R> {
     /// When present, the graph is seeded with this tree (see
     /// `model::lock_codec::lock_to_graph`) so the resolver only does work for the delta —
     /// added/changed/removed direct deps — and the prior tree's layout is
-    /// preserved verbatim. `None` falls back to a full cold resolve. The
-    /// lockfile supersedes `project_cache` on this path: it already pins every
-    /// resolved manifest, so `project_cache` is ignored when this is `Some`.
+    /// preserved verbatim. `None` (or an internally inconsistent lock, see
+    /// `lock_codec::lock_is_consistent`) falls back to a full cold resolve. When
+    /// the lock is actually reused it supersedes `project_cache` — it already
+    /// pins every resolved manifest — so `project_cache` is ignored on that path.
     pub baseline: Option<PackageLock>,
 }
 
@@ -141,14 +142,24 @@ where
         baseline,
     } = options;
 
+    // Only reuse a baseline that is internally complete. An incomplete lock
+    // (hand-edited, a partial install, or a foreign lock shaped unlike ours)
+    // would seed dangling transitive edges — listed in the re-emitted lock but
+    // never installed — so fall back to a cold resolve instead of reusing it.
+    let reuse_baseline = baseline.as_ref().is_some_and(|lock| {
+        let ok = crate::model::lock_codec::lock_is_consistent(lock);
+        if !ok {
+            tracing::warn!(
+                "package-lock.json is internally inconsistent; cold-resolving instead of reusing it"
+            );
+        }
+        ok
+    });
+
     // The lockfile baseline pins every resolved manifest itself, so the
     // separate manifest project cache is redundant — and seeding both would
-    // duplicate the warm state. Drop it on the reuse path.
-    let project_cache = if baseline.is_some() {
-        None
-    } else {
-        project_cache
-    };
+    // duplicate the warm state. Drop it only when we actually reuse the lock.
+    let project_cache = if reuse_baseline { None } else { project_cache };
 
     // 1. Inject runtime dependencies (node-bin packages)
     if let Some(engines) = &pkg.engines {
@@ -198,9 +209,8 @@ where
     //     edges stay unresolved (live, from the current manifests) so the BFS
     //     resolves only the delta against the seeded nodes; everything pinned
     //     by the lock is reused with no network I/O.
-    let reuse_baseline = baseline.is_some();
-    if let Some(lock) = baseline {
-        crate::model::lock_codec::lock_to_graph(&mut graph, &lock, &root_path);
+    if reuse_baseline && let Some(lock) = &baseline {
+        crate::model::lock_codec::lock_to_graph(&mut graph, lock, &root_path);
     }
 
     // 4. The host supplies the stateless registry client (URL, store, semver,

@@ -122,10 +122,12 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
 }
 
 /// Add `pkg`'s recorded dependency edges from the node at `index`, marking each
-/// resolved against the slot the lockfile hoisted it to. Edges whose target is
-/// absent (a skipped link, or an inconsistent lock) are left unresolved — they
+/// resolved against the slot the lockfile hoisted it to. A target may still be
+/// absent for a non-prod edge (an optional/peer dep with no entry) or one that
+/// resolves through a skipped link; such edges are left unresolved — they
 /// round-trip into the re-emitted lock entry but never enter the BFS, since a
-/// seeded node is not a freshly-created one.
+/// seeded node is not a freshly-created one. Prod-dep targets are guaranteed
+/// present: [`lock_is_consistent`] gates seeding on every prod dep resolving.
 fn seed_resolved_edges(
     graph: &mut DependencyGraph,
     path: &str,
@@ -151,16 +153,18 @@ fn seed_resolved_edges(
     }
 }
 
-/// Walk the npm hoisting chain from `from_path` upward, returning the node that
-/// satisfies `dep_name` at the nearest ancestor `node_modules/` — mirroring how
-/// the lockfile's physical layout resolves a dependency. Ancestors are reached
-/// by stripping the trailing `/node_modules/<seg>`; a path with no such segment
-/// (a workspace member) falls back to the project root.
-fn resolve_dep_target(
-    path_index: &HashMap<String, NodeIndex>,
+/// Walk the npm hoisting chain from `from_path` upward, returning the lockfile
+/// path that satisfies `dep_name` at the nearest ancestor `node_modules/` for
+/// which `exists` is true — mirroring how the lockfile's physical layout
+/// resolves a dependency. Ancestors are reached by stripping the trailing
+/// `/node_modules/<seg>`; a path with no such segment (a workspace member) falls
+/// back to the project root. Shared by [`resolve_dep_target`] (against the
+/// graph's path index) and [`lock_is_consistent`] (against the lock's keys).
+fn resolve_dep_path(
     from_path: &str,
     dep_name: &str,
-) -> Option<NodeIndex> {
+    exists: impl Fn(&str) -> bool,
+) -> Option<String> {
     let mut search: &str = from_path;
     loop {
         let candidate = if search.is_empty() {
@@ -168,8 +172,8 @@ fn resolve_dep_target(
         } else {
             format!("{search}/node_modules/{dep_name}")
         };
-        if let Some(&index) = path_index.get(&candidate) {
-            return Some(index);
+        if exists(&candidate) {
+            return Some(candidate);
         }
         if search.is_empty() {
             return None;
@@ -179,6 +183,43 @@ fn resolve_dep_target(
             None => "",
         };
     }
+}
+
+/// The seeded node that satisfies `dep_name` for the package at `from_path`.
+fn resolve_dep_target(
+    path_index: &HashMap<String, NodeIndex>,
+    from_path: &str,
+    dep_name: &str,
+) -> Option<NodeIndex> {
+    resolve_dep_path(from_path, dep_name, |p| path_index.contains_key(p))
+        .and_then(|p| path_index.get(&p).copied())
+}
+
+/// Whether `lock` is internally complete enough to seed: every **prod**
+/// dependency recorded in a regular (non-root, non-link) entry resolves — via
+/// npm hoisting — to *some* existing lock entry.
+///
+/// A `false` means the baseline is incomplete (hand-edited, a partial/aborted
+/// install, or a foreign lock shaped differently than ours): seeding it would
+/// leave those transitive edges dangling — listed in the re-emitted lock but
+/// never installed (a runtime `MODULE_NOT_FOUND`) — so the caller must
+/// cold-resolve instead of reusing it.
+///
+/// Only prod deps are checked: optional/peer deps may legitimately have no
+/// entry (an unmet peer, or an optional dep skipped on this platform). The
+/// existence set includes link entries, so a cross-workspace dep satisfied
+/// through a `node_modules/<member>` symlink is not flagged.
+pub(crate) fn lock_is_consistent(lock: &PackageLock) -> bool {
+    let exists = |p: &str| lock.packages.contains_key(p);
+    lock.packages.iter().all(|(path, pkg)| {
+        if path.is_empty() || pkg.is_link() {
+            return true;
+        }
+        pkg.dependencies
+            .iter()
+            .flatten()
+            .all(|(dep_name, _)| resolve_dep_path(path, dep_name, exists).is_some())
+    })
 }
 
 /// The lockfile path of the physical parent: everything before the final
@@ -596,5 +637,73 @@ mod tests {
             resolve_dep_target(&index, "node_modules/a", "missing"),
             None
         );
+    }
+
+    #[test]
+    fn test_lock_is_consistent_complete() {
+        let mut packages = HashMap::new();
+        packages.insert(String::new(), root_entry(&[("a", "^1.0.0")]));
+        packages.insert(
+            "node_modules/a".to_string(),
+            lock_entry("1.0.0", &[("b", "^1.0.0")]),
+        );
+        packages.insert("node_modules/b".to_string(), lock_entry("1.0.0", &[]));
+        let lock = PackageLock::new("root", "1.0.0", packages);
+        assert!(lock_is_consistent(&lock));
+    }
+
+    #[test]
+    fn test_lock_is_inconsistent_missing_transitive() {
+        // `a` records a prod dep on `b`, but `b` has no lock entry — seeding
+        // would dangle, so this must be rejected (→ cold resolve).
+        let mut packages = HashMap::new();
+        packages.insert(String::new(), root_entry(&[("a", "^1.0.0")]));
+        packages.insert(
+            "node_modules/a".to_string(),
+            lock_entry("1.0.0", &[("b", "^1.0.0")]),
+        );
+        let lock = PackageLock::new("root", "1.0.0", packages);
+        assert!(!lock_is_consistent(&lock));
+    }
+
+    #[test]
+    fn test_lock_is_consistent_ignores_missing_optional() {
+        // An optional dep with no entry (skipped on this platform) is fine.
+        let mut a = lock_entry("1.0.0", &[]);
+        a.optional_dependencies = Some(HashMap::from([("fsevents".to_string(), "^2".to_string())]));
+        let mut packages = HashMap::new();
+        packages.insert(String::new(), root_entry(&[("a", "^1.0.0")]));
+        packages.insert("node_modules/a".to_string(), a);
+        let lock = PackageLock::new("root", "1.0.0", packages);
+        assert!(lock_is_consistent(&lock));
+    }
+
+    #[test]
+    fn test_lock_is_consistent_nested_hoist() {
+        // A nested copy resolves its dep against its own nested sibling.
+        let mut packages = HashMap::new();
+        packages.insert(
+            String::new(),
+            root_entry(&[("a", "^1.0.0"), ("c", "^1.0.0")]),
+        );
+        packages.insert(
+            "node_modules/a".to_string(),
+            lock_entry("1.0.0", &[("b", "^1.0.0")]),
+        );
+        packages.insert("node_modules/b".to_string(), lock_entry("1.0.0", &[]));
+        packages.insert(
+            "node_modules/c".to_string(),
+            lock_entry("1.0.0", &[("a", "^2.0.0")]),
+        );
+        packages.insert(
+            "node_modules/c/node_modules/a".to_string(),
+            lock_entry("2.0.0", &[("b", "^2.0.0")]),
+        );
+        packages.insert(
+            "node_modules/c/node_modules/b".to_string(),
+            lock_entry("2.0.0", &[]),
+        );
+        let lock = PackageLock::new("root", "1.0.0", packages);
+        assert!(lock_is_consistent(&lock));
     }
 }
