@@ -183,7 +183,9 @@ impl SpeedMeter {
     }
 
     fn sample_at(&mut self, bytes: u64, now: Instant) -> f64 {
-        let dt = now.duration_since(self.last_tick).as_secs_f64();
+        // Saturate rather than panic if a tick's clock reading is not strictly
+        // monotonic; a zero dt just skips this sample's speed update.
+        let dt = now.saturating_duration_since(self.last_tick).as_secs_f64();
         if dt > 0.0 {
             let instant_speed = bytes.saturating_sub(self.last_bytes) as f64 / dt;
             // EMA smooths chunk-arrival jitter without lagging far behind.
