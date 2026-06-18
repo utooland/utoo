@@ -317,11 +317,18 @@ pub fn serialize_to_packages_filtered(
             let child = graph.get_node(child_index).expect("Child node must exist");
             let child_prefix = if prefix.is_empty() {
                 if child.is_workspace() {
+                    // A workspace member keys off its directory relative to the
+                    // root. Lockfile paths are POSIX, but `strip_prefix` keeps the
+                    // OS separator, so normalize `\` → `/` — otherwise a Windows
+                    // lock records `packages\m`, its nested entries become
+                    // `packages\m/node_modules/...`, and the reuse parent lookup
+                    // (which indexes members by their normalized path) can't match
+                    // them, dropping the subtree and churning the lock.
                     child
                         .path
                         .strip_prefix(root_path)
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .unwrap_or_else(|_| child.path.to_string_lossy().into_owned())
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_else(|_| child.path.to_string_lossy().replace('\\', "/"))
                 } else {
                     format!("node_modules/{}", child.name)
                 }
