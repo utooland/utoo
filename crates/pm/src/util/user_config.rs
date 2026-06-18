@@ -6,6 +6,7 @@ use std::sync::{LazyLock, OnceLock};
 
 use anyhow::Result;
 use dashmap::DashMap;
+use reqwest::Url;
 
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
@@ -43,7 +44,7 @@ fn default_cache_dir() -> PathBuf {
 
 pub async fn init_registry(registry: Option<String>) {
     // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
-    let final_registry = if let Some(reg) = registry {
+    let raw_registry = if let Some(reg) = registry {
         tracing::debug!("Using registry from CLI: {}", reg);
         Some(reg)
     } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
@@ -66,6 +67,17 @@ pub async fn init_registry(registry: Option<String>) {
         }
     };
 
+    // Canonicalize at the single resolution chokepoint so every downstream
+    // consumer sees a validated, slash-normalized URL. An invalid value is
+    // dropped (leaving the built-in default) rather than failing every fetch.
+    let final_registry = raw_registry.and_then(|reg| match normalize_registry(&reg) {
+        Ok(normalized) => Some(normalized),
+        Err(err) => {
+            tracing::warn!("Ignoring invalid registry {reg:?}: {err}");
+            None
+        }
+    });
+
     REGISTRY.set(final_registry);
 
     // Auto-detect semver support for the selected registry
@@ -76,6 +88,28 @@ pub async fn init_registry(registry: Option<String>) {
 
 pub fn get_registry() -> String {
     REGISTRY.get_sync()
+}
+
+/// Parse, validate, and canonicalize a registry URL.
+///
+/// Registry values arrive unnormalized from the CLI, `UTOO_REGISTRY`, or the
+/// config file — and a trailing slash is common (npm's own default is
+/// `https://registry.npmjs.org/`). Downstream code joins package paths as
+/// `{registry}/{pkg}`, so a trailing slash produces `//<pkg>`, which npm's
+/// registry rejects with HTTP 406. Strip it here, at the single resolution
+/// chokepoint, and reject non-`http(s)` URLs early with a clear message instead
+/// of a late, opaque fetch failure.
+///
+/// Sub-paths are preserved, so a private registry served under a prefix
+/// (Artifactory/Nexus/Verdaccio `…/api/npm/<repo>`) keeps resolving correctly.
+fn normalize_registry(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let url = Url::parse(trimmed)
+        .map_err(|e| anyhow::anyhow!("invalid registry URL {trimmed:?}: {e}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        anyhow::bail!("registry must be an http(s) URL, got {trimmed:?}");
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
 }
 
 /// Scheme + host(+port) origin of an http(s) URL — e.g. `https://registry.npmjs.org`
@@ -538,6 +572,43 @@ mod tests {
         ));
         // Non-http resolveds are not registry tarballs.
         assert!(!is_registry_tarball("file:../foo.tgz"));
+    }
+
+    #[test]
+    fn normalize_registry_strips_trailing_slash() {
+        // npm's own default form (trailing slash) → single-slash joins.
+        assert_eq!(
+            normalize_registry("https://registry.npmjs.org/").unwrap(),
+            "https://registry.npmjs.org"
+        );
+        // Already canonical → unchanged.
+        assert_eq!(
+            normalize_registry("https://registry.npmmirror.com").unwrap(),
+            "https://registry.npmmirror.com"
+        );
+        // Multiple trailing slashes and surrounding whitespace are normalized.
+        assert_eq!(
+            normalize_registry("  https://registry.npmjs.org///  ").unwrap(),
+            "https://registry.npmjs.org"
+        );
+    }
+
+    #[test]
+    fn normalize_registry_preserves_subpath() {
+        // Private registries served under a prefix keep their path.
+        assert_eq!(
+            normalize_registry("https://npm.corp/api/npm/npm-virtual/").unwrap(),
+            "https://npm.corp/api/npm/npm-virtual"
+        );
+    }
+
+    #[test]
+    fn normalize_registry_rejects_invalid() {
+        // Non-http(s) schemes and unparseable input are rejected, not silently
+        // forwarded into a later HTTP fetch.
+        assert!(normalize_registry("ftp://registry.example.com").is_err());
+        assert!(normalize_registry("registry.npmjs.org").is_err());
+        assert!(normalize_registry("not a url").is_err());
     }
 
     use super::super::config_file::ConfigValueParser;
