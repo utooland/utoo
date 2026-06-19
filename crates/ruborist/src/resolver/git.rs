@@ -1,16 +1,18 @@
-//! Git clone backend powered by `gix`.
+//! Git clone backend powered by the system `git` binary.
 //!
 //! Git packages are stored under `<cache_dir>/<name>/<commit_sha>/`, the same
 //! `<name>/<key>/` layout used by registry tarballs, so `utoo clean` works
 //! uniformly without any git-specific knowledge.
 //!
-//! The `gix` crate uses blocking HTTP transport; all network and heavy I/O
-//! is run in a `tokio::task::spawn_blocking` thread so the async executor is
-//! never blocked.
+//! Rather than bundling a Rust git implementation, we shell out to the user's
+//! `git` (the same approach npm/pnpm/yarn take) — it keeps the binary small,
+//! reuses the user's existing git auth/config, and avoids carrying a second
+//! HTTP+TLS stack. `git` is required only for `git:`/`github:` dependencies; if
+//! it is missing, a clear error names it. All clone/checkout work runs in a
+//! `tokio::task::spawn_blocking` thread so the async executor is never blocked.
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -62,32 +64,34 @@ fn try_inject_token_into_https_url(url: &str, token: &str) -> String {
     }
 }
 
-/// Read `package.json` from the root of a git tree and deserialize it as a
-/// [`CoreVersionManifest`].
+/// Run `git` with the given args (optionally in `cwd`), returning trimmed stdout.
 ///
-/// Only reads the single `package.json` blob — does **not** extract the full
-/// tree, so this is cheap even for large repositories.
-fn read_pkg_manifest(
-    repo: &gix::Repository,
-    tree_id: gix::ObjectId,
-) -> Result<CoreVersionManifest> {
-    let tree = repo
-        .find_object(tree_id)?
-        .try_into_tree()
-        .map_err(|e| anyhow!("expected tree object: {e}"))?;
-
-    for entry in tree.iter() {
-        let entry = entry?;
-        if entry.filename() == b"package.json" {
-            let obj = repo.find_object(entry.object_id())?;
-            let manifest: CoreVersionManifest = serde_json::from_slice(&obj.data)
-                .context("Failed to parse package.json from git tree")?;
-            return Ok(manifest);
-        }
+/// `GIT_TERMINAL_PROMPT=0` keeps a missing-credentials clone from hanging on an
+/// interactive prompt. A missing `git` binary is reported as a clear, named
+/// error rather than a generic spawn failure.
+fn run_git(cwd: Option<&Path>, args: &[&str]) -> Result<String> {
+    let mut cmd = Command::new("git");
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
     }
-    Err(anyhow!(
-        "package.json not found in git repo root (does the repo have a package.json?)"
-    ))
+    cmd.args(args).env("GIT_TERMINAL_PROMPT", "0");
+
+    let output = cmd.output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            anyhow!("`git` command not found in PATH — it is required to resolve git dependencies")
+        } else {
+            anyhow!("failed to run git: {e}")
+        }
+    })?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Build a [`GitCloneResult`] from a cached package directory on disk.
@@ -114,86 +118,104 @@ fn read_cached_git_result(
     ))
 }
 
-/// Recursively extract a git tree to a directory on disk.
+/// Copy a checked-out working tree into `dest`, skipping `.git` and preserving
+/// executable bits (via `std::fs::copy`) and symlinks.
 ///
-/// `root_dest` is the top-level extraction directory; symlinks that would
-/// escape it are skipped to prevent path-traversal attacks.
-fn extract_tree_to_dir(
-    repo: &gix::Repository,
-    tree_id: gix::ObjectId,
-    dest: &Path,
-    root_dest: &Path,
-) -> Result<()> {
-    let tree = repo
-        .find_object(tree_id)?
-        .try_into_tree()
-        .map_err(|e| anyhow!("expected tree object: {e}"))?;
-
-    for entry in tree.iter() {
+/// `root_dest` is the top-level destination; symlinks whose target would escape
+/// it are skipped to prevent path-traversal attacks (matching the previous
+/// tree-extraction behaviour).
+fn copy_worktree(src: &Path, dest: &Path, root_dest: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(src)? {
         let entry = entry?;
-        let name =
-            std::str::from_utf8(entry.filename()).context("non-UTF-8 filename in git tree")?;
-        let entry_path = dest.join(name);
+        let name = entry.file_name();
+        // Skip git's own metadata (only present at the repo root, but a
+        // submodule gitlink could leave a `.git` file deeper — skip defensively).
+        if name == ".git" {
+            continue;
+        }
+        let from = entry.path();
+        let to = dest.join(&name);
+        let file_type = entry.file_type()?;
 
-        match entry.mode().kind() {
-            gix::object::tree::EntryKind::Tree => {
-                std::fs::create_dir_all(&entry_path)?;
-                extract_tree_to_dir(repo, entry.object_id(), &entry_path, root_dest)?;
-            }
-            gix::object::tree::EntryKind::Blob | gix::object::tree::EntryKind::BlobExecutable => {
-                let obj = repo.find_object(entry.object_id())?;
-                std::fs::write(&entry_path, &obj.data)?;
-
-                // Set executable permission on Unix
-                #[cfg(unix)]
-                if entry.mode().kind() == gix::object::tree::EntryKind::BlobExecutable {
-                    let perms = std::fs::Permissions::from_mode(0o755);
-                    if let Err(e) = std::fs::set_permissions(&entry_path, perms) {
-                        tracing::debug!(
-                            "Failed to set executable permission on {}: {e}",
-                            entry_path.display()
-                        );
-                    }
-                }
-            }
-            gix::object::tree::EntryKind::Link => {
-                let obj = repo.find_object(entry.object_id())?;
-                let target = std::str::from_utf8(&obj.data).context("non-UTF-8 symlink target")?;
-
-                // Validate that the symlink target does not escape the
-                // extraction root to prevent path-traversal attacks.
-                let resolved = entry_path.parent().unwrap_or(dest).join(target);
-                if !resolved.starts_with(root_dest) {
-                    tracing::debug!(
-                        "Skipping symlink {} -> {} (escapes extraction dir)",
-                        entry_path.display(),
-                        target
-                    );
-                    continue;
-                }
-
-                #[cfg(unix)]
-                if let Err(e) = std::os::unix::fs::symlink(target, &entry_path) {
-                    tracing::debug!("Failed to create symlink {}: {e}", entry_path.display());
-                }
-                #[cfg(not(unix))]
-                {
-                    let _ = target;
-                }
-            }
-            gix::object::tree::EntryKind::Commit => {
-                // Submodule reference – skip silently
+        if file_type.is_symlink() {
+            let target = std::fs::read_link(&from)?;
+            // Validate that the symlink target does not escape the destination
+            // root to prevent path-traversal attacks.
+            let resolved = to.parent().unwrap_or(dest).join(&target);
+            if !resolved.starts_with(root_dest) {
                 tracing::debug!(
-                    "Skipping submodule entry at {:?}",
-                    std::str::from_utf8(entry.filename()).unwrap_or("<non-utf8>")
+                    "Skipping symlink {} -> {} (escapes extraction dir)",
+                    to.display(),
+                    target.display()
                 );
+                continue;
             }
+            #[cfg(unix)]
+            if let Err(e) = std::os::unix::fs::symlink(&target, &to) {
+                tracing::debug!("Failed to create symlink {}: {e}", to.display());
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = target;
+            }
+        } else if file_type.is_dir() {
+            std::fs::create_dir_all(&to)?;
+            copy_worktree(&from, &to, root_dest)?;
+        } else {
+            // `std::fs::copy` preserves the permission bits (incl. the exec bit)
+            // on Unix, so an executable in the repo stays executable.
+            std::fs::copy(&from, &to)?;
         }
     }
     Ok(())
 }
 
-/// Blocking core that does the actual clone + extraction via gix.
+/// Clone `clone_url` (optionally at `commit_ish`) into `dest`, shelling out to
+/// `git`. Prefers a shallow clone for branch/tag/HEAD; a full SHA (or a ref a
+/// shallow `--branch` can't name) falls back to a full clone + checkout.
+fn git_clone_into(
+    dest: &Path,
+    clone_url: &str,
+    commit_ish: Option<&str>,
+    is_full_sha: bool,
+) -> Result<()> {
+    let dest_str = dest
+        .to_str()
+        .ok_or_else(|| anyhow!("non-UTF-8 clone path"))?;
+
+    // Shallow fast path: a named branch/tag, or the default HEAD.
+    if !is_full_sha {
+        let shallow = match commit_ish {
+            Some(ref_name) => run_git(
+                None,
+                &[
+                    "clone", "--quiet", "--depth", "1", "--branch", ref_name, clone_url, dest_str,
+                ],
+            ),
+            None => run_git(
+                None,
+                &["clone", "--quiet", "--depth", "1", clone_url, dest_str],
+            ),
+        };
+        match shallow {
+            Ok(_) => return Ok(()),
+            // `--branch` only names branches/tags; a short SHA (or other ref)
+            // falls through to a full clone + checkout below.
+            Err(_) => {
+                let _ = std::fs::remove_dir_all(dest);
+            }
+        }
+    }
+
+    // Full clone, then check out the requested commit-ish (SHA, short SHA, …).
+    run_git(None, &["clone", "--quiet", clone_url, dest_str])?;
+    if let Some(target) = commit_ish {
+        run_git(Some(dest), &["checkout", "--quiet", target])?;
+    }
+    Ok(())
+}
+
+/// Blocking core that does the actual clone + checkout via the `git` binary.
 fn clone_repo_blocking(
     cache_dir: &Path,
     clone_url: &str,
@@ -205,14 +227,14 @@ fn clone_repo_blocking(
     // This MUST run before the early cache check which does cache_dir.join(name).
     validate_package_name(name)?;
 
-    // A full 40-hex SHA might not be reachable at depth 1 (it may not be
-    // HEAD), so only use shallow fetch for branch/tag refs and bare HEAD.
+    // A full 40-hex SHA can't be named by a shallow `--branch`, so it takes the
+    // full-clone path.
     let is_full_sha =
         commit_ish.is_some_and(|c| c.len() == 40 && c.chars().all(|ch| ch.is_ascii_hexdigit()));
 
-    // Early cache check for full SHA specs — skip network fetch entirely.
-    // The package name is known at call site so we check the exact path
-    // rather than scanning directories.
+    // Early cache check for full SHA specs — skip the clone entirely. The
+    // package name is known at the call site so we check the exact path rather
+    // than scanning directories.
     if is_full_sha {
         let sha = commit_ish.unwrap();
         let package_dir = cache_dir.join(name).join(sha);
@@ -242,71 +264,34 @@ fn clone_repo_blocking(
         None => clone_url.to_string(),
     };
 
-    // Clone to a temporary directory (bare)
+    // Clone into a temporary working tree.
     let temp_dir = tempfile::tempdir().context("Failed to create temp directory for git clone")?;
+    let checkout = temp_dir.path().join("repo");
 
-    let url = gix::url::parse(effective_url.as_str().into())?;
-
-    let mut prepare = gix::prepare_clone_bare(url, temp_dir.path())?;
-
-    if !is_full_sha {
-        prepare = prepare.with_shallow(gix::remote::fetch::Shallow::DepthAtRemote(
-            std::num::NonZeroU32::MIN,
-        ));
-    }
-
-    // For branch/tag refs, tell gix which ref to fetch.
-    // Full-SHA requests have no corresponding ref name.
-    if let Some(ref_name) = commit_ish
-        && !is_full_sha
-    {
-        prepare = prepare.with_ref_name(Some(ref_name))?;
-    }
-
-    let (checkout, _outcome) = prepare
-        .fetch_only(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED)
-        .map_err(|e| {
-            let mut msg = format!("git fetch failed for '{}': {e}", clone_url);
-            if token.is_none()
-                && (clone_url.contains("github.com") || clone_url.contains("gitlab.com"))
-            {
-                msg.push_str(
-                    "\n\nTip: set GITHUB_TOKEN or GH_TOKEN for private repos / higher rate limits",
-                );
-            }
-            anyhow!(msg)
-        })?;
-
-    // Resolve the commit: if we have a full 40-char hex SHA use it directly,
-    // otherwise resolve HEAD of the fetched ref.
-    let commit_id = match commit_ish {
-        Some(sha) if sha.len() == 40 && sha.chars().all(|ch| ch.is_ascii_hexdigit()) => {
-            gix::ObjectId::from_hex(sha.as_bytes())
-                .map_err(|e| anyhow!("invalid commit SHA '{}': {e}", sha))?
+    git_clone_into(&checkout, &effective_url, commit_ish, is_full_sha).map_err(|e| {
+        let mut msg = format!("git clone failed for '{clone_url}': {e}");
+        if token.is_none() && (clone_url.contains("github.com") || clone_url.contains("gitlab.com"))
+        {
+            msg.push_str(
+                "\n\nTip: set GITHUB_TOKEN or GH_TOKEN for private repos / higher rate limits",
+            );
         }
-        _ => checkout
-            .head_id()
-            .map_err(|e| anyhow!("could not resolve HEAD after fetch: {e}"))?
-            .detach(),
-    };
+        anyhow!(msg)
+    })?;
 
-    let commit_hex = commit_id.to_string();
+    // The checked-out commit SHA pins the cache directory.
+    let commit_hex = run_git(Some(&checkout), &["rev-parse", "HEAD"])
+        .context("could not resolve HEAD after clone")?;
 
-    // Get the commit tree
-    let commit = checkout
-        .find_object(commit_id)?
-        .try_into_commit()
-        .map_err(|e| anyhow!("object is not a commit: {e}"))?;
+    // Read package.json straight from the working tree.
+    let pkg_bytes = std::fs::read(checkout.join("package.json"))
+        .context("package.json not found in git repo root (does the repo have a package.json?)")?;
+    let mut manifest: CoreVersionManifest =
+        serde_json::from_slice(&pkg_bytes).context("Failed to parse package.json from git repo")?;
 
-    let tree_id = commit.tree_id()?;
-
-    // Deserialize package.json from the git blob directly into a CoreVersionManifest.
-    // This is cheap (single object read) and avoids any serde_json::Value round-trip.
-    let mut manifest = read_pkg_manifest(&checkout, tree_id.into())?;
-
-    // Cache path: <cache_dir>/<name>/<commit_sha>/
-    // Using the full commit SHA as the version directory avoids collisions
-    // with registry versions and between different commits of the same repo.
+    // Cache path: <cache_dir>/<name>/<commit_sha>/. Using the full commit SHA as
+    // the version directory avoids collisions with registry versions and between
+    // different commits of the same repo.
     let pinned_url = format!("{}#{}", resolved_url, commit_hex);
     finalize_non_registry_manifest(&mut manifest, pinned_url.clone())?;
 
@@ -315,9 +300,7 @@ fn clone_repo_blocking(
         return Ok(GitCloneResult::new(package_dir, pinned_url, manifest));
     }
 
-    commit_cache_dir_atomic(&package_dir, |stage| {
-        extract_tree_to_dir(&checkout, tree_id.into(), stage, stage)
-    })?;
+    commit_cache_dir_atomic(&package_dir, |stage| copy_worktree(&checkout, stage, stage))?;
 
     Ok(GitCloneResult::new(package_dir, pinned_url, manifest))
 }

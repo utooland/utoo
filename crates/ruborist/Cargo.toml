@@ -35,11 +35,9 @@ reqwest      = { version = "0.12", default-features = false, features = ["json",
 # Shared URL-hash + staging helpers for native-only resolvers (git / http)
 sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
-# Git clone (gated on `native-git`)
-gix          = { workspace = true, features = [
-  "blocking-http-transport-reqwest-rust-tls",
-  "blocking-network-client",
-], optional = true }
+# Git deps shell out to the system `git` (see resolver/git.rs) — no bundled git
+# implementation, which also keeps gix-transport's HTTP/2 reqwest stack out of
+# the binary. `native-git` now only needs `tempfile` for the clone scratch dir.
 # HTTP tarball extraction (gated on `http-tarball`)
 # Uses libdeflater to match pm's extractor and avoid pulling a second gzip
 # implementation (flate2) into the workspace.
@@ -79,4 +77,4 @@ default      = []
 # URL-hash disambiguator also keeps HTTP tarball slots from colliding with
 # registry tarball slots (<name>/<version>/).
 http-tarball = ["libdeflater", "sha2", "tar", "tempfile"]
-native-git   = ["gix", "tempfile"]
+native-git   = ["tempfile"]

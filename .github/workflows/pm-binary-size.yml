@@ -51,12 +51,16 @@ jobs:
 
       - name: Assert trimmed dependency set
         run: |
-          # These must NOT be linked: aws-lc (second crypto backend) and hickory
-          # (DNS resolver replaced by the custom getaddrinfo resolver).
+          # None of these may be linked into the production (non-dev) binary:
+          #   aws-lc-sys      second crypto backend (unified to ring)
+          #   hickory-*       DNS resolver (replaced by custom getaddrinfo)
+          #   gix/gix-*       bundled git (replaced by system `git`)
+          #   h2              HTTP/2 (clients force h1; gix-transport was the
+          #                   only non-dev puller)
           fail=0
-          for crate in aws-lc-sys hickory-resolver hickory-proto; do
-            if cargo tree -p utoo-pm --target ${{ matrix.target }} -i "$crate" >/dev/null 2>&1; then
-              echo "::error::$crate is still linked — trimming regressed"
+          for crate in aws-lc-sys hickory-resolver hickory-proto gix gix-transport h2; do
+            if cargo tree -p utoo-pm --target ${{ matrix.target }} -e no-dev -i "$crate" >/dev/null 2>&1; then
+              echo "::error::$crate is still linked into the release binary — trimming regressed"
               fail=1
             else
               echo "ok: $crate absent"
