@@ -381,7 +381,11 @@ impl PackageService {
                     let script = script.to_string();
                     let is_optional = *is_optional;
                     async move {
-                        log_progress(&format!("{} {}", package.name, hook));
+                        let label = format!("{} {}", package.name, hook);
+                        log_progress(&label);
+                        // The renderer surfaces the longest-running entry with
+                        // elapsed time, so a slow postinstall stays visible.
+                        let _running = crate::util::install_progress::track_script(label);
                         let start = std::time::Instant::now();
                         let result =
                             ScriptService::execute_script(&package, hook, ScriptOutput::Silent)

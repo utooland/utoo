@@ -18,6 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
+use crate::util::install_progress;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
@@ -290,6 +291,7 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
+        install_progress::start_install_run();
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
         // install from a lockfile we couldn't validate. `is_pkg_lock_outdated`
@@ -372,7 +374,8 @@ impl InstallService {
 
         let counts = scheduler_handle.shutdown().await;
         install_result?;
-        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
+        let clone_elapsed = link_start.elapsed();
+        finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
         RebuildService::rebuild(&package_lock, root_path, scripts).await?;
 
@@ -390,6 +393,7 @@ impl InstallService {
     /// the global `node_modules` is the source of truth, reified **additively**
     /// so previously-installed globals survive.
     pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+        install_progress::start_install_run();
         let (name, resolved_version, version_spec) = resolve_package_spec(npm_spec).await?;
         // Resolvable spec for the synthetic dependency: registry ranges pinned to
         // the resolved version; git/file/url specs kept as-is.
@@ -445,7 +449,8 @@ impl InstallService {
         let reify = reify_packages(&groups, &root_path, &omit, &scheduler).await;
         let counts = scheduler_handle.shutdown().await;
         reify.context("Failed to install global package")?;
-        finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
+        let clone_elapsed = link_start.elapsed();
+        finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
         // Dependency lifecycle only — preinstall/install/postinstall + bin
         // linking for the tool and its deps. No project/workspace hooks, so no

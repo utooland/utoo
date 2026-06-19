@@ -53,6 +53,18 @@ async fn build_script_command(
     Ok(cmd)
 }
 
+/// Cap one captured stream at 64 KiB in the debug log; a runaway script can
+/// emit hundreds of megabytes and the log file is per-run, not rotated.
+fn truncate_for_log(bytes: &[u8]) -> Cow<'_, str> {
+    const LIMIT: usize = 64 * 1024;
+    if bytes.len() <= LIMIT {
+        return String::from_utf8_lossy(bytes);
+    }
+    let mut s = String::from_utf8_lossy(&bytes[..LIMIT]).into_owned();
+    s.push_str(&format!("\n… [truncated {} bytes]\n", bytes.len() - LIMIT));
+    Cow::Owned(s)
+}
+
 /// Append extra CLI args to a script body, borrowing when there are none —
 /// the common per-script case allocates nothing.
 fn join_script_args<'a>(script_content: &'a str, script_args: &[&str]) -> Cow<'a, str> {
@@ -127,6 +139,18 @@ impl ScriptService {
                         package.path.display(),
                         script,
                         output.status.code().unwrap_or(-1)
+                    );
+                }
+
+                // On success the output is otherwise discarded — keep it in the
+                // debug log file so `utoo-*.log` answers "what did that
+                // postinstall actually do?" after the fact.
+                if !output.stdout.is_empty() || !output.stderr.is_empty() {
+                    tracing::debug!(
+                        "{hook} output for {}:\n--- stdout ---\n{}--- stderr ---\n{}",
+                        package.name,
+                        truncate_for_log(&output.stdout),
+                        truncate_for_log(&output.stderr),
                     );
                 }
             }
