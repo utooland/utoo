@@ -28,17 +28,13 @@ thiserror    = { workspace = true }
 tokio-fs-ext = { workspace = true }
 tokio-retry  = "0.3"
 tracing      = { workspace = true }
-# TLS provider is selected per-target below: macOS overrides to
-# aws-lc-rs (see service/http.rs); every other target keeps ring.
-reqwest      = { version = "0.12", default-features = false, features = ["http2", "json", "socks"] }
+# TLS roots are selected per native target below. HTTP clients force HTTP/1.1,
+# so keep reqwest's HTTP/2 stack out of the binary.
+reqwest      = { version = "0.12", default-features = false, features = ["json", "socks"] }
 # Shared URL-hash + staging helpers for native-only resolvers (git / http)
 sha2         = { workspace = true, optional = true }
 tempfile     = { workspace = true, optional = true }
-# Git clone (gated on `native-git`)
-gix          = { workspace = true, features = [
-  "blocking-http-transport-reqwest-rust-tls",
-  "blocking-network-client",
-], optional = true }
+# Git clone support (gated on `native-git`) uses the system `git` executable.
 # HTTP tarball extraction (gated on `http-tarball`)
 # Uses libdeflater to match pm's extractor and avoid pulling a second gzip
 # implementation (flate2) into the workspace.
@@ -52,36 +48,23 @@ workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
 
-# Native (non-macOS) targets: reqwest's default rustls + ring.
+# Native targets: reqwest's default rustls provider (ring) + OS root store.
 # `gzip` lets the manifest client send Accept-Encoding and transparently
 # decompress packuments (~2.5x smaller on registry.npmjs.org); brotli is
 # only ~1% smaller than gzip there but decodes slower, so it stays off.
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "macos")))'.dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["gzip", "rustls-tls-native-roots"] }
-
 # Native-only dependencies (not compiled for WASM)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-libc  = "0.2"
+libc    = "0.2"
 # Dedicated CPU thread pool for simd_json manifest parsing — keeps the
 # tokio runtime free of CPU-bound work so in-flight network IO is not
 # blocked by sibling parses. WASM falls back to inline parse.
-rayon = { workspace = true }
+rayon   = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["gzip", "rustls-tls-native-roots"] }
 
 # Browser handles TLS via the fetch API, so reqwest needs no rustls
 # feature on this target.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
-
-# macOS uses aws-lc-rs (BoringSSL primitives) for ~40 % faster cold
-# resolves on M-series ARM. CI bench-phases regresses on Linux/x86_64
-# with this provider, so it's gated to macOS only. See service/http.rs.
-[target.'cfg(target_os = "macos")'.dependencies]
-reqwest             = { version = "0.12", default-features = false, features = [
-  "gzip",
-  "rustls-tls-native-roots-no-provider"
-] }
-rustls              = { version = "0.23", default-features = false, features = ["aws-lc-rs", "logging", "std", "tls12"] }
-rustls-native-certs = "0.8"
 
 [features]
 default      = []
@@ -90,4 +73,4 @@ default      = []
 # URL-hash disambiguator also keeps HTTP tarball slots from colliding with
 # registry tarball slots (<name>/<version>/).
 http-tarball = ["libdeflater", "sha2", "tar", "tempfile"]
-native-git   = ["gix", "tempfile"]
+native-git   = ["tempfile"]
