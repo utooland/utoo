@@ -125,7 +125,7 @@ async fn async_main() -> Result<()> {
     }
 
     // global registry
-    init_registry(cli.registry).await;
+    init_registry(cli.registry).await?;
 
     // set cache directory
     set_cache_dir(cli.cache_dir).await;
