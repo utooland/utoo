@@ -1,0 +1,233 @@
+{
+  "version": "2.20.0",
+  "mirrors": {
+    "china": {
+      "ENVS": {
+        "COREPACK_NPM_REGISTRY": "https://registry.npmmirror.com",
+        "EDGEDRIVER_CDNURL": "https://npmmirror.com/mirrors/edgedriver",
+        "NODEJS_ORG_MIRROR": "https://cdn.npmmirror.com/binaries/node",
+        "NVM_NODEJS_ORG_MIRROR": "https://cdn.npmmirror.com/binaries/node",
+        "PHANTOMJS_CDNURL": "https://cdn.npmmirror.com/binaries/phantomjs",
+        "CHROMEDRIVER_CDNURL": "https://cdn.npmmirror.com/binaries/chromedriver",
+        "OPERADRIVER_CDNURL": "https://cdn.npmmirror.com/binaries/operadriver",
+        "CYPRESS_DOWNLOAD_PATH_TEMPLATE": "https://cdn.npmmirror.com/binaries/cypress/${version}/${platform}-${arch}/cypress.zip",
+        "ELECTRON_MIRROR": "https://cdn.npmmirror.com/binaries/electron/",
+        "ELECTRON_BUILDER_BINARIES_MIRROR": "https://cdn.npmmirror.com/binaries/electron-builder-binaries/",
+        "SASS_BINARY_SITE": "https://cdn.npmmirror.com/binaries/node-sass",
+        "SWC_BINARY_SITE": "https://cdn.npmmirror.com/binaries/node-swc",
+        "NWJS_URLBASE": "https://cdn.npmmirror.com/binaries/nwjs/v",
+        "PUPPETEER_DOWNLOAD_HOST": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
+        "PUPPETEER_DOWNLOAD_BASE_URL": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
+        "PUPPETEER_CHROME_DOWNLOAD_BASE_URL": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
+        "PUPPETEER_CHROME_HEADLESS_SHELL_DOWNLOAD_BASE_URL": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
+        "PLAYWRIGHT_DOWNLOAD_HOST": "https://cdn.npmmirror.com/binaries/playwright",
+        "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
+        "SENTRYCLI_CDNURL": "https://cdn.npmmirror.com/binaries/sentry-cli",
+        "SAUCECTL_INSTALL_BINARY_MIRROR": "https://cdn.npmmirror.com/binaries/saucectl",
+        "RE2_DOWNLOAD_MIRROR": "https://cdn.npmmirror.com/binaries/node-re2",
+        "RE2_DOWNLOAD_SKIP_PATH": "true",
+        "PRISMA_ENGINES_MIRROR": "https://cdn.npmmirror.com/binaries/prisma",
+        "npm_config_better_sqlite3_binary_host": "https://cdn.npmmirror.com/binaries/better-sqlite3",
+        "npm_config_isolated_vm_binary_host": "https://cdn.npmmirror.com/binaries/isolated-vm",
+        "npm_config_keytar_binary_host": "https://cdn.npmmirror.com/binaries/keytar",
+        "npm_config_sharp_binary_host": "https://cdn.npmmirror.com/binaries/sharp",
+        "npm_config_sharp_libvips_binary_host": "https://cdn.npmmirror.com/binaries/sharp-libvips",
+        "npm_config_robotjs_binary_host": "https://cdn.npmmirror.com/binaries/robotjs",
+        "npm_config_gl_binary_host": "https://cdn.npmmirror.com/binaries/gl",
+        "RIPGREP_PREBUILT_BINARIES_MIRROR": "https://registry.npmmirror.com/-/binary/ripgrep-prebuilt"
+      },
+      "@ali/s2": {
+        "host": "https://cdn.npmmirror.com/binaries/looksgood-s2"
+      },
+      "sharp": {
+        "replaceHostFiles": [
+          "install/libvips.js"
+        ],
+        "replaceHostMap": {
+          "https://github.com/lovell/sharp-libvips/releases/download/": "https://cdn.npmmirror.com/binaries/sharp-libvips/"
+        }
+      },
+      "@tensorflow/tfjs-node": {
+        "replaceHostFiles": [
+          "scripts/install.js",
+          "package.json"
+        ],
+        "replaceHostRegExpMap": {
+          "https://storage\\.googleapis\\.com/": "https://cdn.npmmirror.com/binaries/"
+        },
+        "replaceHostMap": {
+          "https://storage.googleapis.com/": "https://cdn.npmmirror.com/binaries/"
+        }
+      },
+      "cypress": {
+        "host": "https://cdn.npmmirror.com/binaries/cypress",
+        "newPlatforms": {
+          "mac": "darwin-x64",
+          "win": "win32-ia32",
+          "linux64": "linux-x64",
+          "darwin": "darwin-x64",
+          "win32": "win32-ia32",
+          "linux": "linux-x64",
+          "darwin-x64": "darwin-x64",
+          "linux-x64": "linux-x64",
+          "win32-ia32": "win32-ia32",
+          "win32-x64": "win32-x64"
+        }
+      },
+      "utf-8-validate": {
+        "host": "https://cdn.npmmirror.com/binaries/utf-8-validate/v{version}"
+      },
+      "xprofiler": {
+        "remote_path": "./xprofiler/v{version}/",
+        "host": "https://cdn.npmmirror.com/binaries"
+      },
+      "leveldown": {
+        "host": "https://cdn.npmmirror.com/binaries/leveldown/v{version}"
+      },
+      "couchbase": {
+        "host": "https://cdn.npmmirror.com/binaries/couchbase/v{version}"
+      },
+      "gl": {
+        "host": "https://cdn.npmmirror.com/binaries/gl/v{version}"
+      },
+      "sqlite3": {
+        "host": "https://cdn.npmmirror.com/binaries/sqlite3",
+        "remote_path": "v{version}"
+      },
+      "@journeyapps/sqlcipher": {
+        "host": "https://cdn.npmmirror.com/binaries"
+      },
+      "grpc": {
+        "host": "https://cdn.npmmirror.com/binaries",
+        "remote_path": "{name}/v{version}"
+      },
+      "grpc-tools": {
+        "host": "https://cdn.npmmirror.com/binaries"
+      },
+      "wrtc": {
+        "host": "https://cdn.npmmirror.com/binaries",
+        "remote_path": "{name}/v{version}"
+      },
+      "fsevents": {
+        "host": "https://cdn.npmmirror.com/binaries/fsevents"
+      },
+      "nodejieba": {
+        "host": "https://cdn.npmmirror.com/binaries/nodejieba"
+      },
+      "canvas": {
+        "host": "https://cdn.npmmirror.com/binaries/canvas",
+        "remote_path": "v{version}"
+      },
+      "skia-canvas": {
+        "host": "https://cdn.npmmirror.com/binaries/skia-canvas"
+      },
+      "flow-bin": {
+        "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+        "host": "https://cdn.npmmirror.com/binaries/flow/v"
+      },
+      "jpegtran-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/jpegtran-bin",
+          "https://raw.github.com/imagemin/jpegtran-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/jpegtran-bin"
+      },
+      "cwebp-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/cwebp-bin",
+          "https://raw.github.com/imagemin/cwebp-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/cwebp-bin"
+      },
+      "zopflipng-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/zopflipng-bin",
+          "https://raw.github.com/imagemin/zopflipng-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/zopflipng-bin"
+      },
+      "optipng-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/optipng-bin",
+          "https://raw.github.com/imagemin/optipng-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/optipng-bin"
+      },
+      "mozjpeg": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/mozjpeg-bin",
+          "https://raw.github.com/imagemin/mozjpeg-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/mozjpeg-bin"
+      },
+      "gifsicle": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/gifsicle-bin",
+          "https://raw.github.com/imagemin/gifsicle-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/gifsicle-bin"
+      },
+      "pngquant-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/pngquant-bin",
+          "https://raw.github.com/imagemin/pngquant-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/pngquant-bin",
+        "replaceHostMap": {
+          "https://raw.githubusercontent.com/imagemin/pngquant-bin": "https://cdn.npmmirror.com/binaries/pngquant-bin",
+          "https://raw.github.com/imagemin/pngquant-bin": "https://cdn.npmmirror.com/binaries/pngquant-bin"
+        }
+      },
+      "pngcrush-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/pngcrush-bin",
+          "https://raw.github.com/imagemin/pngcrush-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/pngcrush-bin"
+      },
+      "jpeg-recompress-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/jpeg-recompress-bin",
+          "https://raw.github.com/imagemin/jpeg-recompress-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/jpeg-recompress-bin"
+      },
+      "advpng-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/advpng-bin",
+          "https://raw.github.com/imagemin/advpng-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/advpng-bin"
+      },
+      "pngout-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/pngout-bin",
+          "https://raw.github.com/imagemin/pngout-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/pngout-bin"
+      },
+      "jpegoptim-bin": {
+        "replaceHost": [
+          "https://raw.githubusercontent.com/imagemin/jpegoptim-bin",
+          "https://raw.github.com/imagemin/jpegoptim-bin"
+        ],
+        "host": "https://cdn.npmmirror.com/binaries/jpegoptim-bin"
+      },
+      "argon2": {
+        "host": "https://cdn.npmmirror.com/binaries/argon2"
+      },
+      "ali-zeromq": {
+        "host": "https://cdn.npmmirror.com/binaries/ali-zeromq"
+      },
+      "ali-usb_ctl": {
+        "host": "https://cdn.npmmirror.com/binaries/ali-usb_ctl"
+      },
+      "gdal-async": {
+        "host": "https://cdn.npmmirror.com/binaries/node-gdal-async"
+      },
+      "libpg-query": {
+        "host": "https://cdn.npmmirror.com/binaries"
+      }
+    }
+  }
+}
