@@ -11,6 +11,11 @@ name: pm-benchmark-set
 # the methodology.
 
 on:
+  # TEMPORARY (validation): push trigger on the bench branch so the run fires
+  # without a merge to the default branch — workflow_dispatch only registers
+  # from the default branch. Remove this `push:` block before merging to next.
+  push:
+    branches: ["ci/pm-benchmark-set"]
   workflow_dispatch:
     inputs:
       registry:
@@ -102,6 +107,16 @@ jobs:
   bench-linux:
     needs: [build-linux]
     runs-on: ubuntu-latest
+    # Resolve inputs once with defaults so push-triggered runs (which carry no
+    # inputs) and workflow_dispatch runs share a single source of truth.
+    env:
+      PM_LIST: ${{ inputs.pm_list || 'utoo,pnpm' }}
+      REGISTRY: ${{ inputs.registry || 'npmjs' }}
+      BENCH_COLD_RUNS: ${{ inputs.cold_runs || '1' }}
+      BENCH_WARM_RUNS: ${{ inputs.warm_runs || '3' }}
+      BENCH_KEEP_LOCKFILES: ${{ inputs.keep_lockfiles == true && '1' || '0' }}
+      BENCH_ONLY: ${{ inputs.projects || '' }}
+      BENCH_OUT_DIR: /tmp/pm-bench-set-output
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
@@ -113,17 +128,17 @@ jobs:
           artifact: utoo-bench-set-linux-x64
           with-ut-symlink: 'false'
       - name: Install pnpm
-        if: contains(inputs.pm_list, 'pnpm')
+        if: contains(env.PM_LIST, 'pnpm')
         uses: pnpm/action-setup@v4
         with:
           version: latest
       - name: Install bun
-        if: contains(inputs.pm_list, 'bun')
+        if: contains(env.PM_LIST, 'bun')
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - name: Install yarn
-        if: contains(inputs.pm_list, 'yarn')
+        if: contains(env.PM_LIST, 'yarn')
         run: npm install -g yarn
       - uses: ./.github/actions/install-bench-tools
         with:
@@ -132,34 +147,29 @@ jobs:
         run: |
           hyperfine --version
           utoo --version
-          IFS=',' read -ra PMS <<< "${{ inputs.pm_list }}"
+          IFS=',' read -ra PMS <<< "$PM_LIST"
           for pm in "${PMS[@]}"; do
             [ "$pm" = "utoo" ] && continue
             echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
           done
       - name: Run benchmark set
-        env:
-          BENCH_COLD_RUNS: ${{ inputs.cold_runs || '1' }}
-          BENCH_WARM_RUNS: ${{ inputs.warm_runs || '3' }}
-          BENCH_KEEP_LOCKFILES: ${{ inputs.keep_lockfiles == true && '1' || '0' }}
-          BENCH_ONLY: ${{ inputs.projects || '' }}
-          BENCH_OUT_DIR: /tmp/pm-bench-set-output
         run: |
+          mkdir -p "$BENCH_OUT_DIR"
           chmod +x bench/pm-bench-set.sh
-          bash bench/pm-bench-set.sh "${{ inputs.registry || 'npmjs' }}" "${{ inputs.pm_list || 'utoo,pnpm' }}" \
-            2>&1 | tee /tmp/pm-bench-set-output/run.log
+          bash bench/pm-bench-set.sh "$REGISTRY" "$PM_LIST" \
+            2>&1 | tee "$BENCH_OUT_DIR/run.log"
       - name: Publish summary
         if: always()
         run: |
           {
             echo "# PM Benchmark Set — utoo vs pnpm"
             echo ""
-            echo "- Registry: \`${{ inputs.registry || 'npmjs' }}\`"
-            echo "- PMs: \`${{ inputs.pm_list || 'utoo,pnpm' }}\`"
+            echo "- Registry: \`$REGISTRY\`"
+            echo "- PMs: \`$PM_LIST\`"
             echo "- utoo: \`$(utoo --version 2>/dev/null)\`"
             echo ""
-            if [ -f /tmp/pm-bench-set-output/summary.md ]; then
-              cat /tmp/pm-bench-set-output/summary.md
+            if [ -f "$BENCH_OUT_DIR/summary.md" ]; then
+              cat "$BENCH_OUT_DIR/summary.md"
             else
               echo "_No summary produced — check the run log artifact._"
             fi
