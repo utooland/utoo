@@ -266,13 +266,65 @@ get_install_cmd() {
 }
 
 # --------------------------------------------------------------------------
-# Cold benchmark: cache purged each run (network-bound, few runs)
+# Validate + prime: install each PM once with output CAPTURED. On failure the
+# real error tail is printed (no more opaque "exit code 1" from hyperfine) and
+# the PM is dropped from VALID_PMS, so cold/warm never benchmark a failing
+# command — which would otherwise emit an empty --export-json and crash the
+# summary. This install also primes the global cache for the warm pass.
+# Sets globals: VALID_PMS (this project), appends to FAILED_CELLS.
+# --------------------------------------------------------------------------
+validate_and_prime() {
+  local project=$1 registry=$2 reg_short=$3 utoo_from=$4
+  local project_dir="$BENCH_DIR/$project"
+  VALID_PMS=()
+  echo -e "  ${YELLOW}Validate + prime (one install each):${NC}"
+  for pm in "${PACKAGE_MANAGERS[@]}"; do
+    local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
+    local cell_log="$LOG_DIR/${project}_${reg_short}_${pm}.log"
+    bash "$PREPARE_SCRIPT" "$project_dir" "$pm" || true
+    if ( cd "$project_dir" && eval "$install_cmd" ) > "$cell_log" 2>&1; then
+      echo -e "    ${GREEN}✓ $pm${NC}"
+      VALID_PMS+=("$pm")
+    else
+      echo -e "    ${RED}✗ $pm install FAILED — cmd: ${NC}$install_cmd"
+      echo -e "    ${RED}  real error tail:${NC}"
+      tail -n 30 "$cell_log" | sed 's/^/        | /'
+      FAILED_CELLS+=("$project ($pm)")
+    fi
+  done
+}
+
+# --------------------------------------------------------------------------
+# Warm benchmark: global cache already primed by validate_and_prime; only the
+# local node_modules is wiped between runs. Benchmarks VALID_PMS only.
+# --------------------------------------------------------------------------
+run_warm_benchmarks() {
+  local project=$1 registry=$2 reg_short=$3 utoo_from=$4
+  local project_dir="$BENCH_DIR/$project"
+  [ ${#VALID_PMS[@]} -eq 0 ] && { echo -e "  ${RED}No valid PMs — skipping warm.${NC}"; return; }
+  echo -e "  ${YELLOW}Warm installs ($BENCH_WARM_RUNS runs, cache primed): ${VALID_PMS[*]}${NC}"
+  local json_file="$RESULTS_DIR/${project}_${reg_short}_warm.json"
+  local hyperfine_args=(--warmup 1 --runs "$BENCH_WARM_RUNS" --export-json "$json_file")
+  for pm in "${VALID_PMS[@]}"; do
+    local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
+    local metrics_file="$RESULTS_DIR/${project}_${reg_short}_warm_${pm}_metrics.jsonl"
+    local cmd_script="$RESULTS_DIR/cmd_warm_${pm}.sh"
+    printf 'set -eo pipefail\ncd %s && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
+    > "$metrics_file"
+    hyperfine_args+=(-n "$pm" --prepare "bash $PREPARE_SCRIPT $project_dir $pm" "bash $METRICS_WRAPPER $metrics_file $cmd_script")
+  done
+  hyperfine "${hyperfine_args[@]}" 2>&1 || echo -e "  ${RED}Warm benchmark error for $project${NC}"
+}
+
+# --------------------------------------------------------------------------
+# Cold benchmark: cache purged each run (network-bound). Benchmarks VALID_PMS only.
 # --------------------------------------------------------------------------
 run_cold_benchmarks() {
   local project=$1 registry=$2 reg_short=$3 utoo_from=$4
   local project_dir="$BENCH_DIR/$project"
-  echo -e "  ${YELLOW}Cold installs ($BENCH_COLD_RUNS run(s) each):${NC}"
-  for pm in "${PACKAGE_MANAGERS[@]}"; do
+  [ ${#VALID_PMS[@]} -eq 0 ] && { echo -e "  ${RED}No valid PMs — skipping cold.${NC}"; return; }
+  echo -e "  ${YELLOW}Cold installs ($BENCH_COLD_RUNS run(s) each, cache purged): ${VALID_PMS[*]}${NC}"
+  for pm in "${VALID_PMS[@]}"; do
     local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "true" "$utoo_from")
     local json_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}.json"
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}_metrics.jsonl"
@@ -286,37 +338,8 @@ run_cold_benchmarks() {
       --export-json "$json_file" \
       -n "$pm" \
       "bash $METRICS_WRAPPER $metrics_file $cmd_script" \
-      2>&1 | tail -1 || echo -e "    ${RED}$pm cold install failed for $project${NC}"
+      2>&1 | tail -1 || echo -e "    ${RED}$pm cold error for $project${NC}"
   done
-}
-
-# --------------------------------------------------------------------------
-# Warm benchmark: global cache primed, head-to-head
-# --------------------------------------------------------------------------
-run_warm_benchmarks() {
-  local project=$1 registry=$2 reg_short=$3 utoo_from=$4
-  local project_dir="$BENCH_DIR/$project"
-  echo -e "  ${YELLOW}Warm installs ($BENCH_WARM_RUNS runs, 1 warmup):${NC}"
-  for pm in "${PACKAGE_MANAGERS[@]}"; do
-    local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
-    local prepop_log="$LOG_DIR/${project}_${reg_short}_prepop_${pm}.log"
-    bash "$PREPARE_SCRIPT" "$project_dir" "$pm"
-    echo -e "    ${CYAN}Priming $pm cache...${NC}"
-    ( cd "$project_dir" && eval "$install_cmd" ) > "$prepop_log" 2>&1 \
-      || echo -e "    ${RED}$pm cache prime failed for $project${NC}"
-  done
-
-  local json_file="$RESULTS_DIR/${project}_${reg_short}_warm.json"
-  local hyperfine_args=(--warmup 1 --runs "$BENCH_WARM_RUNS" --export-json "$json_file")
-  for pm in "${PACKAGE_MANAGERS[@]}"; do
-    local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
-    local metrics_file="$RESULTS_DIR/${project}_${reg_short}_warm_${pm}_metrics.jsonl"
-    local cmd_script="$RESULTS_DIR/cmd_warm_${pm}.sh"
-    printf 'set -eo pipefail\ncd %s && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
-    > "$metrics_file"
-    hyperfine_args+=(-n "$pm" --prepare "bash $PREPARE_SCRIPT $project_dir $pm" "bash $METRICS_WRAPPER $metrics_file $cmd_script")
-  done
-  hyperfine "${hyperfine_args[@]}" 2>&1 || echo -e "  ${RED}Warm benchmark failed for $project${NC}"
 }
 
 # --------------------------------------------------------------------------
@@ -337,7 +360,12 @@ print_results() {
 
     const rows = [];
     for (const file of jsonFiles) {
-      const data = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+      let data;
+      try {
+        const raw = fs.readFileSync(path.join(dir, file), "utf8");
+        if (!raw.trim()) continue;             // a failed cell can leave an empty --export-json
+        data = JSON.parse(raw);
+      } catch (e) { continue; }                // one bad file must never sink the whole summary
       const base = file.replace(".json", "");
       const parts = base.split("_");
       const typeIdx = parts.findIndex(p => p === "cold" || p === "warm");
@@ -345,9 +373,10 @@ print_results() {
       const project = parts.slice(0, typeIdx - 1).join("-");
       const registry = parts[typeIdx - 1];
       const type = parts[typeIdx];
-      for (const r of data.results) rows.push({ project, registry, type, pm: r.command, mean: r.mean, stddev: r.stddev });
+      for (const r of (data.results || [])) rows.push({ project, registry, type, pm: r.command, mean: r.mean, stddev: r.stddev });
     }
-    if (!rows.length) { console.log("No results found."); process.exit(0); }
+
+    const failed = (process.env.FAILED_CELLS_STR || "").split("\n").map(s => s.trim()).filter(Boolean);
 
     const pms = [...new Set(rows.map(r => r.pm))];
     const fmt = r => r.stddev > 0.005 ? r.mean.toFixed(2)+"s ±"+r.stddev.toFixed(2) : r.mean.toFixed(2)+"s";
@@ -358,38 +387,49 @@ print_results() {
     }
 
     let md = "";
-    // ---- Timing ----
-    md += "## Timing — install wall-clock\n\n";
-    md += "| Project | Registry | Type | " + pms.join(" | ") + " |\n";
-    md += "|---|---|---|" + pms.map(() => "---").join("|") + "|\n";
-    for (const [key, byPm] of Object.entries(groups)) {
-      const [project, registry, type] = key.split("|");
-      const cells = pms.map(p => byPm[p] ? fmt(byPm[p]) : "—").join(" | ");
-      md += `| ${star(project)} | ${registry} | ${type} | ${cells} |\n`;
-    }
+    if (rows.length) {
+      // ---- Timing ----
+      md += "## Timing — install wall-clock\n\n";
+      md += "| Project | Registry | Type | " + pms.join(" | ") + " |\n";
+      md += "|---|---|---|" + pms.map(() => "---").join("|") + "|\n";
+      for (const [key, byPm] of Object.entries(groups)) {
+        const [project, registry, type] = key.split("|");
+        const cells = pms.map(p => byPm[p] ? fmt(byPm[p]) : "—").join(" | ");
+        md += `| ${star(project)} | ${registry} | ${type} | ${cells} |\n`;
+      }
 
-    // ---- Speedup vs pnpm (only if pnpm present) ----
-    if (pms.includes("pnpm")) {
-      const challengers = pms.filter(p => p !== "pnpm");
-      if (challengers.length) {
-        md += "\n## Speedup vs pnpm\n\n";
-        md += "| Project | Registry | Type | " + challengers.map(c => `${c} vs pnpm`).join(" | ") + " |\n";
-        md += "|---|---|---|" + challengers.map(() => "---").join("|") + "|\n";
-        for (const [key, byPm] of Object.entries(groups)) {
-          const [project, registry, type] = key.split("|");
-          const pnpm = byPm["pnpm"];
-          const cells = challengers.map(c => {
-            if (!pnpm || !byPm[c]) return "—";
-            const ratio = pnpm.mean / byPm[c].mean;
-            return ratio >= 1 ? `**${ratio.toFixed(2)}× faster**` : `${(1/ratio).toFixed(2)}× slower`;
-          }).join(" | ");
-          md += `| ${star(project)} | ${registry} | ${type} | ${cells} |\n`;
+      // ---- Speedup vs pnpm (only if pnpm present) ----
+      if (pms.includes("pnpm")) {
+        const challengers = pms.filter(p => p !== "pnpm");
+        if (challengers.length) {
+          md += "\n## Speedup vs pnpm\n\n";
+          md += "| Project | Registry | Type | " + challengers.map(c => `${c} vs pnpm`).join(" | ") + " |\n";
+          md += "|---|---|---|" + challengers.map(() => "---").join("|") + "|\n";
+          for (const [key, byPm] of Object.entries(groups)) {
+            const [project, registry, type] = key.split("|");
+            const pnpm = byPm["pnpm"];
+            const cells = challengers.map(c => {
+              if (!pnpm || !byPm[c]) return "—";
+              const ratio = pnpm.mean / byPm[c].mean;
+              return ratio >= 1 ? `**${ratio.toFixed(2)}× faster**` : `${(1/ratio).toFixed(2)}× slower`;
+            }).join(" | ");
+            md += `| ${star(project)} | ${registry} | ${type} | ${cells} |\n`;
+          }
         }
       }
+      md += "\n_Both PMs install the same tree, `--ignore-scripts`, lockfiles stripped (fresh resolve). Cold = cache purged, warm = cache primed._\n";
+      if (fromPnpm.size) {
+        md += "_\\* utoo installed via `--from pnpm` (migrates pnpm-workspace.yaml → workspaces + catalog → .utoo.toml before installing); its time includes that local migration step. pnpm reads the workspace natively._\n";
+      }
+    } else {
+      md += "## Timing\n\n_No timing results — every benchmarked install failed. See Failures below and the run log._\n";
     }
-    md += "\n_Both PMs install the same tree, `--ignore-scripts`, lockfiles stripped (fresh resolve). Cold = cache purged, warm = cache primed._\n";
-    if (fromPnpm.size) {
-      md += "_\\* utoo installed via `--from pnpm` (migrates pnpm-workspace.yaml → workspaces + catalog → .utoo.toml before installing); its time includes that local migration step. pnpm reads the workspace natively._\n";
+
+    // ---- Failures (surfaced, not swallowed) ----
+    if (failed.length) {
+      md += `\n## ⚠️ Failures (${failed.length})\n\n`;
+      for (const f of failed) md += `- \`${f}\`\n`;
+      md += "\n_The real error output for each failed cell is in the run-log artifact (search the project/pm name)._\n";
     }
 
     process.stdout.write(md);
@@ -407,11 +447,13 @@ main() {
 
   clone_projects
 
+  FAILED_CELLS=()
   for entry in "${PROJECTS[@]}"; do
     local project="${entry%%|*}"
     local utoo_from; utoo_from="$(echo "$entry" | cut -d'|' -f4)"
     if [ ! -d "$BENCH_DIR/$project/.git" ]; then
       echo -e "${RED}Skipping $project (not cloned)${NC}\n"
+      FAILED_CELLS+=("$project (clone)")
       continue
     fi
     for registry in "${REGISTRIES[@]}"; do
@@ -419,11 +461,19 @@ main() {
       echo -e "${YELLOW}----------------------------------------${NC}"
       echo -e "${YELLOW}Project: ${CYAN}$project${NC}  Registry: ${CYAN}$reg_short${NC}$([[ -n "$utoo_from" ]] && echo "  (utoo --from $utoo_from)")"
       echo -e "${YELLOW}----------------------------------------${NC}"
-      run_cold_benchmarks "$project" "$registry" "$reg_short" "$utoo_from"
+      # validate (surfaces real errors, builds VALID_PMS + primes cache)
+      # → warm (consumes primed cache) → cold (purges per run).
+      validate_and_prime "$project" "$registry" "$reg_short" "$utoo_from"
       run_warm_benchmarks "$project" "$registry" "$reg_short" "$utoo_from"
+      run_cold_benchmarks "$project" "$registry" "$reg_short" "$utoo_from"
       echo ""
     done
   done
+
+  # Newline-joined so cell labels (which contain spaces) survive into the printer.
+  FAILED_CELLS_STR=""
+  for c in "${FAILED_CELLS[@]}"; do FAILED_CELLS_STR+="$c"$'\n'; done
+  export FAILED_CELLS_STR
 
   print_results
 }
