@@ -40,7 +40,7 @@ set -eo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 REGISTRY_MODE=${1:-npmjs}
-PM_LIST=${2:-utoo,pnpm}
+PM_LIST=${2:-utoo,pnpm,bun}
 
 BENCH_COLD_RUNS=${BENCH_COLD_RUNS:-1}
 BENCH_WARM_RUNS=${BENCH_WARM_RUNS:-3}
@@ -59,14 +59,24 @@ export BENCH_KEEP_LOCKFILES
 #                        migration it would install a smaller tree than pnpm.
 #                        These rows carry a `*` in the summary: utoo's measured
 #                        time includes the (cheap, local) migration step.
-# Diverse on purpose: single-package React component lib, very-large pnpm dep
-# tree, Vue monorepo (pnpm catalog), yarn-workspaces app.
+# Diverse on purpose. Two tiers:
+#   * package.json-workspaces repos (no utoo_from) — utoo / pnpm / bun ALL read
+#     `workspaces` natively, so it's a clean 3-way comparison.
+#   * pnpm-only repos (utoo_from=pnpm) — members live only in pnpm-workspace.yaml
+#     (+ catalog:). pnpm reads them natively; utoo needs `--from pnpm`; bun/yarn
+#     can't read them at all and are auto-skipped for these rows (see
+#     validate_and_prime) to avoid a misleading root-only install.
 # --------------------------------------------------------------------------
 PROJECTS=(
+  # --- 3-way comparable (package.json workspaces / single package) ---
   "ant-design|https://github.com/ant-design/ant-design.git||"
+  "excalidraw|https://github.com/excalidraw/excalidraw.git||"
+  "babel|https://github.com/babel/babel.git||"
+  "jest|https://github.com/jestjs/jest.git||"
+  "strapi|https://github.com/strapi/strapi.git||"
+  # --- pnpm-only (utoo via --from pnpm vs pnpm; bun/yarn skipped) ---
   "material-ui|https://github.com/mui/material-ui.git||pnpm"
   "vue-core|https://github.com/vuejs/core.git||pnpm"
-  "excalidraw|https://github.com/excalidraw/excalidraw.git||"
 )
 
 # BENCH_ONLY filter (comma-separated project names)
@@ -262,7 +272,11 @@ get_install_cmd() {
   case $pm in
     utoo)      echo "utoo install --ignore-scripts$from_flag --registry=$registry" ;;
     utoo-next) echo "$UTOO_NEXT_BIN install --ignore-scripts$from_flag --registry=$registry" ;;
-    pnpm)      echo "npm_config_package_manager_strict=false pnpm install --ignore-scripts --no-frozen-lockfile --registry $registry" ;;
+    # --config.package-manager-strict=false is the authoritative override (beats
+    # both the env var and any .npmrc) so pnpm runs on a repo that pins a
+    # different packageManager (e.g. excalidraw pins yarn) instead of erroring
+    # "This project is configured to use yarn".
+    pnpm)      echo "pnpm install --ignore-scripts --no-frozen-lockfile --config.package-manager-strict=false --registry $registry" ;;
     yarn)      echo "yarn install --ignore-scripts --registry $registry" ;;
     bun)
       if [ "$cold" = "true" ]; then echo "bun install --ignore-scripts --registry $registry --no-cache";
@@ -314,6 +328,14 @@ validate_and_prime() {
   VALID_PMS=()
   echo -e "  ${YELLOW}Validate + prime (one install each):${NC}"
   for pm in "${PACKAGE_MANAGERS[@]}"; do
+    # pnpm-only repos (utoo_from set) declare members only in pnpm-workspace.yaml
+    # (+ catalog:). bun/yarn can't read that — they'd silently install a root-only
+    # tree (misleading) or fail. utoo handles it via --from pnpm; pnpm natively.
+    # Skip the others rather than report a bogus number.
+    if [[ -n "$utoo_from" && ( "$pm" == "bun" || "$pm" == "yarn" ) ]]; then
+      echo -e "    ${YELLOW}- skip $pm (pnpm-only workspace; can't read pnpm-workspace.yaml/catalog)${NC}"
+      continue
+    fi
     local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
     local cell_log="$LOG_DIR/${project}_${reg_short}_${pm}.log"
     bash "$PREPARE_SCRIPT" "$project_dir" "$pm" || true

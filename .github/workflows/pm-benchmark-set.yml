@@ -25,12 +25,12 @@ on:
         type: choice
         options: [npmjs, npmmirror, both]
       pm_list:
-        description: 'Comma-separated PMs (pnpm anchors the speedup column)'
+        description: 'Comma-separated PMs (pnpm anchors the speedup column; bun auto-skipped on pnpm-only repos)'
         required: false
-        default: 'utoo,pnpm'
+        default: 'utoo,pnpm,bun'
         type: string
       projects:
-        description: 'Restrict the set (comma-separated names); empty = all four'
+        description: 'Restrict the set (comma-separated names); empty = all'
         required: false
         default: ''
         type: string
@@ -110,7 +110,7 @@ jobs:
     # Resolve inputs once with defaults so push-triggered runs (which carry no
     # inputs) and workflow_dispatch runs share a single source of truth.
     env:
-      PM_LIST: ${{ inputs.pm_list || 'utoo,pnpm' }}
+      PM_LIST: ${{ inputs.pm_list || 'utoo,pnpm,bun' }}
       REGISTRY: ${{ inputs.registry || 'npmjs' }}
       BENCH_COLD_RUNS: ${{ inputs.cold_runs || '1' }}
       BENCH_WARM_RUNS: ${{ inputs.warm_runs || '3' }}
