@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
-use futures::StreamExt;
 use once_cell::sync::Lazy;
 use reqwest::{Client, StatusCode};
 use tokio_retry::RetryIf;
@@ -45,27 +44,32 @@ pub async fn download_bytes(url: &str, auth_token: Option<&str>) -> Result<Bytes
             if let Some(token) = auth_token {
                 request = request.bearer_auth(token);
             }
-            let response = request
+            let mut response = request
                 .send()
                 .await
                 .map_err(|e| RetryableError::Temporary(format!("Network error: {e}")))?;
 
             match response.status() {
                 StatusCode::OK => {
-                    // Stream chunks instead of buffering the whole body in one
-                    // await: each chunk feeds the live byte counter the spinner
-                    // renders as `↓ 23.4 MB 8.2 MB/s`. The guard surfaces this
-                    // request in the `N downloading` concurrency count.
+                    // Read the body chunk-by-chunk via `Response::chunk` (which
+                    // needs no reqwest `stream` feature) instead of buffering it
+                    // in one await: each chunk feeds the live byte counter the
+                    // spinner renders as `↓ 23.4 MB 8.2 MB/s`. The body is still
+                    // fully buffered before return — the downstream extractor is
+                    // not streaming — so `chunk` only buys the progress signal,
+                    // not lower peak memory. The guard surfaces this request in
+                    // the `N downloading` concurrency count.
                     let _gauge = DownloadGuard::enter();
                     // Capacity hint only — capped so a bogus Content-Length
                     // can't force a huge allocation; BytesMut grows as needed.
                     const MAX_PREALLOC: u64 = 32 * 1024 * 1024;
                     let hint = response.content_length().unwrap_or(0).min(MAX_PREALLOC);
                     let mut buf = BytesMut::with_capacity(hint as usize);
-                    let mut stream = response.bytes_stream();
-                    while let Some(chunk) = stream.next().await {
-                        let chunk = chunk
-                            .map_err(|e| RetryableError::Temporary(format!("Stream error: {e}")))?;
+                    while let Some(chunk) = response
+                        .chunk()
+                        .await
+                        .map_err(|e| RetryableError::Temporary(format!("Stream error: {e}")))?
+                    {
                         DOWNLOADED_BYTES.fetch_add(chunk.len() as u64, Ordering::Relaxed);
                         buf.extend_from_slice(&chunk);
                     }
