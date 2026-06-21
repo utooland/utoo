@@ -174,14 +174,19 @@ fi
 
 # pnpm needs a pnpm-workspace.yaml; synthesize one from package.json
 # "workspaces" only when the repo doesn't already ship its own (preserving
-# catalog definitions in repos like vuejs/core).
+# catalog definitions in repos like vuejs/core). `linkWorkspacePackages: true`
+# makes pnpm link sibling workspace packages by bare version — pnpm v10 defaults
+# this off (links only via the `workspace:` protocol), but yarn/npm/utoo link by
+# version, so yarn-workspace repos (e.g. excalidraw) reference siblings as plain
+# `@scope/pkg@x.y.z`. Without this, pnpm hits the registry for an unpublished
+# in-repo version and fails — an artifact of cross-PM install, not a real diff.
 if [ "$PM" = "pnpm" ] && [ ! -f "pnpm-workspace.yaml" ] && grep -q '"workspaces"' package.json 2>/dev/null; then
   node -e "
     const pkg = require('./package.json');
     const ws = pkg.workspaces || [];
     const p = Array.isArray(ws) ? ws : (ws.packages || []);
     if (p.length) {
-      let y = 'packages:\n';
+      let y = 'linkWorkspacePackages: true\npackages:\n';
       p.forEach(x => y += '  - \"' + x + '\"\n');
       require('fs').writeFileSync('pnpm-workspace.yaml', y);
     }
@@ -266,6 +271,31 @@ get_install_cmd() {
 }
 
 # --------------------------------------------------------------------------
+# Disk-size helpers
+# --------------------------------------------------------------------------
+# Actual disk blocks (KB) of a dir, 0 if missing.
+dir_kb() { du -sk "$1" 2>/dev/null | awk '{print $1+0}'; }
+
+# Global cache/store dir for a PM (what --cold purges).
+cache_dir_for() {
+  case "$1" in
+    utoo|utoo-next) echo "$UTOO_CACHE_DIR" ;;
+    pnpm) echo "$PNPM_STORE_DIR" ;;
+    bun)  echo "$BUN_INSTALL_DIR" ;;
+    yarn) yarn cache dir 2>/dev/null || echo "$HOME/.yarn/cache" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Total node_modules footprint of a project: sum every node_modules tree (root
+# + each workspace package), pruning nested ones so they aren't double-counted.
+node_modules_kb() {
+  find "$1" -type d -name node_modules -prune 2>/dev/null \
+    | while read -r d; do du -sk "$d" 2>/dev/null; done \
+    | awk '{s+=$1} END {print s+0}'
+}
+
+# --------------------------------------------------------------------------
 # Validate + prime: install each PM once with output CAPTURED. On failure the
 # real error tail is printed (no more opaque "exit code 1" from hyperfine) and
 # the PM is dropped from VALID_PMS, so cold/warm never benchmark a failing
@@ -282,9 +312,16 @@ validate_and_prime() {
     local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
     local cell_log="$LOG_DIR/${project}_${reg_short}_${pm}.log"
     bash "$PREPARE_SCRIPT" "$project_dir" "$pm" || true
+    # Cache size before this install — the delta is the project's footprint in
+    # the PM's store (prior project's cold run purged it, so this is ~per-project).
+    local cache_dir cache_before; cache_dir=$(cache_dir_for "$pm"); cache_before=$(dir_kb "$cache_dir")
     if ( cd "$project_dir" && eval "$install_cmd" ) > "$cell_log" 2>&1; then
       echo -e "    ${GREEN}✓ $pm${NC}"
       VALID_PMS+=("$pm")
+      # Record node_modules footprint + cache delta for the resources table.
+      node_modules_kb "$project_dir" > "$RESULTS_DIR/${project}_${reg_short}_nm_${pm}.txt"
+      local cache_after; cache_after=$(dir_kb "$cache_dir")
+      echo $(( cache_after - cache_before )) > "$RESULTS_DIR/${project}_${reg_short}_cache_${pm}.txt"
     else
       echo -e "    ${RED}✗ $pm install FAILED — cmd: ${NC}$install_cmd"
       echo -e "    ${RED}  real error tail:${NC}"
@@ -417,7 +454,44 @@ print_results() {
           }
         }
       }
-      md += "\n_Both PMs install the same tree, `--ignore-scripts`, lockfiles stripped (fresh resolve). Cold = cache purged, warm = cache primed._\n";
+      // ---- Resources: RSS + IO + ctx (warm avg) + node_modules + cache footprint ----
+      const res = {};  // key: project|registry|pm
+      const ensure = k => (res[k] ||= { rss:0, io_in:0, io_out:0, vol_ctx:0, invol_ctx:0, nm:null, cache:null });
+      for (const file of fs.readdirSync(dir)) {
+        if (file.endsWith("_metrics.jsonl")) {
+          const parts = file.replace("_metrics.jsonl","").split("_");
+          const ti = parts.findIndex(p => p === "cold" || p === "warm");
+          if (ti === -1 || parts[ti] !== "warm") continue;       // warm runs only
+          const project = parts.slice(0, ti-1).join("-"), registry = parts[ti-1], pm = parts.slice(ti+1).join("-");
+          let lines;
+          try { lines = fs.readFileSync(path.join(dir,file),"utf8").trim().split("\n").filter(Boolean).map(JSON.parse); }
+          catch(e) { continue; }
+          if (!lines.length) continue;
+          const avg = key => Math.round(lines.reduce((s,e)=>s+(e[key]||0),0)/lines.length);
+          const r = ensure([project,registry,pm].join("|"));
+          r.rss=avg("rss"); r.io_in=avg("io_in"); r.io_out=avg("io_out"); r.vol_ctx=avg("vol_ctx"); r.invol_ctx=avg("invol_ctx");
+        } else if (file.endsWith(".txt") && (file.includes("_nm_") || file.includes("_cache_"))) {
+          const parts = file.replace(".txt","").split("_");
+          const mi = parts.findIndex(p => p === "nm" || p === "cache");
+          if (mi === -1) continue;
+          const project = parts.slice(0, mi-1).join("-"), registry = parts[mi-1], pm = parts.slice(mi+1).join("-");
+          let kb = 0; try { kb = parseInt(fs.readFileSync(path.join(dir,file),"utf8").trim(),10) || 0; } catch(e){}
+          const r = ensure([project,registry,pm].join("|"));
+          if (parts[mi] === "nm") r.nm = kb; else r.cache = kb;
+        }
+      }
+      const resKeys = Object.keys(res).sort();
+      if (resKeys.length) {
+        const fmtKB = kb => kb == null ? "—" : kb >= 1048576 ? (kb/1048576).toFixed(1)+"G" : kb >= 1024 ? (kb/1024).toFixed(0)+"M" : kb+"K";
+        const fmtB  = b  => b >= 1073741824 ? (b/1073741824).toFixed(1)+"G" : b >= 1048576 ? (b/1048576).toFixed(0)+"M" : Math.round(b/1024)+"K";
+        md += "\n## Resources (warm-run avg)\n\n";
+        md += "| Project | PM | RSS | node_modules | cache Δ | IO r/w | ctx v/i |\n|---|---|---|---|---|---|---|\n";
+        for (const k of resKeys) {
+          const [project, , pm] = k.split("|"); const r = res[k];
+          md += `| ${star(project)} | ${pm} | ${fmtB(r.rss)} | ${fmtKB(r.nm)} | ${fmtKB(r.cache)} | ${r.io_in}/${r.io_out} | ${r.vol_ctx}/${r.invol_ctx} |\n`;
+        }
+      }
+      md += "\n_Both PMs install the same tree, `--ignore-scripts`, lockfiles stripped (fresh resolve). Cold = cache purged, warm = cache primed. node_modules = sum of all node_modules trees (du, actual blocks); cache Δ = bytes the project added to each PM global store._\n";
       if (fromPnpm.size) {
         md += "_\\* utoo installed via `--from pnpm` (migrates pnpm-workspace.yaml → workspaces + catalog → .utoo.toml before installing); its time includes that local migration step. pnpm reads the workspace natively._\n";
       }
