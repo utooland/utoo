@@ -24,6 +24,29 @@ where
         .collect())
 }
 
+/// Deserialize an optional bool that also tolerates a string-typed value
+/// (`"private": "true"` / `"false"`). npm/pnpm/yarn coerce these, and real
+/// manifests ship them (e.g. `@mui/internal-waterfall`). Without this, a single
+/// string-typed `private` fails the *whole* manifest parse — and since workspace
+/// discovery silently skips members that fail to parse, the member vanishes and
+/// later surfaces as a misleading "workspace: dependency does not match any
+/// workspace member". Unrecognised values (including numeric `1`/`0`, which npm
+/// does not coerce either) read as `None` so one odd field never sinks the parse.
+fn deserialize_lenient_opt_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        Some(Value::Bool(b)) => Some(b),
+        Some(Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 /// Parsed package.json content.
 ///
 /// This is the primary type for representing package.json in ruborist.
@@ -119,8 +142,14 @@ pub struct PackageJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Whether package is private
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Whether package is private. Accepts boolean or string `"true"`/`"false"`
+    /// (some real manifests ship the string form); see
+    /// [`deserialize_lenient_opt_bool`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_lenient_opt_bool"
+    )]
     pub private: Option<bool>,
 
     /// Files whitelist for publishing
@@ -652,6 +681,39 @@ mod tests {
         assert_eq!(rt["private"], true);
         assert_eq!(rt["main"], "./lib/index.js");
         assert_eq!(rt["publishConfig"]["tag"], "beta");
+    }
+
+    #[test]
+    fn test_private_accepts_string_typed_value() {
+        // Some real manifests (e.g. @mui/internal-waterfall) ship `"private"` as
+        // a string. It must not fail the whole parse — that would drop the
+        // package as a workspace member and break sibling `workspace:` deps.
+        assert_eq!(
+            PackageJson::from_value(&json!({ "name": "x", "private": "true" }))
+                .unwrap()
+                .private,
+            Some(true)
+        );
+        assert_eq!(
+            PackageJson::from_value(&json!({ "private": "false" }))
+                .unwrap()
+                .private,
+            Some(false)
+        );
+        // Boolean form still works.
+        assert_eq!(
+            PackageJson::from_value(&json!({ "private": true }))
+                .unwrap()
+                .private,
+            Some(true)
+        );
+        // Unrecognised value reads as None rather than failing the parse.
+        assert_eq!(
+            PackageJson::from_value(&json!({ "private": "yes" }))
+                .unwrap()
+                .private,
+            None
+        );
     }
 
     #[test]

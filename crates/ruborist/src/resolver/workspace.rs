@@ -99,12 +99,20 @@ impl<G: Glob> WorkspaceDiscovery<G> {
                     None => continue,
                 };
 
-                // Read workspace package.json
+                // Read workspace package.json. A parse failure here drops the
+                // member from the graph entirely, which later surfaces as a
+                // confusing "workspace: dependency does not match any workspace
+                // member" on any sibling that depends on it — so warn loudly
+                // rather than swallowing it at debug level.
                 let mut workspace_pkg: PackageJson = match read_package_json(&workspace_path).await
                 {
                     Ok(pkg) => pkg,
                     Err(e) => {
-                        tracing::debug!("Failed to read workspace package.json: {}", e);
+                        tracing::warn!(
+                            "Skipping workspace member at {}: package.json failed to parse ({e:#}); \
+                             `workspace:` deps on it will not resolve",
+                            workspace_path.display()
+                        );
                         continue;
                     }
                 };
