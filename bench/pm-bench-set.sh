@@ -273,8 +273,13 @@ get_install_cmd() {
 # --------------------------------------------------------------------------
 # Disk-size helpers
 # --------------------------------------------------------------------------
-# Actual disk blocks (KB) of a dir, 0 if missing.
-dir_kb() { du -sk "$1" 2>/dev/null | awk '{print $1+0}'; }
+# Actual disk blocks (KB) of a dir; 0 if missing. Must never fail the script:
+# under `set -eo pipefail`, a bare `du` on a not-yet-created cache dir exits
+# non-zero and would abort. Guard existence + swallow du's exit.
+dir_kb() {
+  [ -d "$1" ] || { echo 0; return 0; }
+  { du -sk "$1" 2>/dev/null || true; } | awk 'END{print $1+0}'
+}
 
 # Global cache/store dir for a PM (what --cold purges).
 cache_dir_for() {
@@ -290,8 +295,8 @@ cache_dir_for() {
 # Total node_modules footprint of a project: sum every node_modules tree (root
 # + each workspace package), pruning nested ones so they aren't double-counted.
 node_modules_kb() {
-  find "$1" -type d -name node_modules -prune 2>/dev/null \
-    | while read -r d; do du -sk "$d" 2>/dev/null; done \
+  { find "$1" -type d -name node_modules -prune 2>/dev/null || true; } \
+    | while read -r d; do du -sk "$d" 2>/dev/null || true; done \
     | awk '{s+=$1} END {print s+0}'
 }
 
