@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{NonLocalValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, Vc, trace::TraceRawVcs};
 use turbopack::{ModuleAssetContext, module_options::CustomModuleType};
 use turbopack_core::{
     context::AssetContext, module::Module, reference_type::ReferenceType, source::Source,
@@ -10,21 +10,8 @@ use turbopack_ecmascript::EcmascriptInputTransforms;
 
 use super::source_asset::InlineCssFileSource;
 
-#[derive(
-    Eq,
-    PartialEq,
-    Clone,
-    Copy,
-    Debug,
-    PartialOrd,
-    Ord,
-    Hash,
-    TaskInput,
-    TraceRawVcs,
-    NonLocalValue,
-    Encode,
-    Decode,
-)]
+#[turbo_tasks::task_input]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, PartialOrd, Ord, Hash, TraceRawVcs, Encode, Decode)]
 pub enum InjectType {
     Style,
     SingletonStyle,

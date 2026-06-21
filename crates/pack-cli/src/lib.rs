@@ -11,9 +11,7 @@ use pack_api::project::{ProjectContainer, ProjectOptions, WatchOptions};
 use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TurboTasks};
-use turbo_tasks_backend::{
-    BackendOptions, NoopBackingStorage, TurboTasksBackend, noop_backing_storage,
-};
+use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 
 pub mod build;
 pub mod serve;
@@ -64,7 +62,7 @@ pub async fn initialize_project_container(
     dev: bool,
 ) -> Result<
     (
-        Arc<TurboTasks<TurboTasksBackend<NoopBackingStorage>>>,
+        Arc<TurboTasks<TurboTasksBackend>>,
         ResolvedVc<ProjectContainer>,
     ),
     anyhow::Error,

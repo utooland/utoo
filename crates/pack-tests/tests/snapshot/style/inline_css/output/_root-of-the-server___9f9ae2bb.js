@@ -261,7 +261,8 @@ var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d
 var __TURBOPACK__default__export__ = {};
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/style/inline_css/input/index.less?modules [client] (css module)", ((__turbopack_context__) => {

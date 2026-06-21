@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
@@ -391,7 +391,8 @@ pub async fn get_server_resolve_options_context(
     .cell())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
+#[turbo_tasks::task_input(contains_unresolved_vcs)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, TraceRawVcs, Encode, Decode)]
 pub struct ServerChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub config: Vc<Config>,

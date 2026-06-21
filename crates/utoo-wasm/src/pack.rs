@@ -18,12 +18,10 @@ use tokio::{sync::mpsc::unbounded_channel, time::Instant};
 use turbo_rcstr::{rcstr, RcStr};
 use turbo_tasks::TaskId;
 use turbo_tasks::{
-    Completion, OperationVc, PrettyPrintError, ReadConsistency, ResolvedVc, TransientInstance,
-    TurboTasks, Vc,
+    read_strongly_consistent_and_apply_effects, Completion, OperationVc, PrettyPrintError,
+    ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
 };
-use turbo_tasks_backend::{
-    noop_backing_storage, BackendOptions, NoopBackingStorage, TurboTasksBackend,
-};
+use turbo_tasks_backend::{noop_backing_storage, BackendOptions, TurboTasksBackend};
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     issue::{PlainIssue, PlainIssueSource, PlainSource},
@@ -381,15 +379,17 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
                 .run(async move {
                     let entrypoints_with_issues_op =
                         get_all_written_entrypoints_with_issues_operation(container);
+                    let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
+                        entrypoints_with_issues_op,
+                        |v| &v.effects,
+                    )
+                    .await?;
 
                     let EntrypointsWithIssues {
                         entrypoints,
                         issues,
-                        effects,
-                    } = &*entrypoints_with_issues_op
-                        .read_strongly_consistent()
-                        .await?;
-                    effects.apply().await?;
+                        effects: _,
+                    } = &*entrypoints_with_issues;
 
                     Ok((entrypoints.clone(), issues.clone()))
                 })
@@ -452,14 +452,16 @@ pub async fn project_entrypoints_subscribe(
 
                     let entrypoints_with_issues_op =
                         get_all_written_entrypoints_with_issues_operation(container);
+                    let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
+                        entrypoints_with_issues_op,
+                        |v| &v.effects,
+                    )
+                    .await?;
                     let EntrypointsWithIssues {
                         entrypoints: _,
                         issues,
-                        effects,
-                    } = &*entrypoints_with_issues_op
-                        .read_strongly_consistent()
-                        .await?;
-                    effects.apply().await?;
+                        effects: _,
+                    } = &*entrypoints_with_issues;
 
                     tracing::info!("dev build finished in {:?}", start.elapsed());
 
@@ -521,14 +523,16 @@ pub fn project_write_all_to_disk(callback: js_sys::Function) {
                         // Use get_all_written_entrypoints_with_issues_operation to write output to disk
                         let entrypoints_with_issues_op =
                             get_all_written_entrypoints_with_issues_operation(container);
+                        let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
+                            entrypoints_with_issues_op,
+                            |v| &v.effects,
+                        )
+                        .await?;
                         let EntrypointsWithIssues {
                             entrypoints: _,
                             issues,
-                            effects,
-                        } = &*entrypoints_with_issues_op
-                            .read_strongly_consistent()
-                            .await?;
-                        effects.apply().await?;
+                            effects: _,
+                        } = &*entrypoints_with_issues;
 
                         Ok::<_, anyhow::Error>(issues.clone())
                     })
@@ -606,13 +610,14 @@ pub async fn project_hmr_events(
 
                         let update_op =
                             hmr_update_with_issues_operation(project, identifier.clone(), state);
-                        let update = update_op.read_strongly_consistent().await?;
+                        let update =
+                            read_strongly_consistent_and_apply_effects(update_op, |v| &v.effects)
+                                .await?;
                         let HmrUpdateWithIssues {
                             update,
                             issues,
-                            effects,
+                            effects: _,
                         } = &*update;
-                        effects.apply().await?;
 
                         // Update the version state (same as NAPI)
                         match &**update {

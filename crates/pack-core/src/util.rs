@@ -6,7 +6,7 @@ use dunce::{canonicalize, simplified};
 use regex::Regex;
 use serde::Deserialize;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{NonLocalValue, TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystem;
 use turbopack::{condition::ContextCondition, module_options::RuleCondition};
 
@@ -58,6 +58,7 @@ fn path_ends_with_segment_path(path: &str, segment_path: &str) -> bool {
     false
 }
 
+#[turbo_tasks::task_input]
 #[derive(
     Default,
     PartialEq,
@@ -70,8 +71,6 @@ fn path_ends_with_segment_path(path: &str, segment_path: &str) -> bool {
     Hash,
     PartialOrd,
     Ord,
-    TaskInput,
-    NonLocalValue,
     Encode,
     Decode,
 )]

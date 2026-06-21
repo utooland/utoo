@@ -23,7 +23,8 @@ __turbopack_context__.s([
 var __TURBOPACK__default__export__ = 'md-frontmatter';
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/webpack-loaders/frontmatter-path-guard/input/page.js.js?type=frontmatter [client] (ecmascript)", ((__turbopack_context__) => {
@@ -32,7 +33,8 @@ __turbopack_context__.s([
 var __TURBOPACK__default__export__ = 'js-frontmatter';
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/webpack-loaders/frontmatter-path-guard/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {

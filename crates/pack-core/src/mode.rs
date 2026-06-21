@@ -1,14 +1,13 @@
 use serde::Deserialize;
-use turbo_tasks::{OperationValue, TaskInput};
+use turbo_tasks::OperationValue;
 use turbopack_ecmascript_runtime::RuntimeType;
 
 use crate::shared::webpack_rules::WebpackLoaderBuiltinCondition;
 
 /// The mode in which Next.js is running.
 #[turbo_tasks::value(shared)]
-#[derive(
-    Default, Debug, Copy, Clone, TaskInput, Ord, PartialOrd, Hash, Deserialize, OperationValue,
-)]
+#[turbo_tasks::task_input(contains_unresolved_vcs)]
+#[derive(Default, Debug, Copy, Clone, Ord, PartialOrd, Hash, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
     Development,

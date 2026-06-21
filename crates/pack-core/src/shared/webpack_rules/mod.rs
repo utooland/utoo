@@ -4,7 +4,7 @@ use anyhow::Result;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::rcstr;
-use turbo_tasks::{NonLocalValue, OperationValue, ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{OperationValue, ResolvedVc, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     WebpackLoaderBuiltinConditionSet, WebpackLoaderBuiltinConditionSetMatch, WebpackLoadersOptions,
@@ -23,6 +23,7 @@ use crate::{
 pub(crate) mod less;
 pub(crate) mod sass;
 
+#[turbo_tasks::task_input]
 #[derive(
     Copy,
     Clone,
@@ -34,9 +35,7 @@ pub(crate) mod sass;
     Hash,
     Serialize,
     Deserialize,
-    TaskInput,
     TraceRawVcs,
-    NonLocalValue,
     OperationValue,
     Encode,
     Decode,
