@@ -14,6 +14,12 @@
 
 use std::sync::Arc;
 
+use dashmap::DashSet;
+
+use super::manifest;
+use super::store::{ManifestStore, NoopStore};
+use crate::traits::registry::{RegistryClient, RegistryError, is_npm_registry};
+
 /// Get current timestamp in seconds since UNIX epoch.
 /// Works on both native and WASM targets.
 #[cfg(not(target_arch = "wasm32"))]
@@ -30,12 +36,6 @@ fn current_timestamp_secs() -> u64 {
 fn current_timestamp_secs() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
-
-use dashmap::DashSet;
-
-use super::manifest;
-use super::store::{ManifestStore, NoopStore};
-use crate::traits::registry::{RegistryClient, RegistryError, is_npm_registry};
 
 /// `ManifestProvider` implementation for the demand BFS resolver. A child
 /// module so it can reach `UnifiedRegistry`'s private fields without widening

@@ -1,53 +1,160 @@
 use crate::fs;
-use crate::helper::ruborist_context::Context as RuboristContext;
 use crate::util::json::read_json_file;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
 use regex::Regex;
+use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::OnceLock;
-use tokio::sync::OnceCell;
-use utoo_ruborist::registry::is_npm_registry;
+use std::sync::{LazyLock, OnceLock};
 use utoo_ruborist::semver::matches;
 
-static CONFIG: OnceCell<Value> = OnceCell::const_new();
+/// The `binary-mirror-config` package (cnpm), parsed from its version
+/// manifest's `mirrors` field. We own this schema, so it is modeled
+/// explicitly rather than poked at through `serde_json::Value`. Every field
+/// is optional/defaulted so a config that grows new sections never fails the
+/// whole parse (a parse failure disables mirroring for the whole install).
+#[derive(Debug, Default, Deserialize)]
+struct BinaryMirrorConfig {
+    #[serde(default)]
+    mirrors: Mirrors,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct Mirrors {
+    #[serde(default)]
+    china: ChinaMirror,
+}
+
+/// The `mirrors.china` section: shared env overrides plus one entry per
+/// package whose prebuilt binaries we redirect to the China CDN.
+#[derive(Debug, Default, Deserialize)]
+struct ChinaMirror {
+    /// Environment variables exported into every install/build script.
+    #[serde(rename = "ENVS", default)]
+    envs: BTreeMap<String, String>,
+    /// Per-package mirror settings, keyed by package name (every key under
+    /// `china` other than `ENVS`).
+    #[serde(flatten)]
+    packages: BTreeMap<String, BinaryMirror>,
+}
+
+/// Per-package binary mirror settings.
+#[derive(Debug, Default, Clone, Deserialize, serde::Serialize)]
+struct BinaryMirror {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    /// Hosts to rewrite to `host` (used when `replaceHostMap` is absent).
+    /// cnpm ships this in both shapes — a single host string (e.g. `flow-bin`)
+    /// or an array — so accept either and normalize to a list. A strict
+    /// `Vec<String>` would reject the bare-string form and, because the whole
+    /// `mirrors.china` map deserializes as one unit, fail the entire config
+    /// parse — silently disabling mirroring for every package.
+    #[serde(
+        rename = "replaceHost",
+        default,
+        deserialize_with = "deserialize_string_or_vec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    replace_host: Option<Vec<String>>,
+    /// Files to rewrite hosts in (defaults to lib/index.js + lib/install.js).
+    /// Excluded from the merge into the package's `binary` config.
+    #[serde(
+        rename = "replaceHostFiles",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    replace_host_files: Option<Vec<String>>,
+    /// Explicit from→to host rewrite map.
+    #[serde(
+        rename = "replaceHostMap",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    replace_host_map: Option<BTreeMap<String, String>>,
+    /// Regex→replacement host rewrite map.
+    #[serde(
+        rename = "replaceHostRegExpMap",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    replace_host_regexp_map: Option<BTreeMap<String, String>>,
+    /// Cypress platform map (`os` → platform slug) for versions >= 3.3.0.
+    #[serde(
+        rename = "newPlatforms",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    new_platforms: Option<BTreeMap<String, String>>,
+    /// Open-ended node-pre-gyp / node-gyp knobs (module_name, remote_path, …)
+    /// passed through verbatim into the package's `binary` config.
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+/// Accept npm's `replaceHost` in either shape — a single host string or an
+/// array of host strings — normalizing to `Vec<String>`. See the field doc on
+/// [`BinaryMirror::replace_host`] for why the bare-string form must not fail
+/// the parse.
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<StringOrVec>::deserialize(deserializer)? {
+        Some(StringOrVec::One(s)) => Some(vec![s]),
+        Some(StringOrVec::Many(v)) => Some(v),
+        None => None,
+    })
+}
+
+/// The China binary-mirror config, **bundled at build time** rather than
+/// fetched from the registry.
+///
+/// `binary-mirror-config` is a package we maintain and publish; its data
+/// changes rarely and applies to public registries only. Fetching it at install
+/// time was both a cold-install network stall (one request gating the first
+/// mirror-matched package) and a silent-failure risk — a registry serving a
+/// schema-drifted manifest made the whole config fail to parse and disabled
+/// mirroring for every package. Bundling turns a bad config into *our* CI
+/// failure (the unit test below), never the user's broken install, and needs
+/// zero network. Re-sync this file with the package's `mirrors` field whenever a
+/// new `binary-mirror-config` version is published.
+static CONFIG: LazyLock<BinaryMirrorConfig> = LazyLock::new(|| {
+    let config: BinaryMirrorConfig =
+        serde_json::from_str(include_str!("binary-mirror-config.json"))
+            .expect("bundled binary-mirror-config.json must parse (covered by a unit test)");
+    tracing::debug!(
+        "Bundled binary mirror config: {} china package entries",
+        config.mirrors.china.packages.len()
+    );
+    config
+});
 /// Cached result of whether we should skip binary mirror envs
 static SKIP_BINARY_MIRROR: OnceLock<bool> = OnceLock::new();
 
-async fn load_config() -> Result<&'static Value> {
-    CONFIG
-        .get_or_try_init(|| async {
-            // Go through the registry client so URL construction and private-
-            // registry auth are handled in one place rather than hand-rolled.
-            // `binary-mirror-config@latest` is a normal version manifest whose
-            // `mirrors` field carries the config.
-            let bytes = RuboristContext::registry()
-                .await
-                .fetch_version_manifest_bytes("binary-mirror-config", "latest")
-                .await
-                .context("Failed to fetch binary mirror config")?;
-            serde_json::from_slice(&bytes).context("Failed to parse binary mirror config")
-        })
-        .await
-}
-
-fn update_binary_config(pkg: &mut Value, binary_mirror: &Map<String, Value>) {
+fn update_binary_config(pkg: &mut Value, binary_mirror: &BinaryMirror) {
     // Get existing binary configuration
-    let mut new_binary = if let Some(binary) = pkg.get("binary") {
-        if let Some(obj) = binary.as_object() {
-            obj.clone()
-        } else {
-            Map::new()
-        }
-    } else {
-        Map::new()
+    let mut new_binary = match pkg.get("binary").and_then(Value::as_object) {
+        Some(obj) => obj.clone(),
+        None => Map::new(),
     };
 
-    // Merge new configuration
-    for (key, value) in binary_mirror {
-        if key != "replaceHostFiles" {
-            new_binary.insert(key.clone(), value.clone());
+    // Merge the mirror entry's keys on top, except `replaceHostFiles` (which
+    // selects rewrite targets and is not a binary-download knob). Serializing
+    // the typed entry reproduces its exact wire keys (structural fields +
+    // passed-through `extra`).
+    if let Ok(Value::Object(entry)) = serde_json::to_value(binary_mirror) {
+        for (key, value) in entry {
+            if key != "replaceHostFiles" {
+                new_binary.insert(key, value);
+            }
         }
     }
 
@@ -86,59 +193,60 @@ async fn handle_node_pre_gyp_versioning(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn should_handle_replace_host(binary_mirror: &Map<String, Value>) -> bool {
-    (binary_mirror.contains_key("replaceHost") && binary_mirror.contains_key("host"))
-        || binary_mirror.contains_key("replaceHostMap")
-        || binary_mirror.contains_key("replaceHostRegExpMap")
+fn should_handle_replace_host(binary_mirror: &BinaryMirror) -> bool {
+    (binary_mirror.replace_host.is_some() && binary_mirror.host.is_some())
+        || binary_mirror.replace_host_map.is_some()
+        || binary_mirror.replace_host_regexp_map.is_some()
 }
 
-fn get_replace_host_files(binary_mirror: &Map<String, Value>) -> Vec<&str> {
+fn get_replace_host_files(binary_mirror: &BinaryMirror) -> Vec<&str> {
+    match &binary_mirror.replace_host_files {
+        Some(files) => files.iter().map(String::as_str).collect(),
+        None => vec!["lib/index.js", "lib/install.js"],
+    }
+}
+
+/// The mirror host. A `replaceHost`/cypress rewrite needs a target host, so a
+/// missing one is a config error, not a panic.
+fn mirror_host(binary_mirror: &BinaryMirror) -> Result<&str> {
     binary_mirror
-        .get("replaceHostFiles")
-        .and_then(|f| f.as_array())
-        .map(|f| f.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-        .unwrap_or_else(|| vec!["lib/index.js", "lib/install.js"])
+        .host
+        .as_deref()
+        .context("binary-mirror config missing string `host`")
 }
 
-fn replace_with_regex(content: &str, replace_map: &Value) -> Result<String> {
+fn replace_with_regex(content: &str, replace_map: &BTreeMap<String, String>) -> Result<String> {
     let mut result = content.to_string();
-    for (pattern, replacement) in replace_map.as_object().unwrap() {
+    for (pattern, replacement) in replace_map {
         let re = Regex::new(pattern).with_context(|| format!("Invalid regex pattern {pattern}"))?;
-        result = re
-            .replace_all(&result, replacement.as_str().unwrap())
-            .to_string();
+        result = re.replace_all(&result, replacement.as_str()).to_string();
     }
     Ok(result)
 }
 
-fn replace_with_map(content: &str, binary_mirror: &Map<String, Value>) -> Result<String> {
-    let replace_map = if let Some(map) = binary_mirror.get("replaceHostMap") {
-        map.as_object().unwrap().clone()
+fn replace_with_map(content: &str, binary_mirror: &BinaryMirror) -> Result<String> {
+    let replace_map = if let Some(map) = &binary_mirror.replace_host_map {
+        map.clone()
     } else {
-        let mut map = Map::new();
-        let hosts = binary_mirror
-            .get("replaceHost")
-            .and_then(|h| h.as_array())
-            .map(|h| h.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec![binary_mirror["host"].as_str().unwrap()]);
-
-        for host in hosts {
-            map.insert(
-                host.to_string(),
-                Value::String(binary_mirror["host"].as_str().unwrap().to_string()),
-            );
-        }
-        map
+        let host = mirror_host(binary_mirror)?;
+        let hosts = match &binary_mirror.replace_host {
+            Some(hosts) => hosts.iter().map(String::as_str).collect(),
+            None => vec![host],
+        };
+        hosts
+            .into_iter()
+            .map(|from| (from.to_string(), host.to_string()))
+            .collect()
     };
 
     let mut result = content.to_string();
-    for (from, to) in replace_map {
-        result = result.replace(&from, to.as_str().unwrap());
+    for (from, to) in &replace_map {
+        result = result.replace(from, to);
     }
     Ok(result)
 }
 
-async fn handle_replace_host(dir: &Path, binary_mirror: &Map<String, Value>) -> Result<()> {
+async fn handle_replace_host(dir: &Path, binary_mirror: &BinaryMirror) -> Result<()> {
     if !should_handle_replace_host(binary_mirror) {
         return Ok(());
     }
@@ -151,10 +259,9 @@ async fn handle_replace_host(dir: &Path, binary_mirror: &Map<String, Value>) -> 
                 .await
                 .context("Failed to read file")?;
 
-            let new_content = if let Some(replace_map) = binary_mirror.get("replaceHostRegExpMap") {
-                replace_with_regex(&content, replace_map)?
-            } else {
-                replace_with_map(&content, binary_mirror)?
+            let new_content = match &binary_mirror.replace_host_regexp_map {
+                Some(regexp_map) => replace_with_regex(&content, regexp_map)?,
+                None => replace_with_map(&content, binary_mirror)?,
             };
 
             fs::write(&file_path, new_content)
@@ -168,53 +275,55 @@ async fn handle_replace_host(dir: &Path, binary_mirror: &Map<String, Value>) -> 
 async fn handle_cypress(
     dir: &Path,
     pkg: &Value,
-    binary_mirror: &Map<String, Value>,
+    binary_mirror: &BinaryMirror,
     target_os: Option<&str>,
 ) -> Result<()> {
-    if pkg["name"].as_str().unwrap() != "cypress" {
+    if pkg.get("name").and_then(Value::as_str) != Some("cypress") {
         return Ok(());
     }
 
-    let default_platforms = serde_json::json!({
-        "darwin": "osx64",
-        "linux": "linux64",
-        "win32": "win64"
-    });
+    let default_platforms: BTreeMap<&str, &str> = [
+        ("darwin", "osx64"),
+        ("linux", "linux64"),
+        ("win32", "win64"),
+    ]
+    .into();
 
-    let platforms = if let Some(new_platforms) = binary_mirror.get("newPlatforms") {
-        if matches(">=3.3.0", pkg["version"].as_str().unwrap()) {
-            new_platforms
-        } else {
-            &default_platforms
-        }
-    } else {
-        &default_platforms
+    // Cypress >= 3.3.0 uses the config's `newPlatforms` slugs; older versions
+    // keep the legacy defaults.
+    let use_new_platforms = match (
+        &binary_mirror.new_platforms,
+        pkg.get("version").and_then(Value::as_str),
+    ) {
+        (Some(new_platforms), Some(version)) if matches(">=3.3.0", version) => Some(new_platforms),
+        _ => None,
     };
 
     let os = target_os.unwrap_or(std::env::consts::OS);
-    if let Some(target_platform) = platforms[os].as_str() {
+    let target_platform = match use_new_platforms {
+        Some(new_platforms) => new_platforms.get(os).map(String::as_str),
+        None => default_platforms.get(os).copied(),
+    };
+
+    if let Some(target_platform) = target_platform {
         let download_file = dir.join("lib/tasks/download.js");
         if fs::try_exists(&download_file).await? {
             let content = fs::read_to_string(&download_file)
                 .await
                 .context("Failed to read download.js")?;
 
+            let host = mirror_host(binary_mirror)?;
+            let mirror_return = format!(
+                "return \"{host}\" + version + \"/{target_platform}/cypress.zip\"; // hack by npminstall"
+            );
             let new_content = content
                 .replace(
                     "return version ? prepend(`desktop/${version}`) : prepend('desktop')",
-                    &format!(
-                        "return \"{}\" + version + \"/{}/cypress.zip\"; // hack by npminstall",
-                        binary_mirror["host"].as_str().unwrap(),
-                        target_platform
-                    ),
+                    &mirror_return,
                 )
                 .replace(
                     "return version ? prepend('desktop/' + version) : prepend('desktop');",
-                    &format!(
-                        "return \"{}\" + version + \"/{}/cypress.zip\"; // hack by npminstall",
-                        binary_mirror["host"].as_str().unwrap(),
-                        target_platform
-                    ),
+                    &mirror_return,
                 );
 
             fs::write(&download_file, new_content)
@@ -227,93 +336,90 @@ async fn handle_cypress(
 }
 
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
-    // npm.org has no China mirror layer — skip alongside `get_envs`.
+    // Only rewrite binary hosts on the npmmirror registry the config targets.
     if should_skip_binary_mirror() {
         return Ok(());
     }
 
-    // A missing/unreachable binary-mirror-config (e.g. a private registry that
-    // doesn't host it) must not fail the install — the china-mirror rewrite is
-    // an optimization. Skip gracefully, matching `get_envs`.
-    let config = match load_config().await {
-        Ok(config) => config,
-        Err(e) => {
-            tracing::debug!("Binary mirror config unavailable, skipping: {e}");
-            return Ok(());
-        }
+    let Some(binary_mirror) = CONFIG.mirrors.china.packages.get(name) else {
+        return Ok(());
     };
 
-    let mirrors = config["mirrors"]["china"]
+    // Read package.json as raw Value for in-place mutation — it is an
+    // arbitrary third-party manifest we patch and write back, so it stays
+    // untyped (typing would risk dropping fields we don't model).
+    let pkg_path = dir.join("package.json");
+    let mut pkg: Value = read_json_file(&pkg_path).await?;
+
+    // has install script and not replaceHostFiles
+    let should_update_binary = pkg["scripts"].as_object().is_some_and(|scripts| {
+        scripts.contains_key("install") && binary_mirror.replace_host_files.is_none()
+    });
+
+    // detect node-pre-gyp
+    let should_handle_node_pre_gyp = pkg["scripts"]
         .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Invalid binary mirror config format"))?;
+        .and_then(|scripts| scripts.get("install"))
+        .and_then(|s| s.as_str())
+        .is_some_and(|s| s.contains("node-pre-gyp install"));
 
-    if let Some(binary_mirror) = mirrors.get(name) {
-        let binary_mirror = binary_mirror
-            .as_object()
-            .ok_or_else(|| anyhow::anyhow!("Invalid binary mirror format"))?;
-
-        // Read package.json as raw Value for in-place mutation
-        let pkg_path = dir.join("package.json");
-        let mut pkg: Value = read_json_file(&pkg_path).await?;
-
-        // has install script and not replaceHostFiles
-        let should_update_binary = pkg["scripts"].as_object().is_some_and(|scripts| {
-            scripts.contains_key("install") && !binary_mirror.contains_key("replaceHostFiles")
-        });
-
-        // detect node-pre-gyp
-        let should_handle_node_pre_gyp = pkg["scripts"]
-            .as_object()
-            .and_then(|scripts| scripts.get("install"))
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s.contains("node-pre-gyp install"));
-
-        // update binary config
-        if should_update_binary {
-            update_binary_config(&mut pkg, binary_mirror);
-        }
-
-        // process node-pre-gyp
-        if should_handle_node_pre_gyp {
-            handle_node_pre_gyp_versioning(dir).await?;
-        }
-
-        handle_replace_host(dir, binary_mirror).await?;
-        handle_cypress(dir, &pkg, binary_mirror, None).await?;
-
-        // Write updated package.json
-        fs::write(pkg_path, serde_json::to_string_pretty(&pkg).unwrap())
-            .await
-            .context("Failed to write package.json")?;
+    // update binary config
+    if should_update_binary {
+        update_binary_config(&mut pkg, binary_mirror);
     }
+
+    // process node-pre-gyp
+    if should_handle_node_pre_gyp {
+        handle_node_pre_gyp_versioning(dir).await?;
+    }
+
+    handle_replace_host(dir, binary_mirror).await?;
+    handle_cypress(dir, &pkg, binary_mirror, None).await?;
+
+    // Write updated package.json
+    fs::write(pkg_path, serde_json::to_string_pretty(&pkg)?)
+        .await
+        .context("Failed to write package.json")?;
 
     Ok(())
 }
 
+/// The bundled config redirects binary downloads to npmmirror's China CDNs, so
+/// it is only correct on the npmmirror registry. Apply it there and skip
+/// everywhere else: official npm has no mirror layer, and other registries
+/// (yarnpkg, GitHub Packages, private/non-China mirrors) would otherwise get
+/// China CDN hosts and ~30 China mirror env vars forced onto downloads they
+/// never opted into.
+///
+/// Earlier this fetched the config from the *configured* registry, so the gate
+/// could be "skip official npm" — a registry that didn't serve the config
+/// 404'd and was skipped implicitly. With the config bundled there is no such
+/// fetch, so the gate is made explicit here.
 fn should_skip_binary_mirror() -> bool {
     *SKIP_BINARY_MIRROR.get_or_init(|| {
         let registry = get_registry();
-        let skip = is_npm_registry(&registry);
+        let skip = !is_china_mirror_registry(&registry);
         if skip {
-            tracing::debug!("Skipping binary mirror envs for npm registry: {}", registry);
+            tracing::debug!("Skipping binary mirror for non-npmmirror registry: {registry}");
         }
         skip
     })
 }
 
-pub async fn get_envs() -> Option<&'static Map<String, Value>> {
-    // Skip binary mirror envs when using official npm registry
+/// Whether `registry` is the npmmirror China registry the bundled mirror config
+/// targets. Matches the host so a path suffix or trailing slash still counts.
+fn is_china_mirror_registry(registry: &str) -> bool {
+    registry.contains("npmmirror.com")
+}
+
+pub fn get_envs() -> Option<&'static BTreeMap<String, String>> {
+    // Only inject China mirror envs on the npmmirror registry the config targets.
     if should_skip_binary_mirror() {
         return None;
     }
 
-    match load_config().await {
-        Ok(_) => {
-            let config = CONFIG.get();
-            config.and_then(|config| config["mirrors"]["china"]["ENVS"].as_object())
-        }
-        Err(_) => None,
-    }
+    let envs = &CONFIG.mirrors.china.envs;
+    (!envs.is_empty()).then_some(envs)
 }
 
 #[cfg(test)]
@@ -321,6 +427,48 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_only_npmmirror_gets_binary_mirror() {
+        // The bundled config rewrites to npmmirror CDNs, so it applies only on
+        // npmmirror — not official npm, and not other registries that would get
+        // China hosts forced onto downloads they never opted into.
+        assert!(is_china_mirror_registry("https://registry.npmmirror.com"));
+        assert!(is_china_mirror_registry("https://registry.npmmirror.com/"));
+        assert!(!is_china_mirror_registry("https://registry.npmjs.org"));
+        assert!(!is_china_mirror_registry("https://registry.yarnpkg.com"));
+        assert!(!is_china_mirror_registry("https://npm.pkg.github.com"));
+    }
+
+    /// The bundled config is the source of truth at runtime, so a re-sync that
+    /// drifts from our strict schema must fail here (in CI) rather than silently
+    /// disabling mirroring in users' installs. Also pins the `flow-bin`
+    /// bare-string `replaceHost` case the strict type used to reject.
+    #[test]
+    fn test_bundled_config_parses() {
+        let config: BinaryMirrorConfig =
+            serde_json::from_str(include_str!("binary-mirror-config.json"))
+                .expect("bundled binary-mirror-config.json must parse");
+        assert!(
+            !config.mirrors.china.packages.is_empty(),
+            "bundled config has no china package entries"
+        );
+        assert!(
+            !config.mirrors.china.envs.is_empty(),
+            "bundled config has no ENVS"
+        );
+        let flow_bin = config
+            .mirrors
+            .china
+            .packages
+            .get("flow-bin")
+            .expect("flow-bin entry present");
+        assert_eq!(
+            flow_bin.replace_host.as_deref(),
+            Some(["https://github.com/facebook/flow/releases/download/v".to_string()].as_slice()),
+            "flow-bin bare-string replaceHost must normalize to a one-element list"
+        );
+    }
 
     #[tokio::test]
     async fn test_update_binary_config() {
@@ -332,7 +480,7 @@ mod tests {
             }
         });
 
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "host": "https://example.com",
             "replaceHostFiles": ["test.js"],
             "newKey": "newValue"
@@ -354,14 +502,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_should_handle_replace_host() {
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "replaceHost": ["old.com"],
             "host": "new.com"
         }))
         .unwrap();
         assert!(should_handle_replace_host(&binary_mirror));
 
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "replaceHostMap": {
                 "old.com": "new.com"
             }
@@ -369,7 +517,7 @@ mod tests {
         .unwrap();
         assert!(should_handle_replace_host(&binary_mirror));
 
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "replaceHostRegExpMap": {
                 "old\\.com": "new.com"
             }
@@ -377,7 +525,7 @@ mod tests {
         .unwrap();
         assert!(should_handle_replace_host(&binary_mirror));
 
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "host": "new.com"
         }))
         .unwrap();
@@ -386,13 +534,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_replace_host_files() {
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "replaceHostFiles": ["custom.js"]
         }))
         .unwrap();
         assert_eq!(get_replace_host_files(&binary_mirror), vec!["custom.js"]);
 
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({})).unwrap();
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({})).unwrap();
         assert_eq!(
             get_replace_host_files(&binary_mirror),
             vec!["lib/index.js", "lib/install.js"]
@@ -402,9 +550,7 @@ mod tests {
     #[tokio::test]
     async fn test_replace_with_regex() {
         let content = "Visit old.com and old.com";
-        let replace_map = json!({
-            "old\\.com": "new.com"
-        });
+        let replace_map = BTreeMap::from([("old\\.com".to_string(), "new.com".to_string())]);
 
         let result = replace_with_regex(content, &replace_map).unwrap();
         assert_eq!(result, "Visit new.com and new.com");
@@ -413,7 +559,7 @@ mod tests {
     #[tokio::test]
     async fn test_replace_with_map() {
         let content = "Visit old.com and old.com";
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "replaceHostMap": {
                 "old.com": "new.com"
             }
@@ -449,7 +595,7 @@ mod tests {
             "version": "3.3.0"
         });
 
-        let binary_mirror = serde_json::from_value::<Map<String, Value>>(json!({
+        let binary_mirror = serde_json::from_value::<BinaryMirror>(json!({
             "host": "https://example.com",
             "newPlatforms": {
                 "darwin": "osx64",
@@ -505,5 +651,82 @@ mod tests {
         // Should not change version
         assert_eq!(updated_pkg["name"], "fsevents");
         assert_eq!(updated_pkg["version"], "2.3.3");
+    }
+
+    #[test]
+    fn test_replace_host_accepts_string_and_array() {
+        // `flow-bin` ships the bare-string form; it must parse and normalize
+        // to a single-element list so the rewrite logic treats it like any
+        // other host list.
+        let single = serde_json::from_value::<BinaryMirror>(json!({
+            "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+            "host": "https://cdn.npmmirror.com/binaries/flow/v"
+        }))
+        .unwrap();
+        assert_eq!(
+            single.replace_host.as_deref(),
+            Some(&["https://github.com/facebook/flow/releases/download/v".to_string()][..])
+        );
+
+        // The array form keeps every entry.
+        let many = serde_json::from_value::<BinaryMirror>(json!({
+            "replaceHost": ["a.com", "b.com"],
+            "host": "new.com"
+        }))
+        .unwrap();
+        assert_eq!(
+            many.replace_host.as_deref(),
+            Some(&["a.com".to_string(), "b.com".to_string()][..])
+        );
+
+        // Absent → None.
+        let none = serde_json::from_value::<BinaryMirror>(json!({ "host": "new.com" })).unwrap();
+        assert!(none.replace_host.is_none());
+    }
+
+    #[test]
+    fn test_china_config_with_string_replace_host_does_not_fail_parse() {
+        // A single string-form `replaceHost` entry (the real `flow-bin` shape)
+        // must not fail the whole `mirrors.china` parse — otherwise mirroring
+        // is silently disabled for every package, including the `ENVS` block.
+        let config = serde_json::from_value::<BinaryMirrorConfig>(json!({
+            "mirrors": {
+                "china": {
+                    "ENVS": { "SASS_BINARY_SITE": "https://cdn.npmmirror.com/binaries/node-sass" },
+                    "flow-bin": {
+                        "replaceHost": "https://github.com/facebook/flow/releases/download/v",
+                        "host": "https://cdn.npmmirror.com/binaries/flow/v"
+                    },
+                    "sharp": {
+                        "replaceHostFiles": ["install/libvips.js"],
+                        "replaceHostMap": {
+                            "https://github.com/lovell/sharp-libvips/releases/download/":
+                                "https://cdn.npmmirror.com/binaries/sharp-libvips/"
+                        }
+                    }
+                }
+            }
+        }))
+        .expect("config with string-form replaceHost must parse");
+
+        assert_eq!(
+            config
+                .mirrors
+                .china
+                .envs
+                .get("SASS_BINARY_SITE")
+                .map(String::as_str),
+            Some("https://cdn.npmmirror.com/binaries/node-sass")
+        );
+        assert_eq!(
+            config
+                .mirrors
+                .china
+                .packages
+                .get("flow-bin")
+                .and_then(|m| m.replace_host.as_deref()),
+            Some(&["https://github.com/facebook/flow/releases/download/v".to_string()][..])
+        );
+        assert!(config.mirrors.china.packages.contains_key("sharp"));
     }
 }

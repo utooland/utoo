@@ -35,6 +35,26 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "utoo rebuild failed for ant-design-x (next)" }
 
         Write-Green "PASS: ant-design-x (next) cloned and installed"
+
+        # Reuse round-trip guard: add then remove a dependency; the lockfile must
+        # return byte-identical, proving the reuse path preserves the existing
+        # ~5900-entry workspace tree (and its symlinks) instead of redrawing it.
+        Write-Yellow "Case 1b: ant-design-x add/remove dependency keeps the tree stable"
+        Copy-Item package-lock.json package-lock.baseline.json -Force
+        $baseLinks = node -e "const l=require('./package-lock.json').packages;console.log(Object.keys(l).filter(k=>l[k].link).length)"
+        utoo install cowsay@1.5.0 --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "add cowsay failed (ant-design-x)" }
+        node -e "const b=require('./package-lock.baseline.json').packages,n=require('./package-lock.json').packages;const kb=new Set(Object.keys(b));const added=Object.keys(n).filter(k=>!kb.has(k));const removed=[...kb].filter(k=>!n[k]);if(!n['node_modules/cowsay']){console.error('cowsay not added');process.exit(1)}if(removed.length){console.error('REGRESSION: adding cowsay dropped '+removed.length+' existing entries (tree explosion)');process.exit(1)}if(added.length>80){console.error('REGRESSION: adding cowsay grew the tree by '+added.length+' entries');process.exit(1)}console.log('add: +'+added.length+' entries (cowsay subtree), 0 existing dropped')"
+        if ($LASTEXITCODE -ne 0) { throw "adding cowsay exploded the tree (ant-design-x)" }
+        utoo uninstall cowsay --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "remove cowsay failed (ant-design-x)" }
+        $nowLinks = node -e "const l=require('./package-lock.json').packages;console.log(Object.keys(l).filter(k=>l[k].link).length)"
+        if ($baseLinks -ne $nowLinks) { throw "workspace symlinks changed ($baseLinks -> $nowLinks) after add/remove (ant-design-x)" }
+        if ((Get-FileHash package-lock.baseline.json).Hash -ne (Get-FileHash package-lock.json).Hash) {
+            throw "add+remove did not round-trip the lockfile (reuse churned the tree, ant-design-x)"
+        }
+        Remove-Item package-lock.baseline.json -Force
+        Write-Green "PASS: ant-design-x add/remove keeps the tree stable (byte-identical round-trip)"
     }
     finally {
         Pop-Location
@@ -59,8 +79,25 @@ try {
         # Use --ignore-scripts to skip prepare hook that causes @swc/core native binding issues on Windows
         utoo install --ignore-scripts
         if ($LASTEXITCODE -ne 0) { throw "utoo install failed for ant-design" }
-        
+
         Write-Green "PASS: ant-design cloned and installed"
+
+        # Same reuse round-trip guard on the large non-workspace tree (~5100
+        # entries): add a leaf dependency, then remove it, and the lockfile must
+        # return to a byte-identical baseline.
+        Write-Yellow "Case 2b: ant-design add/remove dependency keeps the tree stable"
+        Copy-Item package-lock.json package-lock.baseline.json -Force
+        utoo install cowsay@1.5.0 --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "add cowsay failed (ant-design)" }
+        node -e "const b=require('./package-lock.baseline.json').packages,n=require('./package-lock.json').packages;const kb=new Set(Object.keys(b));const added=Object.keys(n).filter(k=>!kb.has(k));const removed=[...kb].filter(k=>!n[k]);if(!n['node_modules/cowsay']){console.error('cowsay not added');process.exit(1)}if(removed.length){console.error('REGRESSION: adding cowsay dropped '+removed.length+' existing entries (tree explosion)');process.exit(1)}if(added.length>80){console.error('REGRESSION: adding cowsay grew the tree by '+added.length+' entries');process.exit(1)}console.log('add: +'+added.length+' entries (cowsay subtree), 0 existing dropped')"
+        if ($LASTEXITCODE -ne 0) { throw "adding cowsay exploded the tree (ant-design)" }
+        utoo uninstall cowsay --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "remove cowsay failed (ant-design)" }
+        if ((Get-FileHash package-lock.baseline.json).Hash -ne (Get-FileHash package-lock.json).Hash) {
+            throw "add+remove did not round-trip the lockfile (reuse churned the tree, ant-design)"
+        }
+        Remove-Item package-lock.baseline.json -Force
+        Write-Green "PASS: ant-design add/remove keeps the tree stable (byte-identical round-trip)"
     }
     finally {
         Pop-Location
@@ -566,5 +603,388 @@ if (-not (Get-Command cowsay -ErrorAction SilentlyContinue)) {
     throw "cowsay not in PATH after global add"
 }
 Write-Green "  ✓ PASS: utoo add -g works"
+
+# ═══════════════════════════════════════════════════════════════
+# Case: file: tarball located OUTSIDE the project root (Windows)
+# ═══════════════════════════════════════════════════════════════
+# Windows mirror of the bash Case 8.5b. A tarball outside the project root
+# yields a root-relative lockfile entry carrying `..` (e.g. "file:../foo.tgz").
+# BFS hashes the cache slot from the canonical absolute path, while install
+# re-absolutizes the `..`-laden lockfile path; without lexical `..`-collapse
+# (which must also handle the Windows `C:` drive prefix) the two disagree and
+# the clone fails with "file tarball cache not found". No other e2e exercises
+# this on win32-msvc.
+Write-Yellow "Case: file: tarball outside project root (Windows)"
+$extDir = Join-Path $env:TEMP "utoo-e2e-exttgz-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$extDir\src\ext-tarball-pkg" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$extDir\app" -Force | Out-Null
+
+    @{ name = "ext-tarball-pkg"; version = "5.6.7"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$extDir\src\ext-tarball-pkg\package.json"
+    Set-Content "$extDir\src\ext-tarball-pkg\index.js" "module.exports = 567;"
+
+    # Pack the leaf package into a tarball that sits OUTSIDE the app dir, so the
+    # lockfile's root-relative `file:` path carries a `..`.
+    Push-Location "$extDir\src\ext-tarball-pkg"
+    try {
+        npm pack 2>&1 | Out-Null
+        $tgz = Get-ChildItem "ext-tarball-pkg-*.tgz" | Select-Object -First 1
+        Move-Item $tgz.FullName "$extDir\ext-tarball-pkg.tgz"
+    }
+    finally { Pop-Location }
+
+    $tgzSpec = "file:" + ((Join-Path $extDir "ext-tarball-pkg.tgz") -replace '\\', '/')
+    @{
+        name         = "ext-tarball-app"
+        version      = "1.0.0"
+        private      = $true
+        dependencies = @{ "ext-tarball-pkg" = $tgzSpec }
+    } | ConvertTo-Json | Set-Content "$extDir\app\package.json"
+
+    Push-Location "$extDir\app"
+    try {
+        utoo install --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for tarball outside project root" }
+
+        if (-not (Test-Path "node_modules\ext-tarball-pkg\package.json")) {
+            throw "ext-tarball-pkg not materialized into node_modules"
+        }
+        $ver = node -p "require('./node_modules/ext-tarball-pkg/package.json').version"
+        if ($ver.Trim() -ne "5.6.7") { throw "ext-tarball-pkg expected v5.6.7, got $ver" }
+
+        # Lockfile must stay portable: a root-relative `file:` path, not absolute.
+        node -e "const lock=require('./package-lock.json');const tar=lock.packages['node_modules/ext-tarball-pkg']||{};const r=tar.resolved||'';if(!r.startsWith('file:')){console.error('resolved not file:',r);process.exit(1);}const p=r.slice(5);if(/^[A-Za-z]:/.test(p)||p[0]==='/'){console.error('resolved should be root-relative, got absolute:',r);process.exit(1);}console.log('  lockfile resolved (portable):',r);"
+        if ($LASTEXITCODE -ne 0) { throw "lockfile entry wrong for outside-root tarball" }
+
+        Write-Green "PASS: file: tarball outside project root installs (Windows)"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $extDir -ErrorAction SilentlyContinue
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides target a local file: tarball (nested + direct)
+# ═══════════════════════════════════════════════════════════════
+# An override value may be any spec npm accepts — including a local `file:`
+# tarball — not just a registry version. Override resolution used to send the
+# target straight to the registry as a version, so `file:x.tgz` became a bogus
+# version lookup → 404 and the whole install aborted. Here a transitive dep
+# (is-number, pulled in by is-odd) is overridden to a locally packed tarball,
+# both via a nested rule (is-odd > is-number) and a direct rule.
+Write-Yellow "Case: overrides -> local file: tarball (nested + direct)"
+$ovDir = Join-Path $env:TEMP "utoo-e2e-override-tgz-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$ovDir\src\is-number" -Force | Out-Null
+    @{ name = "is-number"; version = "9.9.9"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$ovDir\src\is-number\package.json"
+    Set-Content "$ovDir\src\is-number\index.js" "module.exports = () => 'OVERRIDE-LOCAL-TGZ';"
+
+    Push-Location "$ovDir\src\is-number"
+    try {
+        npm pack 2>&1 | Out-Null
+        $tgz = Get-ChildItem "is-number-*.tgz" | Select-Object -First 1
+        Move-Item $tgz.FullName "$ovDir\is-number.tgz"
+    }
+    finally { Pop-Location }
+
+    Push-Location $ovDir
+    try {
+        # Nested rule: is-odd > is-number -> file: tarball.
+        @{
+            name         = "ov-file-tarball-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-odd" = @{ "is-number" = "file:./is-number.tgz" } }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+        utoo install --registry=https://registry.npmjs.org --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for nested file: tarball override" }
+        $ver = (node -p "require('./node_modules/is-number/package.json').version").Trim()
+        if ($ver -ne "9.9.9") { throw "nested override did not resolve to local tarball (is-number=$ver, want 9.9.9)" }
+        $out = (node -p "require('./node_modules/is-number')()").Trim()
+        if ($out -ne "OVERRIDE-LOCAL-TGZ") { throw "overridden is-number content wrong (got '$out')" }
+        node -e "const l=require('./package-lock.json');const r=(l.packages['node_modules/is-number']||{}).resolved||'';if(!r.startsWith('file:')){console.error('is-number not pinned to file: tarball, got',r);process.exit(1);}"
+        if ($LASTEXITCODE -ne 0) { throw "lockfile did not pin overridden is-number to file: tarball" }
+
+        # Direct (non-nested) rule must work too.
+        @{
+            name         = "ov-file-tarball-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-number" = "file:./is-number.tgz" }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+        Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+
+        utoo install --registry=https://registry.npmjs.org --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "install failed for direct file: tarball override" }
+        $ver2 = (node -p "require('./node_modules/is-number/package.json').version").Trim()
+        if ($ver2 -ne "9.9.9") { throw "direct override did not resolve to local tarball (is-number=$ver2, want 9.9.9)" }
+
+        Write-Green "PASS: overrides -> local file: tarball (nested + direct)"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $ovDir -ErrorAction SilentlyContinue
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Case: overrides → file: DIRECTORY must fail with a clear error
+# ═══════════════════════════════════════════════════════════════
+# A `file:` directory dep installs as a symlink (Link node, no manifest), which
+# the manifest-returning override path can't express. It must fail with an
+# actionable "use a tarball" message rather than silently resolving it as a
+# registry version (→ 404). Guards the boundary against a regression.
+Write-Yellow "Case: overrides -> file: directory errors clearly"
+$ovdDir = Join-Path $env:TEMP "utoo-e2e-override-dir-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path "$ovdDir\local-is-number" -Force | Out-Null
+    @{ name = "is-number"; version = "9.9.9"; main = "index.js" } |
+        ConvertTo-Json | Set-Content "$ovdDir\local-is-number\package.json"
+    Set-Content "$ovdDir\local-is-number\index.js" "module.exports = () => 'DIR';"
+
+    Push-Location $ovdDir
+    try {
+        @{
+            name         = "ov-file-dir-test"
+            version      = "1.0.0"
+            dependencies = @{ "is-odd" = "3.0.1" }
+            overrides    = @{ "is-number" = "file:./local-is-number" }
+        } | ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+        # Join to a single string: `2>&1` yields an array of lines, and
+        # `-match`/`-notmatch` over an array filter elements (truthy) rather
+        # than test a boolean.
+        $ovdOut = (utoo install --registry=https://registry.npmjs.org --ignore-scripts 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host $ovdOut
+            throw "file: directory override should not install successfully"
+        }
+        if ($ovdOut -notmatch "directory overrides") {
+            Write-Host $ovdOut
+            throw "file: directory override gave the wrong error (want 'directory overrides … use a tarball')"
+        }
+        if ($ovdOut -match "No matching version") {
+            Write-Host $ovdOut
+            throw "file: directory override regressed into a registry version lookup (404)"
+        }
+        Write-Green "PASS: overrides -> file: directory errors clearly"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $ovdDir -ErrorAction SilentlyContinue
+}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Case: bundled binary-mirror-config applies on the npmmirror registry
+# ═══════════════════════════════════════════════════════════════
+# `binary-mirror-config` is bundled at build time (crates/pm/src/service/
+# binary-mirror-config.json) — no runtime fetch — and its parse under our strict
+# schema is guarded by a unit test. This case is the integration check: install
+# against npmmirror (the only registry the bundled config targets) with --verbose
+# and assert the bundled mirror layer initialized during the install (the debug
+# line fires when the config is first read on a non-skipped package). flow-bin is
+# the dep on purpose — its bare-string `replaceHost` is the entry that once broke
+# parse.
+Write-Yellow "Case: bundled binary-mirror-config applies on npmmirror"
+$bmcDir = Join-Path $env:TEMP "utoo-e2e-bmc-$(Get-Random)"
+try {
+    New-Item -ItemType Directory -Path $bmcDir -Force | Out-Null
+    @{
+        name         = "binary-mirror-config-parse-test"
+        version      = "1.0.0"
+        dependencies = @{ "flow-bin" = "0.180.0" }
+    } | ConvertTo-Json | Set-Content "$bmcDir\package.json"
+
+    Push-Location $bmcDir
+    try {
+        # --ignore-scripts keeps this fast (no native binary download); the
+        # mirror config is loaded on the clone path regardless of script exec.
+        $bmcOut = utoo install --registry=https://registry.npmmirror.com --ignore-scripts --verbose 2>&1
+        $bmcOut | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw "utoo install failed for binary-mirror-config test" }
+
+        if (-not ($bmcOut -match "Bundled binary mirror config:")) {
+            throw "bundled binary-mirror-config was never applied (mirror layer skipped)"
+        }
+
+        Write-Green "PASS: bundled binary-mirror-config applied"
+    }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item -Recurse -Force $bmcDir -ErrorAction SilentlyContinue
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — adding a dep doesn't redraw the tree
+# ═══════════════════════════════════════════════════════════════
+# A fresh install writes the baseline lock. Adding one leaf dependency must
+# REUSE that lock: every prior package keeps its exact version and `resolved`,
+# and the only new entries belong to the added package's own subtree.
+Write-Yellow "Case: package-lock.json reuse keeps existing tree stable"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for lockfile-reuse" }
+    Copy-Item package-lock.json package-lock.before.json
+
+    # is-number@7.0.0 has no dependencies of its own (a leaf add).
+    utoo install is-number@7.0.0 --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "add is-number failed for lockfile-reuse" }
+
+    $check = @'
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+for (const [key, pkg] of Object.entries(before)) {
+  if (key === "" || pkg.link) continue;
+  const now = after[key];
+  if (!now) { console.error("REGRESSION: lost lock entry " + key); process.exit(1); }
+  if (now.version !== pkg.version) { console.error("REGRESSION: " + key + " version changed"); process.exit(1); }
+  if (now.resolved !== pkg.resolved) { console.error("REGRESSION: " + key + " resolved changed"); process.exit(1); }
+}
+if (!after["node_modules/is-number"]) { console.error("is-number not added to lockfile"); process.exit(1); }
+const newKeys = Object.keys(after).filter((k) => !(k in before));
+const unexpected = newKeys.filter((k) => k !== "node_modules/is-number");
+if (unexpected.length) { console.error("REGRESSION: unrelated entries added: " + unexpected.join(", ")); process.exit(1); }
+console.log("lock reuse: " + Object.keys(before).length + " preserved, +" + newKeys.length + " added");
+'@
+    Set-Content -Path check.js -Value $check
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "adding a dep redrew the existing lock tree" }
+    Remove-Item check.js, package-lock.before.json -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse keeps existing tree stable"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse prunes a removed dep's orphaned subtree
+# ═══════════════════════════════════════════════════════════════
+# Removing a dep must drop it AND any transitive only it pulled in. Baseline
+# carries debug (→ ms) and is-odd (→ is-number); removing is-odd prunes both
+# is-odd and the orphaned is-number, while debug + ms survive untouched.
+Write-Yellow "Case: package-lock.json reuse prunes a removed dep"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true;
+        dependencies = @{ debug = "4.3.4"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for prune case" }
+    $base = @'
+const p = require("./package-lock.json").packages;
+for (const k of ["node_modules/debug","node_modules/ms","node_modules/is-odd","node_modules/is-number"]) {
+  if (!p[k]) { console.error("baseline missing " + k); process.exit(1); }
+}
+'@
+    Set-Content -Path check.js -Value $base
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "prune baseline did not contain the expected tree" }
+    Copy-Item package-lock.json package-lock.before.json
+
+    # Remove is-odd, reinstall via the reuse path.
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "reinstall after removal failed" }
+    $check = @'
+const before = require("./package-lock.before.json").packages;
+const after = require("./package-lock.json").packages;
+for (const k of ["node_modules/is-odd", "node_modules/is-number"]) {
+  if (after[k]) { console.error("REGRESSION: " + k + " not pruned after removal"); process.exit(1); }
+}
+for (const k of ["node_modules/debug", "node_modules/ms"]) {
+  if (!after[k]) { console.error("REGRESSION: lost " + k); process.exit(1); }
+  if (after[k].version !== before[k].version || after[k].resolved !== before[k].resolved) {
+    console.error("REGRESSION: " + k + " changed during prune"); process.exit(1);
+  }
+}
+console.log("prune: is-odd + orphaned is-number removed, debug + ms preserved");
+'@
+    Set-Content -Path check.js -Value $check
+    node check.js
+    if ($LASTEXITCODE -ne 0) { throw "removing a dep did not prune its orphaned subtree" }
+    Remove-Item check.js, package-lock.before.json -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse prunes a removed dep"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: package-lock.json reuse — warm re-install is a faithful no-op
+# ═══════════════════════════════════════════════════════════════
+# Reseeding the prior tree and re-resolving an unchanged manifest must converge
+# to a byte-identical lock — no churn, no reordering, no re-pin.
+Write-Yellow "Case: package-lock.json reuse warm re-install is a no-op"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ debug = "4.3.4" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "cold install failed for no-op case" }
+    Copy-Item package-lock.json package-lock.cold.json
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "warm reinstall failed for no-op case" }
+    if ((Get-Content -Raw package-lock.cold.json) -ne (Get-Content -Raw package-lock.json)) {
+        throw "warm re-install changed the lockfile (reuse is not a faithful no-op)"
+    }
+    Remove-Item package-lock.cold.json, node_modules, package-lock.json -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Green "PASS: package-lock.json reuse warm re-install is a no-op"
+}
+finally { Pop-Location }
+
+# ═══════════════════════════════════════════════════════════════
+# Case: bumping a shared dep past a transitive's range stays sound
+# ═══════════════════════════════════════════════════════════════
+# Baseline hoists is-number@6 (shared by the root and is-odd@3.0.1, which needs
+# ^6). Bumping the root's is-number to ^7 collides is-number@7 and the still-
+# pinned is-number@6 in one node_modules slot; the resolver must detect that and
+# cold-resolve to the npm-correct tree (is-number@7 hoisted, is-number@6 nested
+# under is-odd), deterministically across repeats.
+Write-Yellow "Case: reuse bump past a transitive's range cold-resolves cleanly"
+try {
+    Push-Location e2e/pm/lockfile-reuse
+    Remove-Item -Recurse -Force node_modules, package-lock.json -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\nm" -ErrorAction SilentlyContinue
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ "is-number" = "^6.0.0"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "baseline install failed for bump case" }
+    node -e "const p=require('./package-lock.json').packages;if(p['node_modules/is-number']?.version?.[0]!=='6'){console.error('baseline did not hoist is-number@6');process.exit(1)}"
+    if ($LASTEXITCODE -ne 0) { throw "bump baseline shape wrong" }
+
+    @{ name = "lockfile-reuse"; version = "1.0.0"; private = $true; dependencies = @{ "is-number" = "^7.0.0"; "is-odd" = "3.0.1" } } |
+        ConvertTo-Json -Depth 5 | Set-Content "package.json"
+    utoo install --ignore-scripts --registry=https://registry.npmjs.org
+    if ($LASTEXITCODE -ne 0) { throw "bump reinstall failed" }
+    node -e "const p=require('./package-lock.json').packages;const top=p['node_modules/is-number']?.version;const nested=p['node_modules/is-odd/node_modules/is-number']?.version;if(top?.[0]!=='7'){console.error('REGRESSION: root is-number not bumped to 7 (got '+top+')');process.exit(1)}if(nested?.[0]!=='6'){console.error('REGRESSION: is-odd did not nest is-number@6 (got '+nested+')');process.exit(1)}"
+    if ($LASTEXITCODE -ne 0) { throw "bump produced an unsound tree" }
+    Copy-Item package-lock.json package-lock.bump.json
+    foreach ($i in 1..2) {
+        utoo install --ignore-scripts --registry=https://registry.npmjs.org | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "repeat install failed for bump case" }
+        if ((Get-Content -Raw package-lock.bump.json) -ne (Get-Content -Raw package-lock.json)) {
+            throw "bump tree is nondeterministic across installs"
+        }
+    }
+    Remove-Item package-lock.bump.json, node_modules, package-lock.json -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Green "PASS: reuse bump past a transitive's range stays sound and deterministic"
+}
+finally { Pop-Location }
 
 Write-Green "All e2e tests passed successfully!"

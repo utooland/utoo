@@ -6,7 +6,6 @@
 //! lives in the driver, which owns both this store and the queue).
 
 use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
 use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
@@ -16,51 +15,56 @@ use crate::resolver::edges::DependencyEdgeInfo;
 use crate::service::VersionsInfo;
 
 /// A parked edge waiting on a pending fetch: its node and the dependency edge.
-type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
+/// Defined here — the store owns the waiter payload — and shared by the driver.
+pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 
-/// Resolved version manifests produced by one run, as neutral
-/// `(name, spec, manifest)` tuples. The persistence layer (`ProjectCacheData`)
-/// adapts these to/from disk; the store itself stays format-agnostic.
-#[derive(Default)]
-pub(crate) struct ResolverManifestCache {
-    pub(crate) entries: Vec<(String, String, Arc<CoreVersionManifest>)>,
-}
-
-/// A manifest cache slot: resolved entries, edges waiting on them, and failures.
+/// The version-manifest slot: resolved entries, edges parked on them, and
+/// failures, keyed by package name then spec.
 ///
-/// The resolver keeps one slot per manifest kind (full package manifests keyed
-/// by name, version manifests keyed by `(name, spec)`), so the demand loop can
-/// dedupe fetches, park waiters, and remember failures uniformly.
+/// Nested maps on purpose: `select_edge` probes this slot for **every edge**
+/// (`get_version_manifest` / `get_version_failure` / `is_version_settled`),
+/// and a flat `HashMap<(String, String), _>` would force two `String`
+/// allocations per probe just to build the key. Two-level `get` with
+/// `(&str, &str)` allocates nothing.
 ///
 /// Invariant: a key is in `cache` *or* `failures`, never both — the driver
 /// fetches each key once (single-flight) and records exactly one outcome.
-pub(crate) struct ManifestSlot<K, V> {
-    pub(crate) cache: HashMap<K, Arc<V>>,
-    pub(crate) waiters: HashMap<K, Vec<WaitingEdge>>,
-    pub(crate) failures: HashMap<K, String>,
+/// Maintenance invariant: removal helpers drop emptied inner maps so the
+/// outer `is_empty` checks stay meaningful.
+#[derive(Default)]
+struct VersionSlot {
+    cache: HashMap<String, HashMap<String, Arc<CoreVersionManifest>>>,
+    waiters: HashMap<String, HashMap<String, Vec<WaitingEdge>>>,
+    failures: HashMap<String, HashMap<String, String>>,
 }
 
-// Manual `Default` so the slot does not require `K: Default`/`V: Default`.
-impl<K, V> Default for ManifestSlot<K, V> {
-    fn default() -> Self {
-        Self {
-            cache: HashMap::new(),
-            waiters: HashMap::new(),
-            failures: HashMap::new(),
-        }
+impl VersionSlot {
+    fn get(&self, name: &str, spec: &str) -> Option<&Arc<CoreVersionManifest>> {
+        self.cache.get(name)?.get(spec)
     }
-}
 
-impl<K: Eq + Hash + Clone, V> ManifestSlot<K, V> {
+    fn failure(&self, name: &str, spec: &str) -> Option<&str> {
+        self.failures.get(name)?.get(spec).map(String::as_str)
+    }
+
     /// Already resolved or failed — no need to fetch again.
-    pub(crate) fn is_settled(&self, key: &K) -> bool {
-        self.cache.contains_key(key) || self.failures.contains_key(key)
+    fn is_settled(&self, name: &str, spec: &str) -> bool {
+        self.cache.get(name).is_some_and(|m| m.contains_key(spec))
+            || self
+                .failures
+                .get(name)
+                .is_some_and(|m| m.contains_key(spec))
     }
 
-    /// Move every edge waiting on `key` into `pending` so they retry next pass.
-    pub(crate) fn wake(&mut self, key: &K, pending: &mut VecDeque<WaitingEdge>) {
-        if let Some(waiters) = self.waiters.remove(key) {
-            pending.extend(waiters);
+    /// Move every edge waiting on `(name, spec)` into `pending` so they retry.
+    fn wake(&mut self, name: &str, spec: &str, pending: &mut VecDeque<WaitingEdge>) {
+        if let Some(by_spec) = self.waiters.get_mut(name) {
+            if let Some(waiters) = by_spec.remove(spec) {
+                pending.extend(waiters);
+            }
+            if by_spec.is_empty() {
+                self.waiters.remove(name);
+            }
         }
     }
 }
@@ -89,34 +93,11 @@ pub(crate) struct ManifestState {
     pub(crate) packages: HashMap<String, PackageVersions>,
     /// Edges parked waiting on a package's full/versions fetch, keyed by name.
     pub(crate) package_waiters: HashMap<String, Vec<WaitingEdge>>,
-    /// Resolved version manifests, keyed by `(name, spec)`.
-    pub(crate) version: ManifestSlot<(String, String), CoreVersionManifest>,
+    /// Resolved version manifests, keyed by name then spec.
+    version: VersionSlot,
 }
 
 impl ManifestState {
-    /// Build a store pre-seeded with already-resolved `(name, spec, manifest)`
-    /// entries (e.g. from a warm project cache). The caller adapts whatever
-    /// persistence format it has into these neutral tuples.
-    pub(crate) fn seeded(entries: Vec<(String, String, Arc<CoreVersionManifest>)>) -> Self {
-        let mut state = Self::default();
-        for (name, spec, manifest) in entries {
-            state.cache_version(name, spec, manifest);
-        }
-        state
-    }
-
-    /// Drain the resolved version manifests as neutral tuples (for persistence).
-    pub(crate) fn into_resolver_cache(self) -> ResolverManifestCache {
-        ResolverManifestCache {
-            entries: self
-                .version
-                .cache
-                .into_iter()
-                .map(|((name, spec), manifest)| (name, spec, manifest))
-                .collect(),
-        }
-    }
-
     /// The cached version source for `name`, if any.
     pub(crate) fn package(&self, name: &str) -> Option<&PackageVersions> {
         self.packages.get(name)
@@ -140,7 +121,14 @@ impl ManifestState {
 
     /// Park an edge waiting on a `(name, spec)` version-manifest fetch.
     pub(crate) fn park_on_version(&mut self, key: (String, String), waiter: WaitingEdge) {
-        self.version.waiters.entry(key).or_default().push(waiter);
+        let (name, spec) = key;
+        self.version
+            .waiters
+            .entry(name)
+            .or_default()
+            .entry(spec)
+            .or_default()
+            .push(waiter);
     }
 
     /// Whether any edge is still parked on a pending package or version fetch.
@@ -151,7 +139,13 @@ impl ManifestState {
     /// Parked-edge counts as `(package, version)`, for diagnostics.
     pub(crate) fn pending_waiter_counts(&self) -> (usize, usize) {
         let package = self.package_waiters.values().map(Vec::len).sum();
-        let version = self.version.waiters.values().map(Vec::len).sum();
+        let version = self
+            .version
+            .waiters
+            .values()
+            .flat_map(HashMap::values)
+            .map(Vec::len)
+            .sum();
         (package, version)
     }
 
@@ -162,8 +156,10 @@ impl ManifestState {
         for (_, waiters) in self.package_waiters.drain() {
             all.extend(waiters);
         }
-        for (_, waiters) in self.version.waiters.drain() {
-            all.extend(waiters);
+        for (_, by_spec) in self.version.waiters.drain() {
+            for (_, waiters) in by_spec {
+                all.extend(waiters);
+            }
         }
         all
     }
@@ -175,37 +171,33 @@ impl ManifestState {
         }
     }
 
-    /// Look up a cached version manifest by `(name, spec)`.
+    /// Look up a cached version manifest by `(name, spec)`. Zero-allocation:
+    /// this runs for every edge the demand loop selects.
     pub(crate) fn get_version_manifest(
         &self,
         name: &str,
         spec: &str,
     ) -> Option<Arc<CoreVersionManifest>> {
-        self.version
-            .cache
-            .get(&(name.to_string(), spec.to_string()))
-            .cloned()
+        self.version.get(name, spec).cloned()
     }
 
     /// Look up a recorded fetch failure for `(name, spec)`.
     pub(crate) fn get_version_failure(&self, name: &str, spec: &str) -> Option<&str> {
-        self.version
-            .failures
-            .get(&(name.to_string(), spec.to_string()))
-            .map(String::as_str)
+        self.version.failure(name, spec)
     }
 
     /// Whether `(name, spec)` is already resolved or failed — no refetch needed.
     pub(crate) fn is_version_settled(&self, name: &str, spec: &str) -> bool {
-        self.version
-            .is_settled(&(name.to_string(), spec.to_string()))
+        self.version.is_settled(name, spec)
     }
 
     /// Record a fetch failure for `(name, spec)`.
     pub(crate) fn fail_version(&mut self, name: &str, spec: &str, error: String) {
         self.version
             .failures
-            .insert((name.to_string(), spec.to_string()), error);
+            .entry(name.to_string())
+            .or_default()
+            .insert(spec.to_string(), error);
     }
 
     /// Move every edge waiting on `(name, spec)` into `ready` so it retries.
@@ -215,8 +207,7 @@ impl ManifestState {
         spec: &str,
         ready: &mut VecDeque<WaitingEdge>,
     ) {
-        self.version
-            .wake(&(name.to_string(), spec.to_string()), ready);
+        self.version.wake(name, spec, ready);
     }
 
     /// Cache a version manifest under both its requested spec and its resolved
@@ -228,13 +219,9 @@ impl ManifestState {
         manifest: Arc<CoreVersionManifest>,
     ) {
         let version = manifest.version.clone();
-        self.version
-            .cache
-            .insert((name.clone(), spec), Arc::clone(&manifest));
-        self.version
-            .cache
-            .entry((name, version))
-            .or_insert(manifest);
+        let by_spec = self.version.cache.entry(name).or_default();
+        by_spec.insert(spec, Arc::clone(&manifest));
+        by_spec.entry(version).or_insert(manifest);
     }
 }
 
@@ -284,24 +271,6 @@ mod tests {
             state.get_version_manifest("pkg", "1.2.3").unwrap().version,
             "1.2.3"
         );
-        assert_eq!(state.into_resolver_cache().entries.len(), 1);
-    }
-
-    #[test]
-    fn test_seeded_preloads_entries() {
-        let state = ManifestState::seeded(vec![(
-            "a".to_string(),
-            "^1".to_string(),
-            manifest("a", "1.0.0"),
-        )]);
-        assert_eq!(
-            state.get_version_manifest("a", "^1").unwrap().version,
-            "1.0.0"
-        );
-        assert_eq!(
-            state.get_version_manifest("a", "1.0.0").unwrap().version,
-            "1.0.0"
-        );
     }
 
     #[test]
@@ -311,24 +280,5 @@ mod tests {
         state.fail_version("pkg", "^1", "boom".to_string());
         assert_eq!(state.get_version_failure("pkg", "^1"), Some("boom"));
         assert!(state.is_version_settled("pkg", "^1"));
-    }
-
-    #[test]
-    fn test_into_resolver_cache_drains_both_keys() {
-        let mut state = ManifestState::default();
-        state.cache_version(
-            "pkg".to_string(),
-            "^1.0.0".to_string(),
-            manifest("pkg", "1.2.3"),
-        );
-        // Drains both the requested-spec and resolved-version entries.
-        let mut specs: Vec<String> = state
-            .into_resolver_cache()
-            .entries
-            .into_iter()
-            .map(|(_, spec, _)| spec)
-            .collect();
-        specs.sort();
-        assert_eq!(specs, ["1.2.3", "^1.0.0"]);
     }
 }

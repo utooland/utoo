@@ -12,29 +12,25 @@
 //! demand (no separate preload phase), overlapping network I/O with graph
 //! construction.
 
-use petgraph::graph::{EdgeIndex, NodeIndex};
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-#[cfg(feature = "http-tarball")]
-use anyhow::Context as _;
+use petgraph::graph::{EdgeIndex, NodeIndex};
 
 use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
 use crate::model::manifest::CoreVersionManifest;
-#[cfg(feature = "http-tarball")]
-use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
-use crate::resolver::demand::{ResolverManifestCache, run_main_loop_bfs};
+use crate::model::package_lock::PackageLock;
+use crate::resolver::demand::{ManifestState, run_main_loop_bfs};
 use crate::resolver::registry::{ResolveError, resolve_registry_dep};
-use crate::service::{ManifestProvider, ProjectCacheData};
+use crate::service::ManifestProvider;
 use crate::spec::{Catalogs, PackageSpec, Protocol};
 use crate::traits::progress::{BuildEvent, EventReceiver, NoopReceiver};
 use crate::traits::registry::ResolvedPackage;
 
-/// Dispatch a git/github spec to the real `gix`-backed resolver when the
+/// Dispatch a git/github spec to the native resolver when the
 /// `native-git` feature is enabled, otherwise error with a hint.
 async fn resolve_git_dep(
     cache_dir: Option<&std::path::Path>,
@@ -58,20 +54,20 @@ async fn resolve_git_dep(
 /// Dispatch an HTTP(S) tarball spec to the real resolver when the
 /// `http-tarball` feature is enabled, otherwise error with a hint.
 ///
-/// BFS extracts to `<cache_dir>/<name>/_http_<url_hash>/` so install-phase
-/// skips re-download; see [`super::http`] module docs.
+/// BFS only reads the tarball's manifest; the content is materialized into
+/// `node_modules` at install time, never the global cache. See
+/// [`super::http`] module docs.
 async fn resolve_http_dep(
-    cache_dir: Option<&std::path::Path>,
     url: &str,
     fetch_cache: &HttpFetchCache,
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::http::resolve_http_dep(cache_dir, url, fetch_cache).await
+        crate::resolver::http::resolve_http_dep(url, fetch_cache).await
     }
     #[cfg(not(feature = "http-tarball"))]
     {
-        let _ = (cache_dir, fetch_cache);
+        let _ = fetch_cache;
         anyhow::bail!(
             "HTTP tarball resolution not available for '{url}' (enable the 'http-tarball' feature)"
         )
@@ -95,6 +91,17 @@ type HttpFetchCache = crate::resolver::common::DedupCache<()>;
 pub use super::edges::{
     DependencyEdgeInfo, DependencySource, EdgeContext, add_edges_from, collect_unresolved_edges,
 };
+// Node-type propagation and graph placement live in their own passes;
+// re-exported here for the callers that historically reached them through
+// builder.
+#[cfg(feature = "http-tarball")]
+use super::file::process_file_dep;
+pub use super::node_types::{compute_node_types, update_node_type_from_edge};
+pub use super::placement::process_dependency_with_resolved;
+pub(crate) use super::placement::{
+    chain_err, handle_resolved_registry_manifest, place_new_node, reuse_existing_node,
+    try_reuse_dependency,
+};
 pub use crate::model::node::{DevDeps, PeerDeps};
 
 /// Default number of concurrent manifest fetches for the demand resolver.
@@ -116,9 +123,6 @@ pub struct BuildDepsConfig {
     /// Catalog definitions for the `catalog:` dependency protocol.
     /// Key `""` = default catalog, other keys = named catalogs.
     pub catalogs: Catalogs,
-    /// Host-provided project cache used to seed the resolver-owned manifest
-    /// cache. Consumed by the demand mainloop.
-    pub project_cache: Option<ProjectCacheData>,
 }
 
 impl Default for BuildDepsConfig {
@@ -130,7 +134,6 @@ impl Default for BuildDepsConfig {
             git_clone_cache: Arc::new(GitCloneCache::new()),
             http_fetch_cache: Arc::new(HttpFetchCache::new()),
             catalogs: HashMap::new(),
-            project_cache: None,
         }
     }
 }
@@ -159,22 +162,6 @@ impl BuildDepsConfig {
         self.catalogs = catalogs;
         self
     }
-
-    /// Seed the resolver-owned manifest cache with a host-provided project cache.
-    pub fn with_project_cache(mut self, project_cache: Option<ProjectCacheData>) -> Self {
-        self.project_cache = project_cache;
-        self
-    }
-}
-
-/// Snapshot of node dependency flags to avoid borrowing conflicts.
-#[derive(Debug, Clone, Copy)]
-struct NodeFlags {
-    is_root: bool,
-    is_prod: bool,
-    is_dev: bool,
-    is_optional: bool,
-    is_peer: bool,
 }
 
 /// Create a new package node for a resolved dependency.
@@ -274,155 +261,6 @@ pub fn resolve_workspace_member_edges(graph: &mut DependencyGraph) {
     }
 }
 
-/// Update target node type based on source node and edge type.
-///
-/// This function propagates dependency types through the graph according to npm rules:
-/// - Root dependencies directly set the target node type
-/// - Prod dependencies propagate through prod edges
-/// - Dev/Optional flags propagate only when appropriate
-pub fn update_node_type_from_edge(
-    graph: &mut DependencyGraph,
-    from_index: NodeIndex,
-    to_index: NodeIndex,
-    edge_type: &EdgeType,
-) {
-    // Extract source node information to avoid borrowing conflicts
-    let source_flags = {
-        let from_node = graph
-            .get_node(from_index)
-            .expect("Source node must exist in graph");
-        NodeFlags {
-            is_root: from_node.is_root(),
-            is_prod: from_node.is_prod,
-            is_dev: from_node.is_dev,
-            is_optional: from_node.is_optional,
-            is_peer: from_node.is_peer,
-        }
-    };
-
-    let to_node = graph
-        .get_node_mut(to_index)
-        .expect("Target node must exist in graph");
-
-    // Root node dependencies directly determine target type
-    if source_flags.is_root {
-        match edge_type {
-            EdgeType::Prod => {
-                to_node.is_prod = true;
-                to_node.is_dev = false;
-                to_node.is_optional = false;
-                to_node.is_peer = false;
-            }
-            EdgeType::Dev => {
-                if !to_node.is_prod {
-                    to_node.is_dev = true;
-                    to_node.is_optional = false;
-                }
-            }
-            EdgeType::Optional => {
-                if !to_node.is_prod && !to_node.is_dev {
-                    to_node.is_optional = true;
-                }
-            }
-            EdgeType::Peer => {
-                if !to_node.is_prod && !to_node.is_dev {
-                    to_node.is_peer = true;
-                }
-            }
-        }
-    } else {
-        // Propagate types from non-root nodes
-        // 1. Source's dev status propagates to target
-        // 2. If edge is Optional, target gets optional flag (unless already prod)
-        if source_flags.is_dev && !to_node.is_prod {
-            to_node.is_dev = true;
-        }
-
-        // Handle edge type
-        if *edge_type == EdgeType::Optional && !to_node.is_prod {
-            // Optional edge -> target is optional
-            to_node.is_optional = true;
-        } else if source_flags.is_prod && *edge_type != EdgeType::Optional {
-            // Prod source with non-optional edge -> target becomes prod
-            to_node.is_prod = true;
-            to_node.is_dev = false;
-            to_node.is_optional = false;
-            to_node.is_peer = false;
-        } else if source_flags.is_optional && !to_node.is_prod {
-            // Optional source propagates optional status
-            // Note: don't check !is_dev here - devOptional packages should propagate both flags
-            to_node.is_optional = true;
-        } else if source_flags.is_peer && !to_node.is_prod && !to_node.is_dev {
-            to_node.is_peer = true;
-        }
-    }
-}
-
-/// Assign dependency types (prod/dev/optional/peer) across the whole graph.
-///
-/// This is the single source of truth for node types: the BFS only builds graph
-/// structure and never touches types, so this pass — run once after the tree is
-/// complete — cannot observe a half-built tree and therefore can't leave stale
-/// `dev` marks on the subtree of a node that turns out to be prod (the bug that
-/// motivated centralizing it here).
-///
-/// It applies the per-edge propagation rules ([`update_node_type_from_edge`])
-/// over every resolved edge, starting from the importer roots (whose
-/// `is_root`/edge type seeds their direct deps) and re-queuing a node's children
-/// whenever its flags change, until nothing changes.
-///
-/// Termination relies on the type lattice being monotone: each node's flags only
-/// move "up" (dev/optional/peer may be set once, then `is_prod` is absorbing —
-/// once set it clears the others and the `!is_prod` guards freeze the node), so
-/// every node changes O(1) times.
-pub fn compute_node_types(graph: &mut DependencyGraph) {
-    use std::collections::VecDeque;
-
-    // Seed only the importers (root + workspace members); their edge types seed
-    // their direct deps, and the fixpoint re-queues every changed node's
-    // children, so the whole reachable graph is covered without visiting leaves
-    // that have nothing to propagate.
-    let mut queued: HashSet<NodeIndex> = graph
-        .graph
-        .node_indices()
-        .filter(|&i| {
-            graph
-                .get_node(i)
-                .is_some_and(|n| n.is_root() || n.is_workspace())
-        })
-        .collect();
-    let mut worklist: VecDeque<NodeIndex> = queued.iter().copied().collect();
-
-    while let Some(src) = worklist.pop_front() {
-        queued.remove(&src);
-
-        // Snapshot resolved out-edges so we can mutate targets while iterating.
-        let edges: Vec<(NodeIndex, EdgeType)> = graph
-            .get_dependency_edges(src)
-            .into_iter()
-            .filter_map(|(_, edge)| {
-                edge.to
-                    .filter(|_| edge.valid)
-                    .map(|to| (to, edge.edge_type))
-            })
-            .collect();
-
-        for (to, edge_type) in edges {
-            let before = graph
-                .get_node(to)
-                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
-            update_node_type_from_edge(graph, src, to, &edge_type);
-            let after = graph
-                .get_node(to)
-                .map(|n| (n.is_prod, n.is_dev, n.is_optional, n.is_peer));
-
-            if before != after && queued.insert(to) {
-                worklist.push_back(to);
-            }
-        }
-    }
-}
-
 /// Result of processing a single dependency.
 #[derive(Debug)]
 pub enum ProcessResult {
@@ -432,100 +270,6 @@ pub enum ProcessResult {
     Created(NodeIndex),
     /// Skipped (optional dependency that failed to resolve)
     Skipped,
-}
-
-/// Handle a `file:` dep: dir → Link node inline (returns
-/// `ControlFlow::Break`); tarball → stream bytes through the shared
-/// `commit_tarball_bytes` and hand the `ResolvedPackage` back to the
-/// normal BFS flow via `ControlFlow::Continue`.
-#[cfg(feature = "http-tarball")]
-async fn process_file_dep<E>(
-    graph: &mut DependencyGraph,
-    node_index: NodeIndex,
-    conflict_parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    path_spec: &str,
-    cache_dir: Option<&Path>,
-) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
-    use std::ops::ControlFlow;
-
-    use crate::resolver::http::file_cache_slot;
-    use crate::resolver::tar::commit_tarball_bytes;
-
-    let file_err = |source: anyhow::Error| ResolveError::File {
-        spec: edge.spec.clone(),
-        source,
-    };
-
-    // Base dir is the on-disk source for root/workspace/link nodes, or
-    // the parent of the `file:<abs>` tarball URL stamped on a transitive
-    // file-tarball dep's manifest. Registry nodes have no valid base.
-    let node = graph.get_node(node_index);
-    let base = node
-        .filter(|n| n.is_root() || n.is_workspace() || n.is_link())
-        .map(|n| n.path.clone())
-        .or_else(|| {
-            let NodeManifest::Registry(m) = &node?.manifest else {
-                return None;
-            };
-            let url = m.dist.tarball.as_deref()?.strip_prefix("file:")?;
-            std::path::Path::new(url).parent().map(Path::to_path_buf)
-        })
-        .ok_or_else(|| ResolveError::Unsupported {
-            spec: edge.spec.clone(),
-            reason: "transitive file: deps inside a published registry package are not supported",
-        })?;
-    let abs = base.join(path_spec);
-
-    let meta = match std::fs::metadata(&abs) {
-        Ok(m) => m,
-        Err(_) if edge.edge_type == EdgeType::Optional => {
-            return Ok(ControlFlow::Break(ProcessResult::Skipped));
-        }
-        Err(e) => {
-            return Err(file_err(
-                anyhow::Error::new(e).context(format!("file: target {}", abs.display())),
-            ));
-        }
-    };
-
-    if meta.is_dir() {
-        // Symlink install — same graph shape as a workspace link. We
-        // intentionally do not walk the linked package's transitive deps
-        // (npm-link semantics: the linked dir owns its own node_modules).
-        let pkg = crate::model::util::read_package_json(&abs)
-            .await
-            .map_err(file_err)?;
-        let idx = graph.add_node(PackageNode::link_from_package_json(abs, pkg));
-        graph.add_physical_edge(conflict_parent, idx);
-        graph.mark_dependency_resolved(edge.edge_id, idx);
-        return Ok(ControlFlow::Break(ProcessResult::Created(idx)));
-    }
-
-    let cache_dir = cache_dir
-        .ok_or_else(|| file_err(anyhow::anyhow!("cache_dir required for file: tarball")))?
-        .to_path_buf();
-    let slot = file_cache_slot(&abs);
-    let pinned = format!("file:{}", abs.display());
-    let manifest = match tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-        let bytes = std::fs::read(&abs)
-            .with_context(|| format!("failed to read tarball {}", abs.display()))?;
-        commit_tarball_bytes(&cache_dir, &bytes, pinned, &slot)
-    })
-    .await
-    {
-        Ok(Ok(m)) => m,
-        Ok(Err(_)) | Err(_) if edge.edge_type == EdgeType::Optional => {
-            return Ok(ControlFlow::Break(ProcessResult::Skipped));
-        }
-        Ok(Err(source)) => return Err(file_err(source)),
-        Err(join) => return Err(file_err(join.into())),
-    };
-    Ok(ControlFlow::Continue(ResolvedPackage {
-        name: manifest.name.clone(),
-        version: manifest.version.clone(),
-        manifest: Arc::new(manifest),
-    }))
 }
 
 /// Process a single dependency edge.
@@ -545,6 +289,54 @@ async fn process_file_dep<E>(
 /// * `edge_info` - Information about the dependency edge
 /// * `config` - Build configuration (peer_deps, cache_dir, etc.)
 ///
+/// Shared optional-edge policy for the non-registry resolvers (git/http): a
+/// failed optional edge logs and resolves to `Skipped`; a load-bearing one
+/// returns the spec-specific error built by `wrap`.
+/// Collapse a non-registry resolver's result: success → `Some`; an *optional*
+/// edge's failure → `None` (caller skips / falls back); a load-bearing failure
+/// → the wrapped cause. Lets [`resolve_remote_spec`] keep each protocol arm to a
+/// single expression.
+fn resolve_or_skip<E>(
+    result: anyhow::Result<ResolvedPackage>,
+    edge_type: &EdgeType,
+    name: &str,
+    spec: &str,
+    kind: &str,
+    wrap: impl FnOnce(anyhow::Error) -> ResolveError<E>,
+) -> Result<Option<ResolvedPackage>, ResolveError<E>> {
+    match result {
+        Ok(pkg) => Ok(Some(pkg)),
+        Err(e) if *edge_type == EdgeType::Optional => {
+            tracing::debug!("Skipping optional {kind} dependency {name}@{spec}: {e}");
+            Ok(None)
+        }
+        Err(e) => Err(wrap(e)),
+    }
+}
+
+/// Shared policy for `workspace:`/`catalog:` specs that reach the BFS — a
+/// declaration anomaly (see the call sites for why). Optional edges skip with
+/// a warning; load-bearing ones fail as `Unsupported`.
+fn skip_optional_or_unsupported<E>(
+    edge: &DependencyEdgeInfo,
+    kind: &str,
+    warn_detail: &str,
+    reason: &'static str,
+) -> Result<ProcessResult, ResolveError<E>> {
+    if edge.edge_type == EdgeType::Optional {
+        tracing::warn!(
+            "Skipping optional {kind} dependency {}@{} — {warn_detail}",
+            edge.name,
+            edge.spec
+        );
+        return Ok(ProcessResult::Skipped);
+    }
+    Err(ResolveError::Unsupported {
+        spec: edge.spec.clone(),
+        reason,
+    })
+}
+
 /// # Returns
 /// The result of processing (reused, created, or skipped)
 pub async fn process_dependency<R: ManifestProvider>(
@@ -557,11 +349,7 @@ pub async fn process_dependency<R: ManifestProvider>(
     // Find installation location
     match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
         FindResult::Reuse(existing_index) => {
-            // Mark edge as resolved. Node types are assigned in a single pass
-            // after the tree is built (see `compute_node_types`).
-            graph.mark_dependency_resolved(edge_info.edge_id, existing_index);
-
-            Ok(ProcessResult::Reused(existing_index))
+            Ok(reuse_existing_node(graph, edge_info, existing_index))
         }
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
             // Parse spec once and exhaustively route by variant.
@@ -569,34 +357,6 @@ pub async fn process_dependency<R: ManifestProvider>(
             // new PackageSpec variant — no silent fall-through to the wrong resolver.
             let parsed_spec = PackageSpec::from(edge_info.spec.as_str());
             let resolved: ResolvedPackage = match &parsed_spec {
-                PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => {
-                    // TODO: add spec => version expiry check so stale git caches
-                    // are invalidated (e.g. branch refs that have moved forward).
-                    match resolve_git_dep(
-                        config.cache_dir.as_deref(),
-                        &parsed_spec,
-                        &edge_info.name,
-                        &config.git_clone_cache,
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
-                            tracing::debug!(
-                                "Skipped optional non-registry dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
-                        }
-                        Err(e) => {
-                            return Err(ResolveError::Git {
-                                url: edge_info.spec.clone(),
-                                source: e,
-                            });
-                        }
-                    }
-                }
                 PackageSpec::Local {
                     protocol: Protocol::Workspace,
                     ..
@@ -610,18 +370,12 @@ pub async fn process_dependency<R: ManifestProvider>(
                     // warning; anything load-bearing fails with the
                     // dependency chain attached (via `chain_err`) so the
                     // offending package is identifiable.
-                    if edge_info.edge_type == EdgeType::Optional {
-                        tracing::warn!(
-                            "Skipping optional workspace dependency {}@{} — no matching workspace member",
-                            edge_info.name,
-                            edge_info.spec
-                        );
-                        return Ok(ProcessResult::Skipped);
-                    }
-                    return Err(ResolveError::Unsupported {
-                        spec: edge_info.spec.clone(),
-                        reason: "workspace: dependency does not match any workspace member of this project",
-                    });
+                    return skip_optional_or_unsupported(
+                        edge_info,
+                        "workspace",
+                        "no matching workspace member",
+                        "workspace: dependency does not match any workspace member of this project",
+                    );
                 }
                 PackageSpec::Local {
                     protocol: Protocol::Catalog,
@@ -632,35 +386,26 @@ pub async fn process_dependency<R: ManifestProvider>(
                     // catalog entry was missing — or a catalog: spec shipped
                     // inside a published manifest, which is a malformed
                     // declaration. Same policy as workspace: above.
-                    if edge_info.edge_type == EdgeType::Optional {
-                        tracing::warn!(
-                            "Skipping optional catalog dependency {}@{} — unresolved catalog entry",
-                            edge_info.name,
-                            edge_info.spec
-                        );
-                        return Ok(ProcessResult::Skipped);
-                    }
-                    return Err(ResolveError::Unsupported {
-                        spec: edge_info.spec.clone(),
-                        reason: "catalog: spec was not resolved — published manifests must not \
-                                 carry catalog:, and importer catalogs must define the entry",
-                    });
+                    return skip_optional_or_unsupported(
+                        edge_info,
+                        "catalog",
+                        "unresolved catalog entry",
+                        "catalog: spec was not resolved — published manifests must not \
+                         carry catalog:, and importer catalogs must define the entry",
+                    );
                 }
+                // file:/link:/portal: all point at a local directory (file: may
+                // also point at a local tarball). A directory becomes a Link node
+                // — the same graph shape as a workspace link — via
+                // `process_file_dep`; link:/portal: only ever reference dirs.
                 PackageSpec::Local {
-                    protocol: Protocol::File,
+                    protocol: Protocol::File | Protocol::Link | Protocol::Portal,
                     path,
                 } => {
                     #[cfg(feature = "http-tarball")]
                     {
-                        match process_file_dep(
-                            graph,
-                            node_index,
-                            conflict_parent,
-                            edge_info,
-                            path,
-                            config.cache_dir.as_deref(),
-                        )
-                        .await?
+                        match process_file_dep(graph, node_index, conflict_parent, edge_info, path)
+                            .await?
                         {
                             std::ops::ControlFlow::Break(r) => return Ok(r),
                             std::ops::ControlFlow::Continue(pkg) => pkg,
@@ -671,47 +416,34 @@ pub async fn process_dependency<R: ManifestProvider>(
                         let _ = path;
                         return Err(ResolveError::Unsupported {
                             spec: edge_info.spec.clone(),
-                            reason: "file: deps require the 'http-tarball' feature",
+                            reason: "file:/link:/portal: deps require the 'http-tarball' feature",
                         });
                     }
                 }
+                // Defensive: Workspace/Catalog settle before the BFS and
+                // File/Link/Portal are handled above, so a Local spec reaching
+                // here means an internal routing bug, not a user error.
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),
-                        reason: "local (link:/portal:) dependencies are not yet supported",
+                        reason: "unexpected local dependency protocol",
                     });
                 }
-                PackageSpec::Http { url } => {
-                    match resolve_http_dep(
-                        config.cache_dir.as_deref(),
-                        url,
-                        &config.http_fetch_cache,
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(_) if edge_info.edge_type == EdgeType::Optional => {
-                            tracing::debug!(
-                                "Skipped optional HTTP dependency {}@{}",
-                                edge_info.name,
-                                edge_info.spec
-                            );
-                            return Ok(ProcessResult::Skipped);
-                        }
-                        Err(e) => {
-                            return Err(ResolveError::Http {
-                                url: url.clone(),
-                                source: e,
-                            });
-                        }
-                    }
-                }
-                PackageSpec::Registry { .. } => {
-                    match resolve_registry_dep(
+                // All remote protocols share one resolver — see
+                // [`resolve_remote_spec`]. The exhaustive listing (no `_`) keeps
+                // a new PackageSpec variant a compile error rather than silently
+                // routing it to the wrong resolver.
+                PackageSpec::Registry { .. }
+                | PackageSpec::Http { .. }
+                | PackageSpec::Git { .. }
+                | PackageSpec::GitHub { .. } => {
+                    match resolve_remote_spec(
                         registry,
-                        &edge_info.name,
+                        &parsed_spec,
                         &edge_info.spec,
+                        &edge_info.name,
                         &edge_info.edge_type,
+                        config,
                     )
                     .await?
                     {
@@ -728,52 +460,222 @@ pub async fn process_dependency<R: ManifestProvider>(
                 }
             };
 
-            // Check override using resolved version (not original spec)
-            let resolved = if let Some(override_spec) =
-                graph.check_override(node_index, &edge_info.name, Some(&resolved.version))
+            // Apply any override against the resolved version (not the original
+            // spec). Non-registry override targets resolve here too.
+            // No manifest cache on this path — non-registry specs are rare.
+            let resolved = match resolve_override(
+                graph,
+                registry,
+                node_index,
+                edge_info,
+                &resolved.version,
+                config,
+                None,
+            )
+            .await?
             {
-                tracing::debug!(
-                    "Override: {}@{} (resolved {}) => {}",
-                    edge_info.name,
-                    edge_info.spec,
-                    resolved.version,
-                    override_spec
-                );
-                // Re-resolve with override spec
-                match resolve_registry_dep(
-                    registry,
-                    &edge_info.name,
-                    &override_spec,
-                    &edge_info.edge_type,
-                )
-                .await?
-                {
-                    Some(r) => r,
-                    None => resolved, // Fallback to original if override fails
-                }
-            } else {
-                resolved
+                Some(manifest) => ResolvedPackage::from_manifest(manifest.name.clone(), manifest),
+                None => resolved,
             };
 
-            // Create new node
-            let new_node = create_package_node(&edge_info.name, &resolved, conflict_parent, graph);
-            let new_index = graph.add_node(new_node);
-
-            // Add physical edge
-            graph.add_physical_edge(conflict_parent, new_index);
-
-            // Mark dependency as resolved
-            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-
-            // Add dependencies of the new node
-            add_edges_from(
+            Ok(place_new_node(
                 graph,
-                new_index,
-                &*resolved.manifest,
-                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-            );
+                conflict_parent,
+                edge_info,
+                &resolved,
+                config,
+            ))
+        }
+    }
+}
 
-            Ok(ProcessResult::Created(new_index))
+/// Resolve a registry / git / http(s) spec to a package, mirroring the protocol
+/// dispatch in [`process_dependency`]. `None` means an *optional* edge's
+/// resolution failed and the caller should skip / fall back. Shared by the
+/// normal dependency path and override resolution so both treat these protocols
+/// identically.
+///
+/// `file:` is intentionally excluded: its base dir (the edge's parent for a
+/// normal dep, the root project for an override) and its dir→Link placement
+/// differ between the two callers, so each routes `file:` through
+/// [`process_file_dep`] with its own `node_index`.
+async fn resolve_remote_spec<R: ManifestProvider>(
+    registry: &R,
+    parsed: &PackageSpec,
+    raw_spec: &str,
+    name: &str,
+    edge_type: &EdgeType,
+    config: &BuildDepsConfig,
+) -> Result<Option<ResolvedPackage>, ResolveError<R::Error>> {
+    match parsed {
+        // The registry path keeps receiving the raw spec so `npm:` alias /
+        // dist-tag / range handling is identical regardless of caller.
+        PackageSpec::Registry { .. } => {
+            resolve_registry_dep(registry, name, raw_spec, edge_type).await
+        }
+        PackageSpec::Http { url } => resolve_or_skip(
+            resolve_http_dep(url, &config.http_fetch_cache).await,
+            edge_type,
+            name,
+            raw_spec,
+            "HTTP",
+            |source| ResolveError::Http {
+                url: url.clone(),
+                source,
+            },
+        ),
+        PackageSpec::Git { .. } | PackageSpec::GitHub { .. } => resolve_or_skip(
+            resolve_git_dep(
+                config.cache_dir.as_deref(),
+                parsed,
+                name,
+                &config.git_clone_cache,
+            )
+            .await,
+            edge_type,
+            name,
+            raw_spec,
+            "git",
+            |source| ResolveError::Git {
+                url: raw_spec.to_string(),
+                source,
+            },
+        ),
+        // Callers route file:/link:/workspace:/catalog: elsewhere; reaching here
+        // is an internal routing bug, not a user error.
+        PackageSpec::Local { .. } => Err(ResolveError::Unsupported {
+            spec: raw_spec.to_string(),
+            reason: "internal: resolve_remote_spec received a non-remote spec",
+        }),
+    }
+}
+
+/// Resolve a dependency override for `edge` against the already-resolved
+/// version, routing the override *target* by protocol like a normal dependency
+/// spec (registry range / `file:` tarball / http(s) tarball / git — not just a
+/// registry version, which used to turn `file:x.tgz` overrides into bogus 404s).
+/// Shared by the demand driver and [`process_dependency`].
+///
+/// Always yields a *manifest* (or `None` to fall back to the original), so the
+/// callers place it like any registry node and stay agnostic of the protocol.
+/// `file:` *directory* overrides would need a self-placed Link node the manifest
+/// contract can't carry, so they are an explicit error. With `state`, the
+/// per-run manifest cache single-flights the override across sibling edges.
+pub(crate) async fn resolve_override<R: ManifestProvider>(
+    graph: &DependencyGraph,
+    registry: &R,
+    parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    resolved_version: &str,
+    config: &BuildDepsConfig,
+    mut state: Option<&mut ManifestState>,
+) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<R::Error>> {
+    let Some(override_spec) = graph.check_override(parent, &edge.name, Some(resolved_version))
+    else {
+        return Ok(None);
+    };
+
+    if let Some(state) = state.as_deref_mut()
+        && let Some(cached) = state.get_version_manifest(&edge.name, &override_spec)
+    {
+        return Ok(Some(cached));
+    }
+
+    tracing::debug!(
+        "Override: {}@{} (resolved {}) => {}",
+        edge.name,
+        edge.spec,
+        resolved_version,
+        override_spec
+    );
+
+    let parsed = PackageSpec::from(override_spec.as_str());
+    let resolved = match &parsed {
+        // `file:` overrides resolve relative to the ROOT project (overrides are
+        // root-declared; a transitive parent is usually a registry node with no
+        // `file:` base).
+        PackageSpec::Local {
+            protocol: Protocol::File,
+            path,
+        } => {
+            resolve_override_file_tarball::<R::Error>(graph, &edge.edge_type, &override_spec, path)
+                .await?
+        }
+        PackageSpec::Local { .. } => {
+            return Err(ResolveError::Unsupported {
+                spec: override_spec,
+                reason: "link:/portal:/workspace: overrides are not supported",
+            });
+        }
+        // registry / http / git share the normal-dependency resolver.
+        _ => resolve_remote_spec(
+            registry,
+            &parsed,
+            &override_spec,
+            &edge.name,
+            &edge.edge_type,
+            config,
+        )
+        .await?
+        .map(|pkg| pkg.manifest),
+    };
+
+    // Optional edge whose override failed to resolve → fall back to the original.
+    let Some(manifest) = resolved else {
+        return Ok(None);
+    };
+    if let Some(state) = state {
+        state.cache_version(edge.name.clone(), override_spec, Arc::clone(&manifest));
+    }
+    Ok(Some(manifest))
+}
+
+/// Resolve a `file:` override target to a manifest, relative to the root project
+/// (overrides are root-declared). A tarball → manifest pinned to `file:<abs>`; a
+/// directory → error (it would need a Link node the manifest contract can't
+/// carry). Read-only, so the resolver stays decoupled from placement.
+async fn resolve_override_file_tarball<E>(
+    graph: &DependencyGraph,
+    edge_type: &EdgeType,
+    override_spec: &str,
+    path: &str,
+) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<E>> {
+    #[cfg(not(feature = "http-tarball"))]
+    {
+        let _ = (graph, edge_type, path);
+        Err(ResolveError::Unsupported {
+            spec: override_spec.to_string(),
+            reason: "file: overrides require the 'http-tarball' feature",
+        })
+    }
+    #[cfg(feature = "http-tarball")]
+    {
+        let file_err = |source| ResolveError::File {
+            spec: override_spec.to_string(),
+            source,
+        };
+        // The root node is a construction-time invariant; resolve the override's
+        // path against it (overrides are root-declared).
+        let abs = graph
+            .get_node(graph.root_index)
+            .expect("root node is always present")
+            .path
+            .join(path);
+        match std::fs::metadata(&abs) {
+            Ok(m) if m.is_dir() => Err(ResolveError::Unsupported {
+                spec: override_spec.to_string(),
+                reason: "file: directory overrides (symlink) are not supported — use a tarball (.tgz)",
+            }),
+            // Same local-tarball read+parse the normal file-dep resolver uses.
+            Ok(_) => match crate::resolver::tar::read_local_tarball_manifest(abs).await {
+                Ok(m) => Ok(Some(Arc::new(m))),
+                Err(_) if *edge_type == EdgeType::Optional => Ok(None),
+                Err(source) => Err(file_err(source)),
+            },
+            Err(_) if *edge_type == EdgeType::Optional => Ok(None),
+            Err(e) => Err(file_err(
+                anyhow::Error::new(e).context(format!("file: override target {}", abs.display())),
+            )),
         }
     }
 }
@@ -851,6 +753,9 @@ where
 ///
 /// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
 /// ```
+/// Demand-driven dependency resolution: a single BFS loop that schedules
+/// manifest jobs through the [`ManifestProvider`] while owning the per-run
+/// manifest cache, waiters, and in-flight de-duplication.
 pub async fn build_deps_with_config<R, E: EventReceiver>(
     graph: &mut DependencyGraph,
     registry: &R,
@@ -861,33 +766,13 @@ where
     R: ManifestProvider,
     R::Error: Send,
 {
-    build_deps_with_config_output(graph, registry, config, receiver)
-        .await
-        .map(|_| ())
-}
-
-/// Demand-driven dependency resolution: a single BFS loop that schedules
-/// manifest jobs through the [`ManifestProvider`] while owning the per-run
-/// manifest cache, waiters, and in-flight de-duplication. Returns the
-/// manifests resolved this run for the host to persist.
-pub(crate) async fn build_deps_with_config_output<R, E>(
-    graph: &mut DependencyGraph,
-    registry: &R,
-    config: BuildDepsConfig,
-    receiver: &E,
-) -> Result<ResolverManifestCache, ResolveError<R::Error>>
-where
-    R: ManifestProvider,
-    R::Error: Send,
-    E: EventReceiver,
-{
     tracing::debug!(
         "Starting demand dependency build, peer_deps: {:?}, concurrency: {}",
         config.peer_deps,
         config.concurrency
     );
 
-    let manifest_cache = run_main_loop_bfs(graph, registry, &config, receiver).await?;
+    run_main_loop_bfs(graph, registry, &config, receiver).await?;
 
     // The BFS only builds graph structure; assign all node types in one pass now
     // that the tree is complete, so prod-ness reaches every transitive dep.
@@ -897,15 +782,12 @@ where
         total_nodes: graph.graph.node_count(),
     });
 
-    Ok(manifest_cache)
+    Ok(())
 }
 
 // ============================================================================
 // High-level API
 // ============================================================================
-
-use crate::model::package_lock::PackageLock;
-use std::path::Path;
 
 /// Build package-lock.json from a package.json.
 ///
@@ -965,112 +847,13 @@ where
     build_deps_with_receiver(&mut graph, registry, peer_deps, receiver).await?;
 
     // Convert to PackageLock
-    Ok(graph_to_package_lock(&graph, pkg, Path::new(".")))
-}
-
-/// Convert a DependencyGraph to PackageLock.
-fn graph_to_package_lock(
-    graph: &DependencyGraph,
-    pkg: &PackageJson,
-    root_path: &Path,
-) -> PackageLock {
-    let (packages, _total) = graph.serialize_to_packages(root_path);
-    PackageLock::new(&pkg.name, &pkg.version, packages)
-}
-
-// ---- demand-resolver graph building (moved from demand::driver) ----
-
-/// Resolve `edge` onto an already-present compatible node by marking the edge
-/// resolved. Shared by the pre-fetch reuse probe ([`try_reuse_dependency`]) and
-/// the post-resolution placement ([`process_dependency_with_resolved`]), whose
-/// `FindResult::Reuse` arms are otherwise identical. Node types are assigned in
-/// a single pass after the tree is built (see [`compute_node_types`]).
-fn reuse_existing_node(
-    graph: &mut DependencyGraph,
-    edge: &DependencyEdgeInfo,
-    existing_index: NodeIndex,
-) -> ProcessResult {
-    graph.mark_dependency_resolved(edge.edge_id, existing_index);
-    ProcessResult::Reused(existing_index)
-}
-
-pub(crate) fn try_reuse_dependency(
-    graph: &mut DependencyGraph,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-) -> Option<ProcessResult> {
-    match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
-        FindResult::Reuse(existing_index) => Some(reuse_existing_node(graph, edge, existing_index)),
-        FindResult::Conflict(_) | FindResult::New(_) => None,
-    }
-}
-
-pub fn process_dependency_with_resolved(
-    graph: &mut DependencyGraph,
-    node_index: NodeIndex,
-    edge_info: &DependencyEdgeInfo,
-    resolved: &ResolvedPackage,
-    config: &BuildDepsConfig,
-) -> ProcessResult {
-    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
-        FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
-        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
-            let new_node = create_package_node(&edge_info.name, resolved, conflict_parent, graph);
-            let new_index = graph.add_node(new_node);
-            graph.add_physical_edge(conflict_parent, new_index);
-            graph.mark_dependency_resolved(edge_info.edge_id, new_index);
-            add_edges_from(
-                graph,
-                new_index,
-                &*resolved.manifest,
-                &EdgeContext::new(config.peer_deps, DevDeps::Exclude),
-            );
-            ProcessResult::Created(new_index)
-        }
-    }
-}
-
-pub(crate) fn chain_err<E>(
-    graph: &DependencyGraph,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    inner: ResolveError<E>,
-) -> ResolveError<E> {
-    let mut chain = graph.logical_ancestry(parent);
-    chain.push((edge.name.clone(), edge.spec.clone()));
-    ResolveError::WithChain {
-        chain,
-        source: Box::new(inner),
-    }
-}
-
-/// Build the graph node for an already-resolved registry manifest (override
-/// resolution is applied upstream by the demand loop, which owns the per-run
-/// manifest cache). Emits the resolve event and links the node.
-pub(crate) fn handle_resolved_registry_manifest<E>(
-    graph: &mut DependencyGraph,
-    receiver: &E,
-    parent: NodeIndex,
-    edge: &DependencyEdgeInfo,
-    manifest: Arc<CoreVersionManifest>,
-    config: &BuildDepsConfig,
-) -> ProcessResult
-where
-    E: EventReceiver,
-{
-    let resolved = ResolvedPackage {
-        name: edge.name.clone(),
-        version: manifest.version.clone(),
-        manifest,
-    };
-    receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
-    process_dependency_with_resolved(graph, parent, edge, &resolved, config)
+    let (packages, _total) = graph.serialize_to_packages(Path::new("."));
+    Ok(PackageLock::new(&pkg.name, &pkg.version, packages))
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Arc;
 
     use super::*;
     use crate::model::manifest::CoreVersionManifest;
@@ -1379,116 +1162,6 @@ mod tests {
         // Check lodash is in packages
         let lodash = lock.packages.get("node_modules/lodash").unwrap();
         assert_eq!(lodash.version, Some("4.17.21".to_string()));
-    }
-
-    // Helper to create a graph with source -> target for testing update_node_type_from_edge
-    // Returns (graph, source_index, target_index) where source is NOT root
-    fn create_source_target_graph() -> (DependencyGraph, NodeIndex, NodeIndex) {
-        let root_pkg = PackageJson::new("root", "1.0.0");
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), root_pkg);
-
-        // Add source node (non-root)
-        let source = PackageNode::from_version_manifest(
-            "source".to_string(),
-            PathBuf::from("node_modules/source"),
-            Arc::new(create_version_manifest("source", "1.0.0")),
-        );
-        let source_index = graph.add_node(source);
-
-        // Add target node
-        let target = PackageNode::from_version_manifest(
-            "target".to_string(),
-            PathBuf::from("node_modules/target"),
-            Arc::new(create_version_manifest("target", "1.0.0")),
-        );
-        let target_index = graph.add_node(target);
-
-        (graph, source_index, target_index)
-    }
-
-    #[test]
-    fn test_update_node_type_prod_optional_edge() {
-        // prod source with optional edge -> target is optional only
-        let (mut graph, source_index, target_index) = create_source_target_graph();
-
-        // Mark source as prod
-        graph.get_node_mut(source_index).unwrap().is_prod = true;
-
-        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Optional);
-
-        let target = graph.get_node(target_index).unwrap();
-        assert!(!target.is_prod, "should not be prod");
-        assert!(!target.is_dev, "should not be dev");
-        assert!(target.is_optional, "should be optional");
-    }
-
-    #[test]
-    fn test_update_node_type_dev_optional_edge() {
-        // dev source with optional edge -> target is dev + optional
-        let (mut graph, source_index, target_index) = create_source_target_graph();
-
-        // Mark source as dev
-        graph.get_node_mut(source_index).unwrap().is_dev = true;
-
-        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Optional);
-
-        let target = graph.get_node(target_index).unwrap();
-        assert!(!target.is_prod, "should not be prod");
-        assert!(target.is_dev, "should be dev");
-        assert!(target.is_optional, "should be optional");
-    }
-
-    #[test]
-    fn test_update_node_type_prod_prod_edge() {
-        // prod source with prod edge -> target is prod
-        let (mut graph, source_index, target_index) = create_source_target_graph();
-
-        graph.get_node_mut(source_index).unwrap().is_prod = true;
-
-        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Prod);
-
-        let target = graph.get_node(target_index).unwrap();
-        assert!(target.is_prod, "should be prod");
-        assert!(!target.is_dev, "should not be dev");
-        assert!(!target.is_optional, "should not be optional");
-    }
-
-    #[test]
-    fn test_update_node_type_dev_prod_edge() {
-        // dev source with prod edge -> target is dev only
-        let (mut graph, source_index, target_index) = create_source_target_graph();
-
-        graph.get_node_mut(source_index).unwrap().is_dev = true;
-
-        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Prod);
-
-        let target = graph.get_node(target_index).unwrap();
-        assert!(!target.is_prod, "should not be prod");
-        assert!(target.is_dev, "should be dev");
-        assert!(!target.is_optional, "should not be optional");
-    }
-
-    #[test]
-    fn test_update_node_type_dev_optional_source_propagates_both() {
-        // dev+optional source (devOptional) with prod edge -> target is dev + optional
-        let (mut graph, source_index, target_index) = create_source_target_graph();
-
-        // Source is both dev and optional (devOptional package)
-        graph.get_node_mut(source_index).unwrap().is_dev = true;
-        graph.get_node_mut(source_index).unwrap().is_optional = true;
-
-        update_node_type_from_edge(&mut graph, source_index, target_index, &EdgeType::Prod);
-
-        let target = graph.get_node(target_index).unwrap();
-        assert!(!target.is_prod, "should not be prod");
-        assert!(
-            target.is_dev,
-            "should be dev (inherited from devOptional source)"
-        );
-        assert!(
-            target.is_optional,
-            "should be optional (inherited from devOptional source)"
-        );
     }
 
     #[test]

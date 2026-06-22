@@ -2,7 +2,10 @@ use anyhow::Result;
 use std::env;
 use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crate::util::install_progress;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::{Lazy, OnceCell};
@@ -12,6 +15,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Layer, Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
+use utoo_ruborist::progress::BuildEvent;
 
 /// Cached at startup: is stderr connected to a terminal?
 ///
@@ -38,6 +42,38 @@ pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     pb
 });
+
+/// Console writer for the tracing fmt layer that cooperates with the spinner.
+///
+/// The bar redraws in place on stderr; a raw stdout write while it is active
+/// lands at the cursor position and glues the log line onto a stale bar
+/// frame. Buffering the event and flushing inside `suspend` lets indicatif
+/// clear the bar, print the line, and redraw below it. With the bar hidden
+/// (non-TTY, or outside a progress phase) `suspend` just runs the closure.
+struct ProgressConsoleWriter(Vec<u8>);
+
+impl std::io::Write for ProgressConsoleWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for ProgressConsoleWriter {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        PROGRESS_BAR.suspend(|| {
+            use std::io::Write;
+            let _ = std::io::stdout().write_all(&self.0);
+        });
+    }
+}
 
 // Global state for tracing
 static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
@@ -70,13 +106,13 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     LOG_FILE_PATH.set(log_path.clone()).ok();
 
     // 3. Detect if stdout is a TTY (terminal) to decide on colors
-    let is_tty = atty::is(atty::Stream::Stdout);
+    let is_tty = std::io::stdout().is_terminal();
 
     // 4. Build subscriber with different filters for console and file
     Registry::default()
         .with(
             fmt::layer()
-                .with_writer(std::io::stdout)
+                .with_writer(|| ProgressConsoleWriter(Vec::new()))
                 .with_target(verbose) // Show module path only in verbose mode
                 .without_time() // No timestamp on console
                 .compact()
@@ -105,6 +141,8 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
 
 /// Finish the progress bar, optionally appending a dimmed `[2.6s]` suffix.
 pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
+    // Stop the render task first so it can't overwrite the final message.
+    stop_render_task();
     if PROGRESS_BAR.length().unwrap_or(0) == 0 {
         return;
     }
@@ -129,36 +167,99 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
 /// - `reused`: tarballs served from the local cache (no network)
 /// - `downloaded`: tarballs fetched from the registry
 pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
+    let bytes = install_progress::downloaded_bytes();
+    let traffic = if bytes > 0 {
+        // Average over the whole run (resolve + clone), matching the byte
+        // window: `downloaded_bytes` counts from `start_install_run`, including
+        // resolve-phase prefetch, so the divisor must start there too.
+        let avg = install_progress::run_elapsed()
+            .map(|d| d.as_secs_f64())
+            .filter(|s| *s > 0.0)
+            .map(|s| format!(" @ {}/s", install_progress::human_bytes(bytes as f64 / s)))
+            .unwrap_or_default();
+        format!(" ({}{})", install_progress::human_bytes(bytes as f64), avg)
+    } else {
+        String::new()
+    };
     println!(
-        "+ {} {} · {} {} · {} {}",
+        "+ {} {} · {} {} · {} {}{}",
         added.to_string().green(),
         "added".dimmed(),
         reused.to_string().magenta(),
         "reused".dimmed(),
         downloaded.to_string().cyan(),
         "downloaded".dimmed(),
+        traffic.dimmed(),
     );
+}
+
+/// Render task started by `start_progress_bar`, stopped by
+/// `finish_progress_bar`. It is the only writer of the spinner *message*:
+/// every ~120ms it samples `install_progress` state (bytes, stage gauges,
+/// running scripts, latest activity) and composes one line, so hot paths only
+/// touch atomics and never contend on indicatif's internal mutex.
+static RENDER_TASK: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
+
+fn spawn_render_task() -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(120));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut meter = install_progress::SpeedMeter::new(install_progress::downloaded_bytes());
+        loop {
+            interval.tick().await;
+            let snap = install_progress::snapshot();
+            let speed = meter.sample(snap.bytes);
+            // Volatile activity goes in the flexible wide message; the network /
+            // stage summary goes in the prefix, which the template pins to the
+            // right edge so it stays readable while the activity churns.
+            PROGRESS_BAR.set_message(install_progress::compose_activity(&snap));
+            PROGRESS_BAR.set_prefix(install_progress::compose_summary(&snap, speed));
+        }
+    })
+}
+
+fn stop_render_task() {
+    if let Ok(mut task) = RENDER_TASK.lock()
+        && let Some(task) = task.take()
+    {
+        task.abort();
+    }
 }
 
 pub fn start_progress_bar() {
     if !*IS_TTY {
         return;
     }
+    install_progress::reset_phase_state();
     PROGRESS_BAR.reset();
+    // Clear the previous phase's finish message/summary so neither lingers on
+    // the fresh bar until the render task's first tick.
+    PROGRESS_BAR.set_message("");
+    PROGRESS_BAR.set_prefix("");
+    // `{wide_msg}` (volatile activity) expands to fill, pushing `{prefix}` (the
+    // network/stage summary) to the right edge so it holds a stable position.
     PROGRESS_BAR.set_style(
-        ProgressStyle::with_template("{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg}")
-            .unwrap()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        ProgressStyle::with_template(
+            "{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg} {prefix}",
+        )
+        .unwrap()
+        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
     );
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::stderr());
     PROGRESS_BAR.enable_steady_tick(Duration::from_millis(100));
+    if let Ok(mut task) = RENDER_TASK.lock()
+        && task.is_none()
+    {
+        *task = Some(spawn_render_task());
+    }
 }
 
 pub fn log_progress(text: &str) {
     if !*IS_TTY {
         return;
     }
-    PROGRESS_BAR.set_message(text.to_string());
+    // The render task folds this into the composed message on its next tick.
+    install_progress::set_activity(text);
 }
 
 // Global timer for log_time/log_time_end
@@ -217,7 +318,6 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
         if !*IS_TTY {
             return;
         }
-        use utoo_ruborist::progress::BuildEvent;
         match event {
             BuildEvent::DependencyCount { count } => {
                 PROGRESS_BAR.inc_length(count as u64);

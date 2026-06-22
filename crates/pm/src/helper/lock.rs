@@ -7,9 +7,8 @@ use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
-use utoo_ruborist::resolver::runtime::install_runtime_from_map;
+use utoo_ruborist::runtime::install_runtime_from_map;
 use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
-use utoo_ruborist::util::PackageNameStr;
 
 use super::ruborist_context::Context;
 use super::workspace::find_workspace_path;
@@ -67,18 +66,18 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
 
     if needs_regenerate {
         tracing::debug!("Resolving dependencies");
-        let output = Context::build_deps(root_path.to_path_buf()).await?;
+        let lock = Context::build_deps(root_path.to_path_buf()).await?;
 
         // Write to disk asynchronously in background
         let path = root_path.to_path_buf();
-        let lock_clone = output.lock.clone();
+        let lock_clone = lock.clone();
         tokio::spawn(async move {
             if let Err(e) = save_package_lock(&path, &lock_clone).await {
                 tracing::warn!("Failed to save package-lock.json: {e}");
             }
         });
 
-        return Ok(output.lock);
+        return Ok(lock);
     }
 
     // Load existing package-lock.json only when it's valid and up-to-date
@@ -222,22 +221,6 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
         PackageSpec::Http { url } => {
             anyhow::bail!("HTTP tarball spec ({url}) not supported in this context")
         }
-    }
-}
-
-/// Extract the relative package name from a package directory path string.
-/// Handles both normal and scoped packages, and skips invalid deep paths.
-pub fn path_to_pkg_name(path_str: &str) -> Option<&str> {
-    if let Some(idx) = path_str.rfind("node_modules/") {
-        let pkg_name = &path_str[idx + "node_modules/".len()..];
-        let parts: Vec<&str> = pkg_name.split('/').collect();
-        // Only allow ora or @scope/ora, skip @pkg/name/path/custom/package.json
-        if parts.len() > 2 || (parts.len() == 2 && !parts[0].is_scoped()) {
-            return None;
-        }
-        Some(pkg_name)
-    } else {
-        None
     }
 }
 
@@ -397,9 +380,10 @@ mod tests {
     use std::fs;
 
     use serde_json::json;
-    use tempfile::TempDir;
+    use tempfile::{TempDir, tempdir};
 
     use super::*;
+    use crate::util::cli_enum::{PackageAction, SaveType};
 
     #[test]
     fn test_version_to_write() {
@@ -459,27 +443,6 @@ mod tests {
         assert_eq!(
             format_save_spec("file:../local-pkg", "1.0.0"),
             "file:../local-pkg"
-        );
-    }
-
-    #[test]
-    fn test_path_to_pkg_name() {
-        // Normal nested package
-        assert_eq!(
-            super::path_to_pkg_name("/root/node_modules/a/node_modules/b"),
-            Some("b")
-        );
-        // Top-level package
-        assert_eq!(super::path_to_pkg_name("/root/node_modules/a"), Some("a"));
-
-        assert_eq!(
-            super::path_to_pkg_name("/root/node_modules/@a/b"),
-            Some("@a/b")
-        );
-        // Deep invalid path (should be None)
-        assert_eq!(
-            super::path_to_pkg_name("/root/node_modules/@a/b/node_modules/b/c/d"),
-            None
         );
     }
 
@@ -740,10 +703,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_package_json_preserves_trailing_newline() {
-        use tempfile::tempdir;
-
-        use crate::util::cli_enum::{PackageAction, SaveType};
-
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
 
@@ -794,10 +753,6 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[tokio::test]
     async fn test_update_package_json_preserves_crlf() {
-        use tempfile::tempdir;
-
-        use crate::util::cli_enum::{PackageAction, SaveType};
-
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
 

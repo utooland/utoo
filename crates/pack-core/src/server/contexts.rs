@@ -232,6 +232,11 @@ pub async fn get_server_module_options_context(
     } else {
         SourceMapsType::None
     };
+    let css_modules_pattern = styles
+        .css_modules
+        .as_ref()
+        .and_then(|css_modules| css_modules.local_ident_pattern());
+
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             source_maps,
@@ -245,6 +250,7 @@ pub async fn get_server_module_options_context(
         css: CssOptionsContext {
             source_maps,
             module_css_condition: Some(module_styles_rule_condition()),
+            css_modules_pattern,
             ..Default::default()
         },
         environment: Some(env),
@@ -346,7 +352,13 @@ pub async fn get_server_resolve_options_context(
         custom_conditions,
         import_map: Some(server_import_map),
         fallback_import_map: Some(server_fallback_import_map),
-        module: true,
+        // Node honors neither the `module` main field nor the `module` exports condition; both are
+        // bundler-only conventions. Enabling them on a node target makes a `require()` (or `import`)
+        // of a package without an `exports` field resolve the ESM `module` build instead of the CJS
+        // `main` Node would load — yielding the ESM namespace (`{ default, __esModule }`) so named
+        // access becomes `undefined` (e.g. `require('json5').parse`). Keep it off to match Node.
+        // See https://github.com/utooland/utoo/issues/3185
+        module: false,
         before_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
         after_resolve_plugins: vec![ResolvedVc::upcast(externals_plugin)],
         ..Default::default()

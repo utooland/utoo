@@ -24,15 +24,13 @@ fn build_graph(node_list: &[String], edges: &[(&str, &str)]) -> Graph<String, ()
     graph
 }
 
-/// Return groups of node names that form cycles.
+/// Return the cycle groups of an already-built graph.
 ///
-/// Each returned `Vec<String>` is one cycle group. Returns empty when acyclic.
-pub fn find_cycle_groups(node_list: &[String], edges: &[(&str, &str)]) -> Vec<Vec<String>> {
-    let graph = build_graph(node_list, edges);
-    // kosaraju_scc returns all strongly connected components (SCCs) — maximal
-    // sets of nodes where every node is reachable from every other. An SCC
-    // with >1 node (or a single self-loop) is a cycle.
-    kosaraju_scc(&graph)
+/// kosaraju_scc returns all strongly connected components (SCCs) — maximal
+/// sets of nodes where every node is reachable from every other. An SCC
+/// with >1 node (or a single self-loop) is a cycle.
+fn cycle_groups(graph: &Graph<String, ()>) -> Vec<Vec<String>> {
+    kosaraju_scc(graph)
         .into_iter()
         .filter(|scc| {
             scc.len() > 1 || (scc.len() == 1 && graph.find_edge(scc[0], scc[0]).is_some())
@@ -45,6 +43,13 @@ pub fn find_cycle_groups(node_list: &[String], edges: &[(&str, &str)]) -> Vec<Ve
         .collect()
 }
 
+/// Return groups of node names that form cycles.
+///
+/// Each returned `Vec<String>` is one cycle group. Returns empty when acyclic.
+pub fn find_cycle_groups(node_list: &[String], edges: &[(&str, &str)]) -> Vec<Vec<String>> {
+    cycle_groups(&build_graph(node_list, edges))
+}
+
 /// Compute topological ordering of nodes based on dependency edges.
 ///
 /// Returns layers where each layer contains nodes that can be processed in parallel.
@@ -54,17 +59,7 @@ pub fn compute_topological_layers(
     edges: &[(&str, &str)],
 ) -> Result<Vec<Vec<String>>> {
     let graph = build_graph(node_list, edges);
-    let cycles: Vec<Vec<String>> = kosaraju_scc(&graph)
-        .into_iter()
-        .filter(|scc| {
-            scc.len() > 1 || (scc.len() == 1 && graph.find_edge(scc[0], scc[0]).is_some())
-        })
-        .map(|scc| {
-            scc.into_iter()
-                .filter_map(|idx| graph.node_weight(idx).cloned())
-                .collect()
-        })
-        .collect();
+    let cycles = cycle_groups(&graph);
 
     if !cycles.is_empty() {
         let msgs: Vec<_> = cycles

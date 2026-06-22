@@ -15,26 +15,20 @@ impl PackageManagementService {
         Ok(home_dir.join(".utoo").join("utx"))
     }
 
-    /// Convert package name to safe directory name
-    /// Examples:
-    /// - "cowsay" -> "cowsay"
-    /// - "@modelcontextprotocol/create-server" -> "@modelcontextprotocol_create-server"
-    fn package_name_to_dir_name(package_name: &str) -> String {
-        package_name.replace("/", "_")
-    }
-
     /// Install a package to the utoo cache directory using utoo's own installation logic.
     /// Delegates to `InstallService::install_global_package` with a per-tool prefix
-    /// (`~/.utoo/utx/<name>@<version>`), so the tool is installed as a dependency.
+    /// (`~/.utoo/utx/<name>/<version>`), so the tool is installed as a dependency.
+    ///
+    /// The prefix uses the same `<name>/<version>` two-segment layout as the
+    /// package store (`~/.cache/nm`): a scoped name nests naturally
+    /// (`@scope/pkg` → `@scope/pkg/<version>`) so no name escaping is needed.
+    /// The directory is purely an internal addressing key — nothing parses it
+    /// back (see `execute.rs`, which only searches under the returned path).
     pub async fn install_package_to_cache(package_name: &str) -> Result<PathBuf> {
         let (name, version, _) = resolve_package_spec(package_name).await?;
 
         let cache_dir = Self::get_utoo_cache_dir()?;
-        let package_cache_dir = cache_dir.join(format!(
-            "{}@{}",
-            Self::package_name_to_dir_name(&name),
-            version
-        ));
+        let package_cache_dir = cache_dir.join(&name).join(&version);
 
         // Check if already installed
         if crate::fs::try_exists(&package_cache_dir.join("bin")).await? {

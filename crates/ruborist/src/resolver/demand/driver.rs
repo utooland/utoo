@@ -3,10 +3,9 @@
 //! per-run [`ManifestState`] store and [`FetchQueues`] scheduler.
 
 use std::collections::VecDeque;
-use std::future::poll_fn;
 use std::sync::Arc;
-use std::task::Poll;
 
+use futures::FutureExt;
 use futures::stream::{FuturesUnordered, StreamExt};
 use petgraph::graph::NodeIndex;
 
@@ -15,10 +14,10 @@ use crate::model::manifest::{CoreVersionManifest, NodeManifest};
 use crate::model::node::EdgeType;
 use crate::resolver::builder::{
     BuildDepsConfig, ProcessResult, chain_err, handle_resolved_registry_manifest,
-    process_dependency, try_reuse_dependency,
+    process_dependency, resolve_override, try_reuse_dependency,
 };
 use crate::resolver::edges::{DependencyEdgeInfo, collect_unresolved_edges};
-use crate::resolver::registry::{ResolveError, resolve_registry_dep};
+use crate::resolver::registry::ResolveError;
 use crate::resolver::semver::normalize_spec;
 use crate::service::ManifestProvider;
 use crate::spec::SpecStr;
@@ -28,7 +27,7 @@ use super::queue::{FetchDone, FetchKey};
 use super::queue::{FetchFuture, FetchQueues};
 use super::schedule::{schedule_fetch, schedule_transitive_prefetches};
 use super::select::{EdgeStep, ResolutionMode, WaitKey, select_edge};
-use super::state::{ManifestState, PackageVersions, ResolverManifestCache};
+use super::state::{ManifestState, PackageVersions, WaitingEdge};
 use crate::model::node::PeerDeps;
 use crate::service::{ManifestFullData, ManifestJob, ManifestJobDone};
 use crate::traits::registry::RegistryError;
@@ -224,14 +223,12 @@ where
 
     /// Apply a dependency override for `edge`, returning the manifest to install.
     ///
-    /// The override is routed through the per-run manifest cache: a sibling
-    /// edge's already-resolved override is reused (single-flight within the
-    /// run), and a freshly-resolved one is recorded so it persists to the
-    /// project cache. Without this, every edge sharing an override re-fetches
-    /// it and the overridden manifest is omitted from the warm cache, forcing a
-    /// network round-trip on every subsequent install. Falls back to the
-    /// original manifest when no override applies or the override fails to
-    /// resolve.
+    /// The override is routed through the per-run manifest cache so sibling
+    /// edges sharing the same override resolve it once (single-flight within the
+    /// run) instead of each re-fetching it. Across runs the overridden version
+    /// is pinned in the lockfile and seeded by the reuse path, so it isn't
+    /// re-resolved on the next install either. Falls back to the original
+    /// manifest when no override applies or the override fails to resolve.
     async fn apply_override(
         &self,
         graph: &mut DependencyGraph,
@@ -240,29 +237,19 @@ where
         edge: &DependencyEdgeInfo,
         manifest: Arc<CoreVersionManifest>,
     ) -> Result<Arc<CoreVersionManifest>, ResolveError<R::Error>> {
-        match graph.check_override(parent, &edge.name, Some(&manifest.version)) {
-            Some(override_spec) => match state.get_version_manifest(&edge.name, &override_spec) {
-                Some(cached) => Ok(cached),
-                None => match resolve_registry_dep(
-                    self.registry,
-                    &edge.name,
-                    &override_spec,
-                    &edge.edge_type,
-                )
-                .await
-                .map_err(|inner| chain_err(graph, parent, edge, inner))?
-                {
-                    Some(overridden) => {
-                        state.cache_version(
-                            edge.name.clone(),
-                            override_spec,
-                            Arc::clone(&overridden.manifest),
-                        );
-                        Ok(overridden.manifest)
-                    }
-                    None => Ok(manifest),
-                },
-            },
+        match resolve_override(
+            graph,
+            self.registry,
+            parent,
+            edge,
+            &manifest.version,
+            self.config,
+            Some(state),
+        )
+        .await
+        .map_err(|inner| chain_err(graph, parent, edge, inner))?
+        {
+            Some(overridden) => Ok(overridden),
             None => Ok(manifest),
         }
     }
@@ -308,14 +295,13 @@ where
 /// as they complete and feeds resolved versions back into the graph so the next
 /// level can be discovered. [`ManifestState`] owns the per-run manifest cache,
 /// waiters, and inflight de-duplication; [`FetchQueues`] prioritises on-demand
-/// fetches over speculative prefetches. Returns the warmed manifest cache so the
-/// caller can reuse it.
+/// fetches over speculative prefetches.
 pub(crate) async fn run_main_loop_bfs<R, E>(
     graph: &mut DependencyGraph,
     registry: &R,
     config: &BuildDepsConfig,
     receiver: &E,
-) -> Result<ResolverManifestCache, ResolveError<R::Error>>
+) -> Result<(), ResolveError<R::Error>>
 where
     // `R` is the I/O boundary (a manifest provider); its error must be `Send`
     // because fetch jobs are polled on a `FuturesUnordered`. `E` receives
@@ -334,13 +320,7 @@ where
         supports_semver,
     };
 
-    let mut state = ManifestState::seeded(
-        config
-            .project_cache
-            .as_ref()
-            .map(|pc| pc.resolved_manifests())
-            .unwrap_or_default(),
-    );
+    let mut state = ManifestState::default();
     let mut queues = FetchQueues::default();
     let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
 
@@ -375,27 +355,19 @@ where
                 ctx.pump_fetches(&mut fetches, &mut queues, concurrency);
             }
 
-            loop {
-                let ready = poll_fn(|cx| match fetches.poll_next_unpin(cx) {
-                    Poll::Ready(done) => Poll::Ready(done),
-                    Poll::Pending => Poll::Ready(None),
-                })
-                .await;
-                let Some(done) = ready else {
-                    break;
-                };
-                let done = done.map_err(|e| {
-                    registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
-                })?;
-
-                apply_fetch_result(
+            // Drain every already-completed fetch without yielding.
+            // `now_or_never` polls once with a no-op waker; that can't lose a
+            // wakeup here because the loop always re-polls (or `.await`s) the
+            // stream afterwards.
+            while let Some(done) = fetches.next().now_or_never().flatten() {
+                absorb_fetch_done(
                     &mut state,
                     &mut queues,
                     done,
                     supports_semver,
                     config.peer_deps,
                     &mut level_pending,
-                );
+                )?;
             }
 
             if !level_pending.is_empty() {
@@ -419,18 +391,14 @@ where
                     .await?;
                 break;
             };
-            let done = done.map_err(|e| {
-                registry_error::<R::Error>(format!("manifest fetch task failed: {e}"))
-            })?;
-
-            apply_fetch_result(
+            absorb_fetch_done(
                 &mut state,
                 &mut queues,
                 done,
                 supports_semver,
                 config.peer_deps,
                 &mut level_pending,
-            );
+            )?;
         }
 
         receiver.on_event(BuildEvent::LevelComplete {
@@ -439,7 +407,7 @@ where
         current_level = next_level;
     }
 
-    Ok(state.into_resolver_cache())
+    Ok(())
 }
 
 // ---- Orchestration: state transitions over the store + queue ----
@@ -447,13 +415,33 @@ where
 // These tie the manifest store and the fetch scheduler together; the store and
 // the queue stay unaware of each other.
 
-/// A parked edge waiting on a pending fetch (matches `state`'s waiter payload).
-pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
-
 pub(super) fn registry_error<E: From<RegistryError>>(
     message: impl Into<String>,
 ) -> ResolveError<E> {
     ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
+}
+
+/// Unwrap one completed fetch task and feed its result back into the
+/// store/queues. Shared by the non-blocking drain and the blocking tail of
+/// the level loop.
+fn absorb_fetch_done<E: From<RegistryError>>(
+    state: &mut ManifestState,
+    queues: &mut FetchQueues,
+    done: Result<FetchDone, String>,
+    supports_semver: ResolutionMode,
+    peer_deps: PeerDeps,
+    level_pending: &mut VecDeque<WaitingEdge>,
+) -> Result<(), ResolveError<E>> {
+    let done = done.map_err(|e| registry_error::<E>(format!("manifest fetch task failed: {e}")))?;
+    apply_fetch_result(
+        state,
+        queues,
+        done,
+        supports_semver,
+        peer_deps,
+        level_pending,
+    );
+    Ok(())
 }
 
 async fn fetch_registry_manifest_inner<R: ManifestProvider>(
@@ -579,6 +567,7 @@ pub(super) fn apply_fetch_result(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -586,9 +575,14 @@ mod tests {
 
     use super::*;
     use crate::model::manifest::CoreVersionManifest;
+    use crate::model::node::DevDeps;
     use crate::model::package_json::PackageJson;
-    use crate::resolver::builder::resolve;
+    use crate::resolver::builder::{
+        add_edges_from, add_workspace_member, build_deps_with_config, resolve,
+    };
+    use crate::resolver::edges::EdgeContext;
     use crate::service::{ManifestJob, ManifestJobDone};
+    use crate::traits::progress::NoopReceiver;
     use crate::traits::registry::mock::{MockError, MockRegistryClient};
 
     /// A parked waiter; node/edge indices are placeholders — `apply_fetch_result`
@@ -764,15 +758,6 @@ mod tests {
         // workspace `app`.deps: mid -> deep -> shared (deep prod via a workspace)
         // `shared` is reachable through a workspace's prod chain, so it must be
         // prod, not dev — the cross-workspace analog of the resolve-order bug.
-        use crate::model::graph::DependencyGraph;
-        use crate::model::node::DevDeps;
-        use crate::resolver::builder::{
-            BuildDepsConfig, add_edges_from, add_workspace_member, build_deps_with_config_output,
-        };
-        use crate::resolver::edges::EdgeContext;
-        use crate::traits::progress::NoopReceiver;
-        use std::path::PathBuf;
-
         let mut inner = MockRegistryClient::new();
         inner.add_package(
             "mid",
@@ -818,7 +803,7 @@ mod tests {
         );
 
         let config = BuildDepsConfig::default().with_peer_deps(PeerDeps::Skip);
-        build_deps_with_config_output(&mut graph, &registry, config, &NoopReceiver)
+        build_deps_with_config(&mut graph, &registry, config, &NoopReceiver)
             .await
             .unwrap();
         let (packages, _) = graph.serialize_to_packages(&PathBuf::from("."));
@@ -847,7 +832,7 @@ mod tests {
 
     #[test]
     fn apply_version_success_caches_and_wakes_waiter() {
-        let mut state = ManifestState::seeded(Vec::new());
+        let mut state = ManifestState::default();
         let mut queues = FetchQueues::default();
         let mut ready = VecDeque::new();
         state.park_on_version(
@@ -875,7 +860,7 @@ mod tests {
 
     #[test]
     fn apply_version_failure_records_and_wakes_waiter() {
-        let mut state = ManifestState::seeded(Vec::new());
+        let mut state = ManifestState::default();
         let mut queues = FetchQueues::default();
         let mut ready = VecDeque::new();
         state.park_on_version(
@@ -906,7 +891,7 @@ mod tests {
 
     #[test]
     fn apply_version_success_schedules_transitive_prefetch() {
-        let mut state = ManifestState::seeded(Vec::new());
+        let mut state = ManifestState::default();
         let mut queues = FetchQueues::default();
         let mut ready = VecDeque::new();
 

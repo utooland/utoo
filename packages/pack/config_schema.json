@@ -169,6 +169,17 @@
         }
       ]
     },
+    "server": {
+      "description": "Server-side configuration",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaServerConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "sourceMaps": {
       "description": "Enable source maps",
       "type": [
@@ -529,6 +540,19 @@
         "anonymous",
         "use-credentials"
       ]
+    },
+    "SchemaCssModulesConfig": {
+      "description": "CSS Modules configuration",
+      "type": "object",
+      "properties": {
+        "localIdentName": {
+          "description": "CSS Modules local class name pattern",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "SchemaDevServer": {
       "description": "Development server configuration",
@@ -1392,13 +1416,6 @@
             "null"
           ]
         },
-        "absoluteSourceFilename": {
-          "description": "Keep React dev source filenames as absolute disk paths for editor integrations",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "runtime": {
           "description": "JSX runtime to use (automatic or classic)",
           "type": [
@@ -1478,9 +1495,6 @@
     "SchemaRuleConfigItem": {
       "description": "Full module rule configuration",
       "type": "object",
-      "required": [
-        "loaders"
-      ],
       "properties": {
         "condition": {
           "description": "Condition for applying the rule",
@@ -1522,6 +1536,49 @@
         }
       }
     },
+    "SchemaServerConfig": {
+      "description": "Server-side configuration",
+      "type": "object",
+      "properties": {
+        "entry": {
+          "description": "Entry point for the server runtime (e.g. \"src/server.ts\")",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "function": {
+          "description": "Configuration for Server Functions (RPC) boundaries",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaServerFunctionConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SchemaServerFunctionConfig": {
+      "type": "object",
+      "properties": {
+        "clientProxy": {
+          "description": "Module that exports createServerReference(actionId, name) for client proxy",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serverRegister": {
+          "description": "Module that exports registerServerReference(action, actionId, name) for the server bundle",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
     "SchemaSplitChunkConfig": {
       "description": "Split chunk configuration",
       "type": "object",
@@ -1558,6 +1615,17 @@
           "type": [
             "boolean",
             "null"
+          ]
+        },
+        "cssModules": {
+          "description": "CSS Modules configuration",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaCssModulesConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "emotion": {

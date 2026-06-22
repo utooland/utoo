@@ -5,6 +5,7 @@
   "description": "e2e test for file: dependency resolution",
   "dependencies": {
     "local-dir-pkg": "file:./local-dir",
-    "local-tarball-pkg": "file:./local-tarball.tgz"
+    "local-tarball-pkg": "file:./local-tarball.tgz",
+    "local-link-pkg": "link:./local-link"
   }
 }

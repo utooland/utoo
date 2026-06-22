@@ -1,4 +1,4 @@
-//! Shared helpers for native, non-registry resolvers (git, http tarball).
+//! Shared helpers for native, non-registry resolvers (git, http/file tarball).
 //!
 //! - [`DedupCache<T>`] — session-scoped single-flight cache (alias for
 //!   [`OnceMap`](crate::util::OnceMap)) so concurrent fetches of the same key
@@ -11,10 +11,14 @@
 //!
 //! Consumers:
 //!   `super::git`   — caches at `<cache>/<name>/<commit_sha>/`
-//!   `super::http`  — caches at `<cache>/<name>/_http_<url_hash>/`
+//!   `super::http`/`super::file` — read only the tarball manifest in BFS; the
+//!     tarball *content* is materialized directly into `node_modules` at
+//!     install time and never enters the global cache.
 
 use std::path::PathBuf;
 
+#[cfg(all(unix, any(feature = "native-git", feature = "http-tarball")))]
+use std::os::unix::fs::PermissionsExt;
 #[cfg(any(feature = "native-git", feature = "http-tarball"))]
 use std::path::Path;
 
@@ -89,6 +93,15 @@ pub fn finalize_non_registry_manifest(
 
 /// Atomically commit a populated staging directory to `package_dir`.
 ///
+/// This is the single durability contract for every `~/.cache/nm/` slot
+/// kind (registry `<name>/<version>`, git `<name>/<sha>`, http
+/// `<name>/_http_<hash>`, file `<name>/_file_<hash>`): a slot becomes
+/// visible only via atomic rename of a fully-written staging dir that
+/// already contains the `_resolved` marker. A `kill -9` at any point
+/// leaves either no slot or a complete slot — never a partial tree a
+/// later run could mistake for a cache hit. pm's install-phase extractor
+/// (`crates/pm/src/util/extractor.rs`) commits through this same helper.
+///
 /// The `write` callback receives a fresh empty staging directory; it must
 /// write all package contents there (but **not** the `_resolved` marker —
 /// this helper writes it afterwards so the final rename is atomic: any
@@ -113,6 +126,18 @@ where
     write(tmp_dir.path())?;
     std::fs::write(tmp_dir.path().join("_resolved"), "")
         .context("failed to write _resolved marker")?;
+
+    // tempfile creates staging dirs 0o700; widen the slot root to 0o755 so
+    // the published slot matches a plain mkdir under the default umask and
+    // stays traversable in shared-cache setups.
+    #[cfg(unix)]
+    if let Err(e) = std::fs::set_permissions(tmp_dir.path(), std::fs::Permissions::from_mode(0o755))
+    {
+        tracing::warn!(
+            "failed to widen staging dir mode for {}: {e}",
+            package_dir.display()
+        );
+    }
 
     // `keep()` consumes the TempDir without deleting it on success.
     let tmp_path = tmp_dir.keep();

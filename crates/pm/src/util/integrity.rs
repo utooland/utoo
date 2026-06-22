@@ -1,10 +1,14 @@
+use std::fmt::Write as _;
+
 use base64::Engine;
+// sha1 and sha2 re-export the same `digest::Digest` trait; one anonymous
+// import covers both hashers.
+use sha2::Digest as _;
 
 /// Compute an SRI integrity string (`sha512-<base64>`) for the given data.
 ///
 /// This is the same format used by npm registries and package-lock.json.
 pub fn compute_integrity(data: &[u8]) -> String {
-    use sha2::Digest;
     let hash = sha2::Sha512::digest(data);
     let b64 = base64::engine::general_purpose::STANDARD.encode(hash);
     format!("sha512-{b64}")
@@ -12,10 +16,8 @@ pub fn compute_integrity(data: &[u8]) -> String {
 
 /// Compute a SHA-1 hex digest (the `shasum` field required by npm registries).
 pub fn compute_shasum(data: &[u8]) -> String {
-    use sha1::Digest;
     let hash = sha1::Sha1::digest(data);
     hash.iter().fold(String::with_capacity(40), |mut s, b| {
-        use std::fmt::Write;
         let _ = write!(s, "{b:02x}");
         s
     })

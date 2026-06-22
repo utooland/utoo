@@ -1,18 +1,24 @@
 use std::collections::HashSet;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dashmap::DashMap;
+use reqwest::Url;
 
 use utoo_ruborist::builder::PeerDeps;
 use utoo_ruborist::manifest::PackageJson;
+use utoo_ruborist::registry::is_npm_registry;
 use utoo_ruborist::spec::Catalogs;
 
 use super::cli_enum::{ConfigScope, OmitType};
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
 use super::json::load_package_json;
+#[cfg(windows)]
+use super::platform_const::drive_root;
 use super::registry::{REGISTRY_NPMMIRROR, select_fastest_registry};
 
 static REGISTRY: LazyLock<ConfigValue<String>> =
@@ -36,16 +42,16 @@ fn default_cache_dir() -> PathBuf {
         .join(".cache/nm")
 }
 
-pub async fn init_registry(registry: Option<String>) {
+pub async fn init_registry(registry: Option<String>) -> Result<()> {
     // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
-    let final_registry = if let Some(reg) = registry {
+    let (raw_registry, registry_source) = if let Some(reg) = registry {
         tracing::debug!("Using registry from CLI: {}", reg);
-        Some(reg)
+        (reg, "CLI")
     } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
         && !env_reg.is_empty()
     {
         tracing::debug!("Using registry from env: {}", env_reg);
-        Some(env_reg)
+        (env_reg, "UTOO_REGISTRY")
     } else {
         let config_registry = Config::load(ConfigScope::Local)
             .await
@@ -54,23 +60,91 @@ pub async fn init_registry(registry: Option<String>) {
 
         if let Some(ref reg) = config_registry {
             tracing::debug!("Using registry from config: {}", reg);
-            config_registry
+            (reg.clone(), "config")
         } else {
             // No config, auto-select fastest registry
-            Some(select_fastest_registry().await)
+            (select_fastest_registry().await, "auto-select")
         }
     };
 
-    REGISTRY.set(final_registry);
+    // Canonicalize at the single resolution chokepoint so every downstream
+    // consumer sees a validated, slash-normalized URL. Explicit invalid values
+    // fail fast instead of silently falling back to a public registry.
+    let final_registry = normalize_registry(&raw_registry)
+        .with_context(|| format!("invalid registry from {registry_source}"))?;
+
+    REGISTRY.set(Some(final_registry));
 
     // Auto-detect semver support for the selected registry
     let registry_url = get_registry();
     let supports = detect_supports_semver(&registry_url, None).await;
     let _ = SUPPORTS_SEMVER.set(supports);
+
+    Ok(())
 }
 
 pub fn get_registry() -> String {
     REGISTRY.get_sync()
+}
+
+/// Parse, validate, and canonicalize a registry URL.
+///
+/// Registry values arrive unnormalized from the CLI, `UTOO_REGISTRY`, or the
+/// config file — and a trailing slash is common (npm's own default is
+/// `https://registry.npmjs.org/`). Downstream code joins package paths as
+/// `{registry}/{pkg}`, so a trailing slash produces `//<pkg>`, which npm's
+/// registry rejects with HTTP 406. Strip it here, at the single resolution
+/// chokepoint, and reject non-`http(s)` URLs early with a clear message instead
+/// of a late, opaque fetch failure.
+///
+/// Sub-paths are preserved, so a private registry served under a prefix
+/// (Artifactory/Nexus/Verdaccio `…/api/npm/<repo>`) keeps resolving correctly.
+fn normalize_registry(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    let url = Url::parse(trimmed)
+        .map_err(|e| anyhow::anyhow!("invalid registry URL {trimmed:?}: {e}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        anyhow::bail!("registry must be an http(s) URL, got {trimmed:?}");
+    }
+    Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+/// Scheme + host(+port) origin of an http(s) URL — e.g. `https://registry.npmjs.org`
+/// from `https://registry.npmjs.org/foo/-/foo-1.0.0.tgz`. `None` for non-http URLs.
+fn url_origin(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    Some(&url[..url.len() - rest.len() + host_end])
+}
+
+/// Whether `resolved` is a tarball served by a trusted registry (the configured
+/// registry, or a well-known public one), so it is safe to materialize into the
+/// shared `<name>/<version>` global cache slot.
+///
+/// A registry download URL and a user-declared remote-tarball URL are
+/// indistinguishable in an npm `package-lock.json` (both are `https://….tgz`,
+/// the lockfile stores no source tag). We resolve that ambiguity by origin:
+/// only a tarball whose host is a trusted registry may enter the shared cache;
+/// any other https tarball is an untrusted remote tarball and is fetched +
+/// extracted directly into `node_modules`, never the global store — which also
+/// removes the cross-cache poisoning risk of an attacker URL self-declaring a
+/// `name@version` that collides with a real registry package.
+pub fn is_registry_tarball(resolved: &str) -> bool {
+    let Some(origin) = url_origin(resolved) else {
+        return false;
+    };
+    let configured = get_registry();
+    let trusted = [
+        url_origin(&configured),
+        url_origin(super::registry::REGISTRY_NPMMIRROR),
+        url_origin(super::registry::REGISTRY_NPMJS),
+    ];
+    trusted
+        .into_iter()
+        .flatten()
+        .any(|t| origin.eq_ignore_ascii_case(t))
 }
 
 static CATALOGS: tokio::sync::OnceCell<Catalogs> = tokio::sync::OnceCell::const_new();
@@ -260,7 +334,6 @@ fn is_cross_device(cache: &Path, project: &Path) -> bool {
 /// cache dir itself may not exist yet.
 #[cfg(unix)]
 fn nearest_device(path: &Path) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
     let mut current = Some(path);
     while let Some(p) = current {
         if let Ok(meta) = std::fs::metadata(p) {
@@ -273,7 +346,6 @@ fn nearest_device(path: &Path) -> Option<u64> {
 
 #[cfg(windows)]
 fn is_cross_device(cache: &Path, project: &Path) -> bool {
-    use super::platform_const::drive_root;
     match (drive_root(cache), drive_root(project)) {
         (Some(a), Some(b)) => a != b,
         _ => false,
@@ -373,8 +445,6 @@ static SUPPORTS_SEMVER: OnceLock<bool> = OnceLock::new();
 /// `utoo` processes may race on the global config, potentially losing entries.
 /// This is a known limitation — entries will be re-probed on the next run.
 pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest::Client>) -> bool {
-    use utoo_ruborist::registry::is_npm_registry;
-
     // Known: npm registry does not support semver queries
     if is_npm_registry(registry_url) {
         tracing::debug!("npm registry detected, skipping semver probe");
@@ -407,7 +477,7 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
         let client = match client {
             Some(c) => c,
             None => {
-                owned_client = client_builder()
+                owned_client = client_builder()?
                     .timeout(std::time::Duration::from_secs(5))
                     .build()?;
                 &owned_client
@@ -419,11 +489,11 @@ pub async fn detect_supports_semver(registry_url: &str, client: Option<&reqwest:
             .send()
             .await?;
         tracing::debug!("Semver probe response: {} for {}", resp.status(), probe_url);
-        Ok::<bool, reqwest::Error>(resp.status().is_success())
+        anyhow::Ok(resp.status().is_success())
     }
     .await
-    .unwrap_or_else(|e: reqwest::Error| {
-        tracing::debug!("Semver probe failed: {}", e);
+    .unwrap_or_else(|e| {
+        tracing::debug!("Semver probe failed: {e:#}");
         false
     });
 
@@ -460,6 +530,83 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use tempfile::TempDir;
+
+    #[test]
+    fn url_origin_extracts_scheme_and_host() {
+        assert_eq!(
+            url_origin("https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz"),
+            Some("https://registry.npmjs.org")
+        );
+        assert_eq!(
+            url_origin("http://cdn.example.com:8080/x.tgz"),
+            Some("http://cdn.example.com:8080")
+        );
+        assert_eq!(
+            url_origin("https://registry.npmjs.org"),
+            Some("https://registry.npmjs.org")
+        );
+        assert_eq!(url_origin("file:/abs/x.tgz"), None);
+        assert_eq!(url_origin("git+https://github.com/u/r.git#abc"), None);
+    }
+
+    #[test]
+    fn is_registry_tarball_trusts_known_registries_only() {
+        // Well-known public registries → trusted (shared cache allowed).
+        assert!(is_registry_tarball(
+            "https://registry.npmjs.org/abbrev/-/abbrev-2.0.0.tgz"
+        ));
+        assert!(is_registry_tarball(
+            "https://registry.npmmirror.com/abbrev/-/abbrev-2.0.0.tgz"
+        ));
+        // A remote tarball from an arbitrary host → NOT trusted (direct extract,
+        // never the shared `<name>/<version>` slot).
+        assert!(!is_registry_tarball(
+            "https://cdn.example.com/foo-1.0.0.tgz"
+        ));
+        // A registry-host *lookalike* path on an untrusted host stays untrusted.
+        assert!(!is_registry_tarball(
+            "https://evil.example.com/abbrev/-/abbrev-2.0.0.tgz"
+        ));
+        // Non-http resolveds are not registry tarballs.
+        assert!(!is_registry_tarball("file:../foo.tgz"));
+    }
+
+    #[test]
+    fn normalize_registry_strips_trailing_slash() {
+        // npm's own default form (trailing slash) → single-slash joins.
+        assert_eq!(
+            normalize_registry("https://registry.npmjs.org/").unwrap(),
+            "https://registry.npmjs.org"
+        );
+        // Already canonical → unchanged.
+        assert_eq!(
+            normalize_registry("https://registry.npmmirror.com").unwrap(),
+            "https://registry.npmmirror.com"
+        );
+        // Multiple trailing slashes and surrounding whitespace are normalized.
+        assert_eq!(
+            normalize_registry("  https://registry.npmjs.org///  ").unwrap(),
+            "https://registry.npmjs.org"
+        );
+    }
+
+    #[test]
+    fn normalize_registry_preserves_subpath() {
+        // Private registries served under a prefix keep their path.
+        assert_eq!(
+            normalize_registry("https://npm.corp/api/npm/npm-virtual/").unwrap(),
+            "https://npm.corp/api/npm/npm-virtual"
+        );
+    }
+
+    #[test]
+    fn normalize_registry_rejects_invalid() {
+        // Non-http(s) schemes and unparsable input are rejected, not silently
+        // forwarded into a later HTTP fetch.
+        assert!(normalize_registry("ftp://registry.example.com").is_err());
+        assert!(normalize_registry("registry.npmjs.org").is_err());
+        assert!(normalize_registry("not a url").is_err());
+    }
 
     use super::super::config_file::ConfigValueParser;
 

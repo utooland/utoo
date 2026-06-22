@@ -42,10 +42,10 @@
 //! │   ├── Local(PackageJson)                  ← root / workspace   │
 //! │   └── Registry(Arc<CoreVersionManifest>)  ← resolved dep      │
 //! │                                                                │
-//! │   Provides unified accessors:                                  │
+//! │   Provides unified accessors (most via the private pick()):    │
 //! │     name(), version(), dependencies(), peer_dependencies(),    │
 //! │     optional_dependencies(), dev_dependencies(), engines(),    │
-//! │     bin(), has_install_scripts()                               │
+//! │     bin(), os(), cpu(), has_install_script()                   │
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -120,8 +120,10 @@
 pub mod compatibility;
 pub mod git;
 pub mod graph;
+pub mod lock_codec;
 pub mod manifest;
 pub mod node;
+pub mod override_match;
 pub mod override_rule;
 pub mod package_json;
 pub mod package_lock;

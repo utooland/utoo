@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use super::manifest::{CoreVersionManifest, NodeManifest};
 use super::node::{EdgeType, NodeType};
-use super::override_rule::{OverrideRule, Overrides};
+use super::override_rule::Overrides;
 use super::package_json::PackageJson;
 use crate::resolver::semver::matches;
 
@@ -38,6 +38,30 @@ pub struct PackageNode {
 }
 
 impl PackageNode {
+    /// Core constructor: every node starts with all dependency-type flags
+    /// clear (they are assigned later by `compute_node_types`). The public
+    /// constructors below differ only in manifest source, node type, and how
+    /// name/version are derived.
+    fn new(
+        name: String,
+        version: String,
+        path: PathBuf,
+        manifest: NodeManifest,
+        node_type: NodeType,
+    ) -> Self {
+        Self {
+            path,
+            name,
+            version,
+            manifest,
+            node_type,
+            is_prod: false,
+            is_dev: false,
+            is_peer: false,
+            is_optional: false,
+        }
+    }
+
     /// Create a new regular package node from CoreVersionManifest.
     pub fn from_version_manifest(
         name: String,
@@ -45,88 +69,70 @@ impl PackageNode {
         manifest: Arc<CoreVersionManifest>,
     ) -> Self {
         let version = manifest.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Registry(manifest),
-            node_type: NodeType::Regular,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Registry(manifest),
+            NodeType::Regular,
+        )
     }
 
     /// Create a new regular package node from PackageJson.
     pub fn from_package_json(name: String, path: PathBuf, pkg: PackageJson) -> Self {
         let version = pkg.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
-            node_type: NodeType::Regular,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Regular,
+        )
     }
 
     /// Create a root project node from PackageJson.
     pub fn root_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
         let version = pkg.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
-            node_type: NodeType::Root,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Root,
+        )
     }
 
     /// Create a workspace package node from PackageJson.
     pub fn workspace_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
+        // A workspace member with no version pins to `*` so dependents can
+        // always satisfy a `workspace:*` requirement.
         let version = if pkg.version.is_empty() {
             "*".to_string()
         } else {
             pkg.version.clone()
         };
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
-            node_type: NodeType::Workspace,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Workspace,
+        )
     }
 
     /// Create a symlinked package node from PackageJson.
     pub fn link_from_package_json(path: PathBuf, pkg: PackageJson) -> Self {
         let name = pkg.name.clone();
         let version = pkg.version.clone();
-        Self {
-            path,
+        Self::new(
             name,
             version,
-            manifest: NodeManifest::Local(pkg),
-            node_type: NodeType::Link,
-            is_prod: false,
-            is_dev: false,
-            is_peer: false,
-            is_optional: false,
-        }
+            path,
+            NodeManifest::Local(Box::new(pkg)),
+            NodeType::Link,
+        )
     }
 
     /// Check if this is the root node.
@@ -155,8 +161,10 @@ impl PackageNode {
 pub enum GraphEdge {
     /// Physical parent-child relationship (directory structure)
     Physical,
-    /// Logical dependency relationship
-    Dependency(DependencyEdge),
+    /// Logical dependency relationship. Boxed: physical edges outnumber
+    /// dependency edges in the petgraph and a unit variant must not pay the
+    /// full DependencyEdge footprint.
+    Dependency(Box<DependencyEdge>),
 }
 
 /// Dependency edge data.
@@ -199,9 +207,9 @@ pub struct DependencyGraph {
     /// Index of the root node
     pub root_index: NodeIndex,
     /// Project-level overrides configuration
-    overrides: Option<Overrides>,
+    pub(crate) overrides: Option<Overrides>,
     /// Fast lookup set for override names
-    override_names: HashSet<String>,
+    pub(crate) override_names: HashSet<String>,
     /// Per-parent `name → child` index over physical edges, maintained by
     /// [`add_physical_edge`](Self::add_physical_edge) (the graph is
     /// append-only — no edge ever gets removed). Hoisting parks most packages
@@ -311,7 +319,7 @@ impl DependencyGraph {
     ) -> EdgeIndex {
         let dep_edge = DependencyEdge::new(name, spec, edge_type);
         self.graph
-            .add_edge(from, from, GraphEdge::Dependency(dep_edge))
+            .add_edge(from, from, GraphEdge::Dependency(Box::new(dep_edge)))
     }
 
     /// Get the physical parent of a node.
@@ -386,7 +394,7 @@ impl DependencyGraph {
             .edges_directed(node, Outgoing)
             .filter_map(|edge| {
                 if let GraphEdge::Dependency(dep) = edge.weight() {
-                    Some((edge.id(), dep))
+                    Some((edge.id(), dep.as_ref()))
                 } else {
                     None
                 }
@@ -462,6 +470,102 @@ impl DependencyGraph {
         super::package_lock::serialize_to_packages(self, root_path)
     }
 
+    /// Serialize to package-lock.json format, dropping any node not reachable
+    /// from the importers via resolved dependency edges. Used on the
+    /// lockfile-reuse path, where seeding inserts the whole prior tree and the
+    /// BFS may leave some of it orphaned: a removed direct dependency's subtree,
+    /// or a node shadowed by a re-resolved (bumped) version. See
+    /// [`reachable_nodes`](Self::reachable_nodes).
+    #[inline]
+    pub fn serialize_to_packages_pruned(
+        &self,
+        root_path: &Path,
+    ) -> (HashMap<String, super::package_lock::LockPackage>, i32) {
+        super::package_lock::serialize_to_packages_filtered(
+            self,
+            root_path,
+            Some(&self.reachable_nodes()),
+        )
+    }
+
+    /// The set of nodes reachable from the importers (root + workspace members)
+    /// by following **resolved** dependency edges. This is the same traversal
+    /// [`compute_node_types`](crate::resolver::node_types::compute_node_types)
+    /// uses to assign node types, so "has a type" and "is reachable" agree.
+    ///
+    /// On a cold resolve every placed node is reachable (the resolver only
+    /// creates a node when it resolves an edge to it), so this is the identity
+    /// — it only prunes on the reuse path, where seeded-but-orphaned nodes
+    /// remain physically attached under the append-only graph invariant.
+    ///
+    /// Link nodes are seeded unconditionally: a workspace's `node_modules/<name>`
+    /// symlink (`add_workspace_member`) has no incoming *resolved dependency*
+    /// edge — the importer edge resolves to the `Workspace` node, not the link —
+    /// so the traversal would never reach it and the symlink entry would be
+    /// pruned from the lock (dropping the on-disk link). Lockfile seeding never
+    /// re-creates link nodes (`lock_codec` skips link entries) and the only
+    /// links in the graph are built for *currently declared* workspaces / `file:`
+    /// deps, so every link present is live and must be kept.
+    pub fn reachable_nodes(&self) -> HashSet<NodeIndex> {
+        let mut reachable: HashSet<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&i| {
+                self.get_node(i)
+                    .is_some_and(|n| n.is_root() || n.is_workspace() || n.is_link())
+            })
+            .collect();
+        let mut stack: Vec<NodeIndex> = reachable.iter().copied().collect();
+        while let Some(node) = stack.pop() {
+            // Walk resolved dependency edges by their target index only — no need
+            // for `get_resolved_dependencies`, which would clone each dep name.
+            // `reachable`/`stack` are locals, so iterate the edges directly rather
+            // than collecting targets into a per-node Vec.
+            for edge in self.graph.edges_directed(node, Outgoing) {
+                if let GraphEdge::Dependency(dep) = edge.weight()
+                    && dep.valid
+                    && let Some(target) = dep.to
+                    && reachable.insert(target)
+                {
+                    stack.push(target);
+                }
+            }
+        }
+        reachable
+    }
+
+    /// Whether any `node_modules` slot — a physical parent plus the directory
+    /// name a child serializes under — is occupied by more than one *reachable*
+    /// node.
+    ///
+    /// The reuse path can reach this state: a direct-dep version bump places a
+    /// fresh node at the parent's slot while a still-pinned transitive's frozen
+    /// seeded edge keeps the shadowed old node reachable at the *same* slot. The
+    /// graph can't re-nest the old copy (its dependents' edges are frozen at seed
+    /// time), so serialization would emit two entries at one lock key — last-wins
+    /// by traversal order, hence nondeterministic and internally inconsistent.
+    /// The caller treats a positive here as "baseline unusable" and cold-resolves.
+    ///
+    /// Keyed by `(is_workspace, name)`: a workspace member's `Workspace` node
+    /// (serialized `packages/<m>`) and its `node_modules/<m>` link/regular sibling
+    /// share a name but not a slot, so they must not count as a collision.
+    pub fn has_slot_collision(&self, reachable: &HashSet<NodeIndex>) -> bool {
+        for &parent in reachable {
+            let mut slots: HashSet<(bool, &str)> = HashSet::new();
+            for child in self.get_physical_children(parent) {
+                if !reachable.contains(&child) {
+                    continue;
+                }
+                if let Some(node) = self.get_node(child)
+                    && !slots.insert((node.is_workspace(), node.name.as_str()))
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Find compatible node in parent chain for dependency resolution.
     ///
     /// For unconditional overrides (spec == "*"), uses the override target_spec.
@@ -525,153 +629,6 @@ impl DependencyGraph {
             // Reached root, install here
             FindResult::New(current)
         }
-    }
-
-    /// Collect the physical parent chain from a node up to root (excluding root).
-    ///
-    /// Returns the chain in order from outermost to innermost.
-    /// INCLUDES the `from` node itself (as the innermost), plus all its ancestors.
-    ///
-    /// Example: root -> express -> body-parser
-    /// If `from` = body-parser, returns [(express, version), (body-parser, version)]
-    ///
-    /// This is used for override matching where the rule specifies:
-    /// "express": { "body-parser": { "debug": "4.0.0" } }
-    /// meaning debug should be overridden when its parent is body-parser AND
-    /// body-parser's parent is express.
-    fn collect_parent_chain(&self, from: NodeIndex) -> Vec<(String, String)> {
-        let mut chain = Vec::new();
-        let mut current = from;
-
-        // First, add the current node itself (if not root)
-        let from_node = &self.graph[from];
-        if !from_node.is_root() {
-            chain.push((from_node.name.clone(), from_node.version.clone()));
-        }
-
-        // Then collect all physical parents up to root (excluding root)
-        while let Some(parent) = self.get_physical_parent(current) {
-            let parent_node = &self.graph[parent];
-            if !parent_node.is_root() {
-                chain.push((parent_node.name.clone(), parent_node.version.clone()));
-            }
-            current = parent;
-        }
-
-        chain.reverse();
-        chain
-    }
-
-    /// Check if an override rule applies.
-    ///
-    /// - `resolved_version = None`: Only check unconditional overrides (spec == "*")
-    /// - `resolved_version = Some(v)`: Check both unconditional and conditional overrides
-    ///
-    /// For conditional overrides like `immer@^9: 8.0.0`, the resolved version
-    /// (e.g., "9.0.21") is matched against the rule spec ("^9").
-    pub fn check_override(
-        &self,
-        from: NodeIndex,
-        name: &str,
-        resolved_version: Option<&str>,
-    ) -> Option<String> {
-        // Fast path: skip if name is not in override_names
-        if !self.override_names.contains(name) {
-            return None;
-        }
-
-        let overrides = self.overrides.as_ref()?;
-        let parent_chain = self.collect_parent_chain(from);
-
-        for rule in &overrides.rules {
-            if rule.name != name {
-                continue;
-            }
-
-            // Check spec matching
-            let spec_matches = if rule.spec == "*" {
-                // Unconditional override: always matches
-                true
-            } else if let Some(version) = resolved_version {
-                // Conditional override: check if resolved version matches rule spec
-                matches(&rule.spec, version)
-            } else {
-                // No resolved version provided, skip conditional overrides
-                false
-            };
-
-            if !spec_matches {
-                continue;
-            }
-
-            // Check if parent chain matches
-            if self.matches_parent_chain_for_rule(rule, &parent_chain) {
-                tracing::debug!(
-                    "Override matched: {}@{} => {} (version: {:?}, from: {:?})",
-                    name,
-                    rule.spec,
-                    rule.target_spec,
-                    resolved_version,
-                    from
-                );
-                return Some(rule.target_spec.clone());
-            }
-        }
-
-        None
-    }
-
-    /// Check if a parent chain matches an override rule's parent condition.
-    ///
-    /// The rule's parent chain is from inner to outer: debug.parent = body-parser,
-    /// body-parser.parent = express.
-    ///
-    /// The parent_chain is from outer to inner: [express, body-parser].
-    ///
-    /// We need to match starting from the innermost (end of parent_chain) and
-    /// work outward, checking that each rule parent matches.
-    fn matches_parent_chain_for_rule(
-        &self,
-        rule: &OverrideRule,
-        parent_chain: &[(String, String)],
-    ) -> bool {
-        // If no parent requirement, always matches
-        if rule.parent.is_none() {
-            return true;
-        }
-
-        // Start from the end of parent_chain (innermost parent)
-        let mut current_rule = rule.parent.as_ref();
-        let mut chain_idx = parent_chain.len();
-
-        while chain_idx > 0 {
-            chain_idx -= 1;
-            let (parent_name, parent_version) = &parent_chain[chain_idx];
-
-            if let Some(rule_ref) = current_rule {
-                if parent_name == &rule_ref.name {
-                    // Check if version matches
-                    let version_matches =
-                        rule_ref.spec == "*" || matches(&rule_ref.spec, parent_version);
-
-                    if version_matches {
-                        // Move to next (outer) parent requirement
-                        current_rule = rule_ref.parent.as_ref();
-                        if current_rule.is_none() {
-                            // All parent requirements matched
-                            return true;
-                        }
-                        continue;
-                    }
-                }
-            } else {
-                // All rule requirements already matched
-                return true;
-            }
-        }
-
-        // If current_rule is still Some, not all parent requirements were matched
-        current_rule.is_none()
     }
 }
 
@@ -884,304 +841,5 @@ mod tests {
         // From express, should find lodash in parent (root)
         let result = graph.find_compatible_node(express_idx, "lodash", "^4.17.0");
         assert_eq!(result, FindResult::Reuse(lodash_idx));
-    }
-
-    #[test]
-    fn test_workspace_override() {
-        use serde_json::json;
-
-        // Create root package.json with workspaces and overrides
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "workspaces": ["packages/*"],
-            "overrides": {
-                "workspace-a": {
-                    "lodash": "3.0.0"
-                },
-                "workspace-b": {
-                    "lodash": "4.0.0"
-                }
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Add workspace-a under root
-        let ws_a_pkg = create_pkg("workspace-a", "1.0.0");
-        let ws_a = PackageNode::workspace_from_package_json(
-            PathBuf::from("packages/workspace-a"),
-            ws_a_pkg,
-        );
-        let ws_a_idx = graph.add_node(ws_a);
-        graph.add_physical_edge(graph.root_index, ws_a_idx);
-
-        // Add workspace-b under root
-        let ws_b_pkg = create_pkg("workspace-b", "1.0.0");
-        let ws_b = PackageNode::workspace_from_package_json(
-            PathBuf::from("packages/workspace-b"),
-            ws_b_pkg,
-        );
-        let ws_b_idx = graph.add_node(ws_b);
-        graph.add_physical_edge(graph.root_index, ws_b_idx);
-
-        // Check unconditional override for workspace-a's lodash dependency
-        let override_a = graph.check_override(ws_a_idx, "lodash", None);
-        assert_eq!(override_a, Some("3.0.0".to_string()));
-
-        // Check unconditional override for workspace-b's lodash dependency
-        let override_b = graph.check_override(ws_b_idx, "lodash", None);
-        assert_eq!(override_b, Some("4.0.0".to_string()));
-
-        // Root's lodash should not have override (no matching parent context)
-        let override_root = graph.check_override(graph.root_index, "lodash", None);
-        assert_eq!(override_root, None);
-    }
-
-    #[test]
-    fn test_simple_override() {
-        use serde_json::json;
-
-        // Simple global override: all lodash -> 4.17.21
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "lodash": "4.17.21"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Unconditional override should apply
-        let override_result = graph.check_override(graph.root_index, "lodash", None);
-        assert_eq!(override_result, Some("4.17.21".to_string()));
-    }
-
-    #[test]
-    fn test_versioned_override() {
-        use serde_json::json;
-
-        // Override only specific version range
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "lodash@^3.0.0": "4.17.21"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Should apply when resolved version matches ^3.0.0
-        let override_result = graph.check_override(graph.root_index, "lodash", Some("3.10.0"));
-        assert_eq!(override_result, Some("4.17.21".to_string()));
-
-        // Should NOT apply when resolved version doesn't match
-        let override_result2 = graph.check_override(graph.root_index, "lodash", Some("4.0.0"));
-        assert_eq!(override_result2, None);
-    }
-
-    #[test]
-    fn test_nested_override_chain() {
-        use serde_json::json;
-
-        // Override debug only under express
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "express": {
-                    "debug": "4.0.0"
-                }
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Add express under root
-        let express = PackageNode::from_version_manifest(
-            "express".to_string(),
-            PathBuf::from("node_modules/express"),
-            create_version_manifest("express", "4.18.0"),
-        );
-        let express_idx = graph.add_node(express);
-        graph.add_physical_edge(graph.root_index, express_idx);
-
-        // Debug under express should be overridden (unconditional)
-        let override_result = graph.check_override(express_idx, "debug", None);
-        assert_eq!(override_result, Some("4.0.0".to_string()));
-
-        // Debug directly under root should NOT be overridden
-        let override_root = graph.check_override(graph.root_index, "debug", None);
-        assert_eq!(override_root, None);
-    }
-
-    #[test]
-    fn test_deeply_nested_override() {
-        use serde_json::json;
-
-        // Override only under express > body-parser
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "express": {
-                    "body-parser": {
-                        "debug": "4.0.0"
-                    }
-                }
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Build: root -> express -> body-parser
-        let express = PackageNode::from_version_manifest(
-            "express".to_string(),
-            PathBuf::from("node_modules/express"),
-            create_version_manifest("express", "4.18.0"),
-        );
-        let express_idx = graph.add_node(express);
-        graph.add_physical_edge(graph.root_index, express_idx);
-
-        let body_parser = PackageNode::from_version_manifest(
-            "body-parser".to_string(),
-            PathBuf::from("node_modules/express/node_modules/body-parser"),
-            create_version_manifest("body-parser", "1.20.0"),
-        );
-        let body_parser_idx = graph.add_node(body_parser);
-        graph.add_physical_edge(express_idx, body_parser_idx);
-
-        // Debug under body-parser (which is under express) should be overridden (unconditional)
-        let override_result = graph.check_override(body_parser_idx, "debug", None);
-        assert_eq!(override_result, Some("4.0.0".to_string()));
-
-        // Debug directly under express should NOT be overridden
-        let override_express = graph.check_override(express_idx, "debug", None);
-        assert_eq!(override_express, None);
-
-        // Debug under root should NOT be overridden
-        let override_root = graph.check_override(graph.root_index, "debug", None);
-        assert_eq!(override_root, None);
-    }
-
-    #[test]
-    fn test_override_with_find_compatible_node() {
-        use serde_json::json;
-
-        // Test that override affects find_compatible_node result
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "lodash": "4.17.21"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Add lodash@4.17.21 under root (matching the override)
-        let lodash = PackageNode::from_version_manifest(
-            "lodash".to_string(),
-            PathBuf::from("node_modules/lodash"),
-            create_version_manifest("lodash", "4.17.21"),
-        );
-        let lodash_idx = graph.add_node(lodash);
-        graph.add_physical_edge(graph.root_index, lodash_idx);
-
-        // Even though someone requests ^3.0.0, the override converts it to 4.17.21
-        // So it should find and reuse the existing lodash@4.17.21
-        let result = graph.find_compatible_node(graph.root_index, "lodash", "^3.0.0");
-        assert_eq!(result, FindResult::Reuse(lodash_idx));
-    }
-
-    #[test]
-    fn test_no_override_when_name_not_matched() {
-        use serde_json::json;
-
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "lodash": "4.17.21"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Other packages should not be affected
-        let override_result = graph.check_override(graph.root_index, "underscore", None);
-        assert_eq!(override_result, None);
-    }
-
-    #[test]
-    fn test_scoped_package_override() {
-        use serde_json::json;
-
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "@babel/core": "7.20.0"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Unconditional override for scoped package
-        let override_result = graph.check_override(graph.root_index, "@babel/core", None);
-        assert_eq!(override_result, Some("7.20.0".to_string()));
-    }
-
-    #[test]
-    fn test_reference_override() {
-        use serde_json::json;
-
-        // Test $dep_name reference
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "dependencies": {
-                "lodash": "^4.17.0"
-            },
-            "overrides": {
-                "lodash": "$lodash"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Override should resolve to the version in dependencies (unconditional)
-        let override_result = graph.check_override(graph.root_index, "lodash", None);
-        assert_eq!(override_result, Some("^4.17.0".to_string()));
-    }
-
-    #[test]
-    fn test_conditional_override_with_resolved_version() {
-        use serde_json::json;
-
-        // Conditional override: only apply when resolved version matches ^9
-        let pkg_value = json!({
-            "name": "root",
-            "version": "1.0.0",
-            "overrides": {
-                "immer@^9": "8.0.0"
-            }
-        });
-        let pkg = PackageJson::from_value(&pkg_value).unwrap();
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Should apply when resolved version is 9.0.21 (matches ^9)
-        let override_result = graph.check_override(graph.root_index, "immer", Some("9.0.21"));
-        assert_eq!(override_result, Some("8.0.0".to_string()));
-
-        // Should NOT apply when resolved version is 8.0.0 (doesn't match ^9)
-        let override_result2 = graph.check_override(graph.root_index, "immer", Some("8.0.0"));
-        assert_eq!(override_result2, None);
-
-        // Should NOT match unconditional (no version provided)
-        let unconditional = graph.check_override(graph.root_index, "immer", None);
-        assert_eq!(unconditional, None);
     }
 }

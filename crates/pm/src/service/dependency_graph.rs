@@ -1,9 +1,15 @@
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use petgraph::Graph;
 use petgraph::graph::{DiGraph, NodeIndex};
-use std::path::Path;
-
 use utoo_ruborist::lock::{LockPackageNode, PackageLock};
+
+/// Upper bound on the number of dependency chains `ut list` enumerates per
+/// (package, root) pair. Diamond dependencies make the full set exponential;
+/// past this point more chains add noise, not insight.
+const MAX_WHY_PATHS: usize = 1024;
 
 /// Service for querying dependency graph built from package-lock.json.
 /// This is different from ruborist's DependencyGraph which is used for resolution.
@@ -194,29 +200,40 @@ impl LockGraphService {
         Ok(())
     }
 
-    /// Helper DFS to find all paths between two nodes (NodeIndex version)
+    /// Helper DFS to find all paths between two nodes (NodeIndex version).
+    ///
+    /// All-simple-paths enumeration is exponential on diamond-heavy
+    /// node_modules graphs, so collection stops at [`MAX_WHY_PATHS`]; the
+    /// caller reports the truncation. Returns `false` when the cap was hit.
     fn dfs_all_paths_index(
         &self,
         current: NodeIndex,
         target: NodeIndex,
-        visited: &mut Vec<NodeIndex>,
+        visited: &mut std::collections::HashSet<NodeIndex>,
         path: &mut Vec<NodeIndex>,
         all_paths: &mut Vec<Vec<NodeIndex>>,
-    ) {
-        if visited.contains(&current) {
-            return;
+    ) -> bool {
+        if all_paths.len() >= MAX_WHY_PATHS {
+            return false;
         }
-        visited.push(current);
+        if !visited.insert(current) {
+            return true;
+        }
         path.push(current);
+        let mut complete = true;
         if current == target {
             all_paths.push(path.clone());
         } else {
             for neighbor in self.graph.neighbors(current) {
-                self.dfs_all_paths_index(neighbor, target, visited, path, all_paths);
+                if !self.dfs_all_paths_index(neighbor, target, visited, path, all_paths) {
+                    complete = false;
+                    break;
+                }
             }
         }
         path.pop();
-        visited.pop();
+        visited.remove(&current);
+        complete
     }
 
     /// Find node indices by package name (supports fuzzy matching)
@@ -268,7 +285,10 @@ impl LockGraphService {
         Ok(all_paths)
     }
 
-    /// Find all paths between two node indices (NodeIndex version)
+    /// Find all paths between two node indices (NodeIndex version).
+    ///
+    /// Capped at [`MAX_WHY_PATHS`]; logs a warning when paths were dropped so
+    /// truncated output is never mistaken for the full set.
     fn find_path_between_indices(
         &self,
         from: NodeIndex,
@@ -276,14 +296,47 @@ impl LockGraphService {
     ) -> Result<Vec<Vec<NodeIndex>>> {
         let mut all_paths = Vec::new();
         let mut path = Vec::new();
-        let mut visited = Vec::new();
-        self.dfs_all_paths_index(from, to, &mut visited, &mut path, &mut all_paths);
+        let mut visited = std::collections::HashSet::new();
+        if !self.dfs_all_paths_index(from, to, &mut visited, &mut path, &mut all_paths) {
+            tracing::warn!(
+                "dependency path listing truncated at {MAX_WHY_PATHS} paths; output is partial"
+            );
+        }
         Ok(all_paths)
     }
 
     pub fn get_graph(&self) -> &DiGraph<LockPackageNode, ()> {
         &self.graph
     }
+}
+
+/// A node in the dependency tree built from root-to-package paths.
+///
+/// `NodeIndex::end()` marks the synthetic root; real nodes index into the
+/// lock graph.
+#[derive(Debug)]
+pub struct DepTreeNode {
+    pub index: NodeIndex,
+    pub children: BTreeMap<NodeIndex, DepTreeNode>,
+}
+
+/// Merge a set of package→root paths into a single tree rooted at a
+/// synthetic `NodeIndex::end()` node.
+pub fn build_dep_tree(paths: &[Vec<NodeIndex>]) -> DepTreeNode {
+    let mut root = DepTreeNode {
+        index: NodeIndex::end(),
+        children: BTreeMap::new(),
+    };
+    for path in paths {
+        let mut node = &mut root;
+        for &idx in path.iter().rev() {
+            node = node.children.entry(idx).or_insert_with(|| DepTreeNode {
+                index: idx,
+                children: BTreeMap::new(),
+            });
+        }
+    }
+    root
 }
 
 #[cfg(test)]
@@ -470,5 +523,18 @@ mod tests {
             paths.len() >= 2,
             "Should find paths to multiple workspace packages"
         );
+    }
+
+    #[test]
+    fn test_build_dep_tree() {
+        let paths = vec![vec![
+            NodeIndex::new(3),
+            NodeIndex::new(2),
+            NodeIndex::new(1),
+            NodeIndex::new(0),
+        ]];
+        let tree = build_dep_tree(&paths);
+        // root should have one child (a)
+        assert_eq!(tree.children.len(), 1);
     }
 }

@@ -181,6 +181,8 @@ jobs:
       - build
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - name: Setup node
         uses: actions/setup-node@v6
         with:
