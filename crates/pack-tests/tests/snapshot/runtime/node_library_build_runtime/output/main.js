@@ -479,7 +479,7 @@ function getAutomaticPublicPath() {
 }
 /**
  * Gets the public path for runtime assets.
- * Checks globalThis.publicPath and falls back to empty string.
+ * Checks globalThis.publicPath and falls back to "/".
  */ function getPublicPath(mode) {
     if (mode === 'auto') {
         return getAutomaticPublicPath();
@@ -488,7 +488,7 @@ function getAutomaticPublicPath() {
         const publicPath = globalThis.publicPath;
         return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
     }
-    return '';
+    return '/';
 }
 contextPrototype.p = getPublicPath;
 function applyModuleFactoryName(factory) {
