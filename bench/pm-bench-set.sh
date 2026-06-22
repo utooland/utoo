@@ -205,6 +205,15 @@ if [ "$PM" = "pnpm" ] && [ ! -f "pnpm-workspace.yaml" ] && grep -q '"workspaces"
     }
   "
 fi
+
+# pnpm refuses to run when package.json pins a different packageManager (e.g.
+# excalidraw pins yarn), and --config.package-manager-strict=false does not
+# reliably override that across pnpm versions in CI. Strip the field for the
+# pnpm run so it installs the same tree as the others; it does not affect the
+# resolved tree (just a PM-pinning hint). prepare's `git checkout` restores it.
+if [ "$PM" = "pnpm" ] && grep -q '"packageManager"' package.json 2>/dev/null; then
+  node -e "const f='./package.json',p=require(f);delete p.packageManager;require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+fi
 PREPARE_EOF
 chmod +x "$PREPARE_SCRIPT"
 
@@ -283,10 +292,9 @@ get_install_cmd() {
   case $pm in
     utoo)      echo "utoo install --ignore-scripts$from_flag --registry=$registry" ;;
     utoo-next) echo "$UTOO_NEXT_BIN install --ignore-scripts$from_flag --registry=$registry" ;;
-    # --config.package-manager-strict=false is the authoritative override (beats
-    # both the env var and any .npmrc) so pnpm runs on a repo that pins a
-    # different packageManager (e.g. excalidraw pins yarn) instead of erroring
-    # "This project is configured to use yarn".
+    # The packageManager pin is stripped in prepare (above) so pnpm doesn't error
+    # "This project is configured to use yarn"; --config.package-manager-strict=false
+    # is a belt-and-suspenders fallback (downgrades the check to a warning where honored).
     pnpm)      echo "pnpm install --ignore-scripts --no-frozen-lockfile --config.package-manager-strict=false --registry $registry" ;;
     yarn)      echo "yarn install --ignore-scripts --registry $registry" ;;
     bun)
