@@ -394,8 +394,12 @@ pub async fn process_dependency<R: ManifestProvider>(
                          carry catalog:, and importer catalogs must define the entry",
                     );
                 }
+                // file:/link:/portal: all point at a local directory (file: may
+                // also point at a local tarball). A directory becomes a Link node
+                // — the same graph shape as a workspace link — via
+                // `process_file_dep`; link:/portal: only ever reference dirs.
                 PackageSpec::Local {
-                    protocol: Protocol::File,
+                    protocol: Protocol::File | Protocol::Link | Protocol::Portal,
                     path,
                 } => {
                     #[cfg(feature = "http-tarball")]
@@ -412,14 +416,17 @@ pub async fn process_dependency<R: ManifestProvider>(
                         let _ = path;
                         return Err(ResolveError::Unsupported {
                             spec: edge_info.spec.clone(),
-                            reason: "file: deps require the 'http-tarball' feature",
+                            reason: "file:/link:/portal: deps require the 'http-tarball' feature",
                         });
                     }
                 }
+                // Defensive: Workspace/Catalog settle before the BFS and
+                // File/Link/Portal are handled above, so a Local spec reaching
+                // here means an internal routing bug, not a user error.
                 PackageSpec::Local { .. } => {
                     return Err(ResolveError::Unsupported {
                         spec: edge_info.spec.clone(),
-                        reason: "local (link:/portal:) dependencies are not yet supported",
+                        reason: "unexpected local dependency protocol",
                     });
                 }
                 // All remote protocols share one resolver — see
