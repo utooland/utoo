@@ -95,8 +95,8 @@ fi
 # Projects whose utoo install goes through `--from pnpm` (4th manifest field).
 UTOO_FROM_PNPM_PROJECTS=""
 for entry in "${PROJECTS[@]}"; do
-  f4="$(echo "$entry" | cut -d'|' -f4)"
-  [[ -n "$f4" ]] && UTOO_FROM_PNPM_PROJECTS+="${entry%%|*} "
+  IFS='|' read -r name _ _ f4 <<< "$entry"
+  [[ -n "$f4" ]] && UTOO_FROM_PNPM_PROJECTS+="$name "
 done
 export UTOO_FROM_PNPM_PROJECTS
 
@@ -212,6 +212,9 @@ chmod +x "$PREPARE_SCRIPT"
 METRICS_WRAPPER="$RESULTS_DIR/metrics_wrapper.sh"
 cat > "$METRICS_WRAPPER" << 'METRICS_EOF'
 #!/bin/bash
+# LC_ALL=C keeps /usr/bin/time's labels English so the greps below match
+# regardless of the runner's locale.
+export LC_ALL=C
 METRICS_FILE="$1"; CMD_SCRIPT="$2"
 TIME_TMP=$(mktemp)
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -246,10 +249,15 @@ clone_projects() {
   echo -e "${YELLOW}Cloning projects...${NC}"
   for entry in "${PROJECTS[@]}"; do
     local name url branch
-    name="${entry%%|*}"; url="$(echo "$entry" | cut -d'|' -f2)"; branch="$(echo "$entry" | cut -d'|' -f3)"
+    IFS='|' read -r name url branch _ <<< "$entry"
     if [ -d "$name/.git" ]; then
       echo -e "  $name already cloned, skipping"
       continue
+    elif [ -d "$name" ]; then
+      # A prior interrupted clone left a dir without .git; git clone refuses to
+      # write into a non-empty dir, so clear it for a clean retry.
+      echo -e "  ${YELLOW}removing partial clone dir $name${NC}"
+      rm -rf "$name"
     fi
     echo -e "  Cloning ${CYAN}$name${NC}..."
     # Non-fatal: one unreachable repo shouldn't sink the whole set (set -e).
@@ -373,7 +381,7 @@ run_warm_benchmarks() {
     local install_cmd; install_cmd=$(get_install_cmd "$pm" "$registry" "false" "$utoo_from")
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_warm_${pm}_metrics.jsonl"
     local cmd_script="$RESULTS_DIR/cmd_warm_${pm}.sh"
-    printf 'set -eo pipefail\ncd %s && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
+    printf 'set -eo pipefail\ncd "%s" && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
     > "$metrics_file"
     hyperfine_args+=(-n "$pm" --prepare "bash $PREPARE_SCRIPT $project_dir $pm" "bash $METRICS_WRAPPER $metrics_file $cmd_script")
   done
@@ -393,7 +401,7 @@ run_cold_benchmarks() {
     local json_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}.json"
     local metrics_file="$RESULTS_DIR/${project}_${reg_short}_cold_${pm}_metrics.jsonl"
     local cmd_script="$RESULTS_DIR/cmd_cold_${pm}.sh"
-    printf 'set -eo pipefail\ncd %s && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
+    printf 'set -eo pipefail\ncd "%s" && %s\n' "$project_dir" "$install_cmd" > "$cmd_script"
     > "$metrics_file"
     echo -e "    ${CYAN}$pm${NC}..."
     hyperfine \
@@ -434,7 +442,7 @@ print_results() {
       const parts = base.split("_");
       const typeIdx = parts.findIndex(p => p === "cold" || p === "warm");
       if (typeIdx === -1) continue;
-      const project = parts.slice(0, typeIdx - 1).join("-");
+      const project = parts.slice(0, typeIdx - 1).join("_");
       const registry = parts[typeIdx - 1];
       const type = parts[typeIdx];
       for (const r of (data.results || [])) rows.push({ project, registry, type, pm: r.command, mean: r.mean, stddev: r.stddev });
@@ -489,7 +497,7 @@ print_results() {
           const parts = file.replace("_metrics.jsonl","").split("_");
           const ti = parts.findIndex(p => p === "cold" || p === "warm");
           if (ti === -1 || parts[ti] !== "warm") continue;       // warm runs only
-          const project = parts.slice(0, ti-1).join("-"), registry = parts[ti-1], pm = parts.slice(ti+1).join("-");
+          const project = parts.slice(0, ti-1).join("_"), registry = parts[ti-1], pm = parts.slice(ti+1).join("_");
           let lines;
           try { lines = fs.readFileSync(path.join(dir,file),"utf8").trim().split("\n").filter(Boolean).map(JSON.parse); }
           catch(e) { continue; }
@@ -501,7 +509,7 @@ print_results() {
           const parts = file.replace(".txt","").split("_");
           const mi = parts.findIndex(p => p === "nm" || p === "cache");
           if (mi === -1) continue;
-          const project = parts.slice(0, mi-1).join("-"), registry = parts[mi-1], pm = parts.slice(mi+1).join("-");
+          const project = parts.slice(0, mi-1).join("_"), registry = parts[mi-1], pm = parts.slice(mi+1).join("_");
           let kb = 0; try { kb = parseInt(fs.readFileSync(path.join(dir,file),"utf8").trim(),10) || 0; } catch(e){}
           const r = ensure([project,registry,pm].join("|"));
           if (parts[mi] === "nm") r.nm = kb; else r.cache = kb;
@@ -550,8 +558,8 @@ main() {
 
   FAILED_CELLS=()
   for entry in "${PROJECTS[@]}"; do
-    local project="${entry%%|*}"
-    local utoo_from; utoo_from="$(echo "$entry" | cut -d'|' -f4)"
+    local project utoo_from
+    IFS='|' read -r project _ _ utoo_from <<< "$entry"
     if [ ! -d "$BENCH_DIR/$project/.git" ]; then
       echo -e "${RED}Skipping $project (not cloned)${NC}\n"
       FAILED_CELLS+=("$project (clone)")
