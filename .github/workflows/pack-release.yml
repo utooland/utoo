@@ -1,8 +1,9 @@
 name: utoopack-release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "utoopack-v*"
   workflow_dispatch:
 
 env:
@@ -10,7 +11,7 @@ env:
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'utoopack-v')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'utoopack-v')
     strategy:
       fail-fast: true
       matrix:
@@ -170,7 +171,7 @@ jobs:
           path: ./packages/pack/src/pack.*.node
           if-no-files-found: error
   publish:
-    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'utoopack-v')
+    if: github.event_name == 'push' && startsWith(github.ref_name, 'utoopack-v')
     name: Publish
     runs-on: ubuntu-latest
     permissions:
@@ -182,7 +183,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -208,11 +209,11 @@ jobs:
           npm run build --workspace=@utoo/pack-shared
           npm run build:js --workspace=@utoo/pack
           npm run build --workspace=@utoo/pack-cli
-      - name: Get version from release or use alpha version
+      - name: Get version from tag
         id: get_version
         shell: bash
         run: |
-          TAG_NAME="${{ github.event.release.tag_name }}"
+          TAG_NAME="${{ github.ref_name }}"
           VERSION=${TAG_NAME#utoopack-v}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       - name: Update npm for trusted publishing
