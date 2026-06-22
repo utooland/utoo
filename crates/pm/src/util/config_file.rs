@@ -77,6 +77,24 @@ impl Config {
         Ok(config)
     }
 
+    /// Load the global and project-local configs **separately** (not merged),
+    /// returning `(global, local)` where `local` is `None` when no `.utoo.toml`
+    /// exists. Callers that need cross-source precedence — e.g. the install
+    /// script policy, where a team-level (global) deny must survive a
+    /// project-level allow — layer these in order instead of consuming the
+    /// flattened [`Self::load`] view (whose per-key `extend` would let a local
+    /// allow erase a global deny). A genuine parse error propagates.
+    pub async fn load_layers() -> ConfigResult<(Self, Option<Self>)> {
+        let global = Self::load_from_path(&Self::global_config_path()?).await?;
+        let local_path = Self::local_config_path()?;
+        let local = if crate::fs::try_exists(&local_path).await? {
+            Some(Self::load_from_path(&local_path).await?)
+        } else {
+            None
+        };
+        Ok((global, local))
+    }
+
     pub fn set(&mut self, key: &str, value: String, scope: ConfigScope) -> ConfigResult<()> {
         self.values.insert(key.to_string(), value);
         self.save(scope)

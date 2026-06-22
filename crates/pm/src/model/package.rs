@@ -166,6 +166,11 @@ pub struct PackageInfo {
     /// Resolved version, used to match `allowScripts` `name@version` entries.
     /// Empty when unknown (e.g. project root, or the lock entry omits it).
     pub version: String,
+    /// True when this entry is a workspace `node_modules` link. Its install
+    /// lifecycle is owned by the workspace walk (`process_workspace_install_hooks`),
+    /// so it is first-party and must never be gated as a third-party dependency
+    /// by the `allowScripts` policy.
+    pub is_workspace_link: bool,
 }
 
 impl PackageInfo {
@@ -212,6 +217,9 @@ impl PackageInfo {
             scripts: pkg.scripts_or_empty().clone(),
             name: pkg.name.clone(),
             version: pkg.version.clone(),
+            // Project/workspace-source packages are loaded here and run via the
+            // workspace walk, not gated as dependencies.
+            is_workspace_link: false,
         })
     }
 
@@ -229,6 +237,7 @@ impl PackageInfo {
             // PackageInstallView omits version; install-script gating runs on the
             // lock-fed collect path, which sets version from the lock entry.
             version: String::new(),
+            is_workspace_link: false,
         })
     }
 

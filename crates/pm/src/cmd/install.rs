@@ -30,7 +30,8 @@ pub struct InstallArgs {
     pub ignore_scripts: bool,
 
     /// Allow these packages to run install-time scripts (comma-separated,
-    /// repeatable). `name` or `name@version`. One-off override; not persisted.
+    /// repeatable). `name` or `name@version`. A one-off, non-persisted allow for
+    /// otherwise-unreviewed packages; it does NOT override an explicit deny.
     #[arg(long, value_delimiter = ',')]
     pub allow_scripts: Vec<String>,
 
@@ -100,12 +101,12 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         set_install_scope(InstallScope::Global);
     }
 
-    let script_args = ScriptPolicyArgs::new(
-        args.ignore_scripts,
-        args.strict_allow_scripts,
-        args.dangerously_allow_all_scripts,
-        args.allow_scripts,
-    );
+    let script_args = ScriptPolicyArgs {
+        ignore_scripts: args.ignore_scripts,
+        dangerously_allow_all: args.dangerously_allow_all_scripts,
+        strict: args.strict_allow_scripts,
+        allow: args.allow_scripts,
+    };
 
     if args.specs.is_empty() {
         install_cwd(&script_args).await

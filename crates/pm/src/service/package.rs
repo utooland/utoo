@@ -233,6 +233,7 @@ impl PackageService {
                 lifecycle_scripts,
                 name: package_name,
                 version: lock_package.version.clone().unwrap_or_default(),
+                is_workspace_link,
             };
 
             packages.push((package_info, is_optional));
@@ -365,6 +366,17 @@ impl PackageService {
             InstallScriptMode::AllowAllDangerously => return true,
             InstallScriptMode::Policy(policy) => policy,
         };
+
+        // Workspace links are first-party: their lifecycle is owned by the
+        // workspace walk, so they are never gated as a dependency. (Their
+        // `lifecycle_scripts` are already suppressed in `collect`; this also
+        // prevents `is_node_gyp_pkg`'s on-disk probe — which follows the
+        // node_modules symlink to the workspace source — from wrongly
+        // synthesizing/gating a `node-gyp rebuild` and aborting a strict install
+        // on a first-party workspace package.)
+        if package.is_workspace_link {
+            return true;
+        }
 
         // An implicit `node-gyp rebuild` install action exists when the package
         // ships a `binding.gyp` and declares no explicit `install` script (npm's
@@ -988,6 +1000,7 @@ mod tests {
             lifecycle_scripts: LifecycleScripts::default(),
             name: "test-bin-missing".to_string(),
             version: "1.0.0".to_string(),
+            is_workspace_link: false,
         };
 
         // Prepare queues: only bin linking queue has this package
@@ -1500,6 +1513,7 @@ mod tests {
             )])),
             name: "test-optional-fail".to_string(),
             version: "1.0.0".to_string(),
+            is_workspace_link: false,
         };
 
         // Test with is_optional = true: should NOT return error
@@ -1707,6 +1721,7 @@ mod tests {
             lifecycle_scripts: LifecycleScripts::from_scripts(&map),
             name: name.to_string(),
             version: version.to_string(),
+            is_workspace_link: false,
         }
     }
 
@@ -1818,6 +1833,40 @@ mod tests {
         // No implicit node-gyp install action synthesized in allow-all mode.
         assert!(queues.install.is_empty());
         assert!(queues.skipped.is_empty());
+    }
+
+    /// A workspace `node_modules` link that ships a binding.gyp is first-party:
+    /// it must NOT be gated as a dependency (its lifecycle is owned by the
+    /// workspace walk), even under strict mode — otherwise a strict install
+    /// would abort on a workspace package. Regression guard for the gate's
+    /// on-disk node-gyp probe following the workspace symlink.
+    #[test]
+    fn test_workspace_link_with_binding_gyp_is_not_gated() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("binding.gyp"), "{}").unwrap();
+        let mut pkg = pkg_with_scripts(tmp.path(), "ws-native", "1.0.0", &[]);
+        pkg.is_workspace_link = true;
+        pkg.bin_files = vec![("ws-cli".to_string(), "cli.js".to_string())];
+
+        // Strict policy that does NOT list the workspace package.
+        let mode = policy_mode(&[("other", true)], true);
+        let queues =
+            PackageService::create_execution_queues_with_options(vec![(pkg, false)], &mode)
+                .unwrap();
+
+        assert!(
+            queues.skipped.is_empty(),
+            "workspace link must not be recorded as a gated/skipped dependency"
+        );
+        assert_eq!(
+            queues.bin_linking.len(),
+            1,
+            "workspace link must still be bin-linked"
+        );
+        assert!(
+            queues.install.is_empty() && queues.preinstall.is_empty(),
+            "workspace link must not have a synthesized node-gyp install queued"
+        );
     }
 
     /// Strict mode aborts before running anything when a package is unreviewed.

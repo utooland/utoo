@@ -20,10 +20,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
 
 /// A package matcher used in `allowScripts` entries.
@@ -43,8 +42,12 @@ impl PackageSelector {
     pub fn parse(raw: &str) -> Self {
         let raw = raw.trim();
         match raw.rfind('@') {
-            // `pos > 0` skips the scope marker in `@scope/x`.
-            Some(pos) if pos > 0 => {
+            // `pos > 0` skips the scope marker in `@scope/x`. Require a
+            // non-empty version after the `@` so a trailing `@` (e.g. `pkg@`)
+            // stays a bare name instead of becoming `NameVersion(_, "")`, which
+            // would otherwise only match a package whose resolved version is
+            // empty (see `decide`'s version note).
+            Some(pos) if pos > 0 && pos + 1 < raw.len() => {
                 Self::NameVersion(raw[..pos].to_string(), raw[pos + 1..].to_string())
             }
             _ => Self::Name(raw.to_string()),
@@ -215,30 +218,50 @@ impl InstallScriptMode {
         matches!(self, Self::Policy(p) if p.strict)
     }
 
-    /// Resolve the effective mode from CLI args, utoo config, and the root
-    /// `package.json` policy (when `root_path` is given — global installs have
-    /// no project policy and pass `None`).
+    /// Resolve the effective mode from CLI args, utoo config, and (for project
+    /// installs) the root `package.json` policy.
     ///
-    /// Source order is global config → project config → root `package.json` →
-    /// CLI `--allow-scripts`; deny is sticky across all of them (see
-    /// [`AllowScriptsPolicy::merge_entry`]).
+    /// Sources are layered in precedence order — global config → project config
+    /// → root `package.json` → CLI `--allow-scripts` — and [`merge_entry`] keeps
+    /// deny sticky ACROSS them, so a team-level (global) deny survives a
+    /// project-level allow. Global installs pass `root_path = None`: they have no
+    /// project context, so the CWD's `.utoo.toml` and `package.json` are ignored
+    /// and only the global config + CLI apply.
+    ///
+    /// [`merge_entry`]: AllowScriptsPolicy::merge_entry
     pub async fn resolve(args: &ScriptPolicyArgs, root_path: Option<&Path>) -> Result<Self> {
         // 1. `--ignore-scripts` has the highest precedence.
         if args.ignore_scripts {
             return Ok(Self::IgnoreAll);
         }
 
-        // `Config::load` merges global + local; treat a load error as "no config".
-        let config = Config::load(ConfigScope::Local).await.ok();
+        // Load global + project-local config SEPARATELY (not the merged view) so
+        // deny precedence can be applied across sources. A genuine parse error is
+        // surfaced rather than swallowed — a broken policy file must not silently
+        // fail open and run every install script.
+        let (global, local) = Config::load_layers()
+            .await
+            .context("failed to load utoo config for the install-script policy")?;
+        // Global installs (root_path = None) ignore the CWD project config.
+        let local = root_path.and(local.as_ref());
+
+        // For scalar flags, a local value overrides global; absence is false.
+        // Trim so a stray space (e.g. `ut config set strict-allow-scripts " true"`)
+        // does not silently disable the flag.
         let config_flag = |key: &str| -> bool {
-            config
-                .as_ref()
+            local
                 .and_then(|c| c.get(key).ok().flatten())
-                .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+                .or_else(|| global.get(key).ok().flatten())
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("true"))
         };
 
-        // 2. `dangerously-allow-all-scripts` bypasses the policy entirely.
-        if args.dangerously_allow_all || config_flag("dangerously-allow-all-scripts") {
+        // 2. Precedence: an explicit CLI `--dangerously-allow-all-scripts`
+        // bypasses the policy. A *config* dangerously flag yields only when the
+        // user did NOT explicitly pass `--strict-allow-scripts`, so a stale
+        // config escape hatch can't silently override an explicit CLI strict.
+        let dangerously = args.dangerously_allow_all
+            || (config_flag("dangerously-allow-all-scripts") && !args.strict);
+        if dangerously {
             eprintln!(
                 "warning: dangerously-allow-all-scripts is set — running ALL dependency install \
                  scripts without review"
@@ -253,47 +276,50 @@ impl InstallScriptMode {
             strict,
         };
 
-        if let Some(config) = &config {
-            // `[allowScripts]` table form: name -> bool.
-            for (name, allow) in config.allow_scripts() {
-                policy.merge_entry(PackageSelector::parse(name), decision(*allow));
-            }
-            // `[arrays]` list form, plus the comma-separated string form written
-            // by `ut config set allow-scripts "a,b"`.
-            merge_list(&mut policy, config.get_array("allow-scripts"), true);
-            merge_list(&mut policy, config.get_array("deny-scripts"), false);
-            merge_csv(
-                &mut policy,
-                config.get("allow-scripts").ok().flatten(),
-                true,
-            );
-            merge_csv(
-                &mut policy,
-                config.get("deny-scripts").ok().flatten(),
-                false,
-            );
+        // Layer config sources in order; deny stays sticky across them.
+        feed_config(&mut policy, &global);
+        if let Some(local) = local {
+            feed_config(&mut policy, local);
         }
 
-        // Root `package.json` `allowScripts`.
+        // Root `package.json` `allowScripts` (project installs only).
         if let Some(root) = root_path {
             for (name, allow) in read_package_json_allow_scripts(root).await {
                 policy.merge_entry(PackageSelector::parse(&name), decision(allow));
             }
         }
 
-        // CLI `--allow-scripts` one-shot allows (never persisted).
+        // CLI `--allow-scripts` one-shot allows (never persisted). These cannot
+        // override an explicit deny — `merge_entry` keeps deny sticky.
         for raw in &args.allow {
             for sel in split_selectors(raw) {
                 policy.merge_entry(sel, AllowScriptDecision::Allow);
             }
         }
 
-        // No policy configured anywhere → preserve pre-RFC behavior.
+        // No policy configured anywhere → preserve pre-RFC behavior (run all).
         if policy.is_inert() {
             return Ok(Self::AllowAllDangerously);
         }
         Ok(Self::Policy(policy))
     }
+}
+
+/// Merge one config layer's `allowScripts` table + `allow-scripts`/`deny-scripts`
+/// list and comma-string forms into `policy`. Called per source (global, then
+/// local) so [`AllowScriptsPolicy::merge_entry`]'s deny-stickiness applies across
+/// sources.
+fn feed_config(policy: &mut AllowScriptsPolicy, config: &Config) {
+    // `[allowScripts]` table form: name -> bool.
+    for (name, allow) in config.allow_scripts() {
+        policy.merge_entry(PackageSelector::parse(name), decision(*allow));
+    }
+    // `[arrays]` list form, plus the comma-separated string form written by
+    // `ut config set allow-scripts "a,b"`.
+    merge_list(policy, config.get_array("allow-scripts"), true);
+    merge_list(policy, config.get_array("deny-scripts"), false);
+    merge_csv(policy, config.get("allow-scripts").ok().flatten(), true);
+    merge_csv(policy, config.get("deny-scripts").ok().flatten(), false);
 }
 
 fn decision(allow: bool) -> AllowScriptDecision {
@@ -363,23 +389,10 @@ pub struct ScriptPolicyArgs {
 }
 
 impl ScriptPolicyArgs {
-    /// Construct from raw clap flags. `allow` entries are split on commas later.
-    pub fn new(
-        ignore_scripts: bool,
-        strict: bool,
-        dangerously_allow_all: bool,
-        allow: Vec<String>,
-    ) -> Self {
-        Self {
-            ignore_scripts,
-            dangerously_allow_all,
-            strict,
-            allow,
-        }
-    }
-
     /// `--ignore-scripts` only — the form used by paths that expose no other
-    /// policy flags (uninstall, bare `utoo`).
+    /// policy flags (uninstall, bare `utoo`). Other call sites build the struct
+    /// with named fields directly (the two `bool`s are easy to transpose
+    /// positionally, so there is no positional constructor).
     pub fn ignore_only(ignore_scripts: bool) -> Self {
         Self {
             ignore_scripts,
@@ -503,7 +516,10 @@ mod tests {
 
     #[tokio::test]
     async fn cli_allow_opts_into_policy_mode() {
-        let args = ScriptPolicyArgs::new(false, false, false, vec!["sharp,esbuild".into()]);
+        let args = ScriptPolicyArgs {
+            allow: vec!["sharp,esbuild".into()],
+            ..Default::default()
+        };
         let mode = InstallScriptMode::resolve(&args, None).await.unwrap();
         match mode {
             InstallScriptMode::Policy(p) => {
@@ -520,7 +536,11 @@ mod tests {
 
     #[tokio::test]
     async fn dangerously_beats_allow_entries() {
-        let args = ScriptPolicyArgs::new(false, false, true, vec!["sharp".into()]);
+        let args = ScriptPolicyArgs {
+            dangerously_allow_all: true,
+            allow: vec!["sharp".into()],
+            ..Default::default()
+        };
         let mode = InstallScriptMode::resolve(&args, None).await.unwrap();
         assert!(matches!(mode, InstallScriptMode::AllowAllDangerously));
     }

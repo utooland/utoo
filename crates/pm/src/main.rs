@@ -171,12 +171,12 @@ async fn async_main() -> Result<()> {
             dangerously_allow_all_scripts,
         }) => {
             let cwd = std::env::current_dir()?;
-            let args = ScriptPolicyArgs::new(
+            let args = ScriptPolicyArgs {
                 ignore_scripts,
-                strict_allow_scripts,
-                dangerously_allow_all_scripts,
-                allow_scripts,
-            );
+                dangerously_allow_all: dangerously_allow_all_scripts,
+                strict: strict_allow_scripts,
+                allow: allow_scripts,
+            };
             rebuild(&cwd, &args).await?;
             log_time_end("All packages rebuilt");
         }
@@ -189,12 +189,12 @@ async fn async_main() -> Result<()> {
             strict_allow_scripts,
             dangerously_allow_all_scripts,
         }) => {
-            let args = ScriptPolicyArgs::new(
+            let args = ScriptPolicyArgs {
                 ignore_scripts,
-                strict_allow_scripts,
-                dangerously_allow_all_scripts,
-                allow_scripts,
-            );
+                dangerously_allow_all: dangerously_allow_all_scripts,
+                strict: strict_allow_scripts,
+                allow: allow_scripts,
+            };
             update(&args).await?;
             log_time_end("All packages updated");
         }

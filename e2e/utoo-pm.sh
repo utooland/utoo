@@ -2152,8 +2152,50 @@ EOF
 grep -q "node-gyp" "$ASP_DIR/proj/asp.out" \
   || { echo -e "${RED}FAIL: implicit node-gyp action must be reported as skipped node-gyp${NC}"; cat "$ASP_DIR/proj/asp.out"; exit 1; }
 
+# Cross-source precedence, with an isolated HOME so a temp global config can be
+# exercised without touching the runner's ~/.utoo. file: deps need no registry.
+ASP_HOME="$ASP_DIR/home"
+mkdir -p "$ASP_HOME/.utoo"
+
+# A global (team) deny must survive a project-local allow (deny sticky ACROSS
+# sources). package.json allows localdep; global config denies it → denied.
+asp_proj <<'EOF'
+{ "name":"proj","version":"1.0.0",
+  "dependencies":{"localdep":"file:../localdep"},
+  "allowScripts":{"localdep":true} }
+EOF
+printf '[allowScripts]\nlocaldep = false\n' > "$ASP_HOME/.utoo/config.toml"
+(cd "$ASP_DIR/proj" && HOME="$ASP_HOME" utoo install >/dev/null 2>&1) \
+  || { echo -e "${RED}FAIL: cross-source install errored${NC}"; exit 1; }
+if asp_ran; then echo -e "${RED}FAIL: a global deny must beat a project allow${NC}"; exit 1; fi
+
+# A config dangerously-allow-all-scripts must NOT override an explicit CLI
+# --strict-allow-scripts (the command line wins).
+printf '[values]\ndangerously-allow-all-scripts = "true"\n' > "$ASP_HOME/.utoo/config.toml"
+asp_proj <<'EOF'
+{ "name":"proj","version":"1.0.0","dependencies":{"localdep":"file:../localdep"} }
+EOF
+if (cd "$ASP_DIR/proj" && HOME="$ASP_HOME" utoo install --strict-allow-scripts >/dev/null 2>&1); then
+  echo -e "${RED}FAIL: config dangerously must not override CLI --strict-allow-scripts${NC}"; exit 1
+fi
+
+# A malformed project config fails the install (fail-closed) rather than
+# silently dropping the policy and running everything. (Uses the local
+# `.utoo.toml`; a malformed *global* config is separately auto-repaired by the
+# registry-probe cache write before the policy is read, so it isn't a reliable
+# fail-open vector to assert here.)
+rm -f "$ASP_HOME/.utoo/config.toml"
+asp_proj <<'EOF'
+{ "name":"proj","version":"1.0.0","dependencies":{"localdep":"file:../localdep"} }
+EOF
+printf 'not = = valid toml [[[\n' > "$ASP_DIR/proj/.utoo.toml"
+if (cd "$ASP_DIR/proj" && HOME="$ASP_HOME" utoo install >/dev/null 2>&1); then
+  echo -e "${RED}FAIL: a malformed project config must fail the install, not fail open${NC}"; exit 1
+fi
+if asp_ran; then echo -e "${RED}FAIL: malformed config must not run scripts${NC}"; exit 1; fi
+
 rm -rf "$ASP_DIR"
 trap - EXIT
-echo -e "${GREEN}PASS: install-time script policy enforced (allow/deny/strict/ignore/dangerously/node-gyp)${NC}"
+echo -e "${GREEN}PASS: install-time script policy enforced (allow/deny/strict/ignore/dangerously/node-gyp/cross-source)${NC}"
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
