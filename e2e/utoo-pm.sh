@@ -320,10 +320,10 @@ fi
 http_cleanup
 echo -e "${GREEN}PASS: non-registry HTTP tarball stays out of the global cache${NC}"
 
-# Case 8.4: file: dependency install. Directory deps install as a SYMLINK
-# (npm-compatible); tarball deps are extracted directly into node_modules
-# (non-registry source — never the global cache).
-echo -e "${YELLOW}Case 8.4: file: dependency install${NC}"
+# Case 8.4: file: / link: dependency install. Directory deps (file: dir and
+# link:) install as a SYMLINK (npm-compatible); file: tarball deps are extracted
+# directly into node_modules (non-registry source — never the global cache).
+echo -e "${YELLOW}Case 8.4: file:/link: dependency install${NC}"
 cd e2e/pm/file-deps
 rm -rf node_modules package-lock.json
 # Neither file: dep enters the global cache: the dir dep installs as a symlink
@@ -331,9 +331,9 @@ rm -rf node_modules package-lock.json
 # prior pm build may have left so a stale entry can't mask a regression.
 rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for file-deps${NC}"; exit 1; }
-for pkg in local-dir-pkg local-tarball-pkg; do
+for pkg in local-dir-pkg local-tarball-pkg local-link-pkg; do
     if [ ! -f "node_modules/$pkg/package.json" ]; then
-        echo -e "${RED}FAIL: $pkg (file:) not installed${NC}"
+        echo -e "${RED}FAIL: $pkg (local dep) not installed${NC}"
         exit 1
     fi
 done
@@ -345,6 +345,16 @@ fi
 LINK_TARGET=$(readlink node_modules/local-dir-pkg)
 if [ "$LINK_TARGET" != "../local-dir" ]; then
     echo -e "${RED}FAIL: local-dir-pkg symlink points to '$LINK_TARGET', expected '../local-dir'${NC}"
+    exit 1
+fi
+# link: dep installs as a SYMLINK too (same graph shape as a file: dir / workspace link).
+if [ ! -L "node_modules/local-link-pkg" ]; then
+    echo -e "${RED}FAIL: local-link-pkg (link:) should be a symlink to ../local-link${NC}"
+    exit 1
+fi
+LINK_TARGET=$(readlink node_modules/local-link-pkg)
+if [ "$LINK_TARGET" != "../local-link" ]; then
+    echo -e "${RED}FAIL: local-link-pkg symlink points to '$LINK_TARGET', expected '../local-link'${NC}"
     exit 1
 fi
 # Tarball dep must be a real directory (direct-extract), not a symlink.
@@ -362,6 +372,11 @@ if [ "$ACTUAL" != "2.3.4" ]; then
     echo -e "${RED}FAIL: local-tarball-pkg expected v2.3.4, got $ACTUAL${NC}"
     exit 1
 fi
+ACTUAL=$(node -e "console.log(require('./node_modules/local-link-pkg/package.json').version)")
+if [ "$ACTUAL" != "0.2.0" ]; then
+    echo -e "${RED}FAIL: local-link-pkg expected v0.2.0, got $ACTUAL${NC}"
+    exit 1
+fi
 # Lockfile entries match npm's format:
 #  - dir dep:     link: true + resolved: <root-relative path>  (no file: prefix)
 #  - tarball dep: resolved:   file:<root-relative path>        (with file: prefix)
@@ -370,11 +385,15 @@ node -e '
 const lock = require("./package-lock.json");
 const dir = lock.packages["node_modules/local-dir-pkg"] || {};
 const tar = lock.packages["node_modules/local-tarball-pkg"] || {};
+const lnk = lock.packages["node_modules/local-link-pkg"] || {};
 if (dir.link !== true) { console.error("local-dir-pkg missing link:true", dir); process.exit(1); }
 if (dir.resolved !== "local-dir") { console.error("local-dir-pkg resolved expected \"local-dir\", got", dir.resolved); process.exit(1); }
 if (tar.resolved !== "file:local-tarball.tgz") { console.error("local-tarball-pkg resolved expected \"file:local-tarball.tgz\", got", tar.resolved); process.exit(1); }
-' || { echo -e "${RED}FAIL: lockfile entries wrong for file: deps${NC}"; exit 1; }
-echo -e "${GREEN}PASS: file: dependency install successful${NC}"
+// link: dep — same lockfile shape as a file: dir: link:true + bare resolved path.
+if (lnk.link !== true) { console.error("local-link-pkg missing link:true", lnk); process.exit(1); }
+if (lnk.resolved !== "local-link") { console.error("local-link-pkg resolved expected \"local-link\", got", lnk.resolved); process.exit(1); }
+' || { echo -e "${RED}FAIL: lockfile entries wrong for file:/link: deps${NC}"; exit 1; }
+echo -e "${GREEN}PASS: file:/link: dependency install successful${NC}"
 
 # Case 8.5: file: warm install (cache hit for tarball; dir symlink rewritten)
 echo -e "${YELLOW}Case 8.5: file: warm install${NC}"
