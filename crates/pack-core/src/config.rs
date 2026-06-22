@@ -24,7 +24,12 @@ use turbopack_core::{
     issue::{Issue, IssueExt, IssueStage, StyledString},
     resolve::ResolveAliasMap,
 };
-use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
+use turbopack_ecmascript::{
+    OptionTreeShaking, TreeShakingMode,
+    transform::{
+        OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
+    },
+};
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
 };
@@ -177,6 +182,10 @@ pub struct Config {
     react: Option<ReactConfig>,
     optimization: Option<OptimizationConfig>,
     stats: Option<bool>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    react_compiler: Option<ReactCompilerOptionsOrBoolean>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    experimental: Option<ExperimentalConfig>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
     #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
@@ -806,6 +815,16 @@ pub enum ReactCompilerMode {
     All,
 }
 
+impl From<ReactCompilerMode> for ReactCompilerCompilationMode {
+    fn from(value: ReactCompilerMode) -> Self {
+        match value {
+            ReactCompilerMode::Infer => ReactCompilerCompilationMode::Infer,
+            ReactCompilerMode::Annotation => ReactCompilerCompilationMode::Annotation,
+            ReactCompilerMode::All => ReactCompilerCompilationMode::All,
+        }
+    }
+}
+
 /// Subset of react compiler options
 #[turbo_tasks::value(shared, operation)]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -814,11 +833,12 @@ pub struct ReactCompilerOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compilation_mode: Option<ReactCompilerMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub panic_threshold: Option<RcStr>,
+    pub target: Option<ReactCompilerTarget>,
 }
 
-#[turbo_tasks::value]
-#[derive(Clone, Debug, Deserialize, OperationValue)]
+#[derive(
+    Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+)]
 #[serde(untagged)]
 pub enum ReactCompilerOptionsOrBoolean {
     Boolean(bool),
@@ -827,6 +847,32 @@ pub enum ReactCompilerOptionsOrBoolean {
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionalReactCompilerOptions(Option<ResolvedVc<ReactCompilerOptions>>);
+
+#[turbo_tasks::value(transparent)]
+pub struct ReactCompilerTargetConfig(ReactCompilerTarget);
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperimentalConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    pub react_compiler: Option<ReactCompilerOptionsOrBoolean>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    pub swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
+}
 
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Deserialize, OperationValue)]
@@ -1154,6 +1200,45 @@ impl Config {
     #[turbo_tasks::function]
     pub fn react(&self) -> Vc<ReactConfig> {
         self.react.clone().unwrap_or_default().cell()
+    }
+
+    #[turbo_tasks::function]
+    pub fn rust_react_compiler(&self) -> Vc<OptionReactCompilerCompilationMode> {
+        let options = self.react_compiler.as_ref().or_else(|| {
+            self.experimental
+                .as_ref()
+                .and_then(|experimental| experimental.react_compiler.as_ref())
+        });
+
+        let mode = match options {
+            Some(ReactCompilerOptionsOrBoolean::Boolean(true)) => {
+                Some(ReactCompilerCompilationMode::Infer)
+            }
+            Some(ReactCompilerOptionsOrBoolean::Option(options)) => {
+                Some(options.compilation_mode.clone().unwrap_or_default().into())
+            }
+            _ => None,
+        };
+
+        Vc::cell(mode)
+    }
+
+    #[turbo_tasks::function]
+    pub fn rust_react_compiler_target(&self) -> Vc<ReactCompilerTargetConfig> {
+        let options = self.react_compiler.as_ref().or_else(|| {
+            self.experimental
+                .as_ref()
+                .and_then(|experimental| experimental.react_compiler.as_ref())
+        });
+
+        let target = match options {
+            Some(ReactCompilerOptionsOrBoolean::Option(options)) => {
+                options.target.unwrap_or_default()
+            }
+            _ => ReactCompilerTarget::default(),
+        };
+
+        Vc::cell(target)
     }
 
     #[turbo_tasks::function]
@@ -1490,7 +1575,14 @@ impl Config {
 
     #[turbo_tasks::function]
     pub fn swc_plugins(&self) -> Vc<SwcPlugins> {
-        Vc::cell(self.swc_plugins.clone().unwrap_or_default())
+        let mut swc_plugins = self.swc_plugins.clone().unwrap_or_default();
+        if let Some(experimental) = &self.experimental
+            && let Some(experimental_swc_plugins) = &experimental.swc_plugins
+        {
+            swc_plugins.extend(experimental_swc_plugins.clone());
+        }
+
+        Vc::cell(swc_plugins)
     }
 
     #[turbo_tasks::function]

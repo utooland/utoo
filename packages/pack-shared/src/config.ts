@@ -36,6 +36,13 @@ export interface MdxTransformOptions {
 
 export type MdxOptions = boolean | MdxTransformOptions;
 
+export interface ReactCompilerOptions {
+  compilationMode?: "infer" | "annotation" | "all";
+  target?: "18" | "19";
+}
+
+export type ReactCompilerConfig = boolean | ReactCompilerOptions;
+
 // At the moment, Turbopack options must be JSON-serializable, so restrict values.
 export type TurbopackLoaderOptions = Record<string, JSONValue>;
 
@@ -310,6 +317,11 @@ export interface ConfigComplete {
     absoluteSourceFilename?: boolean;
   };
   stats?: boolean;
+  reactCompiler?: ReactCompilerConfig;
+  experimental?: {
+    reactCompiler?: ReactCompilerConfig;
+    swcPlugins?: [string, any][];
+  };
   swcPlugins?: [string, any][];
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;

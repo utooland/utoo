@@ -27,7 +27,9 @@ use turbopack_core::{
     resolve::options::{ImportMap, ImportMapping},
 };
 use turbopack_css::chunk::CssChunkType;
-use turbopack_ecmascript::{TypeofWindow, chunk::EcmascriptChunkType};
+use turbopack_ecmascript::{
+    TypeofWindow, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
+};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransform, PostCssTransformOptions},
@@ -369,6 +371,9 @@ pub async fn get_client_module_options_context(
         .css_modules
         .as_ref()
         .and_then(|css_modules| css_modules.local_ident_pattern());
+    let enable_rust_react_compiler = *config.rust_react_compiler().await?;
+    let rust_react_compiler_target: ReactCompilerTarget =
+        *config.rust_react_compiler_target().await?;
 
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
@@ -431,6 +436,8 @@ pub async fn get_client_module_options_context(
             enable_jsx: Some(jsx_transform_options),
             enable_typescript_transform: Some(tsconfig),
             enable_decorators: Some(decorators_options.to_resolved().await?),
+            enable_rust_react_compiler,
+            rust_react_compiler_target,
             ..module_options_context.ecmascript.clone()
         },
         enable_webpack_loaders,
