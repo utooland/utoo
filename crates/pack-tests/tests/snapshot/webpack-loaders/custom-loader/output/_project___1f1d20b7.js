@@ -27,7 +27,8 @@ module.exports = "Got a buffer of 11 bytes";
 var __TURBOPACK__default__export__ = "\ndlroW olleH ##";
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/webpack-loaders/custom-loader/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {

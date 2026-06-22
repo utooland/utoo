@@ -81,7 +81,8 @@ FG6adF1kPdxcnQ9rUk0b1jaemDjUwXJRycSSrmUPKiA6MTt8YVMx3Xf4NTZvmTugEE9pXSLyFeQQzEx3
 var __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__1
+    0,
+    __TURBOPACK__default__export__1
 ], 148);
 }),
 554, ((__turbopack_context__, module, exports) => {

@@ -245,7 +245,8 @@ var update = (0, __TURBOPACK__imported__module__15__["default"])([
 var __TURBOPACK__default__export__ = {};
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 56, ((__turbopack_context__) => {
@@ -262,7 +263,8 @@ var __TURBOPACK__imported__module__56__ = __turbopack_context__.i(56);
 var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__56__["default"];
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 ],

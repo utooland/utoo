@@ -20,7 +20,10 @@ use std::{
     path::{Path, PathBuf},
 };
 use turbo_rcstr::rcstr;
-use turbo_tasks::{Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc, take_effects};
+use turbo_tasks::{
+    Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc,
+    read_strongly_consistent_and_apply_effects, take_effects,
+};
 use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, FileSystemPath};
 use turbopack_core::{
@@ -134,7 +137,7 @@ async fn run(resource: PathBuf) -> Result<()> {
                 .await?;
             let plain_issues = out_op
                 .peek_issues()
-                .get_plain_issues(IssueFilter::everything())
+                .get_plain_issues(&IssueFilter::everything())
                 .await?;
             snapshot_issues(plain_issues, out_path.join("issues")?, &REPO_ROOT)
                 .await
@@ -160,14 +163,9 @@ async fn run(resource: PathBuf) -> Result<()> {
         }
 
         let out_op = run_test_operation(container_op);
-        let snapshot_effects = snapshot_effects_operation(out_op)
-            .read_strongly_consistent()
+        read_strongly_consistent_and_apply_effects(snapshot_effects_operation(out_op), |e| e)
             .await?;
-        let output_effects = output_effects_operation(out_op)
-            .read_strongly_consistent()
-            .await?;
-        snapshot_effects.apply().await?;
-        output_effects.apply().await?;
+        read_strongly_consistent_and_apply_effects(output_effects_operation(out_op), |e| e).await?;
 
         Ok(())
     })

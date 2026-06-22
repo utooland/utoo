@@ -20,7 +20,8 @@ const primaryButtonClassName = __TURBOPACK__imported__module__$5b$project$5d2f$l
 var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$node_auto_css_modules$2f$input$2f$index$2e$css$3f$modules__$5b$library$2d$server$5d$__$28$css__module$29$__["default"];
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__,
+    0,
+    __TURBOPACK__default__export__,
     "primaryButtonClassName",
     0,
     primaryButtonClassName,
