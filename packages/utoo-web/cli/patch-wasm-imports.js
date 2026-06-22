@@ -54,8 +54,10 @@ function readCustomSection(
   targetPtr,
   targetLength,
 ) {
+  const nameBytes = new Uint8Array(memory.buffer, namePtr, nameLength);
   const sectionName = new TextDecoder('utf-8').decode(
-    new Uint8Array(memory.buffer, namePtr, nameLength),
+    // TextDecoder rejects SharedArrayBuffer-backed views in browsers.
+    new Uint8Array(nameBytes),
   );
   const sections = WebAssembly.Module.customSections(wasmModule, sectionName);
   if (sections.length === 0) {
@@ -72,15 +74,18 @@ function readCustomSection(
 
 // `function __wbg_get_imports(` — match regardless of args/spacing tweaks.
 const FN_ANCHOR = 'function __wbg_get_imports(';
-// Last statement of `__wbg_get_imports`.
+// Last statement of older `__wbg_get_imports` output.
 const RETURN_ANCHOR = 'return imports;';
+// Current wasm-bindgen emits a returned import object with `"env": import1`.
+const ENV_PROPERTY_RE = /(\n\s*)(["']env["']\s*:\s*)([$A-Z_a-z][$\w]*)(\s*,)/;
 
 // Reader definition, injected once just before `__wbg_get_imports`. The inner
 // function name is scoped to the expression, so it cannot collide with glue
 // symbols. `wasm` (the glue's `let wasm` holding `instance.exports`) and
-// `__wbg_init.__wbindgen_wasm_module` (the compiled module, set by
-// `__wbg_finalize_init`) are both populated before the wasm start function — and
-// therefore the `link-section` ctors — run, so they are safe to read lazily.
+// `wasmModule` (the compiled module, set by `__wbg_finalize_init`) are both
+// populated before wasm-bindgen manually calls the wasm start function — and
+// therefore before the `link-section` ctors run — so they are safe to read
+// lazily from the host import.
 const READER_DEF = `// --- utoo: link-section host import (read_custom_section) ---
 // Injected by cli/patch-wasm-imports.js. Supplies the \`env.read_custom_section\`
 // import expected by the \`link-section\` crate on wasm32 (reads out-of-band wasm
@@ -93,7 +98,18 @@ const ${MARKER} = ${readCustomSection.toString()};`;
 const IMPORT_WIRING =
   `imports.env = imports.env ?? {};\n` +
   `    imports.env.read_custom_section = (namePtr, nameLength, targetPtr, targetLength) =>\n` +
-  `        ${MARKER}(__wbg_init.__wbindgen_wasm_module, wasm.memory, namePtr, nameLength, targetPtr, targetLength);\n`;
+  `        ${MARKER}(wasmModule, wasm.memory, namePtr, nameLength, targetPtr, targetLength);\n`;
+
+function buildEnvObject(indent, envIdentifier) {
+  return (
+    `{\n` +
+    `${indent}    __proto__: null,\n` +
+    `${indent}    ...${envIdentifier},\n` +
+    `${indent}    read_custom_section: (namePtr, nameLength, targetPtr, targetLength) =>\n` +
+    `${indent}        ${MARKER}(wasmModule, wasm.memory, namePtr, nameLength, targetPtr, targetLength),\n` +
+    `${indent}}`
+  );
+}
 
 /**
  * Inject the `env.read_custom_section` host import into wasm-bindgen
@@ -117,18 +133,26 @@ function patchSource(source) {
     );
   }
 
-  // Restrict the `return imports;` search to the function body.
   const rest = source.slice(fnStart);
-  if (rest.indexOf(RETURN_ANCHOR) === -1) {
+
+  let patchedRest;
+  if (rest.indexOf(RETURN_ANCHOR) !== -1) {
+    patchedRest = rest.replace(
+      RETURN_ANCHOR,
+      `${IMPORT_WIRING}    ${RETURN_ANCHOR}`,
+    );
+  } else if (ENV_PROPERTY_RE.test(rest)) {
+    patchedRest = rest.replace(
+      ENV_PROPERTY_RE,
+      (match, indent, propPrefix, envIdentifier, suffix) =>
+        `${indent}${propPrefix}${buildEnvObject(indent, envIdentifier)}${suffix}`,
+    );
+  } else {
     throw new Error(
-      `patch-wasm-imports: could not find '${RETURN_ANCHOR}' inside __wbg_get_imports().`,
+      `patch-wasm-imports: could not find '${RETURN_ANCHOR}' or an env import property ` +
+        'inside __wbg_get_imports(); wasm-bindgen output shape may have changed.',
     );
   }
-
-  const patchedRest = rest.replace(
-    RETURN_ANCHOR,
-    `${IMPORT_WIRING}    ${RETURN_ANCHOR}`,
-  );
 
   const out = `${source.slice(0, fnStart)}${READER_DEF}\n\n${patchedRest}`;
   return { source: out, patched: true };

@@ -21,6 +21,7 @@ const { patchSource, readCustomSection, MARKER } = require('./patch-wasm-imports
 // A representative slice of wasm-bindgen `--target web` glue.
 const GLUE = [
   'let wasm;',
+  'let wasmModule;',
   'function __wbg_init(input) {}',
   'function __wbg_get_imports() {',
   '    const imports = {};',
@@ -28,6 +29,22 @@ const GLUE = [
   '    return imports;',
   '}',
   'function initSync(module) {}',
+].join('\n');
+
+const GLUE_WITH_ENV_NAMESPACE = [
+  'let wasmModule, wasm;',
+  'const import1 = {};',
+  'function __wbg_get_imports(memory) {',
+  '    const import0 = {',
+  '        __proto__: null,',
+  '        memory: memory || new WebAssembly.Memory({initial:1}),',
+  '    };',
+  '    return {',
+  '        __proto__: null,',
+  '        "./index_bg.js": import0,',
+  '        "env": import1,',
+  '    };',
+  '}',
 ].join('\n');
 
 test('patchSource injects the env.read_custom_section import', () => {
@@ -44,9 +61,26 @@ test('patchSource injects the env.read_custom_section import', () => {
   );
 });
 
+test('patchSource injects into returned env namespace imports', () => {
+  const { source, patched } = patchSource(GLUE_WITH_ENV_NAMESPACE);
+  assert.equal(patched, true);
+  assert.match(source, /"env": \{/);
+  assert.match(source, /\.\.\.import1,/);
+  assert.match(
+    source,
+    /read_custom_section: \(namePtr, nameLength, targetPtr, targetLength\) =>/,
+  );
+  assert.doesNotMatch(source, /"env": import1,/);
+});
+
 test('patched glue is syntactically valid JavaScript', () => {
   const { source } = patchSource(GLUE);
   // Throws on a syntax error; top-level let/function decls are fine in a body.
+  assert.doesNotThrow(() => new Function(source));
+});
+
+test('patched env namespace glue is syntactically valid JavaScript', () => {
+  const { source } = patchSource(GLUE_WITH_ENV_NAMESPACE);
   assert.doesNotThrow(() => new Function(source));
 });
 
@@ -61,7 +95,7 @@ test('patchSource throws when anchors are missing', () => {
   assert.throws(() => patchSource('function unrelated() { return 1; }'), /could not find/);
   assert.throws(
     () => patchSource('function __wbg_get_imports() { const imports = {}; }'),
-    /return imports;/,
+    /return imports;.*env import property/s,
   );
 });
 
@@ -152,4 +186,27 @@ test('readCustomSection returns 0 for an unknown section', () => {
   const namePtr = 100;
   const nameLen = writeString(memory, namePtr, 'does_not_exist');
   assert.equal(readCustomSection(module, memory, namePtr, nameLen, 256, 16), 0);
+});
+
+test('readCustomSection accepts SharedArrayBuffer-backed wasm memory', () => {
+  const payload = [1, 3, 3, 7];
+  const module = buildModule('ut_shared', payload);
+  const memory = new WebAssembly.Memory({
+    initial: 1,
+    maximum: 1,
+    shared: true,
+  });
+
+  const namePtr = 100;
+  const nameLen = writeString(memory, namePtr, 'ut_shared');
+  const targetPtr = 256;
+
+  assert.equal(
+    readCustomSection(module, memory, namePtr, nameLen, targetPtr, 16),
+    payload.length,
+  );
+  assert.deepEqual(
+    Array.from(new Uint8Array(memory.buffer, targetPtr, payload.length)),
+    payload,
+  );
 });
