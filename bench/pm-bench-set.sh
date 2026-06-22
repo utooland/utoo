@@ -206,12 +206,16 @@ if [ "$PM" = "pnpm" ] && [ ! -f "pnpm-workspace.yaml" ] && grep -q '"workspaces"
   "
 fi
 
-# pnpm refuses to run when package.json pins a different packageManager (e.g.
-# excalidraw pins yarn), and --config.package-manager-strict=false does not
-# reliably override that across pnpm versions in CI. Strip the field for the
-# pnpm run so it installs the same tree as the others; it does not affect the
-# resolved tree (just a PM-pinning hint). prepare's `git checkout` restores it.
-if [ "$PM" = "pnpm" ] && grep -q '"packageManager"' package.json 2>/dev/null; then
+# When a repo pins a NON-pnpm packageManager (e.g. excalidraw pins yarn), pnpm
+# refuses with "This project is configured to use yarn" and
+# --config.package-manager-strict=false doesn't reliably override it across CI
+# pnpm versions — so strip the field for the pnpm run (doesn't affect the
+# resolved tree; git checkout restores it next run).
+# KEEP a pnpm@ pin, though: corepack uses it to run the exact pnpm version the
+# repo's engines.pnpm requires (e.g. material-ui pins pnpm@11.5.0 and otherwise
+# trips ERR_PNPM_UNSUPPORTED_ENGINE against the globally-installed pnpm).
+if [ "$PM" = "pnpm" ] && grep -q '"packageManager"' package.json 2>/dev/null \
+   && ! grep -qE '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@' package.json 2>/dev/null; then
   node -e "const f='./package.json',p=require(f);delete p.packageManager;require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
 fi
 PREPARE_EOF
