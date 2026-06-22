@@ -71,20 +71,16 @@ PROJECTS=(
   # --- 3-way comparable (package.json workspaces / single package) ---
   "ant-design|https://github.com/ant-design/ant-design.git||"
   "excalidraw|https://github.com/excalidraw/excalidraw.git||"
-  # jest pins yarn-berry and resolves ts-node through the `patch:` protocol
-  # (.yarn/patches/...), which utoo doesn't yet understand — kept here as a
-  # tracked utoo gap; currently only bun installs it.
-  "jest|https://github.com/jestjs/jest.git||"
-  # --- pnpm-only / catalog (utoo via --from pnpm vs pnpm; bun/yarn skipped) ---
+  # --- pnpm-only (utoo via --from pnpm vs pnpm; bun/yarn skipped) ---
   "material-ui|https://github.com/mui/material-ui.git||pnpm"
   "vue-core|https://github.com/vuejs/core.git||pnpm"
-  # babel & strapi declare deps via pnpm `catalog:` — utoo must go through
-  # --from pnpm to migrate the catalog first (plain mode correctly rejects an
-  # unresolved `catalog:` spec). Moved here from the 3-way tier after a bench
-  # run surfaced `core-js@catalog:` / `vitest@catalog:` resolution failures.
-  "babel|https://github.com/babel/babel.git||pnpm"
-  "strapi|https://github.com/strapi/strapi.git||pnpm"
 )
+# Deliberately NOT in the set: babel / strapi / jest. All three are yarn@4
+# repos (no pnpm-workspace.yaml) whose deps use yarn-side `catalog:` and/or
+# `patch:` (.yarn/patches/...) protocols. utoo resolves neither, pnpm refuses
+# the yarn-pinned project, and bun also chokes on `catalog:` — so every PM
+# fails and the row carries no cross-PM signal. Tracked as a utoo capability
+# gap, not something this perf harness should surface.
 
 # BENCH_ONLY filter (comma-separated project names)
 if [[ -n "$BENCH_ONLY" ]]; then
