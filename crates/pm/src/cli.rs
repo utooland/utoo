@@ -126,7 +126,24 @@ pub enum Commands {
     },
 
     #[command(name = REBUILD_NAME, alias = REBUILD_ALIAS, about = REBUILD_ABOUT)]
-    Rebuild,
+    Rebuild {
+        /// Skip running dependency scripts
+        #[arg(long)]
+        ignore_scripts: bool,
+
+        /// Allow these packages to run install-time scripts (comma-separated,
+        /// repeatable). `name` or `name@version`.
+        #[arg(long, value_delimiter = ',')]
+        allow_scripts: Vec<String>,
+
+        /// Fail if any package with an install script is unreviewed
+        #[arg(long)]
+        strict_allow_scripts: bool,
+
+        /// Run ALL dependency install scripts, bypassing the allowScripts policy
+        #[arg(long)]
+        dangerously_allow_all_scripts: bool,
+    },
 
     #[command(name = CLEAN_NAME, alias = CLEAN_ALIAS, about = CLEAN_ABOUT)]
     Clean {
@@ -141,7 +158,24 @@ pub enum Commands {
     },
 
     #[command(name = UPDATE_NAME, alias = UPDATE_ALIAS, about = UPDATE_ABOUT)]
-    Update,
+    Update {
+        /// Skip running dependency scripts
+        #[arg(long)]
+        ignore_scripts: bool,
+
+        /// Allow these packages to run install-time scripts (comma-separated,
+        /// repeatable). `name` or `name@version`.
+        #[arg(long, value_delimiter = ',')]
+        allow_scripts: Vec<String>,
+
+        /// Fail if any package with an install script is unreviewed
+        #[arg(long)]
+        strict_allow_scripts: bool,
+
+        /// Run ALL dependency install scripts, bypassing the allowScripts policy
+        #[arg(long)]
+        dangerously_allow_all_scripts: bool,
+    },
 
     #[command(name = LIST_NAME, alias = LIST_ALIAS, about = LIST_ABOUT)]
     List {

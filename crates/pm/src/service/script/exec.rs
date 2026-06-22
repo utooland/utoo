@@ -378,6 +378,7 @@ mod tests {
             scripts: Default::default(),
             lifecycle_scripts: LifecycleScripts::default(),
             name: "test-package".to_string(),
+            version: "1.0.0".to_string(),
         };
 
         let bin_paths = ScriptService::collect_bin_paths(&package).await.unwrap();

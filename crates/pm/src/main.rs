@@ -14,8 +14,9 @@ use crate::constants::{APP_NAME, APP_VERSION};
 use crate::helper::auto_update::init_auto_update;
 use crate::service::script::MissingScript;
 use crate::service::workspace::WorkspaceFilter;
-use crate::util::cli_enum::{ConfigScope, ScriptPolicy};
+use crate::util::cli_enum::ConfigScope;
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
+use crate::util::script_policy::ScriptPolicyArgs;
 use crate::util::user_config::{
     init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit,
 };
@@ -156,18 +157,45 @@ async fn async_main() -> Result<()> {
             workspace,
             ignore_scripts,
         }) => {
-            cmd::install::uninstall(specs, workspace, ScriptPolicy::from(ignore_scripts)).await?;
+            cmd::install::uninstall(
+                specs,
+                workspace,
+                &ScriptPolicyArgs::ignore_only(ignore_scripts),
+            )
+            .await?;
         }
-        Some(Commands::Rebuild) => {
+        Some(Commands::Rebuild {
+            ignore_scripts,
+            allow_scripts,
+            strict_allow_scripts,
+            dangerously_allow_all_scripts,
+        }) => {
             let cwd = std::env::current_dir()?;
-            rebuild(&cwd).await?;
+            let args = ScriptPolicyArgs::new(
+                ignore_scripts,
+                strict_allow_scripts,
+                dangerously_allow_all_scripts,
+                allow_scripts,
+            );
+            rebuild(&cwd, &args).await?;
             log_time_end("All packages rebuilt");
         }
         Some(Commands::Deps { workspace_only }) => {
             cmd::deps::run(workspace_only).await?;
         }
-        Some(Commands::Update) => {
-            update(ScriptPolicy::Run).await?;
+        Some(Commands::Update {
+            ignore_scripts,
+            allow_scripts,
+            strict_allow_scripts,
+            dangerously_allow_all_scripts,
+        }) => {
+            let args = ScriptPolicyArgs::new(
+                ignore_scripts,
+                strict_allow_scripts,
+                dangerously_allow_all_scripts,
+                allow_scripts,
+            );
+            update(&args).await?;
             log_time_end("All packages updated");
         }
         Some(Commands::List { package }) => {
@@ -240,7 +268,10 @@ async fn async_main() -> Result<()> {
                 .await?;
             }
             // Default to install if no arguments
-            None => cmd::install::install_cwd(ScriptPolicy::from(cli.ignore_scripts)).await?,
+            None => {
+                cmd::install::install_cwd(&ScriptPolicyArgs::ignore_only(cli.ignore_scripts))
+                    .await?
+            }
         },
         // Completions is handled early before initialization
         Some(Commands::Completions { .. }) => unreachable!(),

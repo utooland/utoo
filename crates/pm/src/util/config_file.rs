@@ -26,6 +26,15 @@ pub struct Config {
     /// Named catalogs: `[catalogs.<name>]` sections.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     catalogs: HashMap<String, HashMap<String, String>>,
+    /// Install-time script allowlist: `[allowScripts]` section, `name -> bool`
+    /// (`true` allows the package to run install scripts, `false` denies it).
+    /// Named `allowScripts` to match npm's `package.json` key.
+    #[serde(
+        rename = "allowScripts",
+        default,
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    allow_scripts: HashMap<String, bool>,
 }
 
 // global config path is ~/.utoo/config.toml
@@ -54,6 +63,11 @@ impl Config {
         if let Some(local) = local_config {
             config.values.extend(local.values);
             config.arrays.extend(local.arrays);
+            // Local `allowScripts` entries override global per package name; a
+            // global deny that the project re-allows is intentional (the project
+            // owner outranks the machine default). Cross-source deny precedence
+            // for the *effective* policy is applied in `script_policy`.
+            config.allow_scripts.extend(local.allow_scripts);
             // Catalogs are project-local only; take them from the local config
             config.catalog = local.catalog;
             config.catalogs = local.catalogs;
@@ -79,6 +93,12 @@ impl Config {
 
     pub fn get_array(&self, key: &str) -> Option<&[String]> {
         self.arrays.get(key).map(|v| v.as_slice())
+    }
+
+    /// The `[allowScripts]` table (`name -> allow`), used to build the
+    /// install-time script policy. See [`crate::util::script_policy`].
+    pub fn allow_scripts(&self) -> &HashMap<String, bool> {
+        &self.allow_scripts
     }
 
     pub fn set_array(
@@ -339,6 +359,24 @@ path-to-regexp = "^1.9.0"
     fn test_catalogs_empty() {
         let config: Config = toml::from_str("").unwrap();
         assert!(config.catalogs().is_empty());
+    }
+
+    #[test]
+    fn test_allow_scripts_table_parses() {
+        let config: Config = toml::from_str(
+            r#"
+[allowScripts]
+"esbuild@0.25.5" = true
+sharp = true
+"telemetry-pkg" = false
+"#,
+        )
+        .unwrap();
+
+        let allow = config.allow_scripts();
+        assert_eq!(allow.get("esbuild@0.25.5"), Some(&true));
+        assert_eq!(allow.get("sharp"), Some(&true));
+        assert_eq!(allow.get("telemetry-pkg"), Some(&false));
     }
 
     #[test]

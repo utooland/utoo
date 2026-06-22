@@ -35,5 +35,6 @@ pub mod package_cache;
 pub mod platform_const;
 pub mod registry;
 pub mod retry;
+pub mod script_policy;
 pub mod sysconf;
 pub mod user_config;

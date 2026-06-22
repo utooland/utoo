@@ -7,9 +7,10 @@ use clap::Args;
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
 use crate::service::install::InstallService;
-use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy};
+use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::format_print::pluralized_package_count;
 use crate::util::logger::log_time_end;
+use crate::util::script_policy::ScriptPolicyArgs;
 use crate::util::user_config::{
     InstallScope, get_omit, resolve_global_prefix, set_install_scope, set_omit,
 };
@@ -27,6 +28,20 @@ pub struct InstallArgs {
     /// Skip running dependency scripts
     #[arg(long)]
     pub ignore_scripts: bool,
+
+    /// Allow these packages to run install-time scripts (comma-separated,
+    /// repeatable). `name` or `name@version`. One-off override; not persisted.
+    #[arg(long, value_delimiter = ',')]
+    pub allow_scripts: Vec<String>,
+
+    /// Fail the install if any package with an install script is unreviewed.
+    #[arg(long)]
+    pub strict_allow_scripts: bool,
+
+    /// Run ALL dependency install scripts, bypassing the allowScripts policy.
+    /// Migration escape hatch — prints a warning.
+    #[arg(long)]
+    pub dangerously_allow_all_scripts: bool,
 
     /// Save as production dependency (default behavior)
     #[arg(long, short = 'S', default_value_t = true)]
@@ -85,12 +100,19 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         set_install_scope(InstallScope::Global);
     }
 
+    let script_args = ScriptPolicyArgs::new(
+        args.ignore_scripts,
+        args.strict_allow_scripts,
+        args.dangerously_allow_all_scripts,
+        args.allow_scripts,
+    );
+
     if args.specs.is_empty() {
-        install_cwd(ScriptPolicy::from(args.ignore_scripts)).await
+        install_cwd(&script_args).await
     } else if args.global {
         // For global installs, process packages one by one
         for spec in args.specs.iter() {
-            install_global_package(spec, args.prefix.as_deref()).await?;
+            install_global_package(spec, args.prefix.as_deref(), &script_args).await?;
         }
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
         Ok(())
@@ -101,7 +123,7 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
             PackageAction::Add,
             &spec_refs,
             args.workspace,
-            ScriptPolicy::from(args.ignore_scripts),
+            &script_args,
             save_type,
         )
         .await?;
@@ -115,7 +137,7 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
 pub async fn uninstall(
     specs: Vec<String>,
     workspace: Option<String>,
-    scripts: ScriptPolicy,
+    args: &ScriptPolicyArgs,
 ) -> Result<()> {
     if specs.is_empty() {
         anyhow::bail!("Package specification is required for uninstall");
@@ -126,7 +148,7 @@ pub async fn uninstall(
         PackageAction::Remove,
         &spec_refs,
         workspace,
-        scripts,
+        args,
         SaveType::Prod,
     )
     .await?;
@@ -136,10 +158,10 @@ pub async fn uninstall(
 
 /// Install all dependencies of the project containing the current directory.
 /// Shared by bare `utoo` and `utoo install` without specs.
-pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
+pub async fn install_cwd(args: &ScriptPolicyArgs) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root_path = init_project_root(&cwd).await?;
-    install(scripts, &root_path).await?;
+    install(args, &root_path).await?;
     log_time_end("All packages installed");
     Ok(())
 }
@@ -161,19 +183,23 @@ pub async fn update_packages(
     action: PackageAction,
     specs: &[&str],
     workspace: Option<String>,
-    scripts: ScriptPolicy,
+    args: &ScriptPolicyArgs,
     save_type: SaveType,
 ) -> Result<()> {
     let omit = get_omit();
-    InstallService::update_packages(action, specs, workspace, scripts, save_type, &omit).await
+    InstallService::update_packages(action, specs, workspace, args, save_type, &omit).await
 }
 
-pub async fn install(scripts: ScriptPolicy, root_path: &Path) -> Result<()> {
+pub async fn install(args: &ScriptPolicyArgs, root_path: &Path) -> Result<()> {
     let omit = get_omit();
-    InstallService::install(scripts, root_path, &omit).await
+    InstallService::install(args, root_path, &omit).await
 }
 
-pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+pub async fn install_global_package(
+    npm_spec: &str,
+    prefix: Option<&str>,
+    args: &ScriptPolicyArgs,
+) -> Result<()> {
     // Parameter validation
     if npm_spec.trim().is_empty() {
         anyhow::bail!("Package specification cannot be empty");
@@ -183,7 +209,7 @@ pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Res
     let prefix = resolve_global_prefix(prefix).await;
 
     // Dispatch to service
-    InstallService::install_global_package(npm_spec, prefix.as_deref()).await
+    InstallService::install_global_package(npm_spec, prefix.as_deref(), args).await
 }
 
 #[cfg(test)]
@@ -193,10 +219,10 @@ mod tests {
     #[tokio::test]
     async fn test_install_global_package_empty_spec() {
         // Test installing with empty package spec
-        let result = install_global_package("", None).await;
+        let result = install_global_package("", None, &ScriptPolicyArgs::default()).await;
         assert!(result.is_err(), "Should fail with empty package spec");
 
-        let result = install_global_package("   ", None).await;
+        let result = install_global_package("   ", None, &ScriptPolicyArgs::default()).await;
         assert!(
             result.is_err(),
             "Should fail with whitespace-only package spec"
@@ -210,7 +236,7 @@ mod tests {
             PackageAction::Add,
             &[],
             None,
-            ScriptPolicy::Run,
+            &ScriptPolicyArgs::default(),
             SaveType::Prod,
         )
         .await;
@@ -219,7 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_uninstall_empty_specs() {
-        let result = uninstall(Vec::new(), None, ScriptPolicy::Run).await;
+        let result = uninstall(Vec::new(), None, &ScriptPolicyArgs::default()).await;
         assert!(result.is_err(), "Should fail with empty specs");
     }
 }

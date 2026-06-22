@@ -45,22 +45,6 @@ pub enum OmitType {
     Peer,
 }
 
-/// Whether to run lifecycle scripts during install/rebuild.
-///
-/// Replaces bare `ignore_scripts: bool` for readability.
-/// See: <https://blakesmith.me/2019/05/07/rust-patterns-enums-instead-of-booleans.html>
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScriptPolicy {
-    Run,
-    Ignore,
-}
-
-impl From<bool> for ScriptPolicy {
-    fn from(ignore: bool) -> Self {
-        if ignore { Self::Ignore } else { Self::Run }
-    }
-}
-
 /// Whether a config operation targets the global (`~/.utoo/config.toml`)
 /// or local (`.utoo.toml`) scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

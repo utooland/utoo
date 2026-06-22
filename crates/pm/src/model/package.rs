@@ -55,6 +55,31 @@ impl LifecycleScripts {
     pub fn get_script(&self, hook: LifecycleHook) -> Option<&str> {
         self.scripts.get(&hook).map(|s| s.as_str())
     }
+
+    /// Whether any install-phase hook (`preinstall`/`install`/`postinstall`) is
+    /// present — i.e. the package has an explicit install action.
+    pub fn has_install_lifecycle(&self) -> bool {
+        [
+            LifecycleHook::Preinstall,
+            LifecycleHook::Install,
+            LifecycleHook::Postinstall,
+        ]
+        .iter()
+        .any(|hook| self.scripts.contains_key(hook))
+    }
+
+    /// Whether an explicit `install` hook is present. Used to decide if a
+    /// `binding.gyp` package needs the implicit `node-gyp rebuild` (npm only
+    /// synthesizes it when `install` is absent).
+    pub fn has_explicit_install(&self) -> bool {
+        self.scripts.contains_key(&LifecycleHook::Install)
+    }
+
+    /// Insert/override one hook. Used to synthesize the implicit
+    /// `node-gyp rebuild` install action for an allowed native package.
+    pub fn set(&mut self, hook: LifecycleHook, script: String) {
+        self.scripts.insert(hook, script);
+    }
 }
 
 /// Publish-related metadata extracted from package.json.
@@ -138,6 +163,9 @@ pub struct PackageInfo {
     pub scripts: HashMap<String, String>,
     pub lifecycle_scripts: LifecycleScripts,
     pub name: String, // Full scoped name, e.g. "@babel/parser"
+    /// Resolved version, used to match `allowScripts` `name@version` entries.
+    /// Empty when unknown (e.g. project root, or the lock entry omits it).
+    pub version: String,
 }
 
 impl PackageInfo {
@@ -183,6 +211,7 @@ impl PackageInfo {
             lifecycle_scripts: LifecycleScripts::from_scripts(pkg.scripts_or_empty()),
             scripts: pkg.scripts_or_empty().clone(),
             name: pkg.name.clone(),
+            version: pkg.version.clone(),
         })
     }
 
@@ -197,6 +226,9 @@ impl PackageInfo {
             lifecycle_scripts: LifecycleScripts::from_scripts(&pkg.scripts),
             scripts: pkg.scripts.clone(),
             name: pkg.name.clone(),
+            // PackageInstallView omits version; install-script gating runs on the
+            // lock-fed collect path, which sets version from the lock entry.
+            version: String::new(),
         })
     }
 

@@ -1,7 +1,9 @@
 use crate::helper::ruborist_context::Context as FsContext;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
-use crate::util::cli_enum::ScriptPolicy;
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
+use crate::util::script_policy::{
+    InstallScriptMode, ScriptGateDecision, SkipReason, SkippedScript, report_skipped_scripts,
+};
 use anyhow::{Context, Result};
 use futures;
 use std::collections::{HashMap, HashSet};
@@ -46,6 +48,9 @@ pub struct ExecutionQueues {
     pub bin_linking: Vec<(Rc<PackageInfo>, bool)>,
     pub install: Vec<(Rc<PackageInfo>, bool)>,
     pub postinstall: Vec<(Rc<PackageInfo>, bool)>,
+    /// Packages whose install action was gated off by the `allowScripts` policy,
+    /// for the end-of-install summary (and the strict-mode abort).
+    pub skipped: Vec<SkippedScript>,
 }
 
 pub struct PackageService;
@@ -120,7 +125,7 @@ impl PackageService {
     pub async fn collect_packages_from_lock(
         package_lock: &PackageLock,
         root_path: &Path,
-        scripts: ScriptPolicy,
+        mode: &InstallScriptMode,
     ) -> Result<Vec<(PackageInfo, bool)>> {
         tracing::debug!("Collecting packages from memory lock...");
 
@@ -191,7 +196,7 @@ impl PackageService {
                 continue;
             }
 
-            if !Self::passes_script_policy(scripts, has_scripts, has_bin, is_link) {
+            if !Self::passes_script_policy(mode, has_scripts, has_bin, is_link) {
                 continue;
             }
 
@@ -211,7 +216,7 @@ impl PackageService {
             let lifecycle_scripts = Self::entry_lifecycle_scripts(
                 &package_path,
                 path,
-                scripts,
+                mode,
                 has_scripts,
                 is_link,
                 is_workspace_link,
@@ -227,6 +232,7 @@ impl PackageService {
                 scripts: Default::default(),
                 lifecycle_scripts,
                 name: package_name,
+                version: lock_package.version.clone().unwrap_or_default(),
             };
 
             packages.push((package_info, is_optional));
@@ -239,16 +245,19 @@ impl PackageService {
     /// A link node is never dropped on the `has_scripts` test — it carries no
     /// script marker in the lock; its scripts are read from disk afterwards.
     fn passes_script_policy(
-        scripts: ScriptPolicy,
+        mode: &InstallScriptMode,
         has_scripts: bool,
         has_bin: bool,
         is_link: bool,
     ) -> bool {
-        match scripts {
+        if mode.is_ignore_all() {
             // scripts-ignored mode: only packages with binaries matter.
-            ScriptPolicy::Ignore => has_bin,
-            // full mode: packages with scripts, binaries, or link nodes.
-            ScriptPolicy::Run => has_scripts || has_bin || is_link,
+            has_bin
+        } else {
+            // any script-running mode (allow-all or policy): packages with
+            // scripts, binaries, or link nodes. Policy gating happens later, per
+            // package, in `create_execution_queues_with_options`.
+            has_scripts || has_bin || is_link
         }
     }
 
@@ -271,12 +280,12 @@ impl PackageService {
     async fn entry_lifecycle_scripts(
         package_path: &Path,
         path: &str,
-        scripts: ScriptPolicy,
+        mode: &InstallScriptMode,
         has_scripts: bool,
         is_link: bool,
         is_workspace_link: bool,
     ) -> Result<LifecycleScripts> {
-        if is_workspace_link || !(has_scripts || scripts == ScriptPolicy::Run) {
+        if is_workspace_link || !(has_scripts || mode.collects_scripts()) {
             return Ok(LifecycleScripts::default());
         }
         match Self::read_lifecycle_scripts(package_path).await {
@@ -286,20 +295,31 @@ impl PackageService {
         }
     }
 
-    /// Create execution queues with bins_only parameter support
-    /// Takes Vec<(PackageInfo, is_optional)> where is_optional indicates edge type
+    /// Create execution queues, applying the install-script policy per package.
+    ///
+    /// Bin linking is queued unconditionally (skipping a script never skips bin
+    /// linking). Whether a package's lifecycle scripts are queued depends on
+    /// `mode`:
+    /// - [`InstallScriptMode::IgnoreAll`]: never (bin linking only).
+    /// - [`InstallScriptMode::AllowAllDangerously`]: always (pre-RFC behavior;
+    ///   no implicit `node-gyp` synthesis, to stay byte-for-byte compatible).
+    /// - [`InstallScriptMode::Policy`]: gated by identity. Allowed native
+    ///   packages get a synthesized `node-gyp rebuild` install action; skipped
+    ///   or denied packages are recorded in `queues.skipped` and their scripts
+    ///   left unqueued (so [`ScriptService::ensure_node_gyp`] is never reached
+    ///   for an unallowed package).
     pub fn create_execution_queues_with_options(
         packages: Vec<(PackageInfo, bool)>,
-        scripts: ScriptPolicy,
+        mode: &InstallScriptMode,
     ) -> Result<ExecutionQueues> {
         tracing::debug!("Creating execution queues with options...");
         let mut queues = ExecutionQueues::default();
 
-        for (package, is_optional) in packages {
+        for (mut package, is_optional) in packages {
+            let queue_scripts = Self::gate_package(mode, &mut package, &mut queues.skipped);
             let package = Rc::new(package);
 
-            // Script queues - skip in bins_only mode
-            if scripts == ScriptPolicy::Run {
+            if queue_scripts {
                 for (hook, queue) in [
                     (LifecycleHook::Preinstall, &mut queues.preinstall),
                     (LifecycleHook::Install, &mut queues.install),
@@ -329,12 +349,97 @@ impl PackageService {
         Ok(queues)
     }
 
-    /// Execute queues with bins_only parameter support
+    /// Apply the policy to one package, deciding whether its lifecycle scripts
+    /// are queued and recording a skip when they are not.
+    ///
+    /// Returns `true` when the package's scripts should be queued. For an allowed
+    /// native package with no explicit `install` script, synthesizes the implicit
+    /// `node-gyp rebuild` action so it runs like npm's default install.
+    fn gate_package(
+        mode: &InstallScriptMode,
+        package: &mut PackageInfo,
+        skipped: &mut Vec<SkippedScript>,
+    ) -> bool {
+        let policy = match mode {
+            InstallScriptMode::IgnoreAll => return false,
+            InstallScriptMode::AllowAllDangerously => return true,
+            InstallScriptMode::Policy(policy) => policy,
+        };
+
+        // An implicit `node-gyp rebuild` install action exists when the package
+        // ships a `binding.gyp` and declares no explicit `install` script (npm's
+        // default-install rule).
+        let is_node_gyp = !package.lifecycle_scripts.has_explicit_install()
+            && ScriptService::is_node_gyp_pkg(package);
+        let has_install_action = package.lifecycle_scripts.has_install_lifecycle() || is_node_gyp;
+        if !has_install_action {
+            // Nothing to gate (bin-only / no install action) — let it through;
+            // queue construction adds no script entries for it anyway.
+            return true;
+        }
+
+        match policy.decide(&package.name, &package.version) {
+            ScriptGateDecision::Run => {
+                if is_node_gyp {
+                    // Materialize the implicit action so it is queued and run.
+                    package
+                        .lifecycle_scripts
+                        .set(LifecycleHook::Install, "node-gyp rebuild".to_string());
+                }
+                true
+            }
+            ScriptGateDecision::Skip(reason) => {
+                skipped.push(SkippedScript {
+                    name: package.name.clone(),
+                    version: package.version.clone(),
+                    reason,
+                    node_gyp: is_node_gyp,
+                });
+                false
+            }
+            ScriptGateDecision::Error => {
+                // Strict mode: recorded as unreviewed; the install is aborted in
+                // `execute_queues_with_options` before any script runs.
+                skipped.push(SkippedScript {
+                    name: package.name.clone(),
+                    version: package.version.clone(),
+                    reason: SkipReason::Unreviewed,
+                    node_gyp: is_node_gyp,
+                });
+                false
+            }
+        }
+    }
+
+    /// Execute the queues, honoring the resolved [`InstallScriptMode`].
+    ///
+    /// Under a strict policy, any unreviewed install action aborts the install
+    /// before a single script runs. The skip/fail summary is printed once at the
+    /// end (or on abort).
     pub async fn execute_queues_with_options(
         queues: ExecutionQueues,
-        scripts: ScriptPolicy,
+        mode: &InstallScriptMode,
     ) -> Result<()> {
-        if scripts == ScriptPolicy::Ignore {
+        // Strict gate: fail fast on any unreviewed install action.
+        if mode.is_strict()
+            && queues
+                .skipped
+                .iter()
+                .any(|s| s.reason == SkipReason::Unreviewed)
+        {
+            report_skipped_scripts(&queues.skipped);
+            let count = queues
+                .skipped
+                .iter()
+                .filter(|s| s.reason == SkipReason::Unreviewed)
+                .count();
+            anyhow::bail!(
+                "strict-allow-scripts: {count} package(s) have unreviewed install scripts; \
+                 approve them in allowScripts or rerun without strict-allow-scripts"
+            );
+        }
+
+        if mode.is_ignore_all() {
             // Binary-only mode: only execute binary linking
             Self::execute_binary_linking(&queues.bin_linking).await?;
         } else {
@@ -360,6 +465,10 @@ impl PackageService {
                 finish_progress_bar("scripts executed", Some(scripts_start.elapsed()));
             }
         }
+
+        // Report anything the policy skipped (denied or unreviewed). Reached only
+        // in non-strict runs, or strict runs with denies but no unreviewed.
+        report_skipped_scripts(&queues.skipped);
         Ok(())
     }
 
@@ -878,6 +987,7 @@ mod tests {
             scripts: Default::default(),
             lifecycle_scripts: LifecycleScripts::default(),
             name: "test-bin-missing".to_string(),
+            version: "1.0.0".to_string(),
         };
 
         // Prepare queues: only bin linking queue has this package
@@ -888,7 +998,11 @@ mod tests {
         };
 
         // Should not panic or error, even though the bin file does not exist
-        let result = PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await;
+        let result = PackageService::execute_queues_with_options(
+            queues,
+            &InstallScriptMode::AllowAllDangerously,
+        )
+        .await;
         assert!(result.is_ok());
     }
 
@@ -978,7 +1092,7 @@ mod tests {
         let result = PackageService::collect_packages_from_lock(
             &package_lock,
             temp_dir.path(),
-            ScriptPolicy::Run,
+            &InstallScriptMode::AllowAllDangerously,
         )
         .await;
         assert!(result.is_ok());
@@ -989,7 +1103,7 @@ mod tests {
         let result = PackageService::collect_packages_from_lock(
             &package_lock,
             temp_dir.path(),
-            ScriptPolicy::Ignore,
+            &InstallScriptMode::IgnoreAll,
         )
         .await;
         assert!(result.is_ok());
@@ -1097,7 +1211,7 @@ mod tests {
         let collected = PackageService::collect_packages_from_lock(
             &package_lock,
             temp_dir.path(),
-            ScriptPolicy::Run,
+            &InstallScriptMode::AllowAllDangerously,
         )
         .await
         .unwrap();
@@ -1177,7 +1291,7 @@ mod tests {
         let result = PackageService::collect_packages_from_lock(
             &package_lock,
             temp_dir.path(),
-            ScriptPolicy::Run,
+            &InstallScriptMode::AllowAllDangerously,
         )
         .await;
         assert!(
@@ -1247,7 +1361,7 @@ mod tests {
         let result = PackageService::collect_packages_from_lock(
             &package_lock,
             temp_dir.path(),
-            ScriptPolicy::Ignore,
+            &InstallScriptMode::IgnoreAll,
         )
         .await;
         assert!(result.is_ok());
@@ -1331,7 +1445,7 @@ mod tests {
         let result = PackageService::collect_packages_from_lock(
             &package_lock,
             temp_dir.path(),
-            ScriptPolicy::Ignore,
+            &InstallScriptMode::IgnoreAll,
         )
         .await;
         assert!(result.is_ok());
@@ -1385,6 +1499,7 @@ mod tests {
                 "exit 1".to_string(),
             )])),
             name: "test-optional-fail".to_string(),
+            version: "1.0.0".to_string(),
         };
 
         // Test with is_optional = true: should NOT return error
@@ -1569,6 +1684,170 @@ mod tests {
         assert!(
             b_dir.join("marker-b").exists(),
             "anonymous workspace `b` prepare must have run"
+        );
+    }
+
+    use crate::util::script_policy::AllowScriptsPolicy;
+
+    /// Build a `PackageInfo` at `path` with the given lifecycle scripts.
+    fn pkg_with_scripts(
+        path: &Path,
+        name: &str,
+        version: &str,
+        scripts: &[(&str, &str)],
+    ) -> PackageInfo {
+        let map: HashMap<String, String> = scripts
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        PackageInfo {
+            path: path.to_path_buf(),
+            bin_files: vec![],
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts::from_scripts(&map),
+            name: name.to_string(),
+            version: version.to_string(),
+        }
+    }
+
+    fn policy_mode(entries: &[(&str, bool)], strict: bool) -> InstallScriptMode {
+        InstallScriptMode::Policy(AllowScriptsPolicy::from_entries(entries, strict))
+    }
+
+    /// Under a policy: allowed packages run, unreviewed are skipped+reported,
+    /// denied are skipped+reported. Bin linking is unaffected (tested elsewhere).
+    #[test]
+    fn test_policy_gates_allow_deny_unreviewed() {
+        let tmp = TempDir::new().unwrap();
+        let packages = vec![
+            (
+                pkg_with_scripts(tmp.path(), "sharp", "1.0.0", &[("postinstall", "echo a")]),
+                false,
+            ),
+            (
+                pkg_with_scripts(tmp.path(), "evil", "2.0.0", &[("postinstall", "echo b")]),
+                false,
+            ),
+            (
+                pkg_with_scripts(tmp.path(), "telemetry", "3.0.0", &[("install", "echo c")]),
+                false,
+            ),
+        ];
+        let mode = policy_mode(&[("sharp", true), ("evil", false)], false);
+        let queues = PackageService::create_execution_queues_with_options(packages, &mode).unwrap();
+
+        // Only `sharp`'s postinstall is queued.
+        assert_eq!(queues.postinstall.len(), 1);
+        assert_eq!(queues.postinstall[0].0.name, "sharp");
+        assert!(
+            queues.install.is_empty(),
+            "telemetry's install must not queue"
+        );
+
+        // `evil` (denied) + `telemetry` (unreviewed) are reported.
+        assert_eq!(queues.skipped.len(), 2);
+        let denied = queues.skipped.iter().find(|s| s.name == "evil").unwrap();
+        assert_eq!(denied.reason, SkipReason::Denied);
+        let unreviewed = queues
+            .skipped
+            .iter()
+            .find(|s| s.name == "telemetry")
+            .unwrap();
+        assert_eq!(unreviewed.reason, SkipReason::Unreviewed);
+    }
+
+    /// A `binding.gyp` package with no explicit install script: when allowed, an
+    /// implicit `node-gyp rebuild` install action is synthesized and queued;
+    /// when unreviewed it is skipped and flagged as node-gyp.
+    #[test]
+    fn test_policy_gates_implicit_node_gyp() {
+        // Allowed native package.
+        let allowed = TempDir::new().unwrap();
+        std::fs::write(allowed.path().join("binding.gyp"), "{}").unwrap();
+        // Unreviewed native package (separate dir so both have binding.gyp).
+        let unreviewed = TempDir::new().unwrap();
+        std::fs::write(unreviewed.path().join("binding.gyp"), "{}").unwrap();
+
+        let packages = vec![
+            (
+                pkg_with_scripts(allowed.path(), "native-ok", "1.0.0", &[]),
+                false,
+            ),
+            (
+                pkg_with_scripts(unreviewed.path(), "native-no", "2.1.0", &[]),
+                false,
+            ),
+        ];
+        let mode = policy_mode(&[("native-ok", true)], false);
+        let queues = PackageService::create_execution_queues_with_options(packages, &mode).unwrap();
+
+        // Allowed: implicit node-gyp rebuild synthesized into the install queue.
+        assert_eq!(queues.install.len(), 1);
+        assert_eq!(queues.install[0].0.name, "native-ok");
+        assert_eq!(
+            queues.install[0]
+                .0
+                .lifecycle_scripts
+                .get_script(LifecycleHook::Install),
+            Some("node-gyp rebuild")
+        );
+
+        // Unreviewed: skipped and flagged node-gyp.
+        assert_eq!(queues.skipped.len(), 1);
+        assert_eq!(queues.skipped[0].name, "native-no");
+        assert!(queues.skipped[0].node_gyp, "must be flagged as node-gyp");
+        assert_eq!(queues.skipped[0].reason, SkipReason::Unreviewed);
+    }
+
+    /// Allow-all-dangerously preserves the pre-RFC behavior: every explicit
+    /// script runs and nothing is recorded as skipped (no node-gyp synthesis).
+    #[test]
+    fn test_allow_all_runs_everything_without_synthesis() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("binding.gyp"), "{}").unwrap();
+        let packages = vec![(
+            pkg_with_scripts(tmp.path(), "native", "1.0.0", &[("postinstall", "echo x")]),
+            false,
+        )];
+        let queues = PackageService::create_execution_queues_with_options(
+            packages,
+            &InstallScriptMode::AllowAllDangerously,
+        )
+        .unwrap();
+        assert_eq!(queues.postinstall.len(), 1);
+        // No implicit node-gyp install action synthesized in allow-all mode.
+        assert!(queues.install.is_empty());
+        assert!(queues.skipped.is_empty());
+    }
+
+    /// Strict mode aborts before running anything when a package is unreviewed.
+    #[tokio::test]
+    async fn test_strict_mode_aborts_on_unreviewed() {
+        let tmp = TempDir::new().unwrap();
+        let packages = vec![(
+            pkg_with_scripts(
+                tmp.path(),
+                "telemetry",
+                "1.0.0",
+                &[("postinstall", "exit 1")],
+            ),
+            false,
+        )];
+        let mode = policy_mode(&[], true);
+        let queues = PackageService::create_execution_queues_with_options(packages, &mode).unwrap();
+        assert_eq!(queues.skipped.len(), 1);
+
+        let result = PackageService::execute_queues_with_options(queues, &mode).await;
+        assert!(
+            result.is_err(),
+            "strict mode must abort on unreviewed scripts"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("strict-allow-scripts"),
+            "error should name the policy"
         );
     }
 }
