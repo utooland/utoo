@@ -1,0 +1,186 @@
+name: pm-benchmark-set
+
+# Manual utoo-vs-pnpm shootout over a curated set of real, popular JS/TS
+# projects (ant-design, mui/material-ui, vuejs/core, excalidraw). Builds utoo
+# once on linux, then installs each project under utoo and pnpm (same tree,
+# fresh resolve, --ignore-scripts) measuring cold + warm wall-clock. Results
+# land in the run's job summary.
+#
+# Trigger: workflow_dispatch only — cloning + cold-installing several large
+# repos is slow, so it never runs automatically. See bench/pm-bench-set.sh for
+# the methodology.
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Registry to test'
+        required: false
+        default: 'npmjs'
+        type: choice
+        options: [npmjs, npmmirror, both]
+      pm_list:
+        description: 'Comma-separated PMs (pnpm anchors the speedup column; bun auto-skipped on pnpm-only repos)'
+        required: false
+        default: 'utoo,pnpm,bun'
+        type: string
+      projects:
+        description: 'Restrict the set (comma-separated names); empty = all'
+        required: false
+        default: ''
+        type: string
+      cold_runs:
+        description: 'Cold install runs per PM'
+        required: false
+        default: '1'
+        type: string
+      warm_runs:
+        description: 'Warm install runs per PM'
+        required: false
+        default: '3'
+        type: string
+      keep_lockfiles:
+        description: 'Keep native lockfiles instead of fresh-resolving both PMs'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Install dependencies
+        timeout-minutes: 6
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          install_pkgs() {
+            timeout 60 apt-get update \
+              && timeout 60 apt-get install -y build-essential curl pkg-config git
+          }
+          install_pkgs && exit 0
+          echo "apt default mirror failed/timed out, falling back to mirrors.edge.kernel.org"
+          dpkg --configure -a || true
+          sed -i 's|http://archive\.ubuntu\.com|http://mirrors.edge.kernel.org|g; s|http://security\.ubuntu\.com|http://mirrors.edge.kernel.org|g' /etc/apt/sources.list
+          install_pkgs
+      - uses: actions/checkout@v4
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory /__w/utoo/utoo
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-02
+          targets: x86_64-unknown-linux-gnu
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          # Share the same key as pm-e2e-bench's build-linux so this workflow
+          # reuses that cache rather than carving a fresh slice of the budget.
+          shared-key: pm-build-linux
+          cache-bin: false
+      - name: Build utoo-pm
+        run: cargo build --release --target x86_64-unknown-linux-gnu --bin utoo -p utoo-pm
+      - name: Upload utoo binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-bench-set-linux-x64
+          path: target/x86_64-unknown-linux-gnu/release/utoo
+          retention-days: 1
+
+  bench-linux:
+    needs: [build-linux]
+    runs-on: ubuntu-latest
+    # Resolve inputs once with defaults so push-triggered runs (which carry no
+    # inputs) and workflow_dispatch runs share a single source of truth.
+    env:
+      PM_LIST: ${{ inputs.pm_list || 'utoo,pnpm,bun' }}
+      REGISTRY: ${{ inputs.registry || 'npmjs' }}
+      BENCH_COLD_RUNS: ${{ inputs.cold_runs || '1' }}
+      BENCH_WARM_RUNS: ${{ inputs.warm_runs || '3' }}
+      BENCH_KEEP_LOCKFILES: ${{ inputs.keep_lockfiles == true && '1' || '0' }}
+      BENCH_ONLY: ${{ inputs.projects || '' }}
+      BENCH_OUT_DIR: /tmp/pm-bench-set-output
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/setup-utoo-bin
+        with:
+          artifact: utoo-bench-set-linux-x64
+          with-ut-symlink: 'false'
+      - name: Install pnpm
+        if: contains(env.PM_LIST, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - name: Install bun
+        if: contains(env.PM_LIST, 'bun')
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install yarn
+        if: contains(env.PM_LIST, 'yarn')
+        run: npm install -g yarn
+      - uses: ./.github/actions/install-bench-tools
+        with:
+          platform: linux
+      - name: Verify tools
+        run: |
+          hyperfine --version
+          utoo --version
+          IFS=',' read -ra PMS <<< "$PM_LIST"
+          for pm in "${PMS[@]}"; do
+            [ "$pm" = "utoo" ] && continue
+            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+          done
+      - name: Run benchmark set
+        # pipefail so a script crash propagates instead of being masked by `tee`.
+        run: |
+          set -o pipefail
+          mkdir -p "$BENCH_OUT_DIR"
+          chmod +x bench/pm-bench-set.sh
+          bash bench/pm-bench-set.sh "$REGISTRY" "$PM_LIST" \
+            2>&1 | tee "$BENCH_OUT_DIR/run.log"
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "# PM Benchmark Set — utoo vs pnpm"
+            echo ""
+            echo "- Registry: \`$REGISTRY\`"
+            echo "- PMs: \`$PM_LIST\`"
+            echo "- utoo: \`$(utoo --version 2>/dev/null)\`"
+            echo ""
+            if [ -f "$BENCH_OUT_DIR/summary.md" ]; then
+              cat "$BENCH_OUT_DIR/summary.md"
+            else
+              echo "_No summary produced — check the run log artifact._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Surface failed cells as a run annotation — a partly-failed bench
+          # must not read as a clean green check.
+          if [ -f "$BENCH_OUT_DIR/summary.md" ] && grep -q "Failures" "$BENCH_OUT_DIR/summary.md"; then
+            n=$(grep -oE "Failures \(([0-9]+)\)" "$BENCH_OUT_DIR/summary.md" | grep -oE "[0-9]+" | head -1)
+            echo "::warning title=pm-benchmark-set::${n:-some} install cell(s) failed — see job summary / run-log artifact"
+          fi
+      - name: Upload bench output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-bench-set-output
+          path: /tmp/pm-bench-set-output
+          retention-days: 7
