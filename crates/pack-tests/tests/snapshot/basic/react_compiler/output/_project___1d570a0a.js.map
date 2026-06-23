@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/jsx-runtime.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\nexport function jsxs() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\n"],"names":["jsx","jsxs"],"mappings":"AAAO,SAASA;IACd,OAAO;AACT;AACO,SAASC;IACd,OAAO;AACT","ignoreList":[0]}},
+    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/compiler-runtime.js"],"sourcesContent":["export function c(size) {\n  return new Array(size);\n}\n"],"names":["c","size","Array"],"mappings":"AAAO,SAASA,EAAEC,IAAI;IACpB,OAAO,IAAIC,MAAMD;AACnB","ignoreList":[0]}},
+    {"offset": {"line": 34, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/index.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/index.js'\n}\nexport function useState(initialState) {\n  return [initialState, () => {}]\n}\n"],"names":["jsx","useState","initialState"],"mappings":"AAAO,SAASA;IACd,OAAO;AACT;AACO,SAASC,SAASC,YAAY;IACnC,OAAO;QAACA;QAAc,KAAO;KAAE;AACjC","ignoreList":[0]}},
+    {"offset": {"line": 52, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/react_compiler/input/index.jsx"],"sourcesContent":["import { useState } from \"react\";\n\nexport function Counter({ initialCount }) {\n  const [count, setCount] = useState(initialCount);\n  const doubled = count * 2;\n\n  return (\n    <div>\n      <p>{count}</p>\n      <p>{doubled}</p>\n      <button onClick={() => setCount(count + 1)}>increment</button>\n    </div>\n  );\n}\n\nconsole.log(Counter);\n"],"names":["console","log","Counter"],"mappings":";;AAAA;;;;AAEO;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;AAaPA,QAAQC,GAAG,CAACC"}}]
+}
