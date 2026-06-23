@@ -11,11 +11,6 @@ name: pm-benchmark-set
 # the methodology.
 
 on:
-  # TEMPORARY (validation): push trigger on the bench branch so the run fires
-  # without a merge to the default branch — workflow_dispatch only registers
-  # from the default branch. Remove this `push:` block before merging to next.
-  push:
-    branches: ["ci/pm-benchmark-set"]
   workflow_dispatch:
     inputs:
       registry:
