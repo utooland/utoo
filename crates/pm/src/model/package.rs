@@ -68,11 +68,12 @@ impl LifecycleScripts {
         .any(|hook| self.scripts.contains_key(hook))
     }
 
-    /// Whether an explicit `install` hook is present. Used to decide if a
-    /// `binding.gyp` package needs the implicit `node-gyp rebuild` (npm only
-    /// synthesizes it when `install` is absent).
-    pub fn has_explicit_install(&self) -> bool {
+    /// Whether an explicit `install` or `preinstall` hook is present. npm only
+    /// defaults a `binding.gyp` package's install action to `node-gyp rebuild`
+    /// when BOTH are absent, so either one suppresses the implicit native build.
+    pub fn suppresses_default_node_gyp(&self) -> bool {
         self.scripts.contains_key(&LifecycleHook::Install)
+            || self.scripts.contains_key(&LifecycleHook::Preinstall)
     }
 
     /// Insert/override one hook. Used to synthesize the implicit

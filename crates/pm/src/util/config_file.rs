@@ -77,22 +77,28 @@ impl Config {
         Ok(config)
     }
 
-    /// Load the global and project-local configs **separately** (not merged),
-    /// returning `(global, local)` where `local` is `None` when no `.utoo.toml`
-    /// exists. Callers that need cross-source precedence — e.g. the install
-    /// script policy, where a team-level (global) deny must survive a
-    /// project-level allow — layer these in order instead of consuming the
-    /// flattened [`Self::load`] view (whose per-key `extend` would let a local
-    /// allow erase a global deny). A genuine parse error propagates.
-    pub async fn load_layers() -> ConfigResult<(Self, Option<Self>)> {
-        let global = Self::load_from_path(&Self::global_config_path()?).await?;
+    /// Load only the global config (`~/.utoo/config.toml`).
+    ///
+    /// Callers that need cross-source precedence — e.g. the install script
+    /// policy, where a team-level (global) deny must survive a project-level
+    /// allow — load global and local separately and layer them in order, rather
+    /// than consuming the flattened [`Self::load`] view (whose per-key `extend`
+    /// would let a local allow erase a global deny). Loading them separately
+    /// also lets a global-only context (a global install) avoid reading the
+    /// CWD's `.utoo.toml` at all, so a malformed project config can't fail an
+    /// unrelated `utoo install -g` / `utoo x`. A genuine parse error propagates.
+    pub async fn load_global() -> ConfigResult<Self> {
+        Self::load_from_path(&Self::global_config_path()?).await
+    }
+
+    /// Load only the project-local config (`.utoo.toml`); `None` when absent.
+    pub async fn load_local() -> ConfigResult<Option<Self>> {
         let local_path = Self::local_config_path()?;
-        let local = if crate::fs::try_exists(&local_path).await? {
-            Some(Self::load_from_path(&local_path).await?)
+        if crate::fs::try_exists(&local_path).await? {
+            Ok(Some(Self::load_from_path(&local_path).await?))
         } else {
-            None
-        };
-        Ok((global, local))
+            Ok(None)
+        }
     }
 
     pub fn set(&mut self, key: &str, value: String, scope: ConfigScope) -> ConfigResult<()> {

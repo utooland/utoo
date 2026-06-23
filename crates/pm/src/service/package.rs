@@ -278,6 +278,12 @@ impl PackageService {
     /// `node_modules/` with an empty name); that reads as "no scripts" rather
     /// than failing the install, while a real dependency with an unreadable
     /// manifest still errors.
+    ///
+    /// A bin-only entry (`has_scripts` false and not a link) has no install
+    /// scripts to read, so skip the `package.json` read entirely — otherwise
+    /// every binary-bearing dependency in a large tree pays a needless disk read.
+    /// Links are exempt: the serializer stamps no script marker on them
+    /// (`has_scripts` is always false), so their scripts must be read from disk.
     async fn entry_lifecycle_scripts(
         package_path: &Path,
         path: &str,
@@ -286,7 +292,7 @@ impl PackageService {
         is_link: bool,
         is_workspace_link: bool,
     ) -> Result<LifecycleScripts> {
-        if is_workspace_link || !(has_scripts || mode.collects_scripts()) {
+        if is_workspace_link || !mode.collects_scripts() || (!has_scripts && !is_link) {
             return Ok(LifecycleScripts::default());
         }
         match Self::read_lifecycle_scripts(package_path).await {
@@ -379,9 +385,11 @@ impl PackageService {
         }
 
         // An implicit `node-gyp rebuild` install action exists when the package
-        // ships a `binding.gyp` and declares no explicit `install` script (npm's
-        // default-install rule).
-        let is_node_gyp = !package.lifecycle_scripts.has_explicit_install()
+        // ships a `binding.gyp` and declares neither an `install` nor a
+        // `preinstall` script — matching npm's default-install rule, so merely
+        // allowing a package that runs its own `preinstall` setup does not add an
+        // unexpected native build.
+        let is_node_gyp = !package.lifecycle_scripts.suppresses_default_node_gyp()
             && ScriptService::is_node_gyp_pkg(package);
         let has_install_action = package.lifecycle_scripts.has_install_lifecycle() || is_node_gyp;
         if !has_install_action {
@@ -1812,6 +1820,34 @@ mod tests {
         assert_eq!(queues.skipped[0].name, "native-no");
         assert!(queues.skipped[0].node_gyp, "must be flagged as node-gyp");
         assert_eq!(queues.skipped[0].reason, SkipReason::Unreviewed);
+    }
+
+    /// A `binding.gyp` package that declares its own `preinstall` (but no
+    /// `install`) must NOT get an implicit `node-gyp rebuild` synthesized when
+    /// allowed — npm suppresses the default install when `preinstall` exists, so
+    /// enabling the package only runs its own preinstall, not an extra native build.
+    #[test]
+    fn test_preinstall_suppresses_implicit_node_gyp() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("binding.gyp"), "{}").unwrap();
+        let packages = vec![(
+            pkg_with_scripts(
+                dir.path(),
+                "native-pre",
+                "1.0.0",
+                &[("preinstall", "echo setup")],
+            ),
+            false,
+        )];
+        let mode = policy_mode(&[("native-pre", true)], false);
+        let queues = PackageService::create_execution_queues_with_options(packages, &mode).unwrap();
+
+        assert_eq!(queues.preinstall.len(), 1, "the declared preinstall runs");
+        assert!(
+            queues.install.is_empty(),
+            "no implicit node-gyp install synthesized when preinstall is present"
+        );
+        assert!(queues.skipped.is_empty());
     }
 
     /// Allow-all-dangerously preserves the pre-RFC behavior: every explicit

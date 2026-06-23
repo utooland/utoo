@@ -17,7 +17,7 @@
 //! are intentionally out of scope here; they gate at the resolver and land in a
 //! follow-up.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -239,11 +239,19 @@ impl InstallScriptMode {
         // deny precedence can be applied across sources. A genuine parse error is
         // surfaced rather than swallowed — a broken policy file must not silently
         // fail open and run every install script.
-        let (global, local) = Config::load_layers()
+        let global = Config::load_global()
             .await
-            .context("failed to load utoo config for the install-script policy")?;
-        // Global installs (root_path = None) ignore the CWD project config.
-        let local = root_path.and(local.as_ref());
+            .context("failed to load global utoo config for the install-script policy")?;
+        // Global installs (root_path = None) have no project context: do NOT even
+        // read the CWD's `.utoo.toml`, so a malformed project config can't fail
+        // an unrelated global install.
+        let local = match root_path {
+            Some(_) => Config::load_local()
+                .await
+                .context("failed to load project utoo config for the install-script policy")?,
+            None => None,
+        };
+        let local = local.as_ref();
 
         // For scalar flags, a local value overrides global; absence is false.
         // Trim so a stray space (e.g. `ut config set strict-allow-scripts " true"`)
@@ -413,15 +421,18 @@ pub fn report_skipped_scripts(skipped: &[SkippedScript]) {
     if skipped.is_empty() {
         return;
     }
-    let width = skipped.iter().map(|s| s.id().len()).max().unwrap_or(0);
+    // Dedup and sort for a clean, deterministic summary: `collect` walks a
+    // HashMap (non-deterministic order), and the same package can surface at
+    // more than one path. A BTreeSet keyed by the printed fields does both.
+    let rows: BTreeSet<(String, &'static str, bool)> = skipped
+        .iter()
+        .map(|s| (s.id(), s.reason.label(), s.node_gyp))
+        .collect();
+    let width = rows.iter().map(|(id, ..)| id.len()).max().unwrap_or(0);
     let mut out = String::from("install scripts skipped:\n");
-    for s in skipped {
-        let suffix = if s.node_gyp { " node-gyp" } else { "" };
-        out.push_str(&format!(
-            "  {id:width$}  {reason}{suffix}\n",
-            id = s.id(),
-            reason = s.reason.label(),
-        ));
+    for (id, reason, node_gyp) in &rows {
+        let suffix = if *node_gyp { " node-gyp" } else { "" };
+        out.push_str(&format!("  {id:width$}  {reason}{suffix}\n"));
     }
     eprint!("{out}");
 }
