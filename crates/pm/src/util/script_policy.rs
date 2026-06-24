@@ -434,7 +434,41 @@ pub fn report_skipped_scripts(skipped: &[SkippedScript]) {
         let suffix = if *node_gyp { " node-gyp" } else { "" };
         out.push_str(&format!("  {id:width$}  {reason}{suffix}\n"));
     }
+    out.push_str(&allow_hint(skipped));
     eprint!("{out}");
+}
+
+/// Bare, de-duplicated, sorted names of packages skipped as *unreviewed* — the
+/// actionable set the user can allow. Denied entries are a deliberate block and
+/// are excluded.
+fn unreviewed_names(skipped: &[SkippedScript]) -> Vec<String> {
+    skipped
+        .iter()
+        .filter(|s| s.reason == SkipReason::Unreviewed)
+        .map(|s| s.name.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// A short "here is how to unblock them" hint for the unreviewed packages, or an
+/// empty string when there is nothing actionable (e.g. all entries are denied).
+fn allow_hint(skipped: &[SkippedScript]) -> String {
+    let names = unreviewed_names(skipped);
+    if names.is_empty() {
+        return String::new();
+    }
+    let json = names
+        .iter()
+        .map(|n| format!("{n:?}: true"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "\nto let a package run its install scripts, add it to \"allowScripts\" in \
+         package.json, e.g.:\n  \"allowScripts\": {{ {json} }}\n\
+         or allow it for a single run with: --allow-scripts {csv}\n",
+        csv = names.join(","),
+    )
 }
 
 #[cfg(test)]
@@ -515,6 +549,48 @@ mod tests {
             strict.decide("telemetry", "1.0.0"),
             ScriptGateDecision::Error
         );
+    }
+
+    #[test]
+    fn allow_hint_lists_unreviewed_not_denied() {
+        let skipped = vec![
+            SkippedScript {
+                name: "sharp".into(),
+                version: "1.0.0".into(),
+                reason: SkipReason::Unreviewed,
+                node_gyp: false,
+            },
+            SkippedScript {
+                name: "evil".into(),
+                version: "2.0.0".into(),
+                reason: SkipReason::Denied,
+                node_gyp: false,
+            },
+            SkippedScript {
+                name: "native".into(),
+                version: "3.0.0".into(),
+                reason: SkipReason::Unreviewed,
+                node_gyp: true,
+            },
+        ];
+        // Sorted, unique, unreviewed-only.
+        assert_eq!(unreviewed_names(&skipped), vec!["native", "sharp"]);
+
+        let hint = allow_hint(&skipped);
+        assert!(hint.contains("allowScripts"));
+        assert!(hint.contains("\"native\": true") && hint.contains("\"sharp\": true"));
+        assert!(hint.contains("--allow-scripts native,sharp"));
+        // A denied package is a deliberate block — never suggested as allowable.
+        assert!(!hint.contains("evil"));
+
+        // Nothing actionable when everything is denied.
+        let denied_only = vec![SkippedScript {
+            name: "evil".into(),
+            version: "1.0.0".into(),
+            reason: SkipReason::Denied,
+            node_gyp: false,
+        }];
+        assert!(allow_hint(&denied_only).is_empty());
     }
 
     #[tokio::test]

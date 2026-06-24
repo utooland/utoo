@@ -447,6 +447,8 @@ impl PackageService {
                 .iter()
                 .any(|s| s.reason == SkipReason::Unreviewed)
         {
+            // Prints the skipped table AND the "how to allow them" hint; the
+            // abort message then just points back to it.
             report_skipped_scripts(&queues.skipped);
             let count = queues
                 .skipped
@@ -454,8 +456,9 @@ impl PackageService {
                 .filter(|s| s.reason == SkipReason::Unreviewed)
                 .count();
             anyhow::bail!(
-                "strict-allow-scripts: {count} package(s) have unreviewed install scripts; \
-                 approve them in allowScripts or rerun without strict-allow-scripts"
+                "install aborted by strict-allow-scripts: {count} package(s) with unreviewed \
+                 install scripts (see above for how to allow them, or rerun without \
+                 strict-allow-scripts)"
             );
         }
 
