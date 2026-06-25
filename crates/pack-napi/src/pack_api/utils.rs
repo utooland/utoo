@@ -3,7 +3,6 @@ use std::{future::Future, path::PathBuf, sync::Arc};
 
 use crate::pack_api::turbopack_ctx::{RootTask, TurbopackContext};
 use anyhow::{Result, anyhow};
-use either::Either;
 use napi::{
     JsFunction, JsObject, JsUnknown, NapiRaw, NapiValue, Status,
     bindgen_prelude::{External, ToNapiValue},
@@ -61,7 +60,7 @@ pub fn create_turbo_tasks(
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
                 ..Default::default()
             },
-            Either::Left(backing_storage),
+            backing_storage,
         ));
         if let StartupCacheState::Invalidated { reason_code } = cache_state {
             tt.send_compilation_event(Arc::new(StartupCacheInvalidationEvent { reason_code }));
@@ -75,7 +74,7 @@ pub fn create_turbo_tasks(
                 dependency_tracking,
                 ..Default::default()
             },
-            Either::Right(noop_backing_storage()),
+            noop_backing_storage(),
         ))
     })
 }

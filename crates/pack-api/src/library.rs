@@ -21,6 +21,7 @@ use turbopack_core::{
         ChunkGroupResult, ChunkingContext, EvaluatableAsset, EvaluatableAssets,
         availability_info::AvailabilityInfo,
     },
+    context::AssetContext,
     ident::{AssetIdent, Layer},
     module::{Module, Modules},
     module_graph::{
@@ -30,7 +31,7 @@ use turbopack_core::{
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
     resolve::{
-        origin::{PlainResolveOrigin, ResolveOrigin, ResolveOriginExt},
+        origin::{PlainResolveOrigin, ResolveOrigin},
         parse::Request,
     },
 };
@@ -236,14 +237,17 @@ impl LibraryEndpoint {
         let origin = PlainResolveOrigin::new(
             asset_context,
             self.project().project_path().await?.join("_")?,
-        );
+        )
+        .await?;
+        let resolve_options = origin.resolve_options();
+        let asset_context = origin.asset_context();
+        let origin_path = origin.origin_path();
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
         Ok(Vc::cell(
-            origin
-                .resolve_asset(entry_request, origin.resolve_options(), ty)
-                .await?
+            asset_context
+                .resolve_asset(origin_path, entry_request, resolve_options, ty)
                 .await?
                 .primary_modules()
                 .await?,
@@ -359,7 +363,7 @@ impl Endpoint for LibraryEndpoint {
             .map(ResolvedVc::upcast)
             .collect();
         entry_modules.extend(self.library_entry_modules().await?);
-        Ok(Vc::cell(vec![ChunkGroupEntry::Entry(entry_modules)]))
+        Ok(GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry(entry_modules)]).cell())
     }
 
     #[turbo_tasks::function]

@@ -158,6 +158,17 @@
         }
       ]
     },
+    "reactCompiler": {
+      "description": "React compiler",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaReactCompilerConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "resolve": {
       "description": "Resolve configuration",
       "anyOf": [
@@ -665,7 +676,15 @@
       "type": "object",
       "properties": {
         "reactCompiler": {
-          "description": "React compiler"
+          "description": "React compiler",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaReactCompilerConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "swcPlugins": {
           "description": "SWC plugins as [path, options] tuples",
@@ -1403,6 +1422,56 @@
             "type": "string"
           }
         }
+      ]
+    },
+    "SchemaReactCompilerCompilationMode": {
+      "type": "string",
+      "enum": [
+        "infer",
+        "annotation",
+        "all"
+      ]
+    },
+    "SchemaReactCompilerConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaReactCompilerOptions"
+        }
+      ]
+    },
+    "SchemaReactCompilerOptions": {
+      "type": "object",
+      "properties": {
+        "compilationMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaReactCompilerCompilationMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaReactCompilerTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SchemaReactCompilerTarget": {
+      "type": "string",
+      "enum": [
+        "18",
+        "19"
       ]
     },
     "SchemaReactConfig": {

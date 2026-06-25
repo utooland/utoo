@@ -58,7 +58,8 @@ function MDXContent(props = {}) {
 var __TURBOPACK__default__export__ = MDXContent;
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/mdx/basic/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
@@ -69,7 +70,8 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$mdx$2f$basic$2f$input$2f$con
 var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__$5b$project$5d2f$mdx$2f$basic$2f$input$2f$content$2e$mdx$2e$tsx__$5b$client$5d$__$28$ecmascript$29$__["default"];
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 ]);

@@ -45,8 +45,8 @@ use tracing_subscriber::{
 };
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    NonLocalValue, OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TaskInput,
-    TransientInstance, TurboTasksApi, UpdateInfo, Vc, trace::TraceRawVcs,
+    OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TransientInstance,
+    TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
 use turbo_unix_path::get_relative_path_to;
@@ -540,15 +540,16 @@ pub async fn project_write_all_entrypoints_to_disk(
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(container);
             // Read and compile the files
+            let entrypoints_with_issues =
+                read_strongly_consistent_and_apply_effects(entrypoints_with_issues_op, |v| {
+                    &v.effects
+                })
+                .await?;
             let EntrypointsWithIssues {
                 entrypoints,
                 issues,
-                effects,
-            } = &*entrypoints_with_issues_op
-                .read_strongly_consistent()
-                .await?;
-            // Apply phase side effects. Asset emission is performed once at the end.
-            effects.apply().await?;
+                effects: _,
+            } = &*entrypoints_with_issues;
             let app_paths = collect_endpoint_output_paths(&entrypoints.apps).await?;
             let library_paths = collect_endpoint_output_paths(&entrypoints.libraries).await?;
 
@@ -600,14 +601,16 @@ pub fn project_entrypoints_subscribe(
         move || {
             async move {
                 let entrypoints_with_issues_op = get_entrypoints_with_issues_operation(container);
+                let entrypoints_with_issues =
+                    read_strongly_consistent_and_apply_effects(entrypoints_with_issues_op, |v| {
+                        &v.effects
+                    })
+                    .await?;
                 let EntrypointsWithIssues {
                     entrypoints,
                     issues,
-                    effects,
-                } = &*entrypoints_with_issues_op
-                    .read_strongly_consistent()
-                    .await?;
-                effects.apply().await?;
+                    effects: _,
+                } = &*entrypoints_with_issues;
                 Ok((entrypoints.clone(), issues.clone()))
             }
             .instrument(tracing::trace_span!("entrypoints subscription"))
@@ -654,13 +657,14 @@ pub fn project_hmr_events(
 
                     let update_op =
                         hmr_update_with_issues_operation(project, identifier.clone(), state);
-                    let update = update_op.read_strongly_consistent().await?;
+                    let update =
+                        read_strongly_consistent_and_apply_effects(update_op, |v| &v.effects)
+                            .await?;
                     let HmrUpdateWithIssues {
                         update,
                         issues,
-                        effects,
+                        effects: _,
                     } = &*update;
-                    effects.apply().await?;
                     match &**update {
                         Update::Missing | Update::None => {}
                         Update::Total(TotalUpdate { to }) => {
@@ -728,14 +732,16 @@ pub fn project_hmr_identifiers_subscribe(
         move || async move {
             let hmr_identifiers_with_issues_op =
                 get_hmr_identifiers_with_issues_operation(container);
+            let hmr_identifiers_with_issues =
+                read_strongly_consistent_and_apply_effects(hmr_identifiers_with_issues_op, |v| {
+                    &v.effects
+                })
+                .await?;
             let HmrIdentifiersWithIssues {
                 identifiers,
                 issues,
-                effects,
-            } = &*hmr_identifiers_with_issues_op
-                .read_strongly_consistent()
-                .await?;
-            effects.apply().await?;
+                effects: _,
+            } = &*hmr_identifiers_with_issues;
 
             Ok((identifiers.clone(), issues.clone()))
         },
@@ -858,20 +864,9 @@ pub fn project_update_info_subscribe(
     Ok(())
 }
 
+#[turbo_tasks::task_input]
 #[napi(object)]
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    Hash,
-    NonLocalValue,
-    OperationValue,
-    PartialEq,
-    TaskInput,
-    TraceRawVcs,
-    Encode,
-    Decode,
-)]
+#[derive(Clone, Debug, Eq, Hash, OperationValue, PartialEq, TraceRawVcs, Encode, Decode)]
 pub struct StackFrame {
     pub is_server: bool,
     pub is_internal: Option<bool>,

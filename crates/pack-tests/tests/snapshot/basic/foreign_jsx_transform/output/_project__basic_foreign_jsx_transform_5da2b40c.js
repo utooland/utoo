@@ -13,7 +13,8 @@ const Fragment = React.Fragment;
 const Component = React.Component;
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js [client] (ecmascript)", ((__turbopack_context__) => {
@@ -32,7 +33,8 @@ const Comp = ()=>/*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$b
 var __TURBOPACK__default__export__ = Comp;
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/basic/foreign_jsx_transform/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
@@ -50,7 +52,8 @@ const App = ()=>{
 var __TURBOPACK__default__export__ = App;
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 ]);

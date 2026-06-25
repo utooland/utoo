@@ -13,7 +13,8 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         var __TURBOPACK__default__export__ = "hello";
         __turbopack_context__.s([
             "default",
-            ()=>__TURBOPACK__default__export__
+            0,
+            __TURBOPACK__default__export__
         ]);
         __turbopack_async_result__();
     } catch (e) {
@@ -35,7 +36,8 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__263__["default"] + " world";
         __turbopack_context__.s([
             "default",
-            ()=>__TURBOPACK__default__export__
+            0,
+            __TURBOPACK__default__export__
         ]);
         __turbopack_async_result__();
     } catch (e) {
@@ -60,7 +62,8 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__513__["default"] + ", " + __TURBOPACK__imported__module__356__["default"];
         __turbopack_context__.s([
             "default",
-            ()=>__TURBOPACK__default__export__
+            0,
+            __TURBOPACK__default__export__
         ]);
         __turbopack_async_result__();
     } catch (e) {
@@ -96,7 +99,8 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__263__["default"] + " world";
         __turbopack_context__.s([
             "default",
-            ()=>__TURBOPACK__default__export__
+            0,
+            __TURBOPACK__default__export__
         ]);
         __turbopack_async_result__();
     } catch (e) {
@@ -112,7 +116,8 @@ var __TURBOPACK__default__export__ = 42;
 const nested = ()=>Promise.resolve().then(()=>__turbopack_context__.i(513));
 __turbopack_context__.s([
     "default",
-    ()=>__TURBOPACK__default__export__,
+    0,
+    __TURBOPACK__default__export__,
     "nested",
     0,
     nested

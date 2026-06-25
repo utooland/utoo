@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, TaskInput, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
@@ -20,7 +20,7 @@ use turbopack_core::{
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
 use turbopack_css::chunk::CssChunkType;
-use turbopack_ecmascript::chunk::EcmascriptChunkType;
+use turbopack_ecmascript::{chunk::EcmascriptChunkType, transform::ReactCompilerTarget};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -236,6 +236,9 @@ pub async fn get_server_module_options_context(
         .css_modules
         .as_ref()
         .and_then(|css_modules| css_modules.local_ident_pattern());
+    let enable_rust_react_compiler = *config.rust_react_compiler().await?;
+    let rust_react_compiler_target: ReactCompilerTarget =
+        *config.rust_react_compiler_target().await?;
 
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
@@ -297,6 +300,8 @@ pub async fn get_server_module_options_context(
             enable_jsx: Some(jsx_transform_options),
             enable_typescript_transform: Some(tsconfig),
             enable_decorators: Some(decorators_options.to_resolved().await?),
+            enable_rust_react_compiler,
+            rust_react_compiler_target,
             ..module_options_context.ecmascript.clone()
         },
         enable_webpack_loaders,
@@ -391,7 +396,8 @@ pub async fn get_server_resolve_options_context(
     .cell())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, TaskInput, TraceRawVcs, Encode, Decode)]
+#[turbo_tasks::task_input(contains_unresolved_vcs)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, TraceRawVcs, Encode, Decode)]
 pub struct ServerChunkingContextOptions {
     pub mode: Vc<Mode>,
     pub config: Vc<Config>,

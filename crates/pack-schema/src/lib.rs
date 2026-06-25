@@ -88,6 +88,11 @@ pub struct CompleteConfig {
     #[schemars(description = "Enable build statistics")]
     pub stats: Option<bool>,
 
+    /// Enable the Rust React Compiler transform
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "React compiler")]
+    pub react_compiler: Option<SchemaReactCompilerConfig>,
+
     /// Enable persistent caching
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Enable persistent caching")]
@@ -1118,7 +1123,39 @@ pub struct SchemaExperimentalConfig {
     /// React compiler
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "React compiler")]
-    pub react_compiler: Option<serde_json::Value>,
+    pub react_compiler: Option<SchemaReactCompilerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaReactCompilerConfig {
+    Boolean(bool),
+    Options(SchemaReactCompilerOptions),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaReactCompilerOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compilation_mode: Option<SchemaReactCompilerCompilationMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<SchemaReactCompilerTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SchemaReactCompilerCompilationMode {
+    Infer,
+    Annotation,
+    All,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub enum SchemaReactCompilerTarget {
+    #[serde(rename = "18")]
+    React18,
+    #[serde(rename = "19")]
+    React19,
 }
 
 // ---------------------------------------------------------------------------

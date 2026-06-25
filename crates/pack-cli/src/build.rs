@@ -5,6 +5,7 @@ use pack_api::{
     entrypoint::EntrypointsWithIssues,
     entrypoint::get_all_written_entrypoints_with_issues_operation, project::ProjectOptions,
 };
+use turbo_tasks::read_strongly_consistent_and_apply_effects;
 use turbo_tasks_malloc::TurboMalloc;
 
 use crate::initialize_project_container;
@@ -26,14 +27,16 @@ pub async fn run(options: ProjectOptions) -> Result<()> {
             let entrypoints_with_issues_op =
                 get_all_written_entrypoints_with_issues_operation(project_container);
 
+            let entrypoints_with_issues =
+                read_strongly_consistent_and_apply_effects(entrypoints_with_issues_op, |v| {
+                    &v.effects
+                })
+                .await?;
             let EntrypointsWithIssues {
                 entrypoints,
                 issues,
-                effects,
-            } = &*entrypoints_with_issues_op
-                .read_strongly_consistent()
-                .await?;
-            effects.apply().await?;
+                effects: _,
+            } = &*entrypoints_with_issues;
 
             Ok((entrypoints.clone(), issues.clone()))
         })

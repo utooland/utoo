@@ -21,7 +21,8 @@ __turbopack_context__.s([
     0,
     createSupportsColor,
     "default",
-    ()=>__TURBOPACK__default__export__
+    0,
+    __TURBOPACK__default__export__
 ]);
 }),
 "[project]/target_node/cjs_esm_interop/input/node_modules/json5/index.cjs [server] (ecmascript)", ((__turbopack_context__, module, exports) => {

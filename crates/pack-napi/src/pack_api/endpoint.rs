@@ -14,7 +14,7 @@ use pack_api::{
     utils::{endpoint_client_changed_operation, subscribe_issues_and_diags_operation},
 };
 use tracing::Instrument;
-use turbo_tasks::ReadRef;
+use turbo_tasks::{ReadRef, read_strongly_consistent_and_apply_effects};
 
 #[napi(object)]
 #[derive(Default)]
@@ -106,14 +106,16 @@ pub async fn endpoint_write_to_disk(
         .run(async move {
             let written_entrypoint_with_issues_op =
                 get_written_endpoint_with_issues_operation(endpoint_op);
+            let written_entrypoint_with_issues = read_strongly_consistent_and_apply_effects(
+                written_entrypoint_with_issues_op,
+                |v| &v.effects,
+            )
+            .await?;
             let WrittenEndpointWithIssues {
                 written,
                 issues,
-                effects,
-            } = &*written_entrypoint_with_issues_op
-                .read_strongly_consistent()
-                .await?;
-            effects.apply().await?;
+                effects: _,
+            } = &*written_entrypoint_with_issues;
 
             Ok((written.clone(), issues.clone()))
         })
@@ -139,9 +141,8 @@ pub fn endpoint_server_changed_subscribe(
         move || {
             async move {
                 let issues_and_diags_op = subscribe_issues_and_diags_operation(endpoint, issues);
-                let result = issues_and_diags_op.read_strongly_consistent().await?;
-                result.effects.apply().await?;
-                Ok(result)
+                read_strongly_consistent_and_apply_effects(issues_and_diags_op, |v| &v.effects)
+                    .await
             }
             .instrument(tracing::info_span!("server changes subscription"))
         },

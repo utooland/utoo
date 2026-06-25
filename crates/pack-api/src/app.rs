@@ -34,10 +34,7 @@ use turbopack_core::{
     },
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
-    resolve::{
-        origin::{PlainResolveOrigin, ResolveOriginExt},
-        parse::Request,
-    },
+    resolve::{origin::PlainResolveOrigin, parse::Request},
 };
 
 use crate::{
@@ -135,14 +132,17 @@ impl AppEntrypoint {
         let origin = PlainResolveOrigin::new(
             asset_context,
             self.project().project_path().await?.join("_")?,
-        );
+        )
+        .await?;
+        let resolve_options = origin.resolve_options();
+        let asset_context = origin.asset_context();
+        let origin_path = origin.origin_path();
 
         let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
 
         Ok(Vc::cell(
-            origin
-                .resolve_asset(entry_request, origin.resolve_options(), ty)
-                .await?
+            asset_context
+                .resolve_asset(origin_path, entry_request, resolve_options, ty)
                 .await?
                 .primary_modules()
                 .await?,
@@ -470,7 +470,7 @@ impl Endpoint for AppEndpoint {
             .try_join()
             .await?;
 
-        Ok(Vc::cell(entries))
+        Ok(GraphEntries::from_chunk_groups(entries).cell())
     }
 
     #[turbo_tasks::function]
@@ -652,11 +652,14 @@ impl AppEndpoint {
             let origin = PlainResolveOrigin::new(
                 server_asset_context,
                 project.project_path().await?.join("_")?,
-            );
+            )
+            .await?;
+            let resolve_options = origin.resolve_options();
+            let asset_context = origin.asset_context();
+            let origin_path = origin.origin_path();
             let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
-            let modules = origin
-                .resolve_asset(entry_request, origin.resolve_options(), ty)
-                .await?
+            let modules = asset_context
+                .resolve_asset(origin_path, entry_request, resolve_options, ty)
                 .await?
                 .primary_modules()
                 .await?;
