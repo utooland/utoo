@@ -103,6 +103,32 @@ if ! diff -q package-lock.baseline.json package-lock.json >/dev/null; then
 fi
 rm -f package-lock.baseline.json
 echo -e "${GREEN}PASS: ant-design add/remove keeps the tree stable (byte-identical round-trip)${NC}"
+
+# Cold resolution must be deterministic: the same package.json resolved twice
+# from scratch (no lockfile to seed) must produce a byte-identical lockfile.
+# A regression here means placement depends on manifest arrival order again —
+# whichever dependent's fetch lands first claims the contested hoisted slot — so
+# the same manifest resolves to different versions run to run. That's what made
+# `utoo update` re-pick versions and re-download the whole store every time, and
+# left node_modules permanently out of sync with the lock. ant-design's tree has
+# enough conflicting transitive ranges (e.g. @ctrl/tinycolor 3 vs 4) to surface
+# it reliably. Two consecutive cold `utoo deps` runs see the same registry
+# state, so byte-identical is the right assertion regardless of registry drift.
+echo -e "${YELLOW}Case 2c: ant-design cold resolution is deterministic${NC}"
+cp package-lock.json package-lock.keep.json
+rm -f package-lock.json
+utoo deps >/dev/null || { echo -e "${RED}FAIL: cold resolve #1 failed (ant-design)${NC}"; exit 1; }
+cp package-lock.json package-lock.cold1.json
+rm -f package-lock.json
+utoo deps >/dev/null || { echo -e "${RED}FAIL: cold resolve #2 failed (ant-design)${NC}"; exit 1; }
+if ! diff -q package-lock.cold1.json package-lock.json >/dev/null; then
+  echo -e "${RED}FAIL: two cold resolves differ — placement is arrival-order dependent again${NC}"
+  diff package-lock.cold1.json package-lock.json | head -40
+  exit 1
+fi
+rm -f package-lock.cold1.json
+mv package-lock.keep.json package-lock.json
+echo -e "${GREEN}PASS: ant-design cold resolution is deterministic (byte-identical)${NC}"
 cd ../../
 
 # Case 3: antd-test project install
