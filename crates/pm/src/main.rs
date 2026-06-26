@@ -18,6 +18,7 @@ use crate::util::cli_enum::{ConfigScope, ScriptPolicy};
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use crate::util::user_config::{
     init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit,
+    set_script_concurrency_limit,
 };
 
 mod cli;
@@ -140,10 +141,10 @@ async fn async_main() -> Result<()> {
         set_legacy_peer_deps(cli.legacy_peer_deps);
     }
 
-    // set manifests concurrency limit if specified
-    if cli.manifests_concurrency_limit.is_some() {
-        set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
-    }
+    // Concurrency limits — the setters ignore `None`, so passing the CLI option
+    // straight through applies an override only when one was given.
+    set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
+    set_script_concurrency_limit(cli.script_concurrency_limit);
 
     // Auto update: check cache → update or refresh in background
     init_auto_update().await;

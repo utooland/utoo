@@ -62,6 +62,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         opts.package_info,
         LifecycleHook::PrepublishOnly,
         ScriptOutput::Verbose,
+        None,
     )
     .await?;
 
@@ -139,12 +140,14 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         opts.package_info,
         LifecycleHook::Publish,
         ScriptOutput::Verbose,
+        None,
     )
     .await?;
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::Postpublish,
         ScriptOutput::Verbose,
+        None,
     )
     .await?;
 

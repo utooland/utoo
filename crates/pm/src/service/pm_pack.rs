@@ -51,8 +51,13 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         anyhow::bail!("Missing 'version' field in package.json");
     }
 
-    ScriptService::execute_script(&package_info, LifecycleHook::Prepack, ScriptOutput::Verbose)
-        .await?;
+    ScriptService::execute_script(
+        &package_info,
+        LifecycleHook::Prepack,
+        ScriptOutput::Verbose,
+        None,
+    )
+    .await?;
 
     // npm/pnpm pack the post-`prepack` manifest, and the script may have
     // rewritten package.json (version bump, stripped fields). The `pkg` above
@@ -102,6 +107,7 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
         &package_info,
         LifecycleHook::Postpack,
         ScriptOutput::Verbose,
+        None,
     )
     .await?;
 
