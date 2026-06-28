@@ -17,14 +17,14 @@ use crate::service::oidc;
 pub const SIGSTORE_AUDIENCE: &str = "sigstore";
 
 const SLSA_PREDICATE_TYPE: &str = "https://slsa.dev/provenance/v1";
-const INTOTO_STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
+const IN_TOTO_STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 const GHA_BUILD_TYPE: &str = "https://github.com/npm/cli/gha/v2";
 const GITLAB_BUILD_TYPE: &str = "https://github.com/npm/cli/gitlab/v0";
 
 /// The in-toto subject a provenance statement attests to: the published
 /// tarball, identified by its package purl and SHA-512 digest.
 pub struct Subject {
-    /// Package URL, e.g. `pkg:npm/%40scope%2Fpkg@1.0.0`.
+    /// Package URL, e.g. `pkg:npm/%40scope/pkg@1.0.0`.
     pub name: String,
     /// Lowercase hex SHA-512 of the tarball bytes.
     pub sha512_hex: String,
@@ -53,7 +53,7 @@ pub struct BuildContext {
 /// Assemble the in-toto Statement wrapping `subject` and `predicate`.
 pub fn build_statement(subject: &Subject, predicate: &Value) -> Value {
     json!({
-        "_type": INTOTO_STATEMENT_TYPE,
+        "_type": IN_TOTO_STATEMENT_TYPE,
         "subject": [{
             "name": subject.name,
             "digest": { "sha512": subject.sha512_hex },
@@ -156,7 +156,10 @@ fn gitlab_ci_predicate() -> Value {
     let var = |k: &str| env::var(k).unwrap_or_default();
     let server_url = var("CI_SERVER_URL");
     let project_path = var("CI_PROJECT_PATH");
-    let git_ref = var("CI_COMMIT_REF_NAME");
+    // `CI_COMMIT_REF_NAME` is the bare branch/tag name; resolve the fully
+    // qualified ref (`refs/tags/…` on a tag pipeline, `refs/heads/…` otherwise)
+    // so the provenance ref/URI match what verifiers expect.
+    let git_ref = gitlab_full_ref(&var("CI_COMMIT_TAG"), &var("CI_COMMIT_REF_NAME"));
     let sha = var("CI_COMMIT_SHA");
     let pipeline_id = var("CI_PIPELINE_ID");
     let job_url = var("CI_JOB_URL");
@@ -178,7 +181,7 @@ fn gitlab_ci_predicate() -> Value {
                 },
             },
             "resolvedDependencies": [{
-                "uri": format!("git+{server_url}/{project_path}@refs/heads/{git_ref}"),
+                "uri": format!("git+{server_url}/{project_path}@{git_ref}"),
                 "digest": { "gitCommit": sha },
             }],
         },
@@ -189,13 +192,30 @@ fn gitlab_ci_predicate() -> Value {
     })
 }
 
-/// Percent-encode a package name for a purl, encoding `@` and `/` (the scope
-/// separators) so `@scope/pkg` becomes `%40scope%2Fpkg`.
+/// Resolve a GitLab pipeline's fully qualified git ref. `CI_COMMIT_TAG` is set
+/// only on tag pipelines (→ `refs/tags/<tag>`); otherwise the ref is the branch
+/// `CI_COMMIT_REF_NAME` (→ `refs/heads/<branch>`). An empty ref name yields an
+/// empty string rather than a dangling `refs/heads/`.
+fn gitlab_full_ref(commit_tag: &str, ref_name: &str) -> String {
+    if !commit_tag.is_empty() {
+        format!("refs/tags/{commit_tag}")
+    } else if !ref_name.is_empty() {
+        format!("refs/heads/{ref_name}")
+    } else {
+        String::new()
+    }
+}
+
+/// Percent-encode a package name for a purl. Per the package-url spec (and
+/// npm-package-arg's `toPurl`), the leading `@` of a scoped name becomes `%40`
+/// while the `/` scope separator stays literal, so `@scope/pkg` becomes
+/// `%40scope/pkg` — the canonical form (`pkg:npm/%40scope/pkg@…`) registries
+/// verify against.
 fn purl_encode_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     for b in name.bytes() {
         match b {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
                 out.push(b as char)
             }
             other => out.push_str(&format!("%{other:02X}")),
@@ -211,22 +231,32 @@ mod tests {
     #[test]
     fn purl_encodes_scoped_name() {
         assert_eq!(purl_encode_name("lodash"), "lodash");
-        assert_eq!(purl_encode_name("@scope/pkg"), "%40scope%2Fpkg");
-        assert_eq!(purl_encode_name("@a-b/c.d_e"), "%40a-b%2Fc.d_e");
+        assert_eq!(purl_encode_name("@scope/pkg"), "%40scope/pkg");
+        assert_eq!(purl_encode_name("@a-b/c.d_e"), "%40a-b/c.d_e");
     }
 
     #[test]
     fn subject_builds_purl() {
         let s = Subject::new("@scope/pkg", "1.2.3", "abc".into());
-        assert_eq!(s.name, "pkg:npm/%40scope%2Fpkg@1.2.3");
+        assert_eq!(s.name, "pkg:npm/%40scope/pkg@1.2.3");
         assert_eq!(s.sha512_hex, "abc");
+    }
+
+    #[test]
+    fn gitlab_full_ref_resolves_tag_and_branch() {
+        // Tag pipeline: CI_COMMIT_TAG takes precedence.
+        assert_eq!(gitlab_full_ref("v1.0.0", "v1.0.0"), "refs/tags/v1.0.0");
+        // Branch pipeline: no tag, fall back to the branch ref name.
+        assert_eq!(gitlab_full_ref("", "main"), "refs/heads/main");
+        // Nothing set: empty rather than a dangling `refs/heads/`.
+        assert_eq!(gitlab_full_ref("", ""), "");
     }
 
     #[test]
     fn statement_has_required_shape() {
         let subject = Subject::new("pkg", "1.0.0", "deadbeef".into());
         let stmt = build_statement(&subject, &json!({ "buildDefinition": {} }));
-        assert_eq!(stmt["_type"], INTOTO_STATEMENT_TYPE);
+        assert_eq!(stmt["_type"], IN_TOTO_STATEMENT_TYPE);
         assert_eq!(stmt["predicateType"], SLSA_PREDICATE_TYPE);
         assert_eq!(stmt["subject"][0]["name"], "pkg:npm/pkg@1.0.0");
         assert_eq!(stmt["subject"][0]["digest"]["sha512"], "deadbeef");

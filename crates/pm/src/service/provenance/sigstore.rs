@@ -23,10 +23,22 @@ use sha2::{Digest, Sha256};
 
 use crate::util::http::client;
 
-const FULCIO_URL: &str = "https://fulcio.sigstore.dev/api/v2/signingCert";
-const REKOR_URL: &str = "https://rekor.sigstore.dev/api/v1/log/entries";
+/// Public-good Fulcio signing-cert endpoint. Override with `SIGSTORE_FULCIO_URL`
+/// to target staging (`fulcio.sigstage.dev`) or a private instance.
+const DEFAULT_FULCIO_URL: &str = "https://fulcio.sigstore.dev/api/v2/signingCert";
+/// Public-good Rekor log-entry endpoint. Override with `SIGSTORE_REKOR_URL`.
+const DEFAULT_REKOR_URL: &str = "https://rekor.sigstore.dev/api/v1/log/entries";
 const DSSE_PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
 const BUNDLE_MEDIA_TYPE: &str = "application/vnd.dev.sigstore.bundle.v0.3+json";
+
+/// Resolve a Sigstore endpoint from `env_key`, falling back to `default` when
+/// the override is unset or empty.
+fn sigstore_url(env_key: &str, default: &str) -> String {
+    std::env::var(env_key)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
 
 /// DER SubjectPublicKeyInfo prefix for an uncompressed NIST P-256 public key.
 /// The 65-byte point (`0x04 ‖ X ‖ Y`) is appended to form the full SPKI.
@@ -146,7 +158,7 @@ async fn fulcio_signing_cert(
     });
 
     let resp = client()?
-        .post(FULCIO_URL)
+        .post(sigstore_url("SIGSTORE_FULCIO_URL", DEFAULT_FULCIO_URL))
         .json(&body)
         .send()
         .await
@@ -193,7 +205,7 @@ async fn rekor_create_entry(envelope: &Value, leaf_pem: &str) -> Result<Value> {
     });
 
     let resp = client()?
-        .post(REKOR_URL)
+        .post(sigstore_url("SIGSTORE_REKOR_URL", DEFAULT_REKOR_URL))
         .json(&proposed)
         .send()
         .await
