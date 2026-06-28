@@ -68,6 +68,13 @@ async fn publish_one(
     mode: RunMode,
     otp: Option<&str>,
 ) -> Result<()> {
+    // Run each publish from inside its own package directory, matching the
+    // single-package flow (`update_cwd_to_project`). The filtered path anchors
+    // resolution at the workspace root, so without this every member would
+    // otherwise publish with the cwd left at the root — breaking cwd-relative
+    // config and `INIT_CWD` for lifecycle scripts.
+    std::env::set_current_dir(package_root)
+        .with_context(|| format!("Failed to change directory to {}", package_root.display()))?;
     let pkg = get_or_load_package_json(package_root).await?;
 
     let meta = PublishMeta::from_package_json(&pkg);
