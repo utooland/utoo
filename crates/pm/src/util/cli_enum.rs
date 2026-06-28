@@ -94,29 +94,16 @@ impl From<bool> for RunMode {
 /// Mirrors `npm publish --access <public|restricted>`. utoo historically only
 /// supported `public`; `restricted` is accepted for scoped packages on
 /// registries that support private publishing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+///
+/// Single source of truth — strum derives the enum↔string conversions; the
+/// `public`/`restricted` spellings come from the variant names via
+/// `serialize_all` (and clap's `rename_all` for the `--access` flag).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, strum::EnumString, strum::IntoStaticStr,
+)]
 #[clap(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum PublishAccess {
     Public,
     Restricted,
-}
-
-impl PublishAccess {
-    /// The wire value sent to the registry in the publish payload.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Public => "public",
-            Self::Restricted => "restricted",
-        }
-    }
-
-    /// Parse an access value from `publishConfig.access` in package.json.
-    /// Returns `None` for unknown values so callers can report them.
-    pub fn from_config_str(s: &str) -> Option<Self> {
-        match s {
-            "public" => Some(Self::Public),
-            "restricted" => Some(Self::Restricted),
-            _ => None,
-        }
-    }
 }

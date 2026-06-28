@@ -99,7 +99,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         integrity: &pack_result.integrity,
         tarball_data,
         registry: opts.registry,
-        access: Some(opts.access.as_str()),
+        access: Some(opts.access.into()),
     });
 
     tracing::info!("Publishing to {} with tag {}", opts.registry, opts.tag);

@@ -109,7 +109,9 @@ impl PublishMeta {
             return Ok(access);
         }
         match self.publish_config.access.as_deref() {
-            Some(value) => PublishAccess::from_config_str(value).ok_or_else(|| {
+            // Parse via strum's derived `FromStr`; the accepted spellings live
+            // solely on the enum (mirrors `LifecycleHook`).
+            Some(value) => value.parse::<PublishAccess>().map_err(|_| {
                 anyhow::anyhow!(
                     "invalid 'publishConfig.access' value \"{value}\": \
                      expected \"public\" or \"restricted\""
