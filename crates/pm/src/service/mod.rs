@@ -32,6 +32,7 @@ pub mod oidc;
 pub mod package;
 pub mod package_management;
 pub mod pm_pack;
+pub mod provenance;
 pub mod publish;
 pub mod publish_manifest;
 pub mod rebuild;

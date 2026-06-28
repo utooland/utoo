@@ -121,6 +121,19 @@ impl PublishMeta {
         }
     }
 
+    /// Whether to attach a provenance attestation.
+    ///
+    /// Enabled by the CLI `--provenance` flag, `publishConfig.provenance: true`,
+    /// or `NPM_CONFIG_PROVENANCE=true` (matching npm/pnpm).
+    pub fn resolve_provenance(&self, cli_provenance: bool) -> bool {
+        cli_provenance
+            || self.publish_config.provenance == Some(true)
+            || matches!(
+                env::var("NPM_CONFIG_PROVENANCE").ok().as_deref(),
+                Some("true" | "1")
+            )
+    }
+
     /// Resolve the publish tag: CLI flag > publishConfig.tag > "latest".
     ///
     /// Rejects pre-release versions using the default `latest` tag to prevent
@@ -391,5 +404,16 @@ mod tests {
         // An unknown publishConfig.access value is rejected.
         meta.publish_config.access = Some("secret".into());
         assert!(meta.resolve_access(None).is_err());
+    }
+
+    #[test]
+    fn resolve_provenance_from_cli_and_config() {
+        let mut meta = PublishMeta::default();
+        assert!(!meta.resolve_provenance(false));
+        // CLI flag enables it.
+        assert!(meta.resolve_provenance(true));
+        // publishConfig.provenance enables it without the flag.
+        meta.publish_config.provenance = Some(true);
+        assert!(meta.resolve_provenance(false));
     }
 }
