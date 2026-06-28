@@ -211,8 +211,33 @@ async fn async_main() -> Result<()> {
             cmd::pm_pack::pack(path, dry_run.into()).await?;
             log_time_end("Pack complete");
         }
-        Some(Commands::Publish { tag, dry_run, otp }) => {
-            cmd::publish::publish(tag.as_deref(), dry_run.into(), otp.as_deref()).await?;
+        Some(Commands::Publish {
+            tag,
+            dry_run,
+            otp,
+            access,
+            provenance,
+            // utoo performs no Git cleanliness checks, so `--no-git-checks` is a
+            // documented no-op accepted for pnpm/npm compatibility.
+            no_git_checks: _,
+        }) => {
+            // `--filter` selects workspace member(s); empty means the current
+            // package. `--workspaces` is intentionally NOT honored here to avoid
+            // an accidental publish of every member.
+            let filter = if cli.filter.is_empty() {
+                WorkspaceFilter::Current
+            } else {
+                WorkspaceFilter::Selected(cli.filter)
+            };
+            cmd::publish::publish(
+                tag.as_deref(),
+                dry_run.into(),
+                otp.as_deref(),
+                access,
+                provenance,
+                filter,
+            )
+            .await?;
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

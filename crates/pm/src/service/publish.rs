@@ -33,7 +33,9 @@ use crate::model::publish_payload::{PublishPayload, PublishPayloadInput};
 use crate::service::auth;
 use crate::service::oidc;
 use crate::service::pm_pack;
+use crate::service::provenance;
 use crate::service::script::{ScriptOutput, ScriptService};
+use crate::util::cli_enum::PublishAccess;
 use crate::util::format_print::print_pack_details;
 use crate::util::integrity::compute_shasum;
 
@@ -44,6 +46,10 @@ pub struct PublishOptions<'a> {
     pub tag: &'a str,
     pub mode: RunMode,
     pub otp: Option<&'a str>,
+    /// Registry visibility (`public`/`restricted`) for the published package.
+    pub access: PublishAccess,
+    /// Whether to generate and attach a signed provenance attestation.
+    pub provenance: bool,
 }
 
 /// Result returned to the cmd layer after a successful publish.
@@ -78,6 +84,18 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         });
     }
 
+    // Generate a signed provenance attestation when requested. Live publishes
+    // only: dry-run returns above so it never writes to the public Rekor log.
+    let provenance_bundle = if opts.provenance {
+        Some(
+            provenance::generate(&pack_result.name, &pack_result.version, tarball_data)
+                .await
+                .context("failed to generate provenance attestation")?,
+        )
+    } else {
+        None
+    };
+
     // Prefer OIDC trusted publishing when running in a supported CI (no
     // long-lived token needed); fall back to a configured token otherwise.
     let token = match oidc::try_mint_publish_token(opts.registry, &pack_result.name).await {
@@ -96,7 +114,8 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         integrity: &pack_result.integrity,
         tarball_data,
         registry: opts.registry,
-        access: Some("public"),
+        access: Some(opts.access.as_str()),
+        provenance: provenance_bundle.as_ref(),
     });
 
     tracing::info!("Publishing to {} with tag {}", opts.registry, opts.tag);
