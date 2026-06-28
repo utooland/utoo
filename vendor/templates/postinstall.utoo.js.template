@@ -76,6 +76,16 @@ function rmQuiet(p) {
   }
 }
 
+// True when `dir` is an npm global prefix: npm links a package's bins into the
+// prefix root before postinstall runs, so the launcher shims for `utoo` are
+// already there. A local install puts bins under node_modules/.bin instead, so
+// the project root (which is what prefixDir resolves to) has none of these.
+function hasGlobalShims(dir) {
+  return ["utoo", "utoo.cmd", "utoo.ps1"].some((s) =>
+    fs.existsSync(path.join(dir, s)),
+  );
+}
+
 // Windows: place the PE binary as `<name>.exe` in the npm prefix and drop the
 // shims npm generated for the placeholder. PATHEXT resolves `<name>` to
 // `<name>.exe` ahead of any leftover `<name>.cmd`, so this is robust even when
@@ -100,28 +110,40 @@ function main() {
   const binDir = path.join(__dirname, "bin");
   fs.mkdirSync(binDir, { recursive: true });
   const destBin = path.join(binDir, BIN);
-  fs.copyFileSync(srcBin, destBin);
-  try {
-    fs.chmodSync(destBin, 0o755);
-  } catch {
-    /* chmod is a no-op / may fail on Windows */
+
+  if (os !== "win32") {
+    // POSIX: overwrite the placeholder with the native binary. npm's symlink
+    // shim then resolves straight to it.
+    fs.copyFileSync(srcBin, destBin);
+    try {
+      fs.chmodSync(destBin, 0o755);
+    } catch {
+      /* chmod is a no-op / may fail */
+    }
+    return;
   }
 
-  if (os !== "win32") return;
+  // Windows: keep the JS placeholder at bin/utoo and drop the native binary
+  // alongside it as bin/utoo.exe. The placeholder execs the sibling exe, so a
+  // local install works too — overwriting bin/utoo with the PE would make npm's
+  // `node bin/utoo` shim try to run a binary as JavaScript.
+  const localExe = destBin + ".exe";
+  fs.copyFileSync(srcBin, localExe);
 
-  // This script lives at <prefix>/node_modules/utoo, so the npm prefix root
-  // (where global shims are written) is two levels up.
+  // Global install only: npm writes the launcher shims into the prefix root
+  // before postinstall runs, so replace them with the native exe to drop the
+  // node wrapper. For a local install prefixDir is the project root and no such
+  // shims exist there — skip, so we never pollute it.
   const prefixDir = path.resolve(__dirname, "..", "..");
+  if (!hasGlobalShims(prefixDir)) return;
   try {
-    winInstallExe(prefixDir, "utoo", destBin);
-    winInstallExe(prefixDir, "ut", destBin); // `ut` is an alias for `utoo`
+    winInstallExe(prefixDir, "utoo", localExe);
+    winInstallExe(prefixDir, "ut", localExe); // `ut` is an alias for `utoo`
     // utx → `utoo x ...`
     fs.writeFileSync(path.join(prefixDir, "utx.cmd"), "@utoo.exe x %*\r\n");
     rmQuiet(path.join(prefixDir, "utx"));
     rmQuiet(path.join(prefixDir, "utx.ps1"));
   } catch (err) {
-    // Non-global layout (e.g. a local install) has no such prefix; the bin/utoo
-    // copy above still lets npm's generated shim find the binary.
     console.error(`utoo: could not finalize Windows prefix shims: ${err.message}`);
   }
 }

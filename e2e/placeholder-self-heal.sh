@@ -240,30 +240,48 @@ rc4b=$(cat "$SANDBOX/last_rc")
 assert_contains "second attempt: real binary"  "STUB argv[1]=second-attempt" "$out4b"
 teardown_sandbox
 
-#------------------------------------------------------------------------------
-# Test 5: Windows code path (UTOO_TARGET_OS override). Lay out a global-style
-# prefix (<prefix>/node_modules/utoo/bin/utoo) and force win32 detection so the
-# placeholder's prefix-shim path runs on this POSIX host. It must drop
-# utoo.exe / ut.exe / utx.cmd into the prefix root and run the exe.
-#------------------------------------------------------------------------------
-printf '\n== windows prefix path (override) ==\n'
-SANDBOX=$(mktemp -d)
-REGISTRY_DIR="$SANDBOX/registry"
-PREFIX="$SANDBOX/prefix"
-WIN_PKG_DIR="$PREFIX/node_modules/utoo"
-mkdir -p "$WIN_PKG_DIR/bin"
-cat > "$WIN_PKG_DIR/package.json" <<JSON
+# Common setup for the Windows-path tests: a <prefix>/node_modules/utoo/bin/utoo
+# layout plus a win32-x64 stub tarball in the registry. $is_global controls
+# whether npm's launcher shims exist in the prefix root, which is how the
+# placeholder distinguishes a global install (swap the prefix exe) from a local
+# one (drop bin/utoo.exe next to the placeholder, never touch the project root).
+setup_win_sandbox() {
+    is_global=$1
+    SANDBOX=$(mktemp -d)
+    REGISTRY_DIR="$SANDBOX/registry"
+    PREFIX="$SANDBOX/prefix"
+    WIN_PKG_DIR="$PREFIX/node_modules/utoo"
+    mkdir -p "$WIN_PKG_DIR/bin"
+    cat > "$WIN_PKG_DIR/package.json" <<JSON
 {
   "name": "utoo",
   "version": "$VERSION"
 }
 JSON
-cp "$TEMPLATE" "$WIN_PKG_DIR/bin/utoo"
-chmod +x "$WIN_PKG_DIR/bin/utoo"
-publish_stub "utoo-win32-x64"
+    cp "$TEMPLATE" "$WIN_PKG_DIR/bin/utoo"
+    chmod +x "$WIN_PKG_DIR/bin/utoo"
+    if [ "$is_global" = "global" ]; then
+        # Simulate the shims npm writes into the prefix root for a global install.
+        for shim in utoo utoo.cmd utoo.ps1 ut ut.cmd ut.ps1 utx.ps1; do
+            : > "$PREFIX/$shim"
+        done
+    fi
+    publish_stub "utoo-win32-x64"
+}
 
-out5=$(UTOO_TARGET_OS=win32 UTOO_TARGET_ARCH=x64 UTOO_REGISTRY="file://$REGISTRY_DIR" \
-    node "$WIN_PKG_DIR/bin/utoo" win-arg 2>&1)
+run_win_placeholder() {
+    UTOO_TARGET_OS=win32 UTOO_TARGET_ARCH=x64 UTOO_REGISTRY="file://$REGISTRY_DIR" \
+        node "$WIN_PKG_DIR/bin/utoo" "$@" 2>&1
+}
+
+#------------------------------------------------------------------------------
+# Test 5: Windows GLOBAL install self-heal (UTOO_TARGET_OS override). With npm
+# shims present in the prefix root, the placeholder must drop
+# utoo.exe / ut.exe / utx.cmd into the prefix and run the exe.
+#------------------------------------------------------------------------------
+printf '\n== windows global prefix path (override) ==\n'
+setup_win_sandbox global
+out5=$(run_win_placeholder win-arg)
 rc5=$?
 
 [ "$rc5" = "0" ] && ok "exit 0" || ko "exit 0" "rc=$rc5"
@@ -276,6 +294,32 @@ if [ -f "$PREFIX/utx.cmd" ]; then
 else
     ko "utx.cmd in prefix" "missing $PREFIX/utx.cmd"
 fi
+rm -rf "$SANDBOX"
+
+#------------------------------------------------------------------------------
+# Test 6: Windows LOCAL install self-heal. Without npm shims in the prefix root
+# (a local `npm install` puts bins under node_modules/.bin), the placeholder
+# must drop bin/utoo.exe next to itself and run it — and must NOT pollute the
+# "project root" with utoo.exe / utx.cmd.
+#------------------------------------------------------------------------------
+printf '\n== windows local install path (override) ==\n'
+setup_win_sandbox local
+out6=$(run_win_placeholder local-arg)
+rc6=$?
+
+[ "$rc6" = "0" ] && ok "exit 0" || ko "exit 0" "rc=$rc6"
+assert_contains "win local: bootstrap reached" "bootstrapping" "$out6"
+assert_contains "win local: real binary args"  "STUB argv[1]=local-arg" "$out6"
+[ -f "$WIN_PKG_DIR/bin/utoo.exe" ] && ok "native exe placed next to placeholder" \
+    || ko "bin/utoo.exe present" "missing $WIN_PKG_DIR/bin/utoo.exe"
+[ ! -e "$PREFIX/utoo.exe" ] && ok "project root not polluted with utoo.exe" \
+    || ko "no project-root pollution" "unexpected $PREFIX/utoo.exe"
+[ ! -e "$PREFIX/utx.cmd" ] && ok "project root not polluted with utx.cmd" \
+    || ko "no project-root pollution" "unexpected $PREFIX/utx.cmd"
+# A second invocation must exec the sibling exe directly (no re-bootstrap).
+out6b=$(run_win_placeholder again-local)
+assert_contains "win local: reuses sibling exe" "STUB argv[1]=again-local" "$out6b"
+assert_not_contains "win local: no re-bootstrap" "bootstrapping" "$out6b"
 rm -rf "$SANDBOX"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

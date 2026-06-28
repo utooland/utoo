@@ -78,7 +78,15 @@ function download(url, dest) {
       return;
     }
     const lib = url.startsWith("https:") ? require("https") : require("http");
+    let out;
+    // Destroy the write stream on any failure so its file handle is released —
+    // otherwise the temp-dir cleanup in main() fails with EBUSY on Windows.
+    const done = (ok) => {
+      if (out) out.destroy();
+      resolve(ok);
+    };
     const req = lib.get(url, { timeout: 120000 }, (res) => {
+      res.on("error", () => done(false));
       const { statusCode, headers } = res;
       if (statusCode >= 300 && statusCode < 400 && headers.location) {
         res.resume();
@@ -90,16 +98,16 @@ function download(url, dest) {
         resolve(false);
         return;
       }
-      const out = fs.createWriteStream(dest);
+      out = fs.createWriteStream(dest);
       res.pipe(out);
       out.on("finish", () => out.close(() => resolve(true)));
-      out.on("error", () => resolve(false));
+      out.on("error", () => done(false));
     });
     req.on("timeout", () => {
       req.destroy();
-      resolve(false);
+      done(false);
     });
-    req.on("error", () => resolve(false));
+    req.on("error", () => done(false));
   });
 }
 
@@ -109,8 +117,29 @@ function run(bin) {
   process.exit(r.status === null ? 1 : r.status);
 }
 
+// True when SELF_DIR's package is installed into an npm global prefix (the
+// launcher shims sit in the prefix root, 3 levels up). A local install keeps
+// its bins under node_modules/.bin, so the project root has none of these.
+function hasGlobalShims(prefixDir) {
+  return ["utoo", "utoo.cmd", "utoo.ps1"].some((s) =>
+    fs.existsSync(path.join(prefixDir, s)),
+  );
+}
+
 async function main() {
   const { os: osName, arch } = detect();
+
+  // Windows: if the native binary is already next to us (a local install had
+  // postinstall drop it as bin/utoo.exe), exec it directly. The JS placeholder
+  // is just the wrapper that makes npm's `node bin/utoo` shim work.
+  if (osName === "win32") {
+    const localExe = path.join(SELF_DIR, `${BIN}.exe`);
+    if (fs.existsSync(localExe)) {
+      run(localExe);
+      return;
+    }
+  }
+
   const pkg = `${BIN}-${osName}-${arch}`;
 
   const version = readVersion(SELF_DIR);
@@ -154,29 +183,41 @@ async function main() {
     if (osName === "win32") {
       // SELF_DIR is <prefix>/node_modules/utoo/bin → prefix root is 3 up.
       const prefixDir = path.resolve(SELF_DIR, "..", "..", "..");
-      const place = (name) => {
-        try {
-          fs.copyFileSync(srcBin, path.join(prefixDir, name + ".exe"));
-        } catch {
-          /* best effort */
-        }
-        for (const ext of ["", ".cmd", ".ps1"]) {
+      if (hasGlobalShims(prefixDir)) {
+        // Global install: drop the exe into the prefix and remove npm's shims
+        // so `utoo` runs the native binary directly.
+        const place = (name) => {
           try {
-            fs.rmSync(path.join(prefixDir, name + ext), { force: true });
+            fs.copyFileSync(srcBin, path.join(prefixDir, name + ".exe"));
           } catch {
             /* best effort */
           }
+          for (const ext of ["", ".cmd", ".ps1"]) {
+            try {
+              fs.rmSync(path.join(prefixDir, name + ext), { force: true });
+            } catch {
+              /* best effort */
+            }
+          }
+        };
+        place("utoo");
+        place("ut");
+        try {
+          fs.writeFileSync(path.join(prefixDir, "utx.cmd"), "@utoo.exe x %*\r\n");
+        } catch {
+          /* best effort */
         }
-      };
-      place("utoo");
-      place("ut");
-      try {
-        fs.writeFileSync(path.join(prefixDir, "utx.cmd"), "@utoo.exe x %*\r\n");
-      } catch {
-        /* best effort */
+        fs.rmSync(tmp, { recursive: true, force: true });
+        run(path.join(prefixDir, "utoo.exe"));
+        return;
       }
+      // Local install: keep this placeholder as the wrapper and drop the native
+      // binary next to it as bin/utoo.exe (which this script execs on the next
+      // run, and right now). Never touch the project root.
+      const localExe = path.join(SELF_DIR, `${BIN}.exe`);
+      fs.copyFileSync(srcBin, localExe);
       fs.rmSync(tmp, { recursive: true, force: true });
-      run(path.join(prefixDir, "utoo.exe"));
+      run(localExe);
       return;
     }
 
