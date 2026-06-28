@@ -2043,4 +2043,49 @@ rm -rf "$BMC_DIR"
 trap - EXIT
 echo -e "${GREEN}PASS: bundled binary-mirror-config applied${NC}"
 
+# ---------------------------------------------------------------------------
+# Case: `utoo --filter <pkg> publish` from a workspace root resolves the member
+# and rewrites its `workspace:`/`catalog:` specifiers to concrete versions.
+# Runs fully in --dry-run (no registry needed).
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}Case: workspace --filter publish (dry-run resolves protocols)${NC}"
+WSP_DIR=$(mktemp -d)
+trap 'rm -rf "$WSP_DIR"' EXIT
+mkdir -p "$WSP_DIR/packages/lib" "$WSP_DIR/packages/app"
+cat > "$WSP_DIR/package.json" << 'EOF'
+{ "name": "wsp-root", "private": true, "workspaces": ["packages/*"] }
+EOF
+cat > "$WSP_DIR/.utoo.toml" << 'EOF'
+[catalog]
+lodash = "^4.17.21"
+EOF
+cat > "$WSP_DIR/packages/lib/package.json" << 'EOF'
+{ "name": "@wsp/lib", "version": "1.2.3" }
+EOF
+cat > "$WSP_DIR/packages/app/package.json" << 'EOF'
+{
+  "name": "@wsp/app",
+  "version": "0.5.0",
+  "dependencies": { "@wsp/lib": "workspace:^", "lodash": "catalog:" }
+}
+EOF
+pushd "$WSP_DIR"
+utoo --filter @wsp/app publish --tag beta --dry-run 2>&1 \
+  | tee wsp.out \
+  || { echo -e "${RED}FAIL: filtered publish dry-run errored${NC}"; cat wsp.out; exit 1; }
+if ! grep -q '@wsp/lib: workspace:\^ -> \^1.2.3' wsp.out; then
+    echo -e "${RED}FAIL: workspace: specifier not resolved to ^1.2.3${NC}"; cat wsp.out; exit 1
+fi
+if ! grep -q 'lodash: catalog: -> \^4.17.21' wsp.out; then
+    echo -e "${RED}FAIL: catalog: specifier not resolved to ^4.17.21${NC}"; cat wsp.out; exit 1
+fi
+if ! grep -q "Would publish @wsp/app@0.5.0" wsp.out; then
+    echo -e "${RED}FAIL: filtered package @wsp/app was not selected${NC}"; cat wsp.out; exit 1
+fi
+rm -f wsp.out
+popd
+rm -rf "$WSP_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: workspace --filter publish resolves protocols${NC}"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

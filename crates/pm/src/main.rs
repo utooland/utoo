@@ -212,7 +212,15 @@ async fn async_main() -> Result<()> {
             log_time_end("Pack complete");
         }
         Some(Commands::Publish { tag, dry_run, otp }) => {
-            cmd::publish::publish(tag.as_deref(), dry_run.into(), otp.as_deref()).await?;
+            // `--filter` selects workspace member(s); empty means the current
+            // package. `--workspaces` is intentionally NOT honored here to avoid
+            // an accidental publish of every member.
+            let filter = if cli.filter.is_empty() {
+                WorkspaceFilter::Current
+            } else {
+                WorkspaceFilter::Selected(cli.filter)
+            };
+            cmd::publish::publish(tag.as_deref(), dry_run.into(), otp.as_deref(), filter).await?;
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

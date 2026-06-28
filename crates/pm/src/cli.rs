@@ -74,6 +74,12 @@ pub struct Cli {
     #[arg(long, global = true, hide = true, default_value = "false")]
     pub workspaces: bool,
 
+    /// Select workspace package(s) by name, relative path, or glob pattern
+    /// (repeatable). Lets `publish` target a member from the workspace root,
+    /// e.g. `ut --filter @scope/pkg publish`. Mirrors `pnpm --filter`.
+    #[arg(long, global = true, num_args = 1, value_name = "PKG")]
+    pub filter: Vec<String>,
+
     pub script_name: Option<String>,
 
     /// Arguments to pass to the script when running without explicit subcommand
