@@ -1,5 +1,5 @@
 #!/bin/sh
-# E2E test for vendor/templates/placeholder.utoo.sh.template self-heal flow.
+# E2E test for vendor/templates/placeholder.utoo.js.template self-heal flow.
 #
 # Stages a fake utoo package (placeholder as bin/utoo + package.json), a
 # fake registry directory holding a tarball with a stub "real" binary, and
@@ -8,19 +8,23 @@
 #
 # Verifies the contract a user actually depends on:
 #   1. Happy path: placeholder downloads, atomic-renames onto bin/utoo,
-#      exec's the real binary, args pass through with boundaries intact.
+#      runs the real binary, args pass through with boundaries intact.
 #   2. Idempotency: a second invocation skips bootstrap and runs the real
 #      binary directly (proves the placeholder was actually replaced).
 #   3. npm-style symlink shim: invoking through a relative symlink (what
-#      npm creates for global bins) resolves $0 correctly so the
+#      npm creates for global bins) resolves the module path correctly so the
 #      package.json walk-up finds the right root.
 #   4. Failure recovery: registry unreachable → exit non-zero, placeholder
 #      stays in place untouched, next invocation with a working registry
-#      succeeds. The "permanent dead end" failure mode this PR fixes.
+#      succeeds. A failed bootstrap must not be a permanent dead end.
+#   5. Windows code path (via UTOO_TARGET_OS=win32 override): the placeholder
+#      drops utoo.exe/ut.exe/utx.cmd into the npm prefix root and runs the exe.
+#      Exercised from a POSIX host so it has CI coverage without a Windows box.
 #
-# Skipped on Windows: the placeholder is a POSIX sh script that in
-# production is bypassed by a Windows .cmd shim; OS detection for the
-# Windows code paths is covered by postinstall-os-detect.sh.
+# The placeholder is now Node (cross-platform); this harness is POSIX and the
+# direct-invoke layout in Tests 1-4 is not a real global prefix, so the script
+# still skips on a real Windows host. Real end-to-end Windows coverage lives in
+# e2e/utoo-pm.ps1 ("npm i -g via real templates").
 
 set -u
 
@@ -31,8 +35,13 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
         ;;
 esac
 
+if ! command -v node >/dev/null 2>&1; then
+    printf 'node is required for the placeholder self-heal e2e\n' >&2
+    exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TEMPLATE="$REPO_ROOT/vendor/templates/placeholder.utoo.sh.template"
+TEMPLATE="$REPO_ROOT/vendor/templates/placeholder.utoo.js.template"
 VERSION="9.9.9-test"
 
 UNAME_S=$(uname -s)
@@ -95,8 +104,10 @@ JSON
 
 # Build a tarball at $REGISTRY_DIR/@utoo/<pkg>/-/<pkg>-<ver>.tgz containing
 # package/bin/utoo as a stub that prints argc + each argv entry, so we can
-# assert arg passthrough preserves boundaries (spaces inside args).
+# assert arg passthrough preserves boundaries (spaces inside args). Defaults to
+# the host platform package; pass an explicit name for the Windows-path test.
 publish_stub() {
+    pkg="${1:-$PKG_NAME}"
     STUB=$(mktemp -d)
     mkdir -p "$STUB/package/bin"
     cat > "$STUB/package/bin/utoo" <<'STUB_EOF'
@@ -110,9 +121,9 @@ done
 STUB_EOF
     chmod +x "$STUB/package/bin/utoo"
 
-    REG_PATH="$REGISTRY_DIR/@utoo/$PKG_NAME/-"
+    REG_PATH="$REGISTRY_DIR/@utoo/$pkg/-"
     mkdir -p "$REG_PATH"
-    (cd "$STUB" && tar -czf "$REG_PATH/${PKG_NAME}-${VERSION}.tgz" package)
+    (cd "$STUB" && tar -czf "$REG_PATH/${pkg}-${VERSION}.tgz" package)
     rm -rf "$STUB"
 }
 
@@ -121,11 +132,9 @@ teardown_sandbox() {
 }
 
 # Run the placeholder with a controlled REGISTRY env. Wraps in a fresh
-# TMPDIR so we can detect mktemp leaks (the trap-before-exec fix this PR
-# adds is the contract being verified here).
-# Capturing stdout via $(...) runs the function in a subshell, so any
-# variables set inside don't reach the caller. Use sentinel files in the
-# sandbox to surface tmp-leak count + exit code back to the test body.
+# TMPDIR so we can detect mktemp leaks (cleanup-before-exec is part of the
+# contract). Capturing stdout via $(...) runs the function in a subshell, so
+# surface tmp-leak count + exit code back via sentinel files in the sandbox.
 run_placeholder() {
     bin=$1
     shift
@@ -164,7 +173,7 @@ case "$new_second_line" in
     *) ok "bin/utoo replaced with real binary" ;;
 esac
 
-# tmp leak guard: trap-before-exec means no subdir survives in our scoped TMPDIR.
+# tmp leak guard: cleanup-before-exec means no subdir survives in our scoped TMPDIR.
 [ "$leaked_tmp" = "0" ] && ok "no tmp leak after exec" || ko "no tmp leak" "leaked $leaked_tmp dir(s)"
 
 #------------------------------------------------------------------------------
@@ -190,7 +199,7 @@ publish_stub
 SHIM_DIR="$SANDBOX/prefix-bin"
 mkdir -p "$SHIM_DIR"
 # npm uses relative symlinks ($prefix/bin/utoo -> ../lib/node_modules/utoo/bin/utoo);
-# mirror that so the readlink + dirname loop in the placeholder is exercised.
+# mirror that so the module-path resolution in the placeholder is exercised.
 (cd "$SHIM_DIR" && ln -s "../utoo/bin/utoo" utoo)
 
 out3=$(run_placeholder "$SHIM_DIR/utoo" via-shim)
@@ -208,7 +217,7 @@ teardown_sandbox
 #------------------------------------------------------------------------------
 printf '\n== failure recovery ==\n'
 setup_sandbox
-# Don't publish_stub yet — registry dir exists but is empty, so curl 404s.
+# Don't publish_stub yet — registry dir exists but is empty, so the download 404s.
 mkdir -p "$REGISTRY_DIR"
 
 placeholder_sha_before=$(cksum "$PKG_DIR/bin/utoo" | awk '{print $1}')
@@ -230,6 +239,44 @@ rc4b=$(cat "$SANDBOX/last_rc")
 [ "$rc4b" = "0" ] && ok "second attempt succeeds" || ko "second attempt" "rc=$rc4b"
 assert_contains "second attempt: real binary"  "STUB argv[1]=second-attempt" "$out4b"
 teardown_sandbox
+
+#------------------------------------------------------------------------------
+# Test 5: Windows code path (UTOO_TARGET_OS override). Lay out a global-style
+# prefix (<prefix>/node_modules/utoo/bin/utoo) and force win32 detection so the
+# placeholder's prefix-shim path runs on this POSIX host. It must drop
+# utoo.exe / ut.exe / utx.cmd into the prefix root and run the exe.
+#------------------------------------------------------------------------------
+printf '\n== windows prefix path (override) ==\n'
+SANDBOX=$(mktemp -d)
+REGISTRY_DIR="$SANDBOX/registry"
+PREFIX="$SANDBOX/prefix"
+WIN_PKG_DIR="$PREFIX/node_modules/utoo"
+mkdir -p "$WIN_PKG_DIR/bin"
+cat > "$WIN_PKG_DIR/package.json" <<JSON
+{
+  "name": "utoo",
+  "version": "$VERSION"
+}
+JSON
+cp "$TEMPLATE" "$WIN_PKG_DIR/bin/utoo"
+chmod +x "$WIN_PKG_DIR/bin/utoo"
+publish_stub "utoo-win32-x64"
+
+out5=$(UTOO_TARGET_OS=win32 UTOO_TARGET_ARCH=x64 UTOO_REGISTRY="file://$REGISTRY_DIR" \
+    node "$WIN_PKG_DIR/bin/utoo" win-arg 2>&1)
+rc5=$?
+
+[ "$rc5" = "0" ] && ok "exit 0" || ko "exit 0" "rc=$rc5"
+assert_contains "win: bootstrap reached"    "bootstrapping" "$out5"
+assert_contains "win: real binary args"     "STUB argv[1]=win-arg" "$out5"
+[ -f "$PREFIX/utoo.exe" ] && ok "utoo.exe placed in prefix" || ko "utoo.exe in prefix" "missing $PREFIX/utoo.exe"
+[ -f "$PREFIX/ut.exe" ]   && ok "ut.exe alias placed in prefix" || ko "ut.exe in prefix" "missing $PREFIX/ut.exe"
+if [ -f "$PREFIX/utx.cmd" ]; then
+    assert_contains "utx.cmd delegates to utoo x" "utoo.exe x" "$(cat "$PREFIX/utx.cmd")"
+else
+    ko "utx.cmd in prefix" "missing $PREFIX/utx.cmd"
+fi
+rm -rf "$SANDBOX"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -41,40 +41,26 @@ cat "$ENTRY_DIR/package.json" | \
         print;
     }' > "$ENTRY_DIR/package.json.tmp" && mv "$ENTRY_DIR/package.json.tmp" "$ENTRY_DIR/package.json"
 
-# do copy postinstall.sh
-cp ../templates/postinstall.utoo.sh.template "$ENTRY_DIR/postinstall.sh"
-chmod +x "$ENTRY_DIR/postinstall.sh"
+# Postinstall runs via `node` (not `sh`): npm executes lifecycle scripts through
+# cmd.exe on Windows, where `sh` is not on PATH for a stock Node install.
+cp ../templates/postinstall.utoo.js.template "$ENTRY_DIR/postinstall.js"
 
 # copy README.md from repository root
 cp ../../README.md "$ENTRY_DIR/README.md"
 
-# Placeholder binaries. Unix self-heals on first invocation; Windows .cmd
-# prints a recovery hint (postinstall replaces both on the happy path).
+# Placeholder bin. The `#!/usr/bin/env node` shebang lets npm generate working
+# .cmd/.ps1 shims on Windows (invoking node, not sh). The bin map points both
+# `utoo` and `ut` at bin/utoo, so only one physical file is needed. postinstall
+# replaces it with the native binary on the happy path; otherwise it self-heals
+# on first invocation.
 mkdir -p "$ENTRY_DIR/bin"
-for binary in utoo ut; do
-    cp ../templates/placeholder.utoo.sh.template "$ENTRY_DIR/bin/$binary"
-    chmod +x "$ENTRY_DIR/bin/$binary"
+cp ../templates/placeholder.utoo.js.template "$ENTRY_DIR/bin/utoo"
+chmod +x "$ENTRY_DIR/bin/utoo"
 
-    cat > "$ENTRY_DIR/bin/$binary.cmd" << 'EOF'
-@echo off
-echo utoo: native binary not installed (postinstall did not run or failed). 1>&2
-echo utoo: recover with: npm install -g utoo --force 1>&2
-exit /b 1
-EOF
-done
-
-# create utx shell script that executes utoo x
-cat > "$ENTRY_DIR/bin/utx" << 'EOF'
-#!/bin/sh
-utoo x "$@"
-EOF
+# utx → `utoo x`. Node launcher; on Windows postinstall also drops a utx.cmd
+# into the prefix on the happy path.
+cp ../templates/utx.utoo.js.template "$ENTRY_DIR/bin/utx"
 chmod +x "$ENTRY_DIR/bin/utx"
-
-# Windows version utx
-cat > "$ENTRY_DIR/bin/utx.cmd" << 'EOF'
-@echo off
-utoo x %*
-EOF
 
 # do publish
 cd "$ENTRY_DIR"
