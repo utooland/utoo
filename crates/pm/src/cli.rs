@@ -19,6 +19,7 @@ use crate::constants::cmd::{
     WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
+use crate::util::cli_enum::PublishAccess;
 
 pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
@@ -229,6 +230,14 @@ pub enum Commands {
         /// One-time password for 2FA
         #[arg(long)]
         otp: Option<String>,
+        /// Registry visibility for the package: `public` or `restricted`
+        /// (default: publishConfig.access, else public). Mirrors `npm --access`.
+        #[arg(long, value_enum)]
+        access: Option<PublishAccess>,
+        /// Skip Git working-tree cleanliness checks. Accepted for pnpm
+        /// compatibility; utoo performs no Git checks, so this is a no-op.
+        #[arg(long)]
+        no_git_checks: bool,
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]
