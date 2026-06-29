@@ -12,7 +12,7 @@ use crate::cmd::update::update;
 use crate::cmd::view::view;
 use crate::constants::{APP_NAME, APP_VERSION};
 use crate::helper::auto_update::init_auto_update;
-use crate::service::script::MissingScript;
+use crate::service::script::{MissingScript, ScriptExit};
 use crate::service::workspace::WorkspaceFilter;
 use crate::util::cli_enum::{ConfigScope, ScriptPolicy};
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
@@ -44,6 +44,11 @@ fn main() {
         .block_on(async_main());
 
     if let Err(e) = result {
+        // A failed package script propagates its own exit status so
+        // `utoo run <script>` mirrors the script: a non-zero `exit N` becomes
+        // N, and a signal death (e.g. SIGPIPE from `script | head`) becomes
+        // 128+N. Any other error keeps the generic exit code 1.
+        let exit_code = e.downcast_ref::<ScriptExit>().map_or(1, |s| s.code);
         if let Some(chain) = util::format_print::format_resolve_chain(&e) {
             tracing::error!("{:#}\n\n{chain}", e);
         } else {
@@ -52,7 +57,7 @@ fn main() {
         if let Some(log_path) = get_log_file_path() {
             eprintln!("Full logs saved to: {}", log_path.display());
         }
-        process::exit(1);
+        process::exit(exit_code);
     }
 }
 

@@ -50,7 +50,56 @@ async fn build_script_command(
         }
     }
 
+    // Restore the default SIGPIPE disposition in the child. The parent
+    // ignores SIGPIPE (see `crate::util::sysconf`) so its own work survives a
+    // broken stdout, but that ignored disposition is inherited across `exec`.
+    // A lifecycle script that pipes into an early-closing reader (`script |
+    // head`) must instead get normal pipe semantics — die cleanly via SIGPIPE
+    // rather than see spurious `EPIPE` write errors that derail a `&&` chain.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: the closure runs in the forked child before `exec` and only
+        // calls `signal(2)`, which is async-signal-safe.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                Ok(())
+            });
+        }
+    }
+
     Ok(cmd)
+}
+
+/// A package script exited unsuccessfully. Carries the exit code utoo should
+/// terminate with, so `utoo run <script>` faithfully mirrors the script's own
+/// status: a non-zero `exit N` propagates as `N`, and a signal death (e.g.
+/// SIGPIPE from `script | head`) propagates as `128 + N` — matching npm/pnpm
+/// and shell convention.
+#[derive(Debug)]
+pub struct ScriptExit {
+    pub code: i32,
+    message: String,
+}
+
+impl std::fmt::Display for ScriptExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ScriptExit {}
+
+/// Map a child `ExitStatus` to the exit code utoo should adopt: `128 + signal`
+/// for a signal death (so SIGPIPE → 141), otherwise the child's own code,
+/// falling back to 1 when neither is available.
+fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        return 128 + signal;
+    }
+    status.code().unwrap_or(1)
 }
 
 /// Cap one captured stream at 64 KiB in the debug log; a runaway script can
@@ -310,10 +359,12 @@ impl ScriptService {
             .context("Failed to execute custom script")?;
 
         if !status.success() {
-            anyhow::bail!(
-                "Custom script execution failed with exit code: {}",
-                status.code().unwrap_or(-1)
-            );
+            let code = status_exit_code(&status);
+            return Err(ScriptExit {
+                code,
+                message: format!("Custom script execution failed with exit code: {code}"),
+            }
+            .into());
         }
 
         Ok(())
@@ -352,6 +403,19 @@ mod tests {
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[cfg(unix)]
+    #[test]
+    fn test_status_exit_code_signal_and_code() {
+        use std::os::unix::process::ExitStatusExt;
+        // Killed by SIGPIPE (13) → 128 + 13 = 141, so `script | head` deaths
+        // propagate the conventional 141 instead of collapsing to 1.
+        let by_signal = std::process::ExitStatus::from_raw(13);
+        assert_eq!(status_exit_code(&by_signal), 141);
+        // Normal exit with code 7 → 7 (raw wait status encodes it in bits 8..).
+        let by_code = std::process::ExitStatus::from_raw(7 << 8);
+        assert_eq!(status_exit_code(&by_code), 7);
+    }
 
     #[tokio::test]
     async fn test_collect_bin_paths_with_local_node_modules() {

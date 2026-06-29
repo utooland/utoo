@@ -9,5 +9,5 @@ mod exec;
 mod lifecycle;
 mod node_gyp;
 
-pub use exec::ScriptService;
+pub use exec::{ScriptExit, ScriptService};
 pub use lifecycle::{LifecycleSink, MissingScript, ScriptOutput};
