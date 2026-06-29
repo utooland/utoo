@@ -2046,7 +2046,8 @@ echo -e "${GREEN}PASS: bundled binary-mirror-config applied${NC}"
 # ---------------------------------------------------------------------------
 # Case: `utoo --filter <pkg> publish` from a workspace root resolves the member
 # and rewrites its `workspace:`/`catalog:` specifiers to concrete versions.
-# Runs fully in --dry-run (no registry needed).
+# Also asserts that selecting multiple members publishes them in workspace
+# topological order (dependency before dependent). Runs fully in --dry-run.
 # ---------------------------------------------------------------------------
 echo -e "${YELLOW}Case: workspace --filter publish (dry-run resolves protocols)${NC}"
 WSP_DIR=$(mktemp -d)
@@ -2083,9 +2084,26 @@ if ! grep -q "Would publish @wsp/app@0.5.0" wsp.out; then
     echo -e "${RED}FAIL: filtered package @wsp/app was not selected${NC}"; cat wsp.out; exit 1
 fi
 rm -f wsp.out
+
+# Selecting both members must publish in topological order (dependency first),
+# regardless of the order they are passed on the command line. `@wsp/app`
+# depends on `@wsp/lib`, so `@wsp/lib` must be published first even though it is
+# listed last here.
+utoo --filter @wsp/app --filter @wsp/lib publish --tag beta --dry-run 2>&1 \
+  | tee wsp-topo.out \
+  || { echo -e "${RED}FAIL: multi-member publish dry-run errored${NC}"; cat wsp-topo.out; exit 1; }
+lib_line=$(grep -n "Would publish @wsp/lib@1.2.3" wsp-topo.out | head -1 | cut -d: -f1)
+app_line=$(grep -n "Would publish @wsp/app@0.5.0" wsp-topo.out | head -1 | cut -d: -f1)
+if [ -z "$lib_line" ] || [ -z "$app_line" ]; then
+    echo -e "${RED}FAIL: both members were not published in dry-run${NC}"; cat wsp-topo.out; exit 1
+fi
+if [ "$lib_line" -ge "$app_line" ]; then
+    echo -e "${RED}FAIL: @wsp/lib must publish before @wsp/app (topological order)${NC}"; cat wsp-topo.out; exit 1
+fi
+rm -f wsp-topo.out
 popd
 rm -rf "$WSP_DIR"
 trap - EXIT
-echo -e "${GREEN}PASS: workspace --filter publish resolves protocols${NC}"
+echo -e "${GREEN}PASS: workspace --filter publish resolves protocols + topological order${NC}"
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
