@@ -139,6 +139,22 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
     LOG_FILE_PATH.get()
 }
 
+/// Write a line to stdout, swallowing `BrokenPipe` (and any other write
+/// failure) so a closed downstream reader never aborts the process.
+///
+/// We keep SIGPIPE ignored (see [`crate::util::sysconf`]) so install work
+/// survives a broken stdout; the trailing summary lines printed here must
+/// degrade just as quietly. Plain `println!` would instead panic with
+/// "failed printing to stdout: Broken pipe" at the finish line.
+fn println_lossy(args: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    // Lock once so the line and its newline are written under a single lock
+    // (no interleaving with other writers), and stream `args` straight to the
+    // writer instead of re-wrapping it in another format pass.
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_fmt(args).and_then(|_| out.write_all(b"\n"));
+}
+
 /// Finish the progress bar, optionally appending a dimmed `[2.6s]` suffix.
 pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     // Stop the render task first so it can't overwrite the final message.
@@ -156,7 +172,7 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     PROGRESS_BAR.finish_with_message(full_msg);
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     // reset color
-    println!("\x1b[0m");
+    println_lossy(format_args!("\x1b[0m"));
 }
 
 /// Print the install counts line, e.g.
@@ -181,7 +197,7 @@ pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
     } else {
         String::new()
     };
-    println!(
+    println_lossy(format_args!(
         "+ {} {} · {} {} · {} {}{}",
         added.to_string().green(),
         "added".dimmed(),
@@ -190,7 +206,7 @@ pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
         downloaded.to_string().cyan(),
         "downloaded".dimmed(),
         traffic.dimmed(),
-    );
+    ));
 }
 
 /// Render task started by `start_progress_bar`, stopped by
@@ -295,13 +311,13 @@ pub fn format_elapsed_time(elapsed: Duration) -> String {
 /// End the global timer and print elapsed time with a message.
 /// Example output: "75 packages installed [5s]"
 pub fn log_time_end(msg: &str) {
-    println!();
+    println_lossy(format_args!(""));
     if let Some(start) = START_TIME.get() {
         let elapsed = start.elapsed();
         let elapsed_str = format_elapsed_time(elapsed);
-        println!("{} {}", msg, elapsed_str.green());
+        println_lossy(format_args!("{} {}", msg, elapsed_str.green()));
     } else {
-        println!("{msg}");
+        println_lossy(format_args!("{msg}"));
     }
 }
 
