@@ -1,7 +1,7 @@
 #!/bin/sh
-# E2E test for vendor/templates/postinstall*.sh.template OS detection.
+# E2E test for vendor/templates/postinstall.sh.template OS detection.
 #
-# Runs each template under a sandboxed shell with `uname` and env vars
+# Runs the template under a sandboxed shell with `uname` and env vars
 # (OSTYPE, PROCESSOR_ARCHITECTURE) mocked, then asserts the computed
 # (OS, ARCH) tuple. Side-effecting commands (cp, mkdir, chmod, npm, rm)
 # are stubbed so the script runs fast and offline.
@@ -10,12 +10,17 @@
 # (`MINGW64_NT-10.0-20348`) to Server 2025 (`MINGW64_NT-10.0-26100`)
 # previously produced `@utoo/utoo-mingw64_nt-10.0-26100-x64` (404 on
 # npm). All Windows kernel slugs must collapse to OS=win32.
+#
+# Note: the `utoo` package's postinstall is now Node
+# (vendor/templates/postinstall.utoo.js.template), which reads
+# process.platform / process.arch and so is immune to this whole class of
+# uname-drift bug. Its self-heal + Windows prefix paths are covered by
+# e2e/placeholder-self-heal.sh and e2e/utoo-pm.ps1.
 
 set -u
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATE_PM="$REPO_ROOT/vendor/templates/postinstall.sh.template"
-TEMPLATE_UTOO="$REPO_ROOT/vendor/templates/postinstall.utoo.sh.template"
 
 PASS=0
 FAIL=0
@@ -80,7 +85,7 @@ assert_detection() {
     fi
 }
 
-for template in "$TEMPLATE_PM" "$TEMPLATE_UTOO"; do
+for template in "$TEMPLATE_PM"; do
     printf '\n== %s ==\n' "$(basename "$template")"
 
     # Unix
