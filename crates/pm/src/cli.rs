@@ -242,6 +242,11 @@ pub enum Commands {
         /// compatibility; utoo performs no Git checks, so this is a no-op.
         #[arg(long)]
         no_git_checks: bool,
+        /// Generate and attach a signed Sigstore/SLSA provenance attestation.
+        /// Requires a supported CI (GitHub Actions / GitLab) with OIDC and a
+        /// registry that exposes the attestation API.
+        #[arg(long)]
+        provenance: bool,
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]

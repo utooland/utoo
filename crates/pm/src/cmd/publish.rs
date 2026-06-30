@@ -26,11 +26,12 @@ pub async fn publish(
     otp: Option<&str>,
     access: Option<PublishAccess>,
     filter: WorkspaceFilter,
+    provenance: bool,
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let roots = resolve_publish_roots(&cwd, filter).await?;
     for root in roots {
-        publish_one(&root, tag, mode, otp, access).await?;
+        publish_one(&root, tag, mode, otp, access, provenance).await?;
     }
     Ok(())
 }
@@ -70,6 +71,7 @@ async fn publish_one(
     mode: RunMode,
     otp: Option<&str>,
     access: Option<PublishAccess>,
+    provenance: bool,
 ) -> Result<()> {
     // Run each publish from inside its own package directory, matching the
     // single-package flow (`update_cwd_to_project`). The filtered path anchors
@@ -85,6 +87,8 @@ async fn publish_one(
 
     let tag = meta.resolve_tag(tag)?;
     let access = meta.resolve_access(access)?;
+    // CLI `--provenance` OR `publishConfig.provenance` OR `NPM_CONFIG_PROVENANCE`.
+    let provenance = meta.resolve_provenance(provenance);
     let registry = meta
         .publish_config
         .registry
@@ -99,6 +103,7 @@ async fn publish_one(
         mode,
         otp,
         access,
+        provenance,
     })
     .await?;
 

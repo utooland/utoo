@@ -225,6 +225,7 @@ async fn async_main() -> Result<()> {
             // utoo performs no Git cleanliness checks, so `--no-git-checks` is a
             // documented no-op accepted for pnpm/npm compatibility.
             no_git_checks: _,
+            provenance,
         }) => {
             // `--workspace`/`--filter` selects member(s); empty means the current
             // package. `--workspaces` is intentionally NOT honored here to avoid
@@ -240,6 +241,7 @@ async fn async_main() -> Result<()> {
                 otp.as_deref(),
                 access,
                 filter,
+                provenance,
             )
             .await?;
         }

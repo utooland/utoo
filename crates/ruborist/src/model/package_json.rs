@@ -337,6 +337,10 @@ pub struct PublishConfig {
     /// Package access level ("public" or "restricted")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<String>,
+
+    /// Whether to generate and attach a signed provenance attestation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<bool>,
 }
 
 /// Empty map constant for convenience methods that return references.
