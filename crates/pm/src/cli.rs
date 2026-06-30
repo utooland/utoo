@@ -66,8 +66,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub manifests_concurrency_limit: Option<usize>,
 
-    /// Workspace to operate in (may be repeated; supports glob patterns)
-    #[arg(long, global = true, hide = true, num_args = 1)]
+    /// Workspace(s) to operate in by name, relative path, or glob pattern
+    /// (repeatable). Also accepted as `--filter` for pnpm familiarity, e.g.
+    /// `ut --filter @scope/pkg publish` targets a member from the workspace root.
+    #[arg(long, global = true, hide = true, num_args = 1, alias = "filter")]
     pub workspace: Vec<String>,
 
     /// Run in all workspaces with topological ordering
