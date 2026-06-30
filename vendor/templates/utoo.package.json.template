@@ -21,6 +21,6 @@
   "os": ["darwin", "linux", "win32"],
   "cpu": ["x64", "arm64"],
   "scripts": {
-    "postinstall": "sh ./postinstall.sh"
+    "postinstall": "node ./postinstall.js"
   }
 }
