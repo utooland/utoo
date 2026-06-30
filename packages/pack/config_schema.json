@@ -222,6 +222,17 @@
         "string",
         "null"
       ]
+    },
+    "turbopackMemoryEviction": {
+      "description": "Turbopack memory eviction mode for the persistent cache",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SchemaTurbopackMemoryEviction"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {
@@ -1749,6 +1760,23 @@
             "minItems": 2
           }
         }
+      ]
+    },
+    "SchemaTurbopackMemoryEviction": {
+      "description": "Turbopack memory eviction mode.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaTurbopackMemoryEvictionMode"
+        }
+      ]
+    },
+    "SchemaTurbopackMemoryEvictionMode": {
+      "type": "string",
+      "enum": [
+        "full"
       ]
     },
     "SchemaTurbopackModuleType": {

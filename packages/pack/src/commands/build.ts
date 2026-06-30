@@ -18,6 +18,8 @@ import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
+type MemoryEvictionMode = import("../binding").MemoryEvictionMode;
+
 export function build(
   options: BundleOptions | WebpackConfig,
   projectPath?: string,
@@ -46,6 +48,9 @@ async function buildInternal(
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
   const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const turbopackMemoryEviction = (
+    bundleOptions.config.turbopackMemoryEviction === false ? "off" : "full"
+  ) as MemoryEvictionMode;
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
@@ -85,6 +90,7 @@ async function buildInternal(
       },
       {
         persistentCaching,
+        turbopackMemoryEviction,
         // Build mode is a short-lived, one-shot compilation, so avoid paying
         // dependency graph bookkeeping cost unless the persistent cache needs it.
         dependencyTracking: persistentCaching,

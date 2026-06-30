@@ -14,7 +14,7 @@ import { nanoid } from "nanoid";
 import type { Socket } from "net";
 import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
-import type { NapiWrittenEndpoint } from "../binding";
+import type { MemoryEvictionMode, NapiWrittenEndpoint } from "../binding";
 import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
@@ -165,6 +165,9 @@ export async function createHotReloader(
 
   const createProject = projectFactory();
   const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const turbopackMemoryEviction = (
+    bundleOptions.config.turbopackMemoryEviction === false ? "off" : "full"
+  ) as MemoryEvictionMode;
   const persistentCacheLock = await acquirePersistentCacheLock(
     resolvedProjectPath,
     "utoo pack dev",
@@ -215,6 +218,7 @@ export async function createHotReloader(
       },
       {
         persistentCaching,
+        turbopackMemoryEviction,
       },
     );
   } catch (error) {
