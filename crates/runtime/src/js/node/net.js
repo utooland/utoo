@@ -143,9 +143,18 @@ class Server extends EventEmitter {
   }
 
   listen(port, host, backlog, cb) {
+    // Handle the options-object form: listen({ port, host }[, cb]).
+    if (typeof port === "object" && port !== null) {
+      const opts = port;
+      cb = typeof host === "function" ? host : cb;
+      host = opts.host;
+      port = opts.port;
+    }
     if (typeof host === "function") { cb = host; host = "0.0.0.0"; backlog = undefined; }
     if (typeof backlog === "function") { cb = backlog; backlog = undefined; }
     host = host || "0.0.0.0";
+    // Coerce the port to an i32 (env vars / config may provide it as a string).
+    port = Number(port) | 0;
 
     // Snapshot mode: capture listen args, don't actually bind.
     // The event loop drains naturally, then V8 heap is serialized.

@@ -52,7 +52,7 @@ fn resolve_from_node_modules(
         .parent()
         .unwrap_or(Path::new("."));
 
-    let resolved = cjs::resolve_from_node_modules_dir(specifier, referrer_dir)
+    let resolved = cjs::resolve_from_node_modules_dir(specifier, referrer_dir, true)
         .map_err(|e| JsErrorBox::generic(e))?;
 
     deno_core::ModuleSpecifier::from_file_path(&resolved).map_err(|_| {

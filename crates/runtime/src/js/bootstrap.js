@@ -1152,6 +1152,51 @@ globalThis.dispatchEvent = function(event) {
 
 var __processListeners = {};
 
+// Node-compat shim over the leaked `globalThis.Deno`. deno_core exposes
+// `Deno.core` for internal ops, which trips libraries (has-flag, supports-color,
+// chalk, etc.) that feature-detect `globalThis.Deno` and then use Deno-only APIs
+// like Deno.args / Deno.env / Deno.build. Provide the small subset they need,
+// backed by process, so they don't crash on this Node-ish runtime.
+try {
+  const D = globalThis.Deno;
+  if (D && !D.args) {
+    Object.defineProperty(D, "args", {
+      configurable: true,
+      get() {
+        const a = globalThis.process && globalThis.process.argv;
+        return Array.isArray(a) ? a.slice(2) : [];
+      },
+    });
+    if (!D.env) {
+      D.env = {
+        get: (k) => globalThis.process.env[k],
+        set: (k, v) => { globalThis.process.env[k] = String(v); },
+        has: (k) => Object.prototype.hasOwnProperty.call(globalThis.process.env, k),
+        delete: (k) => { delete globalThis.process.env[k]; },
+        toObject: () => ({ ...globalThis.process.env }),
+      };
+    }
+    if (!D.build) {
+      Object.defineProperty(D, "build", {
+        configurable: true,
+        get() {
+          return { os: globalThis.process.platform, arch: globalThis.process.arch, target: "", vendor: "unknown", env: "" };
+        },
+      });
+    }
+    if (!("noColor" in D)) {
+      Object.defineProperty(D, "noColor", {
+        configurable: true,
+        get() { return !!globalThis.process.env.NO_COLOR; },
+      });
+    }
+    if (!D.version) D.version = { deno: "0.0.0", v8: "11.3.244.8", typescript: "5.0.0" };
+    if (!D.pid) Object.defineProperty(D, "pid", { configurable: true, get() { return globalThis.process.pid; } });
+    if (typeof D.exit !== "function") D.exit = (code = 0) => globalThis.process.exit(code);
+    if (typeof D.cwd !== "function") D.cwd = () => globalThis.process.cwd();
+  }
+} catch (_e) { /* ignore */ }
+
 globalThis.process = {
   exit(code = 0) {
     __bootstrapOps.op_exit(code);

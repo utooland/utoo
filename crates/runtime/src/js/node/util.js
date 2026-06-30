@@ -104,11 +104,55 @@ function debuglog() {
   return function () {};
 }
 
+// Node 22's util.getCallSites(). Returns plain objects describing the current
+// call stack. Implemented via Error.prepareStackTrace + captureStackTrace using
+// only the CallSite methods this runtime exposes (getScriptHash is not one of
+// them, which is why libraries like @eggjs/tegg's StackUtil prefer this API).
+function getCallSites(frameCountOrOptions, maybeOptions) {
+  let frameCount = 10;
+  let sourceMap = false;
+  if (typeof frameCountOrOptions === "number") {
+    frameCount = frameCountOrOptions;
+    if (maybeOptions && typeof maybeOptions === "object") {
+      sourceMap = !!maybeOptions.sourceMap;
+    }
+  } else if (frameCountOrOptions && typeof frameCountOrOptions === "object") {
+    if (typeof frameCountOrOptions.frameCount === "number") {
+      frameCount = frameCountOrOptions.frameCount;
+    }
+    sourceMap = !!frameCountOrOptions.sourceMap;
+  }
+  const origPrepare = Error.prepareStackTrace;
+  const origLimit = Error.stackTraceLimit;
+  Error.prepareStackTrace = (_, stack) => stack;
+  Error.stackTraceLimit = frameCount + 1;
+  const holder = {};
+  Error.captureStackTrace(holder, getCallSites);
+  const stack = Array.isArray(holder.stack) ? holder.stack : [];
+  Error.prepareStackTrace = origPrepare;
+  Error.stackTraceLimit = origLimit;
+  const call = (cs, name) => {
+    try {
+      return typeof cs[name] === "function" ? cs[name]() : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return stack.slice(0, frameCount).map((cs) => ({
+    functionName: call(cs, "getFunctionName") ?? "",
+    scriptName: call(cs, "getFileName") ?? "",
+    scriptId: String(call(cs, "getScriptNameOrSourceURL") ?? ""),
+    lineNumber: call(cs, "getLineNumber") ?? 0,
+    columnNumber: call(cs, "getColumnNumber") ?? 0,
+    column: call(cs, "getColumnNumber") ?? 0,
+  }));
+}
+
 const types = _types;
 
 const util = {
   format, inspect, inherits, deprecate, promisify, callbackify,
-  debuglog, types,
+  debuglog, getCallSites, types,
   TextEncoder: globalThis.TextEncoder,
   TextDecoder: globalThis.TextDecoder,
   isArray: Array.isArray,
@@ -127,5 +171,5 @@ const util = {
 export default util;
 export {
   format, inspect, inherits, deprecate, promisify, callbackify,
-  debuglog, types,
+  debuglog, getCallSites, types,
 };

@@ -64,8 +64,8 @@ pub fn op_cjs_resolve(
             });
     }
 
-    // 3. node_modules walk
-    resolve_from_node_modules_dir(specifier, &referrer_dir)
+    // 3. node_modules walk (CJS require context)
+    resolve_from_node_modules_dir(specifier, &referrer_dir, false)
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| JsErrorBox::generic(e))
 }
@@ -177,9 +177,14 @@ pub fn is_cjs(path: &Path) -> bool {
 }
 
 /// Resolve a bare specifier from node_modules, walking up from `from_dir`.
+/// `esm` selects the active export conditions: ESM imports prefer `import`,
+/// CJS requires prefer `require` (both fall back to `node`/`default`). This is
+/// essential for dual packages (e.g. `utility`) whose named ESM exports are
+/// only present in the `import` build.
 pub fn resolve_from_node_modules_dir(
     specifier: &str,
     from_dir: &Path,
+    esm: bool,
 ) -> Result<PathBuf, String> {
     let (pkg_name, subpath) = parse_package_name(specifier);
 
@@ -189,7 +194,7 @@ pub fn resolve_from_node_modules_dir(
         if nm.is_dir() {
             let target = if subpath.is_empty() {
                 // Try exports["."] first, then main/index
-                if let Some(resolved) = resolve_package_exports(&nm, ".") {
+                if let Some(resolved) = resolve_package_exports(&nm, ".", esm) {
                     resolved
                 } else {
                     resolve_package_entry(&nm)?
@@ -197,7 +202,7 @@ pub fn resolve_from_node_modules_dir(
             } else {
                 // Try exports field first
                 let export_key = format!("./{subpath}");
-                if let Some(resolved) = resolve_package_exports(&nm, &export_key) {
+                if let Some(resolved) = resolve_package_exports(&nm, &export_key, esm) {
                     resolved
                 } else {
                     let sub = nm.join(subpath);
@@ -266,7 +271,7 @@ fn parse_package_name(specifier: &str) -> (&str, &str) {
 
 /// Resolve a subpath via the package.json "exports" field.
 /// Returns None if exports field is absent or doesn't match.
-fn resolve_package_exports(pkg_dir: &Path, export_key: &str) -> Option<PathBuf> {
+fn resolve_package_exports(pkg_dir: &Path, export_key: &str, esm: bool) -> Option<PathBuf> {
     let pkg_json = pkg_dir.join("package.json");
     let content = std::fs::read_to_string(&pkg_json).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -284,7 +289,7 @@ fn resolve_package_exports(pkg_dir: &Path, export_key: &str) -> Option<PathBuf> 
     let exports_obj = exports.as_object()?;
 
     // Try exact match first
-    if let Some(target) = resolve_export_target(pkg_dir, exports_obj.get(export_key)) {
+    if let Some(target) = resolve_export_target(pkg_dir, exports_obj.get(export_key), esm) {
         return Some(target);
     }
 
@@ -320,18 +325,24 @@ fn resolve_package_exports(pkg_dir: &Path, export_key: &str) -> Option<PathBuf> 
 fn resolve_export_target(
     pkg_dir: &Path,
     value: Option<&serde_json::Value>,
+    esm: bool,
 ) -> Option<PathBuf> {
     let value = value?;
     if let Some(s) = value.as_str() {
         return resolve_as_file_or_directory(&pkg_dir.join(s));
     }
     if let Some(obj) = value.as_object() {
-        // Priority: "require" > "node" > "default" > "import"
-        // Try "require" first since we're in CJS context
-        for key in &["require", "node", "default"] {
+        // ESM imports prefer "import"; CJS requires prefer "require". Both fall
+        // back to "node" then "default".
+        let keys: &[&str] = if esm {
+            &["import", "node", "default"]
+        } else {
+            &["require", "node", "default"]
+        };
+        for key in keys {
             if let Some(v) = obj.get(*key) {
                 // Recurse into nested condition objects
-                if let Some(r) = resolve_export_target(pkg_dir, Some(v)) {
+                if let Some(r) = resolve_export_target(pkg_dir, Some(v), esm) {
                     return Some(r);
                 }
             }
@@ -513,7 +524,7 @@ mod tests {
         fs::write(nm.join("index.js"), "module.exports = {};").unwrap();
 
         let result =
-            resolve_from_node_modules_dir("testpkg", dir.path()).unwrap();
+            resolve_from_node_modules_dir("testpkg", dir.path(), false).unwrap();
         assert_eq!(result, nm.join("index.js"));
     }
 
@@ -532,7 +543,7 @@ mod tests {
         fs::write(lib.join("entry.js"), "module.exports = {};").unwrap();
 
         let result =
-            resolve_from_node_modules_dir("mypkg", dir.path()).unwrap();
+            resolve_from_node_modules_dir("mypkg", dir.path(), false).unwrap();
         assert_eq!(result, lib.join("entry.js"));
     }
 }

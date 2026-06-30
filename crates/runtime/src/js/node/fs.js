@@ -27,6 +27,19 @@ function normalizeArgs(optionsOrCb, cb) {
   return [optionsOrCb, cb];
 }
 
+// node:fs Stats class. Some libraries (e.g. @eggjs/core's ManifestLoaderFS)
+// build virtual stat objects via `Object.create(fs.Stats.prototype)`, so the
+// class and its prototype must exist.
+class Stats {
+  isFile() { return (this.mode & 0o170000) === 0o100000; }
+  isDirectory() { return (this.mode & 0o170000) === 0o040000; }
+  isSymbolicLink() { return (this.mode & 0o170000) === 0o120000; }
+  isBlockDevice() { return false; }
+  isCharacterDevice() { return false; }
+  isFIFO() { return false; }
+  isSocket() { return false; }
+}
+
 function wrapStats(s) {
   return {
     size: s.size,
@@ -528,6 +541,7 @@ export function rmdir(path, optionsOrCb, cb) {
 const fs = {
   promises,
   constants,
+  Stats,
   // Sync
   readFileSync,
   writeFileSync,
@@ -590,4 +604,5 @@ const fs = {
   rmdirSync, rmdir,
 };
 
+export { Stats };
 export default fs;

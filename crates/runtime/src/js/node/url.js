@@ -4,45 +4,58 @@
 class UtooURL {
   constructor(input, base) {
     let url = String(input);
-    if (base !== undefined && base !== null) {
+    const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(url);
+    if (base !== undefined && base !== null && !hasScheme) {
       const baseStr = typeof base === "string" ? base : (base.href || String(base));
-      if (!url.includes("://")) {
-        // Parse the base URL to get its components
-        const bm = baseStr.match(
-          /^([a-z][a-z0-9+.-]*):\/\/([^/?#:]*)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i,
-        );
-        if (bm) {
-          const bProto = bm[1];
-          const bHost = bm[2] + (bm[3] ? ":" + bm[3] : "");
-          const bPath = bm[4] || "/";
-          if (url.startsWith("/")) {
-            // Absolute path relative to base origin
-            url = bProto + "://" + bHost + url;
-          } else if (url.startsWith("?") || url.startsWith("#")) {
-            url = bProto + "://" + bHost + bPath + url;
-          } else {
-            // Relative path -- resolve against base directory
-            const dir = bPath.replace(/\/[^/]*$/, "/");
-            url = bProto + "://" + bHost + dir + url;
-          }
+      // Parse base, supporting both special (scheme://host/path) and
+      // non-special / opaque (scheme:path, e.g. turbopack's `x:/`) forms.
+      const bm = baseStr.match(
+        /^([a-z][a-z0-9+.-]*):(\/\/([^/?#:]*)(?::(\d+))?)?([^?#]*)?(\?[^#]*)?(#.*)?$/i,
+      );
+      if (bm) {
+        const bProto = bm[1];
+        const authority = bm[2] ? "//" + bm[3] + (bm[4] ? ":" + bm[4] : "") : "";
+        const bPath = bm[5] || (authority ? "/" : "");
+        if (url.startsWith("/")) {
+          url = bProto + ":" + authority + url;
+        } else if (url.startsWith("?") || url.startsWith("#")) {
+          url = bProto + ":" + authority + bPath + url;
+        } else {
+          const dir = bPath.replace(/\/[^/]*$/, "/") || "/";
+          url = bProto + ":" + authority + dir + url;
         }
       }
     }
+    // Special URLs (with `//` authority): scheme://host:port/path?query#hash
     const match = url.match(
       /^([a-z][a-z0-9+.-]*):\/\/([^/?#:]*)(?::(\d+))?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i,
     );
-    if (!match) {
-      throw new TypeError(`Invalid URL: ${input}`);
+    if (match) {
+      this.protocol = match[1] + ":";
+      this.hostname = match[2] || "";
+      this.port = match[3] || "";
+      this.pathname = match[4] || "/";
+      this.search = match[5] || "";
+      this.hash = match[6] || "";
+      this.host = this.port ? `${this.hostname}:${this.port}` : this.hostname;
+      this.origin = `${this.protocol}//${this.host}`;
+      this.href = this.origin + this.pathname + this.search + this.hash;
+    } else {
+      // Non-special / opaque scheme: scheme:path?query#hash (no authority).
+      const m2 = url.match(/^([a-z][a-z0-9+.-]*):([^?#]*)(\?[^#]*)?(#.*)?$/i);
+      if (!m2) {
+        throw new TypeError(`Invalid URL: ${input}`);
+      }
+      this.protocol = m2[1] + ":";
+      this.hostname = "";
+      this.port = "";
+      this.pathname = m2[2] || "";
+      this.search = m2[3] || "";
+      this.hash = m2[4] || "";
+      this.host = "";
+      this.origin = "null";
+      this.href = this.protocol + this.pathname + this.search + this.hash;
     }
-    this.protocol = match[1] + ":";
-    this.hostname = match[2] || "";
-    this.port = match[3] || "";
-    this.pathname = match[4] || "/";
-    this.search = match[5] || "";
-    this.hash = match[6] || "";
-    this.host = this.port ? `${this.hostname}:${this.port}` : this.hostname;
-    this.origin = `${this.protocol}//${this.host}`;
-    this.href = this.origin + this.pathname + this.search + this.hash;
     this.searchParams = new UtooURLSearchParams(this.search.slice(1));
   }
 
