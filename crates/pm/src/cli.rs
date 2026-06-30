@@ -67,6 +67,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub manifests_concurrency_limit: Option<usize>,
 
+    /// Maximum lifecycle scripts run at once (default: auto, ~CPU cores)
+    #[arg(long, global = true)]
+    pub script_concurrency_limit: Option<usize>,
+
     /// Workspace(s) to operate in by name, relative path, or glob pattern
     /// (repeatable). Also accepted as `--filter` for pnpm familiarity, e.g.
     /// `ut --filter @scope/pkg publish` targets a member from the workspace root.

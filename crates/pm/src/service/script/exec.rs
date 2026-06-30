@@ -6,17 +6,23 @@ use std::env;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::ScriptOutput;
 use crate::fs;
-use crate::model::package::PackageInfo;
+use crate::model::package::{LifecycleHook, PackageInfo};
 use crate::service::binary::get_envs;
 use crate::util::format_print::announce_script;
 use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_install_scope;
+
+/// A consumer for a script's captured output, one call per output segment. The
+/// executor stays unaware of *who* consumes the lines (here it's the progress
+/// UI's per-script tap), so output capture isn't coupled to the display.
+pub(crate) type OutputSink = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Build a `Command` with the standard npm env vars for script execution.
 async fn build_script_command(
@@ -124,13 +130,69 @@ fn join_script_args<'a>(script_content: &'a str, script_args: &[&str]) -> Cow<'a
     }
 }
 
+/// Read a child pipe to EOF, returning its raw bytes while feeding each output
+/// segment to `sink`. Splits on both `\n` and `\r` so a `\r`-updated progress
+/// bar (e.g. puppeteer's Chromium download) still surfaces its latest state, not
+/// just whole newline-terminated lines.
+async fn drain_tapped<R: tokio::io::AsyncRead + Unpin>(
+    reader: Option<R>,
+    sink: Option<OutputSink>,
+) -> Vec<u8> {
+    let mut raw = Vec::new();
+    let Some(mut reader) = reader else {
+        return raw;
+    };
+    // The current line, accumulated only for the one-line `↳` preview. Bounded
+    // so a script that emits a huge line (or binary) with no `\n`/`\r` can't grow
+    // it without limit — the full bytes still land in `raw` for the dump.
+    const MAX_SEGMENT: usize = 4 * 1024;
+    let mut segment: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => {
+                raw.extend_from_slice(&chunk[..n]);
+                for &byte in &chunk[..n] {
+                    if byte == b'\n' || byte == b'\r' {
+                        emit_segment(&segment, sink.as_ref());
+                        segment.clear();
+                    } else if segment.len() < MAX_SEGMENT {
+                        segment.push(byte);
+                    }
+                }
+            }
+            // Keep what was read so far, but don't pretend it was a clean EOF —
+            // a truncated capture would otherwise silently weaken a failing
+            // script's diagnostic dump.
+            Err(e) => {
+                tracing::debug!("script output pipe read failed (output truncated): {e}");
+                break;
+            }
+        }
+    }
+    emit_segment(&segment, sink.as_ref());
+    raw
+}
+
+/// Forward a non-blank output segment to `sink` as the script's latest line.
+fn emit_segment(segment: &[u8], sink: Option<&OutputSink>) {
+    let Some(sink) = sink else { return };
+    let text = String::from_utf8_lossy(segment);
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        sink(trimmed);
+    }
+}
+
 pub struct ScriptService;
 
 impl ScriptService {
     pub async fn execute_script(
         package: &PackageInfo,
-        hook: crate::model::package::LifecycleHook,
+        hook: LifecycleHook,
         output: ScriptOutput,
+        sink: Option<OutputSink>,
     ) -> Result<()> {
         let script = package.lifecycle_scripts.get_script(hook);
 
@@ -170,17 +232,34 @@ impl ScriptService {
                     );
                 }
             } else {
-                let output = tokio::process::Command::from(cmd)
-                    .output()
+                // Pipe and drain line-by-line rather than buffering with
+                // `.output()`: each line feeds `sink` so the long-run heartbeat
+                // can show what a slow, silent script is doing, while the full
+                // text is still collected for the failure dump / debug log.
+                let output = Self::run_captured(cmd, sink.as_ref())
                     .await
                     .context("Failed to execute script")?;
 
                 if !output.status.success() {
+                    // Relay the failed script's captured output. Ignore write
+                    // errors: the parent keeps SIGPIPE ignored to survive a closed
+                    // stdout (see the SIGPIPE handling above), so a plain
+                    // `println!`/`eprintln!` here would panic on `BrokenPipe`
+                    // rather than letting the install bail cleanly.
+                    use std::io::Write as _;
                     if !output.stdout.is_empty() {
-                        println!("{}", String::from_utf8_lossy(&output.stdout));
+                        let _ = writeln!(
+                            std::io::stdout(),
+                            "{}",
+                            String::from_utf8_lossy(&output.stdout)
+                        );
                     }
                     if !output.stderr.is_empty() {
-                        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+                        let _ = writeln!(
+                            std::io::stderr(),
+                            "{}",
+                            String::from_utf8_lossy(&output.stderr)
+                        );
                     }
 
                     anyhow::bail!(
@@ -206,6 +285,43 @@ impl ScriptService {
         }
 
         Ok(())
+    }
+
+    /// Run `cmd` with stdout/stderr piped, draining both concurrently so the
+    /// pipes can't fill and deadlock the child. Each output segment is fed to
+    /// `sink` (for the long-run heartbeat) while the raw bytes are collected into
+    /// a [`std::process::Output`], so callers keep the same failure-dump /
+    /// debug-log behaviour they had with `.output()`.
+    async fn run_captured(cmd: Command, sink: Option<&OutputSink>) -> Result<std::process::Output> {
+        let mut child = tokio::process::Command::from(cmd)
+            // Null stdin, matching the replaced `.output()`: a dependency script
+            // that reads stdin must get immediate EOF, not inherit the user's
+            // terminal — otherwise it blocks forever waiting for input it'll
+            // never get, hanging the install (and holding a concurrency slot).
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("Failed to spawn script")?;
+
+        // Drain both pipes and wait for the child concurrently on this one task
+        // (no `tokio::spawn`): the drains keep the pipes from filling while
+        // `wait` runs, and joining in place avoids the spawn overhead and the
+        // `JoinError` path entirely. Take the pipe handles first so the only
+        // borrow of `child` inside `join!` is `wait`.
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let (status, stdout, stderr) = tokio::join!(
+            child.wait(),
+            drain_tapped(stdout_pipe, sink.cloned()),
+            drain_tapped(stderr_pipe, sink.cloned()),
+        );
+
+        Ok(std::process::Output {
+            status: status.context("Failed to wait for script")?,
+            stdout,
+            stderr,
+        })
     }
 
     pub async fn ensure_executable(target_path: &Path) -> Result<()> {

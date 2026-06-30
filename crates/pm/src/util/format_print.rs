@@ -11,6 +11,7 @@ use utoo_ruborist::registry::{RegistryError, ResolveError};
 use crate::helper::migrate::MigrateResult;
 use crate::service::dependency_graph::{DepTreeNode, LockGraphService};
 use crate::service::pm_pack::PackResult;
+use crate::util::logger::format_elapsed_time;
 
 pub use package_view::print_package_info;
 
@@ -207,6 +208,75 @@ pub fn announce_script(workspace: Option<&str>, script_content: &str, script_arg
             println!();
         }
     }
+}
+
+/// One slow script in a [`print_script_heartbeat`] batch.
+pub struct HeartbeatScript<'a> {
+    pub label: &'a str,
+    pub secs: u64,
+    pub last_line: &'a str,
+}
+
+/// Persistent heartbeat for long-running *silent* dependency scripts (e.g.
+/// `puppeteer postinstall`). The spinner already ticks the longest one's elapsed
+/// time in place; this adds a scroll-up record with each script's latest output
+/// line (`↳ …`) so a stuck download is visible instead of looking hung, plus a
+/// pointer to the run log so the user knows where to dig in. When several are
+/// stuck in parallel they're all listed, so you see which ones — not one at a
+/// time as each finishes. All dimmed — a reassurance, not an alarm.
+///
+/// `log_path` is the run-wide `utoo=debug` trace, not this script's stdout: a
+/// silent script's captured output is written there (tagged with its package
+/// name) once it completes, so `grep <name> <path>` recovers it after the fact.
+/// (A *failing* script prints its output to the console inline instead.) Mid-run
+/// the live `↳` is the real-time signal; the path tells you where the record
+/// lands.
+pub fn print_script_heartbeat(scripts: &[HeartbeatScript<'_>], log_path: Option<&std::path::Path>) {
+    let logs = log_path
+        .map(|p| format!(" — logs: {}", p.display()))
+        .unwrap_or_default();
+
+    if let [only] = scripts {
+        println!(
+            "{}",
+            format!("⏳ {} still running [{}s]{logs}", only.label, only.secs).dimmed()
+        );
+        if !only.last_line.is_empty() {
+            println!("{}", format!("  ↳ {}", only.last_line).dimmed());
+        }
+        return;
+    }
+
+    println!(
+        "{}",
+        format!("⏳ {} scripts still running{logs}", scripts.len()).dimmed()
+    );
+    for s in scripts {
+        let tail = if s.last_line.is_empty() {
+            String::new()
+        } else {
+            format!("  ↳ {}", s.last_line)
+        };
+        println!(
+            "{}",
+            format!("  • {} [{}s]{tail}", s.label, s.secs).dimmed()
+        );
+    }
+}
+
+/// Completion line for a streamed install hook, e.g. `✓ prepare [12.3s]`.
+/// Gives every hook a uniform end-of-run marker with its wall time.
+pub fn print_hook_done(workspace: Option<&str>, label: &str, elapsed: std::time::Duration) {
+    let tag = match workspace {
+        Some(ws) => format!("[{ws}] {label}"),
+        None => label.to_string(),
+    };
+    println!(
+        "{} {} {}",
+        "✓".green(),
+        tag,
+        format_elapsed_time(elapsed).dimmed()
+    );
 }
 
 /// Header printed once before a multi-workspace run. Shows the script name,

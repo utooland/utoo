@@ -126,6 +126,56 @@ fn seed_level<E: EventReceiver>(
     (next_level, level_pending)
 }
 
+/// How a buffered edge will be turned into a graph node in the placement phase.
+enum Resolution {
+    /// A registry manifest already resolved from the store; placed (with any
+    /// override applied) onto a hoisted slot or a fresh nested node.
+    Registry(Arc<CoreVersionManifest>),
+    /// A non-registry spec (`file:`/`git:`/`http:`/`link:`) resolved by the
+    /// legacy router in the placement phase — it owns its own I/O.
+    NonRegistry,
+    /// An optional dep with no satisfiable/available version — emits a skip event.
+    Skip,
+}
+
+/// One edge whose manifest is settled, awaiting placement. Buffered during the
+/// fetch phase and placed in `sort_key` order so the tree never depends on the
+/// non-deterministic order manifests arrive over the network — the previous
+/// "place as it arrives" behaviour let whichever dependent resolved first claim
+/// a contested hoisted slot, so the same `package.json` could resolve to
+/// different versions run to run (a cold `utoo update` re-downloading the world,
+/// a reuse churning hundreds of node_modules entries).
+struct LevelPlacement {
+    parent: NodeIndex,
+    edge: DependencyEdgeInfo,
+    resolution: Resolution,
+    /// The parent's lock path, captured while the graph is borrowed (the
+    /// placement phase no longer has the parent in hand by name). The level is
+    /// placed in `(edge.name, parent_path, edge.spec)` order; `name`/`spec` come
+    /// straight off the owned `edge` at sort time, so only this needs storing.
+    parent_path: String,
+}
+
+/// Build a [`LevelPlacement`], capturing the parent's path while the graph is
+/// borrowed.
+fn make_placement(
+    graph: &DependencyGraph,
+    parent: NodeIndex,
+    edge: DependencyEdgeInfo,
+    resolution: Resolution,
+) -> LevelPlacement {
+    let parent_path = graph
+        .get_node(parent)
+        .map(|n| n.path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    LevelPlacement {
+        parent,
+        edge,
+        resolution,
+        parent_path,
+    }
+}
+
 /// Run-invariant context threaded through the demand loop's per-edge helpers:
 /// the manifest provider, the progress receiver, the build config, and whether
 /// the registry resolves semver ranges. Bundled so the helpers stay readable.
@@ -142,32 +192,51 @@ where
     R::Error: Send,
     E: EventReceiver,
 {
-    /// Resolve one pending edge: dispatch a non-registry spec to the legacy
-    /// resolver, reuse an existing compatible node, resolve it now from a cached
-    /// manifest, skip/fail it, or park it on a pending fetch and schedule it.
-    async fn process_pending_edge(
+    /// Settle one pending edge's *manifest* without touching the graph: dispatch
+    /// a non-registry spec to the placement phase, resolve a registry edge from a
+    /// cached manifest (buffering it for placement), skip/fail it, or park it on
+    /// a pending fetch and schedule it. Placement is deliberately deferred to
+    /// [`Self::place_level`] so the whole level is placed in a deterministic
+    /// order rather than in manifest-arrival order.
+    async fn resolve_pending_edge(
         &self,
         graph: &mut DependencyGraph,
         state: &mut ManifestState,
         queues: &mut FetchQueues,
         parent: NodeIndex,
         edge: DependencyEdgeInfo,
-        next_level: &mut Vec<NodeIndex>,
+        placements: &mut Vec<LevelPlacement>,
     ) -> Result<(), ResolveError<R::Error>> {
         self.receiver
             .on_event(BuildEvent::Resolving { name: &edge.name });
 
         if !edge.spec.is_registry_spec() {
-            let processed = process_dependency(graph, self.registry, parent, &edge, self.config)
-                .await
-                .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
-            handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
+            placements.push(make_placement(graph, parent, edge, Resolution::NonRegistry));
             return Ok(());
         }
 
-        if let Some(processed) = try_reuse_dependency(graph, parent, &edge) {
-            handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
-            return Ok(());
+        // Reuse an already-placed node — a seeded baseline entry or one from a
+        // prior level — right away, with no fetch. This is order-independent:
+        // those nodes are fixed for the whole level (this level's own nodes
+        // aren't placed until `place_level`), so it can't reintroduce the
+        // arrival-order race. It's also what keeps the lockfile-reuse path fast:
+        // a pinned tree resolves by reusing seeds instead of refetching every
+        // manifest. Only genuinely *new* packages fall through to be buffered and
+        // placed in deterministic order.
+        match try_reuse_dependency(graph, parent, &edge) {
+            Some(ProcessResult::Reused(idx)) => {
+                if let Some(node) = graph.get_node(idx) {
+                    self.receiver.on_event(BuildEvent::Reused {
+                        name: &edge.name,
+                        version: &node.version,
+                    });
+                }
+                return Ok(());
+            }
+            // `try_reuse_dependency` only ever yields `Reuse`/`None`; spell the
+            // rest out so a future `Created`/`Skipped` here is a compile error,
+            // not a silently re-fetched edge.
+            Some(ProcessResult::Created(_) | ProcessResult::Skipped) | None => {}
         }
 
         let (real_name, real_spec) = normalize_spec(&edge.name, &edge.spec);
@@ -180,31 +249,19 @@ where
                 if let Some((alias_name, alias_spec)) = alias {
                     state.cache_version(alias_name, alias_spec, Arc::clone(&manifest));
                 }
-                let manifest = self
-                    .apply_override(graph, state, parent, &edge, manifest)
-                    .await?;
-                let processed = handle_resolved_registry_manifest(
+                placements.push(make_placement(
                     graph,
-                    self.receiver,
                     parent,
-                    &edge,
-                    manifest,
-                    self.config,
-                );
-                handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
+                    edge,
+                    Resolution::Registry(manifest),
+                ));
             }
             EdgeStep::Skip => {
-                self.receiver.on_event(BuildEvent::Skipped {
-                    name: &edge.name,
-                    spec: &edge.spec,
-                });
+                placements.push(make_placement(graph, parent, edge, Resolution::Skip));
             }
             EdgeStep::Fail(message) => {
                 if edge.edge_type == EdgeType::Optional {
-                    self.receiver.on_event(BuildEvent::Skipped {
-                        name: &edge.name,
-                        spec: &edge.spec,
-                    });
+                    placements.push(make_placement(graph, parent, edge, Resolution::Skip));
                 } else {
                     return Err(chain_err(graph, parent, &edge, registry_error(message)));
                 }
@@ -218,6 +275,64 @@ where
             }
         }
 
+        Ok(())
+    }
+
+    /// Place a level's settled edges in deterministic `(name, parent path, spec)`
+    /// order, building the next level. Same-name edges sort adjacent, so the
+    /// first by `(parent path, spec)` creates the hoisted node and the rest reuse
+    /// or nest under it — a fixed outcome independent of fetch timing.
+    async fn place_level(
+        &self,
+        graph: &mut DependencyGraph,
+        state: &mut ManifestState,
+        placements: &mut Vec<LevelPlacement>,
+        next_level: &mut Vec<NodeIndex>,
+    ) -> Result<(), ResolveError<R::Error>> {
+        placements.sort_by(|a, b| {
+            a.edge
+                .name
+                .cmp(&b.edge.name)
+                .then_with(|| a.parent_path.cmp(&b.parent_path))
+                .then_with(|| a.edge.spec.cmp(&b.edge.spec))
+        });
+        for placement in placements.drain(..) {
+            let LevelPlacement {
+                parent,
+                edge,
+                resolution,
+                ..
+            } = placement;
+            match resolution {
+                Resolution::Registry(manifest) => {
+                    let manifest = self
+                        .apply_override(graph, state, parent, &edge, manifest)
+                        .await?;
+                    let processed = handle_resolved_registry_manifest(
+                        graph,
+                        self.receiver,
+                        parent,
+                        &edge,
+                        manifest,
+                        self.config,
+                    );
+                    handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
+                }
+                Resolution::NonRegistry => {
+                    let processed =
+                        process_dependency(graph, self.registry, parent, &edge, self.config)
+                            .await
+                            .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
+                    handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
+                }
+                Resolution::Skip => {
+                    self.receiver.on_event(BuildEvent::Skipped {
+                        name: &edge.name,
+                        spec: &edge.spec,
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -254,21 +369,19 @@ where
         }
     }
 
-    /// Last-resort path when the fetch stream drains while edges are still parked:
-    /// resolve every remaining waiter sequentially through the legacy resolver.
-    async fn resolve_waiters_sequentially(
+    /// Last-resort path when the fetch stream drains while edges are still
+    /// parked: buffer every remaining waiter for the placement phase, where the
+    /// legacy router resolves it. Buffering (rather than placing here) keeps even
+    /// the fallback deterministic — placement still happens in `sort_key` order.
+    fn buffer_remaining_waiters(
         &self,
-        graph: &mut DependencyGraph,
+        graph: &DependencyGraph,
         state: &mut ManifestState,
-        next_level: &mut Vec<NodeIndex>,
-    ) -> Result<(), ResolveError<R::Error>> {
+        placements: &mut Vec<LevelPlacement>,
+    ) {
         for (parent, edge) in state.drain_waiters() {
-            let processed = process_dependency(graph, self.registry, parent, &edge, self.config)
-                .await
-                .map_err(|inner| chain_err(graph, parent, &edge, inner))?;
-            handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
+            placements.push(make_placement(graph, parent, edge, Resolution::NonRegistry));
         }
-        Ok(())
     }
 
     /// Top up the in-flight fetch set from the queue up to `concurrency`, spawning
@@ -337,19 +450,23 @@ where
         let (mut next_level, mut level_pending) =
             seed_level(graph, receiver, &current_level, root_idx);
 
-        // Drain loop: keep the fetch pipeline saturated and process edges as
-        // their manifests arrive, until this level has nothing left in flight.
+        // Fetch phase: keep the fetch pipeline saturated and *settle* edges as
+        // their manifests arrive — buffering each into `placements` rather than
+        // placing it — until this level has nothing left in flight. Placement is
+        // deferred so the level can be applied in a deterministic order below,
+        // independent of the order manifests happened to arrive.
+        let mut placements: Vec<LevelPlacement> = Vec::new();
         loop {
             ctx.pump_fetches(&mut fetches, &mut queues, concurrency);
 
             while let Some((parent, edge)) = level_pending.pop_front() {
-                ctx.process_pending_edge(
+                ctx.resolve_pending_edge(
                     graph,
                     &mut state,
                     &mut queues,
                     parent,
                     edge,
-                    &mut next_level,
+                    &mut placements,
                 )
                 .await?;
                 ctx.pump_fetches(&mut fetches, &mut queues, concurrency);
@@ -387,8 +504,7 @@ where
                     version_waiters,
                     "manifest fetch stream ended with pending resolver waiters; falling back to sequential resolution"
                 );
-                ctx.resolve_waiters_sequentially(graph, &mut state, &mut next_level)
-                    .await?;
+                ctx.buffer_remaining_waiters(graph, &mut state, &mut placements);
                 break;
             };
             absorb_fetch_done(
@@ -400,6 +516,11 @@ where
                 &mut level_pending,
             )?;
         }
+
+        // Placement phase: apply the whole level in deterministic `sort_key`
+        // order, discovering the next level as nodes are created.
+        ctx.place_level(graph, &mut state, &mut placements, &mut next_level)
+            .await?;
 
         receiver.on_event(BuildEvent::LevelComplete {
             next_level_count: next_level.len(),
