@@ -34,6 +34,7 @@ use crate::service::auth;
 use crate::service::oidc;
 use crate::service::pm_pack;
 use crate::service::script::{ScriptOutput, ScriptService};
+use crate::util::cli_enum::PublishAccess;
 use crate::util::format_print::print_pack_details;
 use crate::util::integrity::compute_shasum;
 
@@ -44,6 +45,8 @@ pub struct PublishOptions<'a> {
     pub tag: &'a str,
     pub mode: RunMode,
     pub otp: Option<&'a str>,
+    /// Registry visibility (`public`/`restricted`) for the published package.
+    pub access: PublishAccess,
 }
 
 /// Result returned to the cmd layer after a successful publish.
@@ -96,7 +99,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
         integrity: &pack_result.integrity,
         tarball_data,
         registry: opts.registry,
-        access: Some("public"),
+        access: Some(opts.access.into()),
     });
 
     tracing::info!("Publishing to {} with tag {}", opts.registry, opts.tag);

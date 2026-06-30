@@ -88,3 +88,22 @@ impl From<bool> for RunMode {
         if dry_run { Self::DryRun } else { Self::Live }
     }
 }
+
+/// Registry visibility for a published package (npm `--access`).
+///
+/// Mirrors `npm publish --access <public|restricted>`. utoo historically only
+/// supported `public`; `restricted` is accepted for scoped packages on
+/// registries that support private publishing.
+///
+/// Single source of truth — strum derives the enum↔string conversions; the
+/// `public`/`restricted` spellings come from the variant names via
+/// `serialize_all` (and clap's `rename_all` for the `--access` flag).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, strum::EnumString, strum::IntoStaticStr,
+)]
+#[clap(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum PublishAccess {
+    Public,
+    Restricted,
+}

@@ -2045,8 +2045,9 @@ echo -e "${GREEN}PASS: bundled binary-mirror-config applied${NC}"
 
 # ---------------------------------------------------------------------------
 # Case: `utoo --filter <pkg> publish` from a workspace root resolves the member
-# and rewrites its `workspace:`/`catalog:` specifiers to concrete versions.
-# Also asserts that selecting multiple members publishes them in workspace
+# and rewrites its `workspace:`/`catalog:` specifiers to concrete versions, and
+# exercises `--no-git-checks` + `--access` over a dirty gitignored `dist`. Also
+# asserts that selecting multiple members publishes them in workspace
 # topological order (dependency before dependent). Runs fully in --dry-run.
 # ---------------------------------------------------------------------------
 echo -e "${YELLOW}Case: workspace --filter publish (dry-run resolves protocols)${NC}"
@@ -2071,7 +2072,11 @@ cat > "$WSP_DIR/packages/app/package.json" << 'EOF'
 }
 EOF
 pushd "$WSP_DIR"
-utoo --filter @wsp/app publish --tag beta --dry-run 2>&1 \
+# A gitignored build artifact makes the tree "dirty"; --no-git-checks must not
+# reject the publish (utoo performs no git checks).
+git init -q . && printf "dist/\n" > .gitignore && mkdir -p packages/app/dist \
+  && echo "x" > packages/app/dist/index.js
+utoo --filter @wsp/app publish --tag beta --dry-run --no-git-checks --access public 2>&1 \
   | tee wsp.out \
   || { echo -e "${RED}FAIL: filtered publish dry-run errored${NC}"; cat wsp.out; exit 1; }
 if ! grep -q '@wsp/lib: workspace:\^ -> \^1.2.3' wsp.out; then

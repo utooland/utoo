@@ -11,6 +11,7 @@ use crate::model::RunMode;
 use crate::model::package::{PackageInfo, PublishMeta};
 use crate::service::publish::{self as publish_service, PublishOptions};
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
+use crate::util::cli_enum::PublishAccess;
 use crate::util::user_config::{get_or_load_package_json, get_registry};
 
 /// Publish one or more packages.
@@ -23,12 +24,13 @@ pub async fn publish(
     tag: Option<&str>,
     mode: RunMode,
     otp: Option<&str>,
+    access: Option<PublishAccess>,
     filter: WorkspaceFilter,
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let roots = resolve_publish_roots(&cwd, filter).await?;
     for root in roots {
-        publish_one(&root, tag, mode, otp).await?;
+        publish_one(&root, tag, mode, otp, access).await?;
     }
     Ok(())
 }
@@ -67,6 +69,7 @@ async fn publish_one(
     tag: Option<&str>,
     mode: RunMode,
     otp: Option<&str>,
+    access: Option<PublishAccess>,
 ) -> Result<()> {
     // Run each publish from inside its own package directory, matching the
     // single-package flow (`update_cwd_to_project`). The filtered path anchors
@@ -81,6 +84,7 @@ async fn publish_one(
     meta.validate()?;
 
     let tag = meta.resolve_tag(tag)?;
+    let access = meta.resolve_access(access)?;
     let registry = meta
         .publish_config
         .registry
@@ -94,6 +98,7 @@ async fn publish_one(
         tag: &tag,
         mode,
         otp,
+        access,
     })
     .await?;
 
