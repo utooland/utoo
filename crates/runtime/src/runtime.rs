@@ -138,6 +138,8 @@ deno_core::extension!(
         "ext:utoo_rt_ext/node/diagnostics_channel" = "src/js/node/diagnostics_channel.js",
         "ext:utoo_rt_ext/node/console" = "src/js/node/console.js",
         "ext:utoo_rt_ext/node/timers" = "src/js/node/timers.js",
+        "ext:utoo_rt_ext/node/timers_promises" = "src/js/node/timers_promises.js",
+        "ext:utoo_rt_ext/node/process" = "src/js/node/process.js",
         "ext:utoo_rt_ext/node/constants" = "src/js/node/constants.js",
         "ext:utoo_rt_ext/node/domain" = "src/js/node/domain.js",
         "ext:utoo_rt_ext/node/util_types" = "src/js/node/util_types.js",
@@ -265,6 +267,7 @@ pub async fn build_app_snapshot(script_path: &str, output_path: &str) -> Result<
         "<utoo:snapshot-init>",
         format!(
             "globalThis.__utoo_snapshot_mode = true;\
+             globalThis.__utoo_building_snapshot = true;\
              globalThis.process.argv = ['utoo-runtime', {}];\
              globalThis.__utoo_origCaptureStackTrace = Error.captureStackTrace;\
              Error.captureStackTrace = function(obj) {{\
@@ -286,6 +289,26 @@ pub async fn build_app_snapshot(script_path: &str, output_path: &str) -> Result<
         ),
     )?;
 
+    // V8 startup-snapshot isolates have WebAssembly disabled (compiled WASM cannot
+    // be serialized into a snapshot). Some dependencies eagerly compile WASM at
+    // module load and reject when it is unavailable (e.g. undici compiling llhttp
+    // via `await WebAssembly.compile`). Those resources re-initialize lazily at
+    // runtime (where WASM is available), so a WASM-unavailable rejection during the
+    // snapshot build is benign and must not abort it. Suppress *only* those; all
+    // other unhandled rejections stay fatal. The default handler (() => false) is
+    // restored on deserialize in run_from_app_snapshot.
+    runtime.execute_script(
+        "<utoo:snapshot-reject-guard>",
+        "Deno.core.setUnhandledPromiseRejectionHandler(function(promise, err){\
+           var msg = (err && (err.message || String(err))) || '';\
+           if (msg.indexOf('WebAssembly') !== -1) {\
+             try { console.error('[snapshot-build] suppressed WASM-unavailable rejection:', msg); } catch (e) {}\
+             return true;\
+           }\
+           return false;\
+         });",
+    )?;
+
     eprintln!("Loading {}", abs_path.display());
 
     let mod_id = runtime
@@ -293,31 +316,82 @@ pub async fn build_app_snapshot(script_path: &str, output_path: &str) -> Result<
         .await
         .with_context(|| format!("Failed to load {}", abs_path.display()))?;
 
-    let result = runtime.mod_evaluate(mod_id);
-    runtime
-        .run_event_loop(deno_core::PollEventLoopOptions::default())
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .context("Event loop error")?;
-    result
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .context("Module evaluation error")?;
+    let _result = runtime.mod_evaluate(mod_id);
 
-    // Verify that listen() was intercepted
-    let captured: bool = runtime
+    // Drive the event loop until the entry registers its restore path (a
+    // deserialize main function or a captured server) rather than waiting for a
+    // full drain. egg's snapshot mode loads all metadata, cleans up
+    // non-serializable resources, registers the deserialize main, then *returns*
+    // while timers/handles (logger flush, schedule) may still be alive — exactly
+    // as Node's `--build-snapshot` snapshots right after the entry runs, not
+    // after a libuv drain. Waiting for a full drain here would hang forever. A
+    // wall-clock cap guards an entry that never registers its restore path.
+    {
+        use std::task::Poll;
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            std::future::poll_fn(|cx| {
+                match runtime.poll_event_loop(cx, deno_core::PollEventLoopOptions::default()) {
+                    Poll::Ready(r) => Poll::Ready(r),
+                    Poll::Pending => {
+                        let ready = runtime
+                            .execute_script(
+                                "<utoo:ready-poll>",
+                                "!!globalThis.__utoo_deserialize_main || \
+                                 !!(globalThis.__utoo_snapshot_servers && \
+                                    globalThis.__utoo_snapshot_servers.length > 0)",
+                            )
+                            .ok()
+                            .map(|v| v.open(runtime.v8_isolate()).is_true())
+                            .unwrap_or(false);
+                        if ready {
+                            Poll::Ready(Ok(()))
+                        } else {
+                            Poll::Pending
+                        }
+                    }
+                }
+            }),
+        )
+        .await;
+
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                return Err(anyhow::anyhow!("{e}")).context("Event loop error");
+            }
+            Err(_elapsed) => anyhow::bail!(
+                "Snapshot build timed out (120s): the entry never registered a restore \
+                 path. Framework init may be stuck awaiting a connection that snapshot \
+                 mode should defer."
+            ),
+        }
+    }
+
+    // Run v8.startupSnapshot serialize callbacks, then verify the entry
+    // registered a restore path: either a deserialize main function
+    // (v8.startupSnapshot flow, e.g. egg's snapshot lifecycle) or a captured
+    // server via the listen()-interception flow.
+    let ready: bool = runtime
         .execute_script(
             "<utoo:check>",
-            "!!(globalThis.__utoo_snapshot_servers && globalThis.__utoo_snapshot_servers.length > 0)",
+            "(function(){\
+               var cbs = globalThis.__utoo_serialize_cbs || [];\
+               for (var i = 0; i < cbs.length; i++) {\
+                 try { cbs[i][0](cbs[i][1]); } catch (e) {}\
+               }\
+               return !!globalThis.__utoo_deserialize_main ||\
+                 !!(globalThis.__utoo_snapshot_servers && globalThis.__utoo_snapshot_servers.length > 0);\
+             })()",
         )?
         .open(runtime.v8_isolate())
         .is_true();
 
-    if !captured {
+    if !ready {
         anyhow::bail!(
-            "No server.listen() calls captured. The entry script must call \
-             server.listen() (e.g., via http.createServer().listen() or app.listen()) \
-             for the application snapshot to work."
+            "Snapshot entry did not register a restore path. Call \
+             v8.startupSnapshot.setDeserializeMainFunction(fn) (recommended) or \
+             server.listen() so the application snapshot has something to resume."
         );
     }
 
@@ -374,9 +448,24 @@ pub async fn run_from_app_snapshot(snapshot_path: &str, _script_path: &str) -> R
         r#"
         Deno.core.setNextTickCallback(globalThis.__utoo_nextTickDrainer);
         globalThis.__utoo_snapshot_mode = false;
+        globalThis.__utoo_building_snapshot = false;
 
-        // Re-bind all captured servers
-        if (globalThis.__utoo_snapshot_servers) {
+        // Restore deno_core's default fatal handling for unhandled rejections
+        // (the snapshot build had installed a WASM-unavailable suppressor).
+        Deno.core.setUnhandledPromiseRejectionHandler(function(){ return false; });
+
+        // Run v8.startupSnapshot deserialize callbacks.
+        var __dcbs = globalThis.__utoo_deserialize_cbs || [];
+        for (var __i = 0; __i < __dcbs.length; __i++) {
+            try { __dcbs[__i][0](__dcbs[__i][1]); } catch (e) {}
+        }
+
+        if (typeof globalThis.__utoo_deserialize_main === 'function') {
+            // v8.startupSnapshot flow: the entry registered a deserialize main
+            // function that resumes the framework lifecycle and binds the server.
+            globalThis.__utoo_deserialize_main(globalThis.__utoo_deserialize_data);
+        } else if (globalThis.__utoo_snapshot_servers) {
+            // listen()-interception flow: re-bind the captured servers.
             for (const entry of globalThis.__utoo_snapshot_servers) {
                 entry.server.listen(entry.port, entry.host);
             }

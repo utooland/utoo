@@ -142,7 +142,10 @@ class _Buffer extends Uint8Array {
       }
       return new _Buffer(utf8Encode(value));
     }
-    if (value instanceof ArrayBuffer || value instanceof SharedArrayBuffer) {
+    if (
+      value instanceof ArrayBuffer ||
+      (typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer)
+    ) {
       return new _Buffer(new Uint8Array(value, encodingOrOffset, length));
     }
     if (ArrayBuffer.isView(value)) {

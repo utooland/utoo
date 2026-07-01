@@ -26,12 +26,38 @@ function getHeapCodeStatistics() {
 function setFlagsFromString() {}
 function writeHeapSnapshot() { return ""; }
 
+// node:v8 startupSnapshot API (Node-compatible subset). utoo-runtime drives
+// these via globals: during a `snapshot` build it sets __utoo_building_snapshot
+// and, after the entry runs, invokes the serialize callbacks then serializes the
+// heap (capturing the registered deserialize main function + its data). During
+// `run --snapshot` it invokes the deserialize callbacks and calls the
+// deserialize main function. This lets frameworks (e.g. egg) that use Node's
+// startup-snapshot lifecycle work unchanged on utoo-runtime.
+const startupSnapshot = {
+  isBuildingSnapshot() {
+    return !!globalThis.__utoo_building_snapshot;
+  },
+  setDeserializeMainFunction(fn, data) {
+    globalThis.__utoo_deserialize_main = fn;
+    globalThis.__utoo_deserialize_data = data;
+  },
+  addSerializeCallback(fn, data) {
+    if (!globalThis.__utoo_serialize_cbs) globalThis.__utoo_serialize_cbs = [];
+    globalThis.__utoo_serialize_cbs.push([fn, data]);
+  },
+  addDeserializeCallback(fn, data) {
+    if (!globalThis.__utoo_deserialize_cbs) globalThis.__utoo_deserialize_cbs = [];
+    globalThis.__utoo_deserialize_cbs.push([fn, data]);
+  },
+};
+
 const v8 = {
   getHeapStatistics,
   getHeapSpaceStatistics,
   getHeapCodeStatistics,
   setFlagsFromString,
   writeHeapSnapshot,
+  startupSnapshot,
 };
 v8.default = v8;
 
@@ -42,4 +68,5 @@ export {
   getHeapCodeStatistics,
   setFlagsFromString,
   writeHeapSnapshot,
+  startupSnapshot,
 };

@@ -44,6 +44,19 @@ pub fn op_napi_open<'scope>(
     let path = std::fs::canonicalize(&path_url)
         .map_err(|_| JsErrorBox::type_error(format!("Invalid path: {}", path_url.display())))?;
 
+    // Native addon loading requires NAPI symbols to be exported from the binary.
+    // Until we properly export napi_* symbols, skip dlopen to avoid dyld crashes.
+    // Set UTOO_ENABLE_NATIVE_ADDONS=1 to attempt loading anyway. This check MUST
+    // run before any v8::Global is created below: those handles get leaked into a
+    // Box::into_raw'd Env and would otherwise persist as un-serializable global
+    // handles, breaking V8 startup-snapshot builds (CheckGlobalAndEternalHandles).
+    if std::env::var("UTOO_ENABLE_NATIVE_ADDONS").is_err() {
+        return Err(JsErrorBox::type_error(format!(
+            "Native addon loading is not yet supported: {}",
+            path.display()
+        )));
+    }
+
     // Create exports object
     let exports = v8::Object::new(scope);
 
@@ -115,16 +128,8 @@ pub fn op_napi_open<'scope>(
         }
     }
 
-    // dlopen the .node file
-    // Native addon loading requires NAPI symbols to be exported from the binary.
-    // Until we properly export napi_* symbols, skip dlopen to avoid dyld crashes.
-    // Set UTOO_ENABLE_NATIVE_ADDONS=1 to attempt loading anyway.
-    if std::env::var("UTOO_ENABLE_NATIVE_ADDONS").is_err() {
-        return Err(JsErrorBox::type_error(format!(
-            "Native addon loading is not yet supported: {}",
-            path.display()
-        )));
-    }
+    // dlopen the .node file (only reached when UTOO_ENABLE_NATIVE_ADDONS=1; the
+    // unsupported-addon guard ran at the top of this op before any globals).
     let library = unsafe { libloading::Library::new(&path) }
         .map_err(|e| JsErrorBox::type_error(format!("{e}")))?;
 
