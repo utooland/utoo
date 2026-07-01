@@ -27,7 +27,7 @@ export interface NapiTaskMessage {
   data: Buffer
 }
 export declare function recvTaskMessageInWorker(workerId: number): Promise<NapiTaskMessage>
-export declare function sendTaskMessage(message: NapiTaskMessage): Promise<void>
+export declare function sendTaskMessage(message: NapiTaskMessage): void
 export declare function lockfileTryAcquireSync(path: string, content?: string | undefined | null): { __napiType: "Lockfile" } | null
 export declare function lockfileTryAcquire(path: string, content?: string | undefined | null): Promise<{ __napiType: "Lockfile" } | null>
 export declare function lockfileUnlockSync(lockfile: { __napiType: "Lockfile" }): void
