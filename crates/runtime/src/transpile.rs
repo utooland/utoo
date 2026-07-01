@@ -11,7 +11,12 @@ use swc_core::{
         codegen::{self, Emitter, text_writer::JsWriter},
         parser::{EsSyntax, Syntax, TsSyntax, parse_file_as_module},
         transforms::{
-            base::{helpers::{HELPERS, Helpers, inject_helpers}, resolver},
+            base::{
+                fixer::fixer,
+                helpers::{HELPERS, Helpers, inject_helpers},
+                hygiene::hygiene,
+                resolver,
+            },
             module::common_js,
             proposal::decorators::{self, decorators},
             typescript::strip_type,
@@ -95,6 +100,19 @@ pub fn transpile_to_js(source: &str, path: &Path) -> Result<String> {
             // which we post-process into require() calls below.
             module.visit_mut_with(&mut inject_helpers(unresolved_mark));
 
+            // Hygiene renames identifiers that collide only by SyntaxContext
+            // (e.g. two imports whose specifiers end in the same segment both
+            // generated as `_promises`) so codegen emits distinct names. Fixer
+            // re-adds parens the AST implies but the printer would otherwise drop
+            // (e.g. the `(0, mod.fn)(...)` indirect-call sequence).
+            let mut program = Program::Module(module);
+            hygiene().process(&mut program);
+            fixer(None).process(&mut program);
+            module = match program {
+                Program::Module(m) => m,
+                _ => unreachable!(),
+            };
+
             module
         })
     });
@@ -151,61 +169,72 @@ fn fix_swc_codegen_issues(code: &str) -> String {
             }
         }
 
-        // Fix 2: SWC codegen omits parens around (0, _mod.default) in const/let/var declarations.
-        // Pattern: `= 0, _name.default(` or `= 0, _name.default.`
-        // This is a comma expression that should be `= (0, _name.default)(` or `= (0, _name.default).`
-        if trimmed.contains("= 0, _") && trimmed.contains(".default") {
-            let fixed = fix_comma_expr_parens(line);
-            result.push_str(&fixed);
-            result.push('\n');
-            continue;
-        }
-
         result.push_str(line);
         result.push('\n');
     }
     if !code.ends_with('\n') && result.ends_with('\n') {
         result.pop();
     }
-    result
+    // Fix 2: SWC codegen sometimes drops the parens around the `(0, obj.method)`
+    // indirect-call sequence (used to call a method without `this` binding),
+    // emitting e.g. `()=>0, _mod.fn(x)`. V8 then parses the identifier after the
+    // comma as a new binding (`Identifier already declared`) or mis-scopes it.
+    // Re-wrap any `0, _ident.member(` that isn't already parenthesized.
+    fix_indirect_call_parens(&result)
 }
 
-/// Fix missing parens around `0, _mod.default` comma expressions.
-/// Converts `= 0, _mod.default(...)` to `= (0, _mod.default)(...)`
-fn fix_comma_expr_parens(line: &str) -> String {
-    let mut result = String::with_capacity(line.len() + 4);
-    let bytes = line.as_bytes();
+/// Re-wrap dropped-paren SWC indirect calls: `0, _ident.member(` -> `(0, _ident.member)(`.
+/// Only matches the SWC-generated marker (a bare `0, _<ident>.<chain>` immediately
+/// followed by a call `(`, not already preceded by `(`). UTF-8 safe: slices only at
+/// the ASCII byte positions it matched.
+fn fix_indirect_call_parens(code: &str) -> String {
+    let bytes = code.as_bytes();
     let len = bytes.len();
-    let mut i = 0;
-
+    let mut result = String::with_capacity(len + 16);
+    let mut last = 0usize;
+    let mut i = 0usize;
     while i < len {
-        // Look for "= 0, _"
-        if i + 6 < len && &line[i..i + 5] == "= 0, " && bytes[i + 5] == b'_' {
-            // Find ".default" after the identifier
-            let start = i + 5; // start of _identifier
-            let mut j = start;
-            // Skip identifier chars
-            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+        // marker: `0, _` where the `0` isn't already wrapped in `(`
+        if bytes[i] == b'0'
+            && i + 3 < len
+            && bytes[i + 1] == b','
+            && bytes[i + 2] == b' '
+            && bytes[i + 3] == b'_'
+            && (i == 0 || bytes[i - 1] != b'(')
+        {
+            // parse `_ident(.ident)*`
+            let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+            let mut j = i + 3;
+            while j < len && is_ident(bytes[j]) {
                 j += 1;
             }
-            // Check for ".default"
-            if j + 8 <= len && &line[j..j + 8] == ".default" {
-                let default_end = j + 8;
-                // Check what follows .default: ( or . or end
-                let next = if default_end < len { bytes[default_end] } else { b';' };
-                if next == b'(' || next == b'.' || next == b';' || next == b')' || next == b',' {
-                    // Emit: = (0, _ident.default)
-                    result.push_str("= (0, ");
-                    result.push_str(&line[start..default_end]);
-                    result.push(')');
-                    i = default_end;
-                    continue;
+            loop {
+                if j < len && bytes[j] == b'.' {
+                    let mut k = j + 1;
+                    while k < len && is_ident(bytes[k]) {
+                        k += 1;
+                    }
+                    if k > j + 1 {
+                        j = k;
+                        continue;
+                    }
                 }
+                break;
+            }
+            // Only an indirect *call*: the member expression is immediately invoked.
+            if j > i + 4 && j < len && bytes[j] == b'(' {
+                result.push_str(&code[last..i]);
+                result.push('(');
+                result.push_str(&code[i..j]);
+                result.push(')');
+                last = j;
+                i = j;
+                continue;
             }
         }
-        result.push(bytes[i] as char);
         i += 1;
     }
+    result.push_str(&code[last..]);
     result
 }
 
@@ -232,6 +261,19 @@ fn syntax_for_path(path: &Path) -> Syntax {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indirect_call_parens_preserved() {
+        // The SWC `(0, mod.fn)(...)` indirect-call parens must survive codegen,
+        // otherwise V8 reparses the identifier after the comma as a new binding.
+        let src = "import { debuglog } from \"node:util\";\nimport path from \"node:path\";\nexport const foo = () => debuglog(\"x\")(path.sep);\n";
+        let out = transpile_to_js(src, Path::new("test.js")).unwrap();
+        assert!(
+            out.contains("(0, _nodeutil.debuglog)"),
+            "indirect-call parens dropped:\n{out}"
+        );
+        assert!(!out.contains("=>0, _nodeutil"), "unwrapped seq in arrow body:\n{out}");
+    }
 
     #[test]
     fn strip_basic_types() {

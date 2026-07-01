@@ -170,5 +170,12 @@ async function* on(emitter, name) {
 EventEmitter.once = once;
 EventEmitter.on = on;
 
+const captureRejectionSymbol = Symbol.for("nodejs.rejection");
+const errorMonitor = Symbol.for("events.errorMonitor");
+EventEmitter.captureRejectionSymbol = captureRejectionSymbol;
+EventEmitter.errorMonitor = errorMonitor;
+EventEmitter.getEventListeners = (emitter, name) =>
+  typeof emitter.listeners === "function" ? emitter.listeners(name) : [];
+
 export default EventEmitter;
-export { EventEmitter, once, on };
+export { EventEmitter, once, on, captureRejectionSymbol, errorMonitor };

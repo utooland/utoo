@@ -232,13 +232,17 @@ function createConnection(port, host, cb) {
   return socket.connect(port, host, cb);
 }
 
+const isIPv4 = (s) => /^\d+\.\d+\.\d+\.\d+$/.test(s);
+const isIPv6 = (s) => typeof s === "string" && s.includes(":");
+const isIP = (s) => (isIPv4(s) ? 4 : isIPv6(s) ? 6 : 0);
+
+const connect = createConnection;
+
 const net = {
   Server, Socket, createServer, createConnection,
-  connect: createConnection,
-  isIP: () => 0,
-  isIPv4: (s) => /^\d+\.\d+\.\d+\.\d+$/.test(s),
-  isIPv6: () => false,
+  connect,
+  isIP, isIPv4, isIPv6,
 };
 
 export default net;
-export { Server, Socket, createServer, createConnection };
+export { Server, Socket, createServer, createConnection, connect, isIP, isIPv4, isIPv6 };

@@ -150,9 +150,18 @@ function getCallSites(frameCountOrOptions, maybeOptions) {
 
 const types = _types;
 
+// Convert to a Unicode-scalar-value string (lone surrogates -> U+FFFD), matching
+// node:util.toUSVString. Used by urllib.
+function toUSVString(value) {
+  const str = `${value}`;
+  return typeof str.toWellFormed === "function"
+    ? str.toWellFormed()
+    : str.replace(/\p{Surrogate}/gu, String.fromCharCode(0xfffd));
+}
+
 const util = {
   format, inspect, inherits, deprecate, promisify, callbackify,
-  debuglog, getCallSites, types,
+  debuglog, getCallSites, types, toUSVString,
   TextEncoder: globalThis.TextEncoder,
   TextDecoder: globalThis.TextDecoder,
   isArray: Array.isArray,
@@ -171,5 +180,5 @@ const util = {
 export default util;
 export {
   format, inspect, inherits, deprecate, promisify, callbackify,
-  debuglog, getCallSites, types,
+  debuglog, getCallSites, types, toUSVString,
 };

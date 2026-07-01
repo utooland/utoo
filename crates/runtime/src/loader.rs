@@ -23,10 +23,16 @@ fn resolve_builtin(specifier: &str) -> Option<String> {
         | "readline" | "diagnostics_channel" | "console" | "timers"
         | "timers/promises" | "constants" | "domain"
         | "util/types" | "stream/promises" | "stream/web" | "stream/consumers"
-        | "inspector" | "dns/promises" | "path/posix" | "vm" | "repl" => {
+        | "inspector" | "dns/promises" | "path/posix" | "vm" | "repl"
+        | "process" => {
             let normalized = name.replace('/', "_");
             Some(format!("ext:utoo_rt_ext/node/{normalized}"))
         }
+        // `node:assert/strict` is a distinct module in Node, but utoo-runtime's
+        // assert exposes `strict === assert`, so route it to the assert module
+        // (its default export is the strict-equivalent assert). The ESM resolver
+        // otherwise drops to file resolution and fails ("Not a file URL").
+        "assert/strict" => Some("ext:utoo_rt_ext/node/assert".to_string()),
         _ => None,
     }
 }
@@ -111,15 +117,26 @@ export default module.exports;
         );
     }
 
-    // True CJS: wrap in function to isolate variables, extract named exports
+    // True CJS: wrap in function to isolate variables, extract named exports.
+    // Bind each name to a uniquely-prefixed local (`__cjs_ex_<name>`) and export
+    // it `as <name>`, rather than `const { <name> } = __mod.exports`. A plain
+    // destructure would create module-scope lexical bindings that SHADOW globals
+    // the wrapped module body itself uses (e.g. a module exporting `Symbol`,
+    // `URL`, or `Request` while also referencing the global) — throwing a TDZ
+    // "Cannot access 'X' before initialization" during evaluation.
     let export_names = extract_cjs_export_names(source);
     let named_exports = if export_names.is_empty() {
         String::new()
     } else {
-        let names = export_names.join(", ");
-        format!(
-            "const {{ {names} }} = __mod.exports;\nexport {{ {names} }};\n"
-        )
+        let decls: String = export_names
+            .iter()
+            .map(|n| format!("const __cjs_ex_{n} = __mod.exports.{n};\n"))
+            .collect();
+        let specifiers: Vec<String> = export_names
+            .iter()
+            .map(|n| format!("__cjs_ex_{n} as {n}"))
+            .collect();
+        format!("{decls}export {{ {} }};\n", specifiers.join(", "))
     };
 
     format!(
@@ -202,6 +219,55 @@ fn extract_cjs_export_names(source: &str) -> Vec<String> {
                 None => break,
             }
         }
+    }
+
+    // Pattern 4: `module.exports.NAME = ...` / `exports.NAME = ...`
+    // Hand-written CJS (e.g. egg-logger) that assigns named exports one by one;
+    // none of the bundler-hint patterns above match these. Restricted to
+    // reasonably-sized modules: a multi-MB single-file bundle inlines countless
+    // nested `exports.X = ...` whose names (URL, Buffer, …) would shadow globals
+    // the bundle itself uses (TDZ), and such a bundle is loaded as a main module
+    // / via its default export, never by name.
+    if source.len() < 262_144 {
+    for marker in &["module.exports.", "exports."] {
+        let mut search_from = 0;
+        while let Some(rel) = source[search_from..].find(marker) {
+            let abs = search_from + rel;
+            search_from = abs + marker.len();
+            // For the bare `exports.` marker, skip matches that are actually part
+            // of `module.exports.` (handled by the other marker) or a property
+            // access on some other object (`foo.exports.`).
+            if *marker == "exports." && abs > 0 {
+                let prev = source.as_bytes()[abs - 1];
+                if prev == b'.' || prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'$' {
+                    continue;
+                }
+            }
+            let rest = &source[abs + marker.len()..];
+            let ident: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+                .collect();
+            if ident.is_empty() {
+                continue;
+            }
+            let after = rest[ident.len()..].trim_start();
+            // Require a real assignment (`=`, not `==`/`===`/`=>`).
+            if after.starts_with('=') && !after.starts_with("==") && !after.starts_with("=>") {
+                names.push(ident);
+            }
+        }
+    }
+
+    // Pattern 5: `module.exports = { key: ..., ... }` direct object-literal
+    // assignment (e.g. should-send-same-site-none). Pattern 1 only matches the
+    // `0 && (module.exports = {` SWC hint; this catches the real assignment.
+    for marker in &["module.exports = {", "module.exports={"] {
+        if let Some(pos) = source.find(marker) {
+            let brace_start = pos + marker.len() - 1;
+            collect_object_keys(source, brace_start, &mut names);
+        }
+    }
     }
 
     // Filter out internal/problematic names
@@ -292,8 +358,14 @@ fn collect_object_keys(source: &str, brace_pos: usize, names: &mut Vec<String>) 
                     while i < len && bytes[i].is_ascii_whitespace() {
                         i += 1;
                     }
-                    // If followed by `:`, it's an object key
-                    if i < len && bytes[i] == b':' {
+                    // Object key when followed by `:` (key: value), `,`/`}`
+                    // (shorthand `{ key }`), or `(` (method `{ key() {} }`).
+                    if i < len
+                        && (bytes[i] == b':'
+                            || bytes[i] == b','
+                            || bytes[i] == b'}'
+                            || bytes[i] == b'(')
+                    {
                         names.push(key.to_string());
                     }
                     // continue without incrementing (already advanced)
@@ -360,7 +432,22 @@ fn is_valid_js_identifier(s: &str) -> bool {
         Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {}
         _ => return false,
     }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') {
+        return false;
+    }
+    // Reserved words can't be used as destructuring binding names in the
+    // generated `const { ... } = __mod.exports` re-export. (A bundled file may
+    // contain inlined `exports.class = ...` etc.; those must not leak through.)
+    !matches!(
+        s,
+        "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger"
+            | "default" | "delete" | "do" | "else" | "enum" | "export" | "extends"
+            | "false" | "finally" | "for" | "function" | "if" | "import" | "in"
+            | "instanceof" | "new" | "null" | "return" | "super" | "switch" | "this"
+            | "throw" | "true" | "try" | "typeof" | "var" | "void" | "while" | "with"
+            | "yield" | "let" | "static" | "await" | "implements" | "interface"
+            | "package" | "private" | "protected" | "public"
+    )
 }
 
 impl deno_core::ModuleLoader for UtooModuleLoader {

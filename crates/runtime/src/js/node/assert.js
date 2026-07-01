@@ -96,9 +96,11 @@ Object.assign(assert, {
 assert.default = assert;
 assert.strict = assert;
 
+const strict = assert;
+
 export default assert;
 export {
   ok, equal, notEqual, strictEqual, notStrictEqual,
   deepEqual, deepStrictEqual, throws, doesNotThrow,
-  fail, ifError, AssertionError,
+  fail, ifError, AssertionError, strict,
 };
