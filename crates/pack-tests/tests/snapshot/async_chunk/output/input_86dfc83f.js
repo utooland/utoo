@@ -9,18 +9,6 @@ __turbopack_context__.v((parentImport) => {
     });
 });
 }),
-402, ((__turbopack_context__) => {
-"use strict";
-
-function bar(value) {
-    console.assert(value);
-}
-__turbopack_context__.s([
-    "bar",
-    0,
-    bar
-]);
-}),
 545, ((__turbopack_context__) => {
 "use strict";
 
@@ -33,6 +21,18 @@ __turbopack_context__.A(192).then(({ foo })=>{
     foo(true);
 });
 __turbopack_context__.s([]);
+}),
+402, ((__turbopack_context__) => {
+"use strict";
+
+function bar(value) {
+    console.assert(value);
+}
+__turbopack_context__.s([
+    "bar",
+    0,
+    bar
+]);
 }),
 743, ((__turbopack_context__, module, exports) => {
 

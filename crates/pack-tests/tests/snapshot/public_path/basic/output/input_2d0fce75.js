@@ -1,4 +1,7 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+19, ((__turbopack_context__) => {
+
+__turbopack_context__.q("https://cdn.example.com/assets/asset.2d068005.jpg");}),
 4, ((__turbopack_context__) => {
 "use strict";
 
@@ -25,9 +28,6 @@ __turbopack_context__.s([
     loadLazyModule
 ]);
 }),
-19, ((__turbopack_context__) => {
-
-__turbopack_context__.q("https://cdn.example.com/assets/asset.2d068005.jpg");}),
 78, ((__turbopack_context__) => {
 
 __turbopack_context__.v((parentImport) => {

@@ -26,5 +26,5 @@ pub async fn recv_task_message_in_worker(worker_id: u32) -> napi::Result<NapiTas
 
 #[napi]
 pub async fn send_task_message(message: NapiTaskMessage) -> napi::Result<()> {
-    turbopack_node::worker_pool::send_task_message(message).await
+    turbopack_node::worker_pool::send_task_message(message)
 }

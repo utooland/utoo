@@ -55,7 +55,7 @@ use turbopack_core::{
     issue::{CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, StyledString},
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
-        chunk_group_info::ChunkGroupEntry,
+        chunk_group_info::{ChunkGroupEntry, EntryHeuristics},
     },
     output::{
         ExpandOutputAssetsInput, ExpandedOutputAssets, OutputAsset, OutputAssets,
@@ -1117,8 +1117,11 @@ impl Project {
                 .collect();
             ModuleGraph::from_graphs(
                 vec![SingleModuleGraph::new_with_entries(
-                    GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry(entries)])
-                        .resolved_cell(),
+                    GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry {
+                        modules: entries,
+                        heuristics: EntryHeuristics::default(),
+                    }])
+                    .resolved_cell(),
                     is_production,
                     is_production,
                 )],
@@ -1319,8 +1322,11 @@ impl Project {
             .collect();
         Ok(ModuleGraph::from_graphs(
             vec![SingleModuleGraph::new_with_entries(
-                GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry(entries)])
-                    .resolved_cell(),
+                GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry {
+                    modules: entries,
+                    heuristics: EntryHeuristics::default(),
+                }])
+                .resolved_cell(),
                 is_production,
                 is_production,
             )],
@@ -1541,9 +1547,7 @@ impl Project {
                 .config()
                 .module_ids()
                 .await?
-                .map_or(ModuleIdStrategyConfig::Deterministic, |module_ids| {
-                    module_ids
-                }),
+                .unwrap_or(ModuleIdStrategyConfig::Deterministic),
         };
 
         match module_id_strategy {
