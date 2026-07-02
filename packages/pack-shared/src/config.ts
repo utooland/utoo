@@ -325,7 +325,7 @@ export interface ConfigComplete {
   swcPlugins?: [string, any][];
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
-  turbopackMemoryEviction?: false | "full";
+  turbopackMemoryEviction?: boolean | "full";
   nodePolyfill?: boolean;
   mdx?: MdxOptions;
   devServer?: DevServerConfig;

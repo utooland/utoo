@@ -3,12 +3,12 @@ export function isTruthyEnv(value: string | undefined): boolean {
 }
 
 export function normalizeTurbopackMemoryEviction(
-  value: false | "full" | undefined,
+  value: boolean | "full" | undefined,
 ): "off" | "full" {
   if (value === false) {
     return "off";
   }
-  if (value === "full") {
+  if (value === true || value === "full") {
     return "full";
   }
 
