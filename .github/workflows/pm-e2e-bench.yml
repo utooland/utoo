@@ -150,7 +150,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-06-23
+          toolchain: nightly-2026-04-02
           targets: x86_64-unknown-linux-gnu
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -224,7 +224,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-06-23
+          toolchain: nightly-2026-04-02
           targets: aarch64-apple-darwin
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -255,7 +255,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-06-23
+          toolchain: nightly-2026-04-02
           targets: x86_64-apple-darwin
       - name: Add cross-compilation target
         run: rustup target add x86_64-apple-darwin
@@ -295,7 +295,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-06-23
+          toolchain: nightly-2026-04-02
           targets: x86_64-pc-windows-msvc
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

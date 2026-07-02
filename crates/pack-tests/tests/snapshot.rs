@@ -18,6 +18,7 @@ use std::{
     collections::VecDeque,
     fs, io,
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
 use turbo_rcstr::rcstr;
 use turbo_tasks::{
@@ -34,6 +35,8 @@ use turbopack_core::{
 use turbopack_test_utils::snapshot::{UPDATE, diff, matches_expected, snapshot_issues};
 
 use crate::util::REPO_ROOT;
+
+static SNAPSHOT_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn default_config() -> String {
     r#"{
@@ -77,14 +80,6 @@ fn test(resource: PathBuf) {
     }
     let resource = canonicalize(resource).unwrap();
 
-    // This PostCSS JS config case is covered by macOS and local snapshot runs.
-    // Linux CI targets can intermittently return unparsable CSS from the
-    // evaluated PostCSS worker even when the config path is valid.
-    #[cfg(target_os = "linux")]
-    if resource.ends_with(Path::new("style/local_postcss_config")) {
-        return;
-    }
-
     // Skip non-directory resources (like config.json files)
     if !resource.is_dir() {
         return;
@@ -115,6 +110,7 @@ fn test(resource: PathBuf) {
         }
     }
 
+    let _guard = SNAPSHOT_TEST_LOCK.lock().unwrap();
     run(resource).unwrap();
 }
 
@@ -244,6 +240,14 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
     // Ensure default mode is present
     if user_config.get("mode").is_none() {
         user_config["mode"] = serde_json::Value::String("production".to_string());
+    }
+
+    // Snapshot tests share a process-wide Node evaluation pool across test cases.
+    // Use child processes so plugin transforms don't reuse worker-thread state
+    // between concurrently running fixtures.
+    if user_config.get("pluginRuntimeStrategy").is_none() {
+        user_config["pluginRuntimeStrategy"] =
+            serde_json::Value::String("childProcesses".to_string());
     }
 
     // Ensure optimization is present (minify default to false for snapshots)

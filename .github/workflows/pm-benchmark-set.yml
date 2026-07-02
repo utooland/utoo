@@ -80,7 +80,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-06-23
+          toolchain: nightly-2026-04-02
           targets: x86_64-unknown-linux-gnu
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

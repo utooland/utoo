@@ -46,7 +46,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-06-23
+          toolchain: nightly-2026-04-02
 
       # Resolve the ruborist version for this release:
       #
