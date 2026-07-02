@@ -19,7 +19,7 @@ import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
-import { isTruthyEnv } from "../utils/env";
+import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
@@ -166,8 +166,8 @@ export async function createHotReloader(
 
   const createProject = projectFactory();
   const persistentCaching = bundleOptions.config.persistentCaching ?? true;
-  const turbopackMemoryEviction = (
-    bundleOptions.config.turbopackMemoryEviction === false ? "off" : "full"
+  const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
+    bundleOptions.config.turbopackMemoryEviction,
   ) as MemoryEvictionMode;
   const smallPreallocation = isTruthyEnv(
     process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,

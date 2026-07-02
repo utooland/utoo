@@ -9,7 +9,7 @@ import { projectFactory } from "../core/project";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
-import { isTruthyEnv } from "../utils/env";
+import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
@@ -49,8 +49,8 @@ async function buildInternal(
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
   const persistentCaching = bundleOptions.config.persistentCaching ?? true;
-  const turbopackMemoryEviction = (
-    bundleOptions.config.turbopackMemoryEviction === false ? "off" : "full"
+  const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
+    bundleOptions.config.turbopackMemoryEviction,
   ) as MemoryEvictionMode;
   const smallPreallocation = isTruthyEnv(
     process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
