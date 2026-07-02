@@ -127,6 +127,8 @@ export interface NapiTurboEngineOptions {
   isShortSession?: boolean
   /** Turbopack memory eviction mode for the persistent cache. */
   turbopackMemoryEviction?: MemoryEvictionMode
+  /** Avoid large backend preallocations to reduce startup memory. */
+  smallPreallocation?: boolean
 }
 /** Turbopack's memory eviction strategy for the persistent cache. */
 export const enum MemoryEvictionMode {

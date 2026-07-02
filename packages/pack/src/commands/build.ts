@@ -9,6 +9,7 @@ import { projectFactory } from "../core/project";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
+import { isTruthyEnv } from "../utils/env";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
@@ -51,6 +52,9 @@ async function buildInternal(
   const turbopackMemoryEviction = (
     bundleOptions.config.turbopackMemoryEviction === false ? "off" : "full"
   ) as MemoryEvictionMode;
+  const smallPreallocation = isTruthyEnv(
+    process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
+  );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
@@ -91,6 +95,7 @@ async function buildInternal(
       {
         persistentCaching,
         turbopackMemoryEviction,
+        smallPreallocation,
         // Build mode is a short-lived, one-shot compilation, so avoid paying
         // dependency graph bookkeeping cost unless the persistent cache needs it.
         dependencyTracking: persistentCaching,

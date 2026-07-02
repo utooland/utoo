@@ -171,6 +171,8 @@ pub struct NapiTurboEngineOptions {
     pub is_short_session: Option<bool>,
     /// Turbopack memory eviction mode for the persistent cache.
     pub turbopack_memory_eviction: Option<MemoryEvictionMode>,
+    /// Avoid large backend preallocations to reduce startup memory.
+    pub small_preallocation: Option<bool>,
 }
 
 /// Turbopack's memory eviction strategy for the persistent cache.
@@ -401,6 +403,7 @@ pub fn project_new(
             let turbopack_memory_eviction = turbo_engine_options
                 .turbopack_memory_eviction
                 .unwrap_or_else(MemoryEvictionMode::from_env_or_default);
+            let small_preallocation = turbo_engine_options.small_preallocation.unwrap_or(false);
             let turbo_tasks = create_turbo_tasks(
                 PathBuf::from(&options.project_path),
                 persistent_caching,
@@ -408,6 +411,7 @@ pub fn project_new(
                 dependency_tracking,
                 is_short_session,
                 turbopack_memory_eviction.evicts_after_snapshot(),
+                small_preallocation,
             )?;
             let turbopack_ctx = TurbopackContext::new(turbo_tasks.clone(), napi_callbacks);
 

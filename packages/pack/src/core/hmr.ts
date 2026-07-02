@@ -19,6 +19,7 @@ import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
+import { isTruthyEnv } from "../utils/env";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
@@ -168,6 +169,9 @@ export async function createHotReloader(
   const turbopackMemoryEviction = (
     bundleOptions.config.turbopackMemoryEviction === false ? "off" : "full"
   ) as MemoryEvictionMode;
+  const smallPreallocation = isTruthyEnv(
+    process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
+  );
   const persistentCacheLock = await acquirePersistentCacheLock(
     resolvedProjectPath,
     "utoo pack dev",
@@ -219,6 +223,7 @@ export async function createHotReloader(
       {
         persistentCaching,
         turbopackMemoryEviction,
+        smallPreallocation,
       },
     );
   } catch (error) {
