@@ -148,7 +148,16 @@ virtue           = { git = "https://github.com/bgw/virtue.git", branch = "bgw/fi
 [profile.release]
 opt-level = "z"
 strip     = "symbols"
-lto       = "fat"
+# Keep release builds on thin LTO instead of fat LTO for wasm compatibility.
+# `utoo-wasm` uses link-section's wasm backend, which counts registration slots
+# with one-byte marker statics in `.data.link_section.*` custom sections and
+# sizes its runtime storage from that byte length during startup. Fat LTO can
+# merge or drop those identical marker statics while leaving the `.init_array.0`
+# registration constructors in place, so the runtime observes a section length
+# of 1 but still registers many items, then panics with:
+# "Link section already initialized". Thin LTO keeps release optimization while
+# preserving the counting metadata in the verified @utoo/web production build.
+lto       = "thin"
 
 # cargo build --profile instruments --bin pack-cli
 # xcrun xctrace record --template "Time Profiler" --launch -- ./target/instruments/pack-cli --mode build --project-path ./examples/with-antd --root-path .
