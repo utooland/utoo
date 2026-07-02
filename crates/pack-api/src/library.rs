@@ -26,7 +26,7 @@ use turbopack_core::{
     module::{Module, Modules},
     module_graph::{
         GraphEntries, ModuleGraph,
-        chunk_group_info::{ChunkGroup, ChunkGroupEntry},
+        chunk_group_info::{ChunkGroup, ChunkGroupEntry, EntryHeuristics},
     },
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
@@ -363,7 +363,13 @@ impl Endpoint for LibraryEndpoint {
             .map(ResolvedVc::upcast)
             .collect();
         entry_modules.extend(self.library_entry_modules().await?);
-        Ok(GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry(entry_modules)]).cell())
+        Ok(
+            GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry {
+                modules: entry_modules,
+                heuristics: EntryHeuristics::default(),
+            }])
+            .cell(),
+        )
     }
 
     #[turbo_tasks::function]

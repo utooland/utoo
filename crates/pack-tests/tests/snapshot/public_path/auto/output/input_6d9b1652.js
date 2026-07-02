@@ -1,14 +1,4 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-15, ((__turbopack_context__) => {
-
-__turbopack_context__.v((parentImport) => {
-    return Promise.all([
-  "input_lazy_7d18b815.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
-        return parentImport(23);
-    });
-});
-}),
 35, (function(__turbopack_context__){
 
 __turbopack_context__.v(__turbopack_context__.p("auto") + "asset.2d068005.jpg");}),
@@ -35,6 +25,16 @@ __turbopack_context__.s([
     0,
     loadLazyModule
 ]);
+}),
+15, ((__turbopack_context__) => {
+
+__turbopack_context__.v((parentImport) => {
+    return Promise.all([
+  "input_lazy_7d18b815.js"
+].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+        return parentImport(23);
+    });
+});
 }),
 ]);
 
