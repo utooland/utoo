@@ -9,6 +9,7 @@ import { projectFactory } from "../core/project";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
+import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
@@ -17,6 +18,8 @@ import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
+
+type MemoryEvictionMode = import("../binding").MemoryEvictionMode;
 
 export function build(
   options: BundleOptions | WebpackConfig,
@@ -46,6 +49,12 @@ async function buildInternal(
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
   const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
+    bundleOptions.config.turbopackMemoryEviction,
+  ) as MemoryEvictionMode;
+  const smallPreallocation = isTruthyEnv(
+    process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
+  );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
@@ -85,6 +94,8 @@ async function buildInternal(
       },
       {
         persistentCaching,
+        turbopackMemoryEviction,
+        smallPreallocation,
         // Build mode is a short-lived, one-shot compilation, so avoid paying
         // dependency graph bookkeeping cost unless the persistent cache needs it.
         dependencyTracking: persistentCaching,
