@@ -677,18 +677,18 @@ pub async fn get_client_chunking_context(
                 },
                 Into::into,
             ),
-            split_chunks.as_ref().and_then(|sc| sc.get("css")).map_or(
-                ChunkingConfig {
+            match split_chunks.as_ref().and_then(|sc| sc.get("css")) {
+                None => ChunkingConfig {
                     max_merge_chunk_size: 100_000,
-                    style_groups_algorithm: style_groups_algorithm.clone(),
+                    style_groups_algorithm,
                     ..Default::default()
                 },
-                |config| {
+                Some(config) => {
                     let mut config = ChunkingConfig::from(config);
-                    config.style_groups_algorithm = style_groups_algorithm.clone();
+                    config.style_groups_algorithm = style_groups_algorithm;
                     config
-                },
-            ),
+                }
+            },
         );
 
         builder = builder
