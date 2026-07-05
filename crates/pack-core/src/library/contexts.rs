@@ -148,6 +148,10 @@ pub async fn get_library_chunking_context(
         builder = builder.css_filename(css_filename.clone());
     }
 
+    if mode.is_production() {
+        builder = builder.style_groups_algorithm(config.css_chunking_algorithm().owned().await?);
+    }
+
     if let Some(asset_module_filename) = &output.asset_module_filename {
         builder = builder.asset_module_filename(asset_module_filename.clone());
     }

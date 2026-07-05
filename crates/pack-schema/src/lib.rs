@@ -553,6 +553,11 @@ pub struct SchemaOptimizationConfig {
     #[schemars(description = "Split chunks configuration")]
     pub split_chunks: Option<HashMap<String, SchemaSplitChunkConfig>>,
 
+    /// CSS chunking algorithm
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "CSS chunking algorithm")]
+    pub css_chunking: Option<SchemaCssChunkingConfig>,
+
     /// Whether to concatenate modules when possible to reduce the number of chunks
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -705,6 +710,48 @@ pub struct SchemaSplitChunkConfig {
     #[serde(default = "default_max_merge_chunk_size")]
     #[schemars(description = "Maximum merge chunk size")]
     pub max_merge_chunk_size: usize,
+}
+
+/// CSS chunking configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaCssChunkingConfig {
+    Boolean(bool),
+    Mode(SchemaCssChunkingMode),
+    Object(SchemaCssChunkingObject),
+}
+
+/// CSS chunking mode
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SchemaCssChunkingMode {
+    Strict,
+    Loose,
+    Graph,
+}
+
+/// CSS chunking object configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum SchemaCssChunkingObject {
+    Strict,
+    Loose,
+    Graph(SchemaCssChunkingGraphOptions),
+}
+
+/// Graph CSS chunking options
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaCssChunkingGraphOptions {
+    /// Estimated cost of an additional request, in bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Estimated cost of an additional request, in bytes")]
+    pub request_cost: Option<f32>,
+
+    /// Weight distribution used by the graph CSS chunking algorithm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Weight distribution used by the graph CSS chunking algorithm")]
+    pub weight_distribution: Option<f32>,
 }
 
 // Import defaults from pack-core
@@ -1218,6 +1265,7 @@ mod tests {
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
+        assert!(schema_str.contains("cssChunking"));
         assert!(schema_str.contains("html"));
         assert!(schema_str.contains("react"));
         assert!(schema_str.contains("provider"));

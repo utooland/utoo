@@ -486,6 +486,8 @@ pub async fn get_server_chunking_context(
     if mode.is_development() {
         builder = builder.source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
     } else {
+        let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;
+
         builder = builder
             .source_map_source_type(SourceMapSourceType::RelativeUri)
             .chunking_config(
@@ -501,6 +503,7 @@ pub async fn get_server_chunking_context(
                 Vc::<CssChunkType>::default().to_resolved().await?,
                 ChunkingConfig {
                     max_merge_chunk_size: 100_000,
+                    style_groups_algorithm,
                     ..Default::default()
                 },
             )

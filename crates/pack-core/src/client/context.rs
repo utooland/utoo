@@ -665,6 +665,7 @@ pub async fn get_client_chunking_context(
             .dynamic_chunk_content_loading(true);
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
+        let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;
 
         let (ecmascript_chunking_config, css_chunking_config) = (
             split_chunks.as_ref().and_then(|sc| sc.get("js")).map_or(
@@ -679,9 +680,14 @@ pub async fn get_client_chunking_context(
             split_chunks.as_ref().and_then(|sc| sc.get("css")).map_or(
                 ChunkingConfig {
                     max_merge_chunk_size: 100_000,
+                    style_groups_algorithm: style_groups_algorithm.clone(),
                     ..Default::default()
                 },
-                Into::into,
+                |config| {
+                    let mut config = ChunkingConfig::from(config);
+                    config.style_groups_algorithm = style_groups_algorithm.clone();
+                    config
+                },
             ),
         );
 
