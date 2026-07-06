@@ -1,1 +1,1 @@
-import "./RuleEdit&Vidw.less";
+import "./RuleEdit&Vidw$Panel.less";
