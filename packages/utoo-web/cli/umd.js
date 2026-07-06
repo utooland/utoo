@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const webpack = require('webpack');
 const yargs = require('yargs');
-const TerserPlugin = require('terser-webpack-plugin');
+const MinimizerPlugin = require('minimizer-webpack-plugin');
 const stdLibBrowser = require('node-stdlib-browser');
 const { NodeProtocolUrlPlugin } = require('node-stdlib-browser/helpers/webpack/plugin');
 
@@ -113,7 +113,7 @@ const config = {
     moduleIds: 'named',
     minimizer: [
       (compiler) => {
-        new TerserPlugin({
+        new MinimizerPlugin({
           terserOptions: {
             mangle: false,
             keep_fnames: true,
