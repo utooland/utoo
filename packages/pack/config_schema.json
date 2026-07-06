@@ -563,6 +563,93 @@
         "use-credentials"
       ]
     },
+    "SchemaCssChunkingConfig": {
+      "description": "CSS chunking configuration",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaCssChunkingMode"
+        },
+        {
+          "$ref": "#/definitions/SchemaCssChunkingObject"
+        }
+      ]
+    },
+    "SchemaCssChunkingMode": {
+      "description": "CSS chunking mode",
+      "type": "string",
+      "enum": [
+        "strict",
+        "loose",
+        "graph"
+      ]
+    },
+    "SchemaCssChunkingObject": {
+      "description": "CSS chunking object configuration",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "strict"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "loose"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Graph CSS chunking options",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "requestCost": {
+              "description": "Estimated cost of an additional request, in bytes",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "float"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "graph"
+              ]
+            },
+            "weightDistribution": {
+              "description": "Weight distribution used by the graph CSS chunking algorithm",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "float"
+            }
+          }
+        }
+      ]
+    },
     "SchemaCssModulesConfig": {
       "description": "CSS Modules configuration",
       "type": "object",
@@ -1188,6 +1275,17 @@
           "type": [
             "boolean",
             "null"
+          ]
+        },
+        "cssChunking": {
+          "description": "CSS chunking algorithm",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaCssChunkingConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "minify": {

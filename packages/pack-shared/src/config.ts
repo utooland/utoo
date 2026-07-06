@@ -204,6 +204,20 @@ export interface DevServerConfig {
   proxy?: DevServerProxy;
 }
 
+export type CssChunkingConfig =
+  | boolean
+  | "strict"
+  | "loose"
+  | "graph"
+  | {
+      type: "strict" | "loose";
+    }
+  | {
+      type: "graph";
+      requestCost?: number;
+      weightDistribution?: number;
+    };
+
 export interface ConfigComplete {
   entry: EntryOptions[];
   mode?: "production" | "development";
@@ -257,6 +271,7 @@ export interface ConfigComplete {
         maxMergeChunkSize?: number;
       }
     >;
+    cssChunking?: CssChunkingConfig;
     modularizeImports?: Record<
       string,
       {

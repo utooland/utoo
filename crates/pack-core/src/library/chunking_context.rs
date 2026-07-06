@@ -30,6 +30,7 @@ use turbopack_core::{
         ModuleGraph,
         binding_usage_info::{BindingUsageInfo, ModuleExportUsage},
         chunk_group_info::ChunkGroup,
+        style_groups::StyleGroupsAlgorithm,
     },
     output::{OutputAsset, OutputAssets},
 };
@@ -148,6 +149,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn style_groups_algorithm(mut self, style_groups_algorithm: StyleGroupsAlgorithm) -> Self {
+        self.chunking_context.style_groups_algorithm = style_groups_algorithm;
+        self
+    }
+
     pub fn debug_ids(mut self, debug_ids: bool) -> Self {
         self.chunking_context.debug_ids = debug_ids;
         self
@@ -213,6 +219,8 @@ pub struct LibraryChunkingContext {
     filename: Option<RcStr>,
     /// Initial css chunk filename template
     css_filename: Option<RcStr>,
+    /// CSS chunking algorithm.
+    style_groups_algorithm: StyleGroupsAlgorithm,
     /// Asset module filename template
     asset_module_filename: Option<RcStr>,
     /// Whether this library targets Node.js (affects runtime backend selection).
@@ -248,6 +256,7 @@ impl LibraryChunkingContext {
                 unused_references: None,
                 filename: Default::default(),
                 css_filename: Default::default(),
+                style_groups_algorithm: Default::default(),
                 asset_module_filename: Default::default(),
                 runtime_root,
                 runtime_export,
@@ -595,6 +604,7 @@ impl ChunkingContext for LibraryChunkingContext {
                 min_chunk_size: usize::MAX,
                 max_chunk_count_per_group: 1,
                 max_merge_chunk_size: usize::MAX,
+                style_groups_algorithm: self.style_groups_algorithm.clone(),
                 ..Default::default()
             },
         );

@@ -22,6 +22,7 @@ use turbopack_core::{
         CrossOrigin as RuntimeCrossOriginLoading,
     },
     issue::{Issue, IssueExt, IssueStage, StyledString},
+    module_graph::style_groups::StyleGroupsAlgorithm,
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{
@@ -432,6 +433,7 @@ pub struct OptimizationConfig {
     pub remove_console: Option<RemoveConsoleConfig>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub split_chunks: Option<FxIndexMap<RcStr, SplitChunkConfig>>,
+    pub css_chunking: Option<CssChunkingConfig>,
     /// Concatenate modules when possible to reduce the number of chunks.
     /// This can improve performance by reducing the number of requests and
     /// improving caching.
@@ -446,6 +448,110 @@ pub struct OptimizationConfig {
     /// When false, WASM files will be output as static assets.
     #[serde(default)]
     pub wasm_as_asset: Option<bool>,
+}
+
+const DEFAULT_CSS_CHUNKING_GRAPH_REQUEST_COST: f32 = 100_000.0;
+const DEFAULT_CSS_CHUNKING_GRAPH_WEIGHT_DISTRIBUTION: f32 = 0.1;
+
+#[derive(
+    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(untagged)]
+pub enum CssChunkingConfig {
+    Boolean(bool),
+    Mode(CssChunkingMode),
+    Object(CssChunkingObject),
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum CssChunkingMode {
+    Strict,
+    Loose,
+    Graph,
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum CssChunkingObject {
+    Strict,
+    Loose,
+    Graph(CssChunkingGraphOptions),
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct CssChunkingGraphOptions {
+    pub request_cost: Option<f32>,
+    pub weight_distribution: Option<f32>,
+}
+
+impl OptimizationConfig {
+    pub fn css_chunking_algorithm(&self) -> Result<StyleGroupsAlgorithm> {
+        let Some(config) = &self.css_chunking else {
+            return Ok(StyleGroupsAlgorithm::Default);
+        };
+
+        match config {
+            CssChunkingConfig::Boolean(false)
+            | CssChunkingConfig::Mode(CssChunkingMode::Strict) => {
+                anyhow::bail!(
+                    "`optimization.cssChunking: false` and `\"strict\"` are not supported by \
+                     utoopack"
+                )
+            }
+            CssChunkingConfig::Object(CssChunkingObject::Strict) => {
+                anyhow::bail!(
+                    "`optimization.cssChunking: {{ type: \"strict\" }}` is not supported by \
+                     utoopack"
+                )
+            }
+            CssChunkingConfig::Boolean(true)
+            | CssChunkingConfig::Mode(CssChunkingMode::Loose)
+            | CssChunkingConfig::Object(CssChunkingObject::Loose) => {
+                Ok(StyleGroupsAlgorithm::Default)
+            }
+            CssChunkingConfig::Mode(CssChunkingMode::Graph) => Ok(StyleGroupsAlgorithm::graph(
+                DEFAULT_CSS_CHUNKING_GRAPH_REQUEST_COST,
+                DEFAULT_CSS_CHUNKING_GRAPH_WEIGHT_DISTRIBUTION,
+            )),
+            CssChunkingConfig::Object(CssChunkingObject::Graph(options)) => {
+                Ok(StyleGroupsAlgorithm::graph(
+                    options
+                        .request_cost
+                        .unwrap_or(DEFAULT_CSS_CHUNKING_GRAPH_REQUEST_COST),
+                    options
+                        .weight_distribution
+                        .unwrap_or(DEFAULT_CSS_CHUNKING_GRAPH_WEIGHT_DISTRIBUTION),
+                ))
+            }
+        }
+    }
 }
 
 #[turbo_tasks::value]
@@ -1179,6 +1285,17 @@ impl Config {
     #[turbo_tasks::function]
     pub fn optimization(&self) -> Vc<OptimizationConfig> {
         self.optimization.clone().unwrap_or_default().cell()
+    }
+
+    #[turbo_tasks::function]
+    pub async fn css_chunking_algorithm(&self) -> Result<Vc<StyleGroupsAlgorithm>> {
+        Ok(self
+            .optimization
+            .as_ref()
+            .map(OptimizationConfig::css_chunking_algorithm)
+            .transpose()?
+            .unwrap_or_default()
+            .cell())
     }
 
     #[turbo_tasks::function]
