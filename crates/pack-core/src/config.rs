@@ -191,6 +191,8 @@ pub struct Config {
     #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    turbopack_memory_eviction: Option<serde_json::Value>,
     node_polyfill: Option<bool>,
     mdx: Option<MdxOptions>,
     dev_server: Option<DevServer>,

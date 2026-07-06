@@ -79,6 +79,20 @@ async fn ci_id_token(registry: &str) -> Option<String> {
     }
 }
 
+/// Fetch a GitHub Actions OIDC id_token for an explicit `audience` (e.g.
+/// `sigstore` for provenance signing). Returns `None` when not running in a
+/// GitHub Actions job that granted `id-token: write`.
+pub(crate) async fn github_oidc_token(audience: &str) -> Option<String> {
+    let (req_url, req_token) = (
+        env::var("ACTIONS_ID_TOKEN_REQUEST_URL").ok()?,
+        env::var("ACTIONS_ID_TOKEN_REQUEST_TOKEN").ok()?,
+    );
+    if req_url.is_empty() || req_token.is_empty() {
+        return None;
+    }
+    github_actions_id_token(&req_url, &req_token, audience).await
+}
+
 /// Fetch an id_token from the GitHub Actions runner token service.
 async fn github_actions_id_token(req_url: &str, req_token: &str, audience: &str) -> Option<String> {
     let mut url = Url::parse(req_url).ok()?;

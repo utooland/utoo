@@ -403,6 +403,69 @@ finally {
     Remove-Item -Recurse -Force $installPrefix -ErrorAction SilentlyContinue
 }
 
+# Case: real templates bootstrap via `node postinstall.js` (no `sh` on PATH).
+# Regression guard for the Windows global-install breakage: the published `utoo`
+# package used to run `sh ./postinstall.sh`, which fails on a stock Windows box
+# (cmd.exe has no `sh`). The fast path now runs through node, always present
+# during `npm install`. We stage the exact files vendor/scripts/npm-utoo.sh
+# publishes, drop the built binary in as the optional platform dep, simulate
+# npm's generated shims in the prefix root, then run the real postinstall and
+# assert it produces a working native `utoo.exe`.
+Write-Yellow "Case: postinstall.js bootstraps native binary on Windows (no sh)"
+$tplDir = Join-Path (Split-Path $PSScriptRoot -Parent) "vendor/templates"
+$bootPrefix = Join-Path $env:TEMP "utoo-e2e-bootstrap-$(Get-Random)"
+try {
+    $pkgDir = Join-Path $bootPrefix "node_modules\utoo"
+    $optDir = Join-Path $bootPrefix "node_modules\@utoo\utoo-win32-x64"
+    New-Item -ItemType Directory -Path "$pkgDir\bin", "$optDir\bin" -Force | Out-Null
+
+    # Render the main package exactly like vendor/scripts/npm-utoo.sh.
+    (Get-Content "$tplDir\utoo.package.json.template" -Raw).Replace("{{version}}", "9.9.9-e2e") |
+        Set-Content "$pkgDir\package.json"
+    Copy-Item "$tplDir\postinstall.utoo.js.template" "$pkgDir\postinstall.js"
+    Copy-Item "$tplDir\placeholder.utoo.js.template" "$pkgDir\bin\utoo"
+    Copy-Item "$tplDir\utx.utoo.js.template" "$pkgDir\bin\utx"
+
+    # Optional platform dep ships the PE binary as bin/utoo (npm-binary.sh).
+    Copy-Item (Get-Command utoo).Source "$optDir\bin\utoo"
+    '{"name":"@utoo/utoo-win32-x64","version":"9.9.9-e2e","os":"win32","cpu":"x64"}' |
+        Set-Content "$optDir\package.json"
+
+    # Simulate the shims npm generates for the placeholder; postinstall must
+    # replace/remove them so `utoo` resolves to the native exe.
+    foreach ($s in "utoo", "utoo.cmd", "utoo.ps1", "ut", "ut.cmd", "ut.ps1", "utx.ps1") {
+        New-Item -ItemType File -Path (Join-Path $bootPrefix $s) -Force | Out-Null
+    }
+
+    # The real postinstall — invoked through node, never sh.
+    Push-Location $pkgDir
+    try {
+        node postinstall.js
+        if ($LASTEXITCODE -ne 0) { throw "postinstall.js exited $LASTEXITCODE" }
+    }
+    finally { Pop-Location }
+
+    $bootUtoo = Join-Path $bootPrefix "utoo.exe"
+    if (-not (Test-Path $bootUtoo)) { throw "postinstall did not produce utoo.exe in the prefix" }
+    if (-not (Test-Path (Join-Path $bootPrefix "ut.exe"))) { throw "postinstall did not produce ut.exe alias" }
+    $utx = Join-Path $bootPrefix "utx.cmd"
+    if (-not (Test-Path $utx)) { throw "postinstall did not produce utx.cmd" }
+    if ((Get-Content $utx -Raw) -notmatch "utoo.exe x") { throw "utx.cmd does not delegate to 'utoo x'" }
+
+    # npm's placeholder shims must be gone (the native exe replaces them).
+    foreach ($s in "utoo.cmd", "utoo.ps1", "ut.cmd", "ut.ps1", "utx.ps1") {
+        if (Test-Path (Join-Path $bootPrefix $s)) { throw "leftover npm shim not removed: $s" }
+    }
+
+    & $bootUtoo --version
+    if ($LASTEXITCODE -ne 0) { throw "bootstrapped utoo.exe --version failed" }
+
+    Write-Green "PASS: postinstall.js bootstraps a working native binary without sh"
+}
+finally {
+    Remove-Item -Recurse -Force $bootPrefix -ErrorAction SilentlyContinue
+}
+
 # Case: Verify ant-design-x install + build on Windows
 Write-Yellow "Case: ant-design-x install and build"
 $antdxDir = Join-Path $env:TEMP "utoo-e2e-antdx-$(Get-Random)"

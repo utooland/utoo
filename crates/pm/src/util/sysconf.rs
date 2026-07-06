@@ -3,7 +3,7 @@ pub fn init() {
     #[cfg(unix)]
     {
         raise_fd_limit();
-        reset_sigpipe();
+        ignore_sigpipe();
     }
 
     // Windows default thread stack is 1MB, insufficient for libdeflater + tar
@@ -15,12 +15,26 @@ pub fn init() {
         .ok();
 }
 
-/// Restore default SIGPIPE handling so broken pipes cause a clean exit
-/// instead of a panic. Same approach as ripgrep and fd.
+/// Ignore SIGPIPE so a broken downstream pipe never terminates the process.
+///
+/// Filters like ripgrep and fd reset SIGPIPE to `SIG_DFL` so they exit
+/// quietly when their consumer goes away (`rg foo | head`). A package
+/// manager is different: it performs stateful, side-effecting work
+/// (writing `node_modules/`, lockfiles, the store) and must NOT be killed
+/// just because something closed its stdout/stderr — e.g. `utoo install |
+/// head`, a CI log collector closing the read end, or a supervising
+/// process that stops reading. Getting signalled mid-install can leave a
+/// half-written tree.
+///
+/// With `SIG_IGN`, a write to a broken pipe instead returns `EPIPE`
+/// (surfaced as `io::ErrorKind::BrokenPipe`), which the I/O layers
+/// (`tracing`, `indicatif`) absorb, so the install keeps running. This is
+/// also the Rust runtime's own startup default; we set it explicitly to
+/// document the intent and to be robust against that default changing.
 #[cfg(unix)]
-fn reset_sigpipe() {
+fn ignore_sigpipe() {
     unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 }
 
@@ -46,12 +60,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_reset_sigpipe_sets_sig_dfl() {
-        reset_sigpipe();
+    fn test_ignore_sigpipe_sets_sig_ign() {
+        ignore_sigpipe();
         unsafe {
-            // signal() returns the previous handler — after reset it should be SIG_DFL
-            let prev = libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-            assert_eq!(prev, libc::SIG_DFL);
+            // signal() returns the previous handler — after ignoring it should be SIG_IGN,
+            // so broken pipes surface as BrokenPipe errors instead of killing the process.
+            let prev = libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+            assert_eq!(prev, libc::SIG_IGN);
         }
     }
 }

@@ -27,7 +27,7 @@ export interface NapiTaskMessage {
   data: Buffer
 }
 export declare function recvTaskMessageInWorker(workerId: number): Promise<NapiTaskMessage>
-export declare function sendTaskMessage(message: NapiTaskMessage): Promise<void>
+export declare function sendTaskMessage(message: NapiTaskMessage): void
 export declare function lockfileTryAcquireSync(path: string, content?: string | undefined | null): { __napiType: "Lockfile" } | null
 export declare function lockfileTryAcquire(path: string, content?: string | undefined | null): Promise<{ __napiType: "Lockfile" } | null>
 export declare function lockfileUnlockSync(lockfile: { __napiType: "Lockfile" }): void
@@ -125,6 +125,20 @@ export interface NapiTurboEngineOptions {
   dependencyTracking?: boolean
   /** Hint that this turbo-tasks instance is for a short-lived one-shot session. */
   isShortSession?: boolean
+  /** Turbopack memory eviction mode for the persistent cache. */
+  turbopackMemoryEviction?: MemoryEvictionMode
+  /** Avoid large backend preallocations to reduce startup memory. */
+  smallPreallocation?: boolean
+}
+/** Turbopack's memory eviction strategy for the persistent cache. */
+export const enum MemoryEvictionMode {
+  /** Never evict. */
+  Off = "off",
+  /**
+   * After every snapshot, evict all evictable tasks from memory, reloading
+   * them from disk on demand.
+   */
+  Full = "full"
 }
 export declare function projectNew(options: NapiProjectOptions, turboEngineOptions: NapiTurboEngineOptions, napiCallbacks: NapiTurbopackCallbacksJsObject): Promise<{ __napiType: "Project" }>
 export declare function projectUpdate(project: { __napiType: "Project" }, options: NapiPartialProjectOptions): Promise<void>

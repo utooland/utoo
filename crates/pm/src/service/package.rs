@@ -1,11 +1,13 @@
 use crate::helper::ruborist_context::Context as FsContext;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
+use crate::util::install_progress::{mark_downloads_done, track_script};
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
 use crate::util::script_policy::{
     InstallScriptMode, ScriptGateDecision, SkipReason, SkippedScript, report_skipped_scripts,
 };
+use crate::util::user_config::get_script_concurrency_limit;
 use anyhow::{Context, Result};
-use futures;
+use futures::stream::{self, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -51,6 +53,22 @@ pub struct ExecutionQueues {
     /// Packages whose install action was gated off by the `allowScripts` policy,
     /// for the end-of-install summary (and the strict-mode abort).
     pub skipped: Vec<SkippedScript>,
+}
+
+/// Max lifecycle scripts run concurrently within one queue. An explicit
+/// `--script-concurrency-limit` / config value wins; otherwise (the `0` auto
+/// default) it's ~one per core, capped at 16 — more conservative than the
+/// I/O-bound clone gate's 2×, since each script is a child process and often a
+/// CPU-bound native build, so over-subscribing the CPU would just thrash. The
+/// lower bound tracks the hardware (no forced floor), so a single-core container
+/// runs scripts serially rather than thrashing four at once.
+async fn script_concurrency_limit() -> usize {
+    let configured = get_script_concurrency_limit().await;
+    if configured > 0 {
+        configured
+    } else {
+        std::thread::available_parallelism().map_or(8, |n| n.get().clamp(1, 16))
+    }
 }
 
 pub struct PackageService;
@@ -103,7 +121,10 @@ impl PackageService {
                 package,
                 event,
                 &[],
-                LifecycleSink::Stream { workspace_label },
+                LifecycleSink::Stream {
+                    workspace_label,
+                    timed: true,
+                },
                 MissingScript::Skip,
             )
             .await
@@ -440,6 +461,10 @@ impl PackageService {
         queues: ExecutionQueues,
         mode: &InstallScriptMode,
     ) -> Result<()> {
+        // The clone phase is over by the time scripts run, so stop the spinner's
+        // network summary from carrying a frozen `↓ <total>` into this phase.
+        mark_downloads_done();
+
         // Strict gate: fail fast on any unreviewed install action.
         if mode.is_strict()
             && queues
@@ -516,18 +541,23 @@ impl PackageService {
                         let label = format!("{} {}", package.name, hook);
                         log_progress(&label);
                         // The renderer surfaces the longest-running entry with
-                        // elapsed time, so a slow postinstall stays visible.
-                        let _running = crate::util::install_progress::track_script(label);
+                        // elapsed time, so a slow postinstall stays visible; its
+                        // `tap` feeds output lines to the long-run heartbeat.
+                        let running = track_script(label);
                         let start = std::time::Instant::now();
-                        let result =
-                            ScriptService::execute_script(&package, hook, ScriptOutput::Silent)
-                                .await
-                                .with_context(|| {
-                                    format!(
-                                        "Failed to execute {} script for {} (command: {})",
-                                        hook, package.name, script
-                                    )
-                                });
+                        let result = ScriptService::execute_script(
+                            &package,
+                            hook,
+                            ScriptOutput::Silent,
+                            Some(running.sink()),
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "Failed to execute {} script for {} (command: {})",
+                                hook, package.name, script
+                            )
+                        });
                         let elapsed = start.elapsed();
                         tracing::debug!(
                             "[{:.2}s] {} {} completed (path: {}, script: {})",
@@ -544,8 +574,14 @@ impl PackageService {
             })
             .collect();
 
-        // Wait for all script tasks to complete
-        let script_results: Vec<(bool, Result<()>)> = futures::future::join_all(script_tasks).await;
+        // Run the queue with a concurrency gate rather than spawning every
+        // script at once: each is a full child process (often a CPU-bound native
+        // build like node-gyp), so an unbounded `join_all` on a big tree could
+        // fork dozens-to-hundreds simultaneously and thrash the machine.
+        let script_results: Vec<(bool, Result<()>)> = stream::iter(script_tasks)
+            .buffer_unordered(script_concurrency_limit().await)
+            .collect()
+            .await;
         for (is_optional, result) in script_results {
             if let Err(e) = result {
                 if is_optional {

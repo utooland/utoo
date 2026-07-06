@@ -236,6 +236,23 @@ pub fn get_manifests_concurrency_limit_sync() -> usize {
     MANIFESTS_CONCURRENCY_LIMIT.get_sync()
 }
 
+// Max lifecycle scripts run concurrently within one queue. `0` (the default)
+// means "auto" — derived from the CPU count by `script_concurrency_limit`.
+// Overridable via the `--script-concurrency-limit` CLI flag / config so a big
+// monorepo can dial it up, or a constrained machine down.
+static SCRIPT_CONCURRENCY_LIMIT: LazyLock<ConfigValue<usize>> =
+    LazyLock::new(|| ConfigValue::new("script-concurrency-limit", 0));
+
+pub fn set_script_concurrency_limit(value: Option<usize>) {
+    SCRIPT_CONCURRENCY_LIMIT.set(value);
+}
+
+/// Configured script concurrency, or `0` when left on auto. Reads the merged
+/// config (so a `.utoo.toml` value is honoured), hence async.
+pub async fn get_script_concurrency_limit() -> usize {
+    SCRIPT_CONCURRENCY_LIMIT.get().await
+}
+
 pub async fn set_cache_dir(cache_dir: Option<String>) {
     // Priority: CLI argument > UTOO_CACHE_DIR env > config > default.
     // `Some` means the user picked the cache dir explicitly; `None` means we

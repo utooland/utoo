@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+"use strict";
+// utoo bootstrap placeholder (Node implementation).
+//
+// The real platform binary replaces this file via one of two paths:
+//   1. postinstall (fast path) — copies the optional @utoo/utoo-${os}-${arch}
+//      sibling into bin/utoo (Windows: utoo.exe into the npm prefix).
+//   2. this script (self-heal) — runs only when (1) was skipped or failed
+//      (--ignore-scripts, --no-optional, missing variant, network blip,
+//      EACCES on the global prefix, ...). Downloads the same tarball from the
+//      registry, swaps it in, and executes it. The user's first invocation
+//      still succeeds; a failed postinstall is recoverable, not a dead end.
+//
+// The shebang is `#!/usr/bin/env node` on purpose: npm's cmd-shim turns that
+// into a working utoo.cmd / utoo.ps1 on Windows that invokes node, so the bin
+// runs without `sh` on PATH.
+//
+// Invariants:
+//   - bin/utoo is the only physical bin file (npm maps both `utoo` and `ut`
+//     to it). On Windows the real exe lands in the prefix; bin/utoo is left as
+//     the placeholder, but the prefix's utoo.exe shadows it via PATHEXT.
+//   - Idempotent. Any mid-flight failure leaves either the placeholder or the
+//     real binary on disk — never a half-installed state. Next run retries.
+
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const { spawnSync } = require("child_process");
+
+const BIN = "utoo";
+// Node resolves the main module through symlinks, so __dirname is the real
+// package bin dir even when invoked via npm's global symlink shim on POSIX.
+const SELF_DIR = __dirname;
+const ARGS = process.argv.slice(2);
+
+function detect() {
+  let osName = process.env.UTOO_TARGET_OS || process.platform;
+  let arch = process.env.UTOO_TARGET_ARCH || process.arch;
+  if (arch === "amd64") arch = "x64";
+  if (arch === "aarch64") arch = "arm64";
+  // No native Windows arm64 build yet; download x64 and run under emulation.
+  if (osName === "win32" && arch === "arm64") arch = "x64";
+  return { os: osName, arch };
+}
+
+function readVersion(startDir) {
+  let dir = startDir;
+  for (;;) {
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+      if (j && j.name === "utoo" && j.version) return j.version;
+    } catch {
+      /* keep walking up */
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function fail(msg) {
+  console.error(`utoo: ${msg}`);
+  process.exit(1);
+}
+
+// Download a URL to `dest`. Supports file:// (offline mirrors and the e2e
+// suite) plus http(s) with redirect handling and a hard transfer cap.
+function download(url, dest) {
+  return new Promise((resolve) => {
+    if (url.startsWith("file://")) {
+      const src = decodeURIComponent(url.slice("file://".length));
+      try {
+        fs.copyFileSync(src, dest);
+        resolve(true);
+      } catch {
+        resolve(false);
+      }
+      return;
+    }
+    const lib = url.startsWith("https:") ? require("https") : require("http");
+    let out;
+    // Destroy the write stream on any failure so its file handle is released —
+    // otherwise the temp-dir cleanup in main() fails with EBUSY on Windows.
+    const done = (ok) => {
+      if (out) out.destroy();
+      resolve(ok);
+    };
+    const req = lib.get(url, { timeout: 120000 }, (res) => {
+      res.on("error", () => done(false));
+      const { statusCode, headers } = res;
+      if (statusCode >= 300 && statusCode < 400 && headers.location) {
+        res.resume();
+        resolve(download(new URL(headers.location, url).toString(), dest));
+        return;
+      }
+      if (statusCode !== 200) {
+        res.resume();
+        resolve(false);
+        return;
+      }
+      out = fs.createWriteStream(dest);
+      res.pipe(out);
+      out.on("finish", () => out.close(() => resolve(true)));
+      out.on("error", () => done(false));
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      done(false);
+    });
+    req.on("error", () => done(false));
+  });
+}
+
+function run(bin) {
+  const r = spawnSync(bin, ARGS, { stdio: "inherit" });
+  if (r.error) fail(r.error.message);
+  process.exit(r.status === null ? 1 : r.status);
+}
+
+// True when SELF_DIR's package is installed into an npm global prefix (the
+// launcher shims sit in the prefix root, 3 levels up). A local install keeps
+// its bins under node_modules/.bin, so the project root has none of these.
+function hasGlobalShims(prefixDir) {
+  return ["utoo", "utoo.cmd", "utoo.ps1"].some((s) =>
+    fs.existsSync(path.join(prefixDir, s)),
+  );
+}
+
+async function main() {
+  const { os: osName, arch } = detect();
+
+  // Windows: if the native binary is already next to us (a local install had
+  // postinstall drop it as bin/utoo.exe), exec it directly. The JS placeholder
+  // is just the wrapper that makes npm's `node bin/utoo` shim work.
+  if (osName === "win32") {
+    const localExe = path.join(SELF_DIR, `${BIN}.exe`);
+    if (fs.existsSync(localExe)) {
+      run(localExe);
+      return;
+    }
+  }
+
+  const pkg = `${BIN}-${osName}-${arch}`;
+
+  const version = readVersion(SELF_DIR);
+  if (!version) fail(`cannot locate utoo package.json from ${SELF_DIR}`);
+
+  // Registry order mirrors utoo.land/install. Keep in sync with the canonical
+  // installer if a mirror is added.
+  const registries = [];
+  if (process.env.UTOO_REGISTRY) registries.push(process.env.UTOO_REGISTRY);
+  registries.push("https://registry.npmjs.org", "https://registry.npmmirror.com");
+
+  console.error(`utoo: bootstrapping @utoo/${pkg}@${version}...`);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "utoo-"));
+  try {
+    const tgz = path.join(tmp, "pkg.tgz");
+    let downloaded = false;
+    for (const reg of registries) {
+      const url = `${reg}/@utoo/${pkg}/-/${pkg}-${version}.tgz`;
+      if (await download(url, tgz)) {
+        downloaded = true;
+        break;
+      }
+    }
+    if (!downloaded) {
+      throw new Error(
+        `failed to download @utoo/${pkg}@${version} from any registry\n` +
+          `utoo: tried: ${registries.join(" ")}`,
+      );
+    }
+
+    // tar.exe ships in Windows 10 1803+; tar is standard on macOS/Linux.
+    const x = spawnSync("tar", ["-xzf", tgz, "-C", tmp], { stdio: "ignore" });
+    if (x.status !== 0) throw new Error("failed to extract package archive");
+
+    const srcBin = path.join(tmp, "package", "bin", BIN);
+    if (!fs.existsSync(srcBin)) {
+      throw new Error(`binary not found in package (expected package/bin/${BIN})`);
+    }
+
+    if (osName === "win32") {
+      // SELF_DIR is <prefix>/node_modules/utoo/bin → prefix root is 3 up.
+      const prefixDir = path.resolve(SELF_DIR, "..", "..", "..");
+      if (hasGlobalShims(prefixDir)) {
+        // Global install: drop the exe into the prefix and remove npm's shims
+        // so `utoo` runs the native binary directly.
+        const place = (name) => {
+          try {
+            fs.copyFileSync(srcBin, path.join(prefixDir, name + ".exe"));
+          } catch {
+            /* best effort */
+          }
+          for (const ext of ["", ".cmd", ".ps1"]) {
+            try {
+              fs.rmSync(path.join(prefixDir, name + ext), { force: true });
+            } catch {
+              /* best effort */
+            }
+          }
+        };
+        place("utoo");
+        place("ut");
+        try {
+          fs.writeFileSync(path.join(prefixDir, "utx.cmd"), "@utoo.exe x %*\r\n");
+        } catch {
+          /* best effort */
+        }
+        fs.rmSync(tmp, { recursive: true, force: true });
+        run(path.join(prefixDir, "utoo.exe"));
+        return;
+      }
+      // Local install: keep this placeholder as the wrapper and drop the native
+      // binary next to it as bin/utoo.exe (which this script execs on the next
+      // run, and right now). Never touch the project root.
+      const localExe = path.join(SELF_DIR, `${BIN}.exe`);
+      fs.copyFileSync(srcBin, localExe);
+      fs.rmSync(tmp, { recursive: true, force: true });
+      run(localExe);
+      return;
+    }
+
+    // POSIX: stage a sibling tmp file, then atomic-rename onto bin/utoo. The
+    // rename keeps this script's open fd valid; future runs see the new binary.
+    const staged = path.join(SELF_DIR, `${BIN}.tmp`);
+    fs.copyFileSync(srcBin, staged);
+    fs.chmodSync(staged, 0o755);
+    fs.renameSync(staged, path.join(SELF_DIR, BIN));
+    fs.rmSync(tmp, { recursive: true, force: true });
+    run(path.join(SELF_DIR, BIN));
+  } catch (err) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fail(err && err.message ? err.message : String(err));
+  }
+}
+
+main();

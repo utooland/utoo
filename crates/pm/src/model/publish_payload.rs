@@ -4,6 +4,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 use utoo_ruborist::manifest::PackageJson;
 
+use crate::service::provenance::ProvenanceBundle;
+
 /// Input for building the publish payload.
 pub(crate) struct PublishPayloadInput<'a> {
     pub package_json: &'a PackageJson,
@@ -15,6 +17,8 @@ pub(crate) struct PublishPayloadInput<'a> {
     pub tarball_data: &'a [u8],
     pub registry: &'a str,
     pub access: Option<&'a str>,
+    /// Signed provenance bundle to attach alongside the tarball, if any.
+    pub provenance: Option<&'a ProvenanceBundle>,
 }
 
 /// npm registry PUT payload for publishing a package.
@@ -32,10 +36,10 @@ pub(crate) struct PublishPayload {
     _attachments: HashMap<String, Attachment>,
 }
 
-/// Tarball attachment embedded in the publish payload.
+/// Attachment embedded in the publish payload (tarball or provenance bundle).
 #[derive(Serialize)]
 struct Attachment {
-    content_type: &'static str,
+    content_type: String,
     data: String,
     length: usize,
 }
@@ -89,6 +93,29 @@ impl PublishPayload {
 
         let description = input.package_json.description.clone();
 
+        let mut attachments = HashMap::from([(
+            tarball_name,
+            Attachment {
+                content_type: "application/octet-stream".to_string(),
+                data: tarball_base64,
+                length: input.tarball_data.len(),
+            },
+        )]);
+
+        // npm attaches the provenance bundle as a second `_attachments` entry
+        // named `<name>-<version>.sigstore`; the registry verifies it against
+        // the tarball subject digest.
+        if let Some(bundle) = input.provenance {
+            attachments.insert(
+                format!("{}-{}.sigstore", input.name, input.version),
+                Attachment {
+                    content_type: bundle.media_type.clone(),
+                    length: bundle.data.len(),
+                    data: bundle.data.clone(),
+                },
+            );
+        }
+
         Self {
             _id: input.name.to_string(),
             name: input.name.to_string(),
@@ -96,14 +123,7 @@ impl PublishPayload {
             access: input.access.map(String::from),
             dist_tags: HashMap::from([(input.tag.to_string(), input.version.to_string())]),
             versions: HashMap::from([(input.version.to_string(), version_metadata)]),
-            _attachments: HashMap::from([(
-                tarball_name,
-                Attachment {
-                    content_type: "application/octet-stream",
-                    data: tarball_base64,
-                    length: input.tarball_data.len(),
-                },
-            )]),
+            _attachments: attachments,
         }
     }
 }
@@ -131,6 +151,7 @@ mod tests {
             tarball_data: b"fake-tarball",
             registry: "https://registry.npmjs.org",
             access: None,
+            provenance: None,
         });
 
         assert_eq!(payload._id, "test-pkg");
@@ -185,6 +206,7 @@ mod tests {
             tarball_data: b"data",
             registry: "https://registry.npmjs.org",
             access: Some("public"),
+            provenance: None,
         });
 
         // description is None when not in package.json
@@ -220,9 +242,61 @@ mod tests {
             tarball_data: b"d",
             registry: "https://r.test",
             access: None,
+            provenance: None,
         });
 
         assert_eq!(payload.dist_tags["beta"], "2.0.0-rc.1");
         assert!(!payload.dist_tags.contains_key("latest"));
+    }
+
+    #[test]
+    fn test_payload_provenance_attachment() {
+        let pkg_json = PackageJson::new("@scope/pkg", "1.0.0");
+        let bundle = ProvenanceBundle {
+            media_type: "application/vnd.dev.sigstore.bundle.v0.3+json".to_string(),
+            data: r#"{"mediaType":"x"}"#.to_string(),
+        };
+
+        let payload = PublishPayload::new(&PublishPayloadInput {
+            package_json: &pkg_json,
+            name: "@scope/pkg",
+            version: "1.0.0",
+            tag: "latest",
+            shasum: "s",
+            integrity: "i",
+            tarball_data: b"data",
+            registry: "https://registry.npmjs.org",
+            access: Some("public"),
+            provenance: Some(&bundle),
+        });
+
+        // The tarball and the `.sigstore` bundle are both attached.
+        assert!(payload._attachments.contains_key("@scope/pkg-1.0.0.tgz"));
+        let att = &payload._attachments["@scope/pkg-1.0.0.sigstore"];
+        assert_eq!(
+            att.content_type,
+            "application/vnd.dev.sigstore.bundle.v0.3+json"
+        );
+        assert_eq!(att.length, bundle.data.len());
+        assert_eq!(att.data, bundle.data);
+    }
+
+    #[test]
+    fn test_payload_without_provenance_has_no_sigstore_attachment() {
+        let pkg_json = PackageJson::new("pkg", "1.0.0");
+        let payload = PublishPayload::new(&PublishPayloadInput {
+            package_json: &pkg_json,
+            name: "pkg",
+            version: "1.0.0",
+            tag: "latest",
+            shasum: "s",
+            integrity: "i",
+            tarball_data: b"d",
+            registry: "https://r.test",
+            access: None,
+            provenance: None,
+        });
+        assert_eq!(payload._attachments.len(), 1);
+        assert!(payload._attachments.contains_key("pkg-1.0.0.tgz"));
     }
 }

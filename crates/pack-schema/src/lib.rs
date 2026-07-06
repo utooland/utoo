@@ -98,6 +98,11 @@ pub struct CompleteConfig {
     #[schemars(description = "Enable persistent caching")]
     pub persistent_caching: Option<bool>,
 
+    /// Turbopack memory eviction mode for the persistent cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Turbopack memory eviction mode for the persistent cache")]
+    pub turbopack_memory_eviction: Option<SchemaTurbopackMemoryEviction>,
+
     /// Cache handler configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Cache handler configuration")]
@@ -166,6 +171,20 @@ pub enum SchemaMdxConfigOrBoolean {
     Boolean(bool),
     /// Advanced MDX transform options
     Options(SchemaMdxConfig),
+}
+
+/// Turbopack memory eviction mode.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaTurbopackMemoryEviction {
+    Boolean(bool),
+    Mode(SchemaTurbopackMemoryEvictionMode),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SchemaTurbopackMemoryEvictionMode {
+    Full,
 }
 
 /// Rust MDX transform options

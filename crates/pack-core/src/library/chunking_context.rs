@@ -335,7 +335,7 @@ impl LibraryChunkingContext {
         let chunk_items = ecmascript_chunk
             .chunk_content()
             .await?
-            .chunk_item_code_and_ids()
+            .chunk_item_code_module_ids_and_paths()
             .await?;
 
         let mut hasher = Xxh3Hash64Hasher::new();
@@ -343,7 +343,7 @@ impl LibraryChunkingContext {
         hasher.write_value(chunk_items.len());
 
         for item in &chunk_items {
-            for (module_id, code) in &**item {
+            for (module_id, code, _) in &**item {
                 hasher.write_value((module_id, code.source_code()));
             }
         }

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::util::format_print::{HeartbeatScript, print_script_heartbeat};
 use crate::util::install_progress;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -33,11 +34,22 @@ use utoo_ruborist::progress::BuildEvent;
 /// allocation. Local dev keeps the full progress UX.
 pub static IS_TTY: Lazy<bool> = Lazy::new(|| std::io::stderr().is_terminal());
 
+/// The bar's spinner-line templates. `with_template` only fails on a malformed
+/// template *string*; these are compile-time constants, so the `.unwrap()`s at
+/// the use sites assert "this literal is well-formed" — a programmer error, not
+/// a runtime one. They're pulled out as consts so `test_progress_templates_parse`
+/// can verify them in CI, turning a would-be runtime panic (rendering is gated
+/// behind a TTY, which CI isn't) into a test failure.
+const TEMPLATE_INIT: &str = "{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}";
+const TEMPLATE_RUNNING: &str = "{spinner:.blue} {prefix} {wide_msg}";
+const TEMPLATE_FINISH: &str = "✓ {wide_msg}";
+const TICK_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
-        ProgressStyle::with_template("{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}")
+        ProgressStyle::with_template(TEMPLATE_INIT)
             .unwrap()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+            .tick_chars(TICK_CHARS),
     );
     pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     pb
@@ -139,6 +151,22 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
     LOG_FILE_PATH.get()
 }
 
+/// Write a line to stdout, swallowing `BrokenPipe` (and any other write
+/// failure) so a closed downstream reader never aborts the process.
+///
+/// We keep SIGPIPE ignored (see [`crate::util::sysconf`]) so install work
+/// survives a broken stdout; the trailing summary lines printed here must
+/// degrade just as quietly. Plain `println!` would instead panic with
+/// "failed printing to stdout: Broken pipe" at the finish line.
+fn println_lossy(args: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    // Lock once so the line and its newline are written under a single lock
+    // (no interleaving with other writers), and stream `args` straight to the
+    // writer instead of re-wrapping it in another format pass.
+    let mut out = std::io::stdout().lock();
+    let _ = out.write_fmt(args).and_then(|_| out.write_all(b"\n"));
+}
+
 /// Finish the progress bar, optionally appending a dimmed `[2.6s]` suffix.
 pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     // Stop the render task first so it can't overwrite the final message.
@@ -146,17 +174,21 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     if PROGRESS_BAR.length().unwrap_or(0) == 0 {
         return;
     }
-    PROGRESS_BAR.set_style(
-        ProgressStyle::with_template("✓ {pos:.green}/{len:.magenta} {wide_msg}").unwrap(),
+    // Render the counter into the message (same auto-width as the running line)
+    // so the figures don't jump when the spinner is replaced by the final ✓ line.
+    let counter = install_progress::format_counter(
+        PROGRESS_BAR.position(),
+        PROGRESS_BAR.length().unwrap_or(0),
     );
+    PROGRESS_BAR.set_style(ProgressStyle::with_template(TEMPLATE_FINISH).unwrap());
     let full_msg = match elapsed {
-        Some(d) => format!("{msg} {}", format_elapsed_time(d).dimmed()),
-        None => msg.to_string(),
+        Some(d) => format!("{counter} {msg} {}", format_elapsed_time(d).dimmed()),
+        None => format!("{counter} {msg}"),
     };
     PROGRESS_BAR.finish_with_message(full_msg);
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     // reset color
-    println!("\x1b[0m");
+    println_lossy(format_args!("\x1b[0m"));
 }
 
 /// Print the install counts line, e.g.
@@ -169,10 +201,11 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
 pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
     let bytes = install_progress::downloaded_bytes();
     let traffic = if bytes > 0 {
-        // Average over the whole run (resolve + clone), matching the byte
-        // window: `downloaded_bytes` counts from `start_install_run`, including
-        // resolve-phase prefetch, so the divisor must start there too.
-        let avg = install_progress::run_elapsed()
+        // Average over the *network-active* window only — first download started
+        // to last byte received — so the figure reflects real link throughput.
+        // Dividing by the whole run would fold in the trailing no-traffic clone
+        // and lifecycle-script phases and badly understate the speed.
+        let avg = install_progress::download_window()
             .map(|d| d.as_secs_f64())
             .filter(|s| *s > 0.0)
             .map(|s| format!(" @ {}/s", install_progress::human_bytes(bytes as f64 / s)))
@@ -181,7 +214,7 @@ pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
     } else {
         String::new()
     };
-    println!(
+    println_lossy(format_args!(
         "+ {} {} · {} {} · {} {}{}",
         added.to_string().green(),
         "added".dimmed(),
@@ -190,7 +223,7 @@ pub fn print_install_counts(added: usize, reused: usize, downloaded: usize) {
         downloaded.to_string().cyan(),
         "downloaded".dimmed(),
         traffic.dimmed(),
-    );
+    ));
 }
 
 /// Render task started by `start_progress_bar`, stopped by
@@ -205,17 +238,102 @@ fn spawn_render_task() -> tokio::task::JoinHandle<()> {
         let mut interval = tokio::time::interval(Duration::from_millis(120));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut meter = install_progress::SpeedMeter::new(install_progress::downloaded_bytes());
+        let mut heartbeat = ScriptHeartbeat::default();
         loop {
             interval.tick().await;
             let snap = install_progress::snapshot();
             let speed = meter.sample(snap.bytes);
-            // Volatile activity goes in the flexible wide message; the network /
-            // stage summary goes in the prefix, which the template pins to the
-            // right edge so it stays readable while the activity churns.
+            // Volatile activity goes in the flexible wide message; the counter
+            // and fixed-width network summary share the prefix, pinned just after
+            // the spinner so they stay in a stable, readable spot while the
+            // activity churns.
+            let counter = install_progress::format_counter(
+                PROGRESS_BAR.position(),
+                PROGRESS_BAR.length().unwrap_or(0),
+            );
+            let summary = install_progress::compose_summary(&snap, speed);
+            let prefix = if summary.is_empty() {
+                counter
+            } else {
+                format!("{counter} {summary}")
+            };
             PROGRESS_BAR.set_message(install_progress::compose_activity(&snap));
-            PROGRESS_BAR.set_prefix(install_progress::compose_summary(&snap, speed));
+            PROGRESS_BAR.set_prefix(prefix);
+            heartbeat.maybe_emit(&snap);
         }
     })
+}
+
+/// How long a silent dependency script must run before its *first* persistent
+/// heartbeat. Set high: this line is `println`'d into the scrollback and can't
+/// be unprinted, so a script that finishes a few seconds later would leave a
+/// misleading "still running" record. Fast visibility is already covered by the
+/// live spinner tail (`SCRIPT_TAIL_AFTER_SECS`), which clears when the script
+/// ends; the persistent record is reserved for genuinely stuck tasks, where a
+/// scroll-up note earns its keep.
+const SCRIPT_HEARTBEAT_FIRST_SECS: u64 = 30;
+
+/// Gap between repeat heartbeats after the first — sparse, since each is a
+/// permanent block; the `↳` output is refreshed each time so a long download
+/// still shows progress.
+const SCRIPT_HEARTBEAT_REPEAT_SECS: u64 = 30;
+
+/// Per-render-task state that throttles the long-running-script heartbeat,
+/// resetting when a different script becomes the longest-running one.
+#[derive(Default)]
+struct ScriptHeartbeat {
+    /// Id of the script the cadence is keyed to (`None` = none yet).
+    id: Option<u64>,
+    /// Elapsed seconds at the last heartbeat for that script (`None` = not yet
+    /// fired), so the first fires at [`SCRIPT_HEARTBEAT_FIRST_SECS`] and repeats
+    /// every [`SCRIPT_HEARTBEAT_REPEAT_SECS`] after.
+    last_fired_secs: Option<u64>,
+}
+
+impl ScriptHeartbeat {
+    fn maybe_emit(&mut self, snap: &install_progress::Snapshot) {
+        // The longest-running script (first, oldest) drives the cadence.
+        let Some(oldest) = snap.scripts.first() else {
+            *self = Self::default();
+            return;
+        };
+        if self.id != Some(oldest.id) {
+            self.id = Some(oldest.id);
+            self.last_fired_secs = None;
+        }
+        let elapsed = oldest.elapsed_secs;
+        let due = match self.last_fired_secs {
+            None => elapsed >= SCRIPT_HEARTBEAT_FIRST_SECS,
+            Some(last) => elapsed >= last + SCRIPT_HEARTBEAT_REPEAT_SECS,
+        };
+        if !due {
+            return;
+        }
+
+        // List *every* script past the first-trigger threshold, so several
+        // parallel scripts stuck at once are all visible — not surfaced one at a
+        // time as each finishes.
+        let slow: Vec<HeartbeatScript> = snap
+            .scripts
+            .iter()
+            .filter(|s| s.elapsed_secs >= SCRIPT_HEARTBEAT_FIRST_SECS)
+            .map(|s| HeartbeatScript {
+                label: &s.label,
+                secs: s.elapsed_secs,
+                last_line: &s.last_line,
+            })
+            .collect();
+        if slow.is_empty() {
+            return;
+        }
+        self.last_fired_secs = Some(elapsed);
+        let log = get_log_file_path().map(|p| p.as_path());
+        // `suspend` clears the live bar, prints above it, and redraws — the only
+        // safe way to emit a persistent line while the spinner runs.
+        PROGRESS_BAR.suspend(|| {
+            print_script_heartbeat(&slow, log);
+        });
+    }
 }
 
 fn stop_render_task() {
@@ -236,14 +354,16 @@ pub fn start_progress_bar() {
     // the fresh bar until the render task's first tick.
     PROGRESS_BAR.set_message("");
     PROGRESS_BAR.set_prefix("");
-    // `{wide_msg}` (volatile activity) expands to fill, pushing `{prefix}` (the
-    // network/stage summary) to the right edge so it holds a stable position.
+    // The counter and network summary both live in `{prefix}`, which the render
+    // task rebuilds each tick (see `format_counter`): indicatif can't size a
+    // template field to a value it doesn't know yet, and the counter width has to
+    // track `len`, which only becomes known — and keeps growing — during resolve.
+    // `{prefix}` is pinned just after the spinner so it stays in the eye's path
+    // on a wide terminal; `{wide_msg}` (volatile activity) fills the rest.
     PROGRESS_BAR.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.blue} {pos:.green}/{len:.magenta} {wide_msg} {prefix}",
-        )
-        .unwrap()
-        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        ProgressStyle::with_template(TEMPLATE_RUNNING)
+            .unwrap()
+            .tick_chars(TICK_CHARS),
     );
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::stderr());
     PROGRESS_BAR.enable_steady_tick(Duration::from_millis(100));
@@ -295,13 +415,13 @@ pub fn format_elapsed_time(elapsed: Duration) -> String {
 /// End the global timer and print elapsed time with a message.
 /// Example output: "75 packages installed [5s]"
 pub fn log_time_end(msg: &str) {
-    println!();
+    println_lossy(format_args!(""));
     if let Some(start) = START_TIME.get() {
         let elapsed = start.elapsed();
         let elapsed_str = format_elapsed_time(elapsed);
-        println!("{} {}", msg, elapsed_str.green());
+        println_lossy(format_args!("{} {}", msg, elapsed_str.green()));
     } else {
-        println!("{msg}");
+        println_lossy(format_args!("{msg}"));
     }
 }
 
@@ -339,6 +459,17 @@ impl utoo_ruborist::progress::EventReceiver for ProgressReceiver {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn test_progress_templates_parse() {
+        // The use sites `.unwrap()` these; rendering is TTY-gated so a malformed
+        // template would only panic on a real terminal, never in CI. Parse them
+        // here so a bad edit fails the test suite instead.
+        for template in [TEMPLATE_INIT, TEMPLATE_RUNNING, TEMPLATE_FINISH] {
+            ProgressStyle::with_template(template)
+                .unwrap_or_else(|e| panic!("malformed progress template {template:?}: {e}"));
+        }
+    }
 
     #[test]
     fn test_format_elapsed_time() {

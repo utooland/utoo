@@ -19,6 +19,7 @@ use crate::constants::cmd::{
     WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
+use crate::util::cli_enum::PublishAccess;
 
 pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
@@ -66,8 +67,14 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub manifests_concurrency_limit: Option<usize>,
 
-    /// Workspace to operate in (may be repeated; supports glob patterns)
-    #[arg(long, global = true, hide = true, num_args = 1)]
+    /// Maximum lifecycle scripts run at once (default: auto, ~CPU cores)
+    #[arg(long, global = true)]
+    pub script_concurrency_limit: Option<usize>,
+
+    /// Workspace(s) to operate in by name, relative path, or glob pattern
+    /// (repeatable). Also accepted as `--filter` for pnpm familiarity, e.g.
+    /// `ut --filter @scope/pkg publish` targets a member from the workspace root.
+    #[arg(long, global = true, hide = true, num_args = 1, alias = "filter")]
     pub workspace: Vec<String>,
 
     /// Run in all workspaces with topological ordering
@@ -261,6 +268,19 @@ pub enum Commands {
         /// One-time password for 2FA
         #[arg(long)]
         otp: Option<String>,
+        /// Registry visibility for the package: `public` or `restricted`
+        /// (default: publishConfig.access, else public). Mirrors `npm --access`.
+        #[arg(long, value_enum)]
+        access: Option<PublishAccess>,
+        /// Skip Git working-tree cleanliness checks. Accepted for pnpm
+        /// compatibility; utoo performs no Git checks, so this is a no-op.
+        #[arg(long)]
+        no_git_checks: bool,
+        /// Generate and attach a signed Sigstore/SLSA provenance attestation.
+        /// Requires a supported CI (GitHub Actions / GitLab) with OIDC and a
+        /// registry that exposes the attestation API.
+        #[arg(long)]
+        provenance: bool,
     },
 
     #[command(name = PING_NAME, alias = PING_ALIAS, about = PING_ABOUT)]

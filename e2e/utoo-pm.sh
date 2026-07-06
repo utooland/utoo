@@ -103,6 +103,32 @@ if ! diff -q package-lock.baseline.json package-lock.json >/dev/null; then
 fi
 rm -f package-lock.baseline.json
 echo -e "${GREEN}PASS: ant-design add/remove keeps the tree stable (byte-identical round-trip)${NC}"
+
+# Cold resolution must be deterministic: the same package.json resolved twice
+# from scratch (no lockfile to seed) must produce a byte-identical lockfile.
+# A regression here means placement depends on manifest arrival order again —
+# whichever dependent's fetch lands first claims the contested hoisted slot — so
+# the same manifest resolves to different versions run to run. That's what made
+# `utoo update` re-pick versions and re-download the whole store every time, and
+# left node_modules permanently out of sync with the lock. ant-design's tree has
+# enough conflicting transitive ranges (e.g. @ctrl/tinycolor 3 vs 4) to surface
+# it reliably. Two consecutive cold `utoo deps` runs see the same registry
+# state, so byte-identical is the right assertion regardless of registry drift.
+echo -e "${YELLOW}Case 2c: ant-design cold resolution is deterministic${NC}"
+cp package-lock.json package-lock.keep.json
+rm -f package-lock.json
+utoo deps >/dev/null || { echo -e "${RED}FAIL: cold resolve #1 failed (ant-design)${NC}"; exit 1; }
+cp package-lock.json package-lock.cold1.json
+rm -f package-lock.json
+utoo deps >/dev/null || { echo -e "${RED}FAIL: cold resolve #2 failed (ant-design)${NC}"; exit 1; }
+if ! diff -q package-lock.cold1.json package-lock.json >/dev/null; then
+  echo -e "${RED}FAIL: two cold resolves differ — placement is arrival-order dependent again${NC}"
+  diff package-lock.cold1.json package-lock.json | head -40
+  exit 1
+fi
+rm -f package-lock.cold1.json
+mv package-lock.keep.json package-lock.json
+echo -e "${GREEN}PASS: ant-design cold resolution is deterministic (byte-identical)${NC}"
 cd ../../
 
 # Case 3: antd-test project install
@@ -2197,5 +2223,73 @@ if asp_ran; then echo -e "${RED}FAIL: malformed config must not run scripts${NC}
 rm -rf "$ASP_DIR"
 trap - EXIT
 echo -e "${GREEN}PASS: install-time script policy enforced (allow/deny/strict/ignore/dangerously/node-gyp/cross-source)${NC}"
+
+# ---------------------------------------------------------------------------
+# Case: `utoo --filter <pkg> publish` from a workspace root resolves the member
+# and rewrites its `workspace:`/`catalog:` specifiers to concrete versions, and
+# exercises `--no-git-checks` + `--access` over a dirty gitignored `dist`. Also
+# asserts that selecting multiple members publishes them in workspace
+# topological order (dependency before dependent). Runs fully in --dry-run.
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}Case: workspace --filter publish (dry-run resolves protocols)${NC}"
+WSP_DIR=$(mktemp -d)
+trap 'rm -rf "$WSP_DIR"' EXIT
+mkdir -p "$WSP_DIR/packages/lib" "$WSP_DIR/packages/app"
+cat > "$WSP_DIR/package.json" << 'EOF'
+{ "name": "wsp-root", "private": true, "workspaces": ["packages/*"] }
+EOF
+cat > "$WSP_DIR/.utoo.toml" << 'EOF'
+[catalog]
+lodash = "^4.17.21"
+EOF
+cat > "$WSP_DIR/packages/lib/package.json" << 'EOF'
+{ "name": "@wsp/lib", "version": "1.2.3" }
+EOF
+cat > "$WSP_DIR/packages/app/package.json" << 'EOF'
+{
+  "name": "@wsp/app",
+  "version": "0.5.0",
+  "dependencies": { "@wsp/lib": "workspace:^", "lodash": "catalog:" }
+}
+EOF
+pushd "$WSP_DIR"
+# A gitignored build artifact makes the tree "dirty"; --no-git-checks must not
+# reject the publish (utoo performs no git checks).
+git init -q . && printf "dist/\n" > .gitignore && mkdir -p packages/app/dist \
+  && echo "x" > packages/app/dist/index.js
+utoo --filter @wsp/app publish --tag beta --dry-run --no-git-checks --access public 2>&1 \
+  | tee wsp.out \
+  || { echo -e "${RED}FAIL: filtered publish dry-run errored${NC}"; cat wsp.out; exit 1; }
+if ! grep -q '@wsp/lib: workspace:\^ -> \^1.2.3' wsp.out; then
+    echo -e "${RED}FAIL: workspace: specifier not resolved to ^1.2.3${NC}"; cat wsp.out; exit 1
+fi
+if ! grep -q 'lodash: catalog: -> \^4.17.21' wsp.out; then
+    echo -e "${RED}FAIL: catalog: specifier not resolved to ^4.17.21${NC}"; cat wsp.out; exit 1
+fi
+if ! grep -q "Would publish @wsp/app@0.5.0" wsp.out; then
+    echo -e "${RED}FAIL: filtered package @wsp/app was not selected${NC}"; cat wsp.out; exit 1
+fi
+rm -f wsp.out
+
+# Selecting both members must publish in topological order (dependency first),
+# regardless of the order they are passed on the command line. `@wsp/app`
+# depends on `@wsp/lib`, so `@wsp/lib` must be published first even though it is
+# listed last here.
+utoo --filter @wsp/app --filter @wsp/lib publish --tag beta --dry-run 2>&1 \
+  | tee wsp-topo.out \
+  || { echo -e "${RED}FAIL: multi-member publish dry-run errored${NC}"; cat wsp-topo.out; exit 1; }
+lib_line=$(grep -n "Would publish @wsp/lib@1.2.3" wsp-topo.out | head -1 | cut -d: -f1)
+app_line=$(grep -n "Would publish @wsp/app@0.5.0" wsp-topo.out | head -1 | cut -d: -f1)
+if [ -z "$lib_line" ] || [ -z "$app_line" ]; then
+    echo -e "${RED}FAIL: both members were not published in dry-run${NC}"; cat wsp-topo.out; exit 1
+fi
+if [ "$lib_line" -ge "$app_line" ]; then
+    echo -e "${RED}FAIL: @wsp/lib must publish before @wsp/app (topological order)${NC}"; cat wsp-topo.out; exit 1
+fi
+rm -f wsp-topo.out
+popd
+rm -rf "$WSP_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: workspace --filter publish resolves protocols + topological order${NC}"
 
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

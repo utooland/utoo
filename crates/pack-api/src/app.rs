@@ -30,7 +30,7 @@ use turbopack_core::{
     module::{Module, Modules},
     module_graph::{
         GraphEntries, ModuleGraph,
-        chunk_group_info::{ChunkGroup, ChunkGroupEntry},
+        chunk_group_info::{ChunkGroup, ChunkGroupEntry, EntryHeuristics},
     },
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
@@ -465,7 +465,10 @@ impl Endpoint for AppEndpoint {
                     .map(ResolvedVc::upcast)
                     .collect();
 
-                Ok(ChunkGroupEntry::Entry(entry_modules))
+                Ok(ChunkGroupEntry::Entry {
+                    modules: entry_modules,
+                    heuristics: EntryHeuristics::default(),
+                })
             })
             .try_join()
             .await?;

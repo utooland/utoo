@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use tokio::task::JoinSet;
@@ -12,7 +13,8 @@ use super::ScriptService;
 use crate::helper::workspace::find_workspace_path;
 use crate::model::package::PackageInfo;
 use crate::util::format_print::{
-    announce_script, print_layer_separator, print_multi_workspace_header, print_workspace_result,
+    announce_script, print_hook_done, print_layer_separator, print_multi_workspace_header,
+    print_workspace_result,
 };
 
 /// How script output is handled.
@@ -40,6 +42,12 @@ pub enum MissingScript {
 pub enum LifecycleSink<'a> {
     Stream {
         workspace_label: Option<&'a str>,
+        /// Emit a `✓ <event> [12.3s]` line on completion and a periodic
+        /// `⏳ <event> still running [Ns]…` heartbeat while a step runs long.
+        /// On for install lifecycle hooks (which are expected to finish); off
+        /// for `utoo run`, where the script may be a long-lived dev server and
+        /// the heartbeat would be noise.
+        timed: bool,
     },
     Capture {
         workspace_label: &'a str,
@@ -86,11 +94,24 @@ impl ScriptService {
             ran_any = true;
 
             match &mut sink {
-                LifecycleSink::Stream { workspace_label } => {
+                LifecycleSink::Stream {
+                    workspace_label,
+                    timed,
+                } => {
                     announce_script(*workspace_label, &content, &step_args.join(" "));
+                    let started = Instant::now();
+                    // No "still running" heartbeat here: a streamed hook prints
+                    // its own output live, so it already reads as working — the
+                    // only addition a timed install hook needs is a uniform
+                    // `✓ <hook> [Xs]` marker when it finishes. (The silent
+                    // dependency-script path, which shows nothing, is where the
+                    // heartbeat earns its keep — see `logger::ScriptHeartbeat`.)
                     Self::execute_custom_script(package, step_name, &content, step_args.to_vec())
                         .await
                         .with_context(|| format!("Failed to execute {step_name}"))?;
+                    if *timed {
+                        print_hook_done(*workspace_label, step_name, started.elapsed());
+                    }
                 }
                 LifecycleSink::Capture {
                     workspace_label,
@@ -153,6 +174,7 @@ impl ScriptService {
             &args,
             LifecycleSink::Stream {
                 workspace_label: workspace,
+                timed: false,
             },
             MissingScript::Fail,
         )

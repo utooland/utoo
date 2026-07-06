@@ -12,13 +12,14 @@ use crate::cmd::update::update;
 use crate::cmd::view::view;
 use crate::constants::{APP_NAME, APP_VERSION};
 use crate::helper::auto_update::init_auto_update;
-use crate::service::script::MissingScript;
+use crate::service::script::{MissingScript, ScriptExit};
 use crate::service::workspace::WorkspaceFilter;
 use crate::util::cli_enum::ConfigScope;
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use crate::util::script_policy::ScriptPolicyArgs;
 use crate::util::user_config::{
     init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit,
+    set_script_concurrency_limit,
 };
 
 mod cli;
@@ -45,6 +46,11 @@ fn main() {
         .block_on(async_main());
 
     if let Err(e) = result {
+        // A failed package script propagates its own exit status so
+        // `utoo run <script>` mirrors the script: a non-zero `exit N` becomes
+        // N, and a signal death (e.g. SIGPIPE from `script | head`) becomes
+        // 128+N. Any other error keeps the generic exit code 1.
+        let exit_code = e.downcast_ref::<ScriptExit>().map_or(1, |s| s.code);
         if let Some(chain) = util::format_print::format_resolve_chain(&e) {
             tracing::error!("{:#}\n\n{chain}", e);
         } else {
@@ -53,7 +59,7 @@ fn main() {
         if let Some(log_path) = get_log_file_path() {
             eprintln!("Full logs saved to: {}", log_path.display());
         }
-        process::exit(1);
+        process::exit(exit_code);
     }
 }
 
@@ -136,10 +142,10 @@ async fn async_main() -> Result<()> {
         set_legacy_peer_deps(cli.legacy_peer_deps);
     }
 
-    // set manifests concurrency limit if specified
-    if cli.manifests_concurrency_limit.is_some() {
-        set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
-    }
+    // Concurrency limits — the setters ignore `None`, so passing the CLI option
+    // straight through applies an override only when one was given.
+    set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
+    set_script_concurrency_limit(cli.script_concurrency_limit);
 
     // Auto update: check cache → update or refresh in background
     init_auto_update().await;
@@ -239,8 +245,33 @@ async fn async_main() -> Result<()> {
             cmd::pm_pack::pack(path, dry_run.into()).await?;
             log_time_end("Pack complete");
         }
-        Some(Commands::Publish { tag, dry_run, otp }) => {
-            cmd::publish::publish(tag.as_deref(), dry_run.into(), otp.as_deref()).await?;
+        Some(Commands::Publish {
+            tag,
+            dry_run,
+            otp,
+            access,
+            // utoo performs no Git cleanliness checks, so `--no-git-checks` is a
+            // documented no-op accepted for pnpm/npm compatibility.
+            no_git_checks: _,
+            provenance,
+        }) => {
+            // `--workspace`/`--filter` selects member(s); empty means the current
+            // package. `--workspaces` is intentionally NOT honored here to avoid
+            // an accidental publish of every member.
+            let filter = if cli.workspace.is_empty() {
+                WorkspaceFilter::Current
+            } else {
+                WorkspaceFilter::Selected(cli.workspace)
+            };
+            cmd::publish::publish(
+                tag.as_deref(),
+                dry_run.into(),
+                otp.as_deref(),
+                access,
+                filter,
+                provenance,
+            )
+            .await?;
         }
         Some(Commands::Ping { registry }) => {
             cmd::ping::ping(registry.as_deref()).await?;

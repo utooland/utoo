@@ -5,6 +5,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use utoo_ruborist::manifest::{PackageInstallView, PackageJson, PublishConfig};
 
+use crate::util::cli_enum::PublishAccess;
 use crate::util::json::load_package_json;
 use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_or_load_package_json;
@@ -121,18 +122,42 @@ impl PublishMeta {
         if self.version.is_empty() {
             bail!("Cannot publish: package.json requires a non-empty 'version' field");
         }
-        if self
-            .publish_config
-            .access
-            .as_deref()
-            .is_some_and(|a| a != "public")
-        {
-            bail!(
-                "utoo publish currently only supports public access.\n\
-                 Remove or change 'publishConfig.access' to \"public\" in package.json."
-            );
-        }
         Ok(())
+    }
+
+    /// Resolve the effective registry access level.
+    ///
+    /// Precedence: CLI `--access` > `publishConfig.access` > `public`.
+    /// An unknown `publishConfig.access` value is rejected rather than silently
+    /// downgraded.
+    pub fn resolve_access(&self, cli_access: Option<PublishAccess>) -> Result<PublishAccess> {
+        if let Some(access) = cli_access {
+            return Ok(access);
+        }
+        match self.publish_config.access.as_deref() {
+            // Parse via strum's derived `FromStr`; the accepted spellings live
+            // solely on the enum (mirrors `LifecycleHook`).
+            Some(value) => value.parse::<PublishAccess>().map_err(|_| {
+                anyhow::anyhow!(
+                    "invalid 'publishConfig.access' value \"{value}\": \
+                     expected \"public\" or \"restricted\""
+                )
+            }),
+            None => Ok(PublishAccess::Public),
+        }
+    }
+
+    /// Whether to attach a provenance attestation.
+    ///
+    /// Enabled by the CLI `--provenance` flag, `publishConfig.provenance: true`,
+    /// or `NPM_CONFIG_PROVENANCE=true` (matching npm/pnpm).
+    pub fn resolve_provenance(&self, cli_provenance: bool) -> bool {
+        cli_provenance
+            || self.publish_config.provenance == Some(true)
+            || matches!(
+                env::var("NPM_CONFIG_PROVENANCE").ok().as_deref(),
+                Some("true" | "1")
+            )
     }
 
     /// Resolve the publish tag: CLI flag > publishConfig.tag > "latest".
@@ -391,5 +416,46 @@ mod tests {
         // Test PackageInfo::from_path with invalid JSON
         let result = PackageInfo::from_path(&package_dir).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_access_precedence() {
+        let mut meta = PublishMeta {
+            name: "pkg".into(),
+            version: "1.0.0".into(),
+            ..Default::default()
+        };
+
+        // CLI flag wins over publishConfig.
+        meta.publish_config.access = Some("restricted".into());
+        assert_eq!(
+            meta.resolve_access(Some(PublishAccess::Public)).unwrap(),
+            PublishAccess::Public
+        );
+
+        // Falls back to publishConfig.access.
+        assert_eq!(
+            meta.resolve_access(None).unwrap(),
+            PublishAccess::Restricted
+        );
+
+        // Defaults to public when neither is set.
+        meta.publish_config.access = None;
+        assert_eq!(meta.resolve_access(None).unwrap(), PublishAccess::Public);
+
+        // An unknown publishConfig.access value is rejected.
+        meta.publish_config.access = Some("secret".into());
+        assert!(meta.resolve_access(None).is_err());
+    }
+
+    #[test]
+    fn resolve_provenance_from_cli_and_config() {
+        let mut meta = PublishMeta::default();
+        assert!(!meta.resolve_provenance(false));
+        // CLI flag enables it.
+        assert!(meta.resolve_provenance(true));
+        // publishConfig.provenance enables it without the flag.
+        meta.publish_config.provenance = Some(true);
+        assert!(meta.resolve_provenance(false));
     }
 }
