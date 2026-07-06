@@ -41,9 +41,12 @@ impl PackageManagementService {
         }
 
         tracing::debug!("Installing package {name} to cache...");
+        // `ut x` exposes no per-invocation script flags, so the policy comes
+        // from global config only (resolved inside `install_global_package`).
         InstallService::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
+            &crate::util::script_policy::ScriptPolicyArgs::default(),
         )
         .await?;
         tracing::debug!("Package {name} installed successfully");

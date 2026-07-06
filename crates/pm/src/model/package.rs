@@ -56,6 +56,32 @@ impl LifecycleScripts {
     pub fn get_script(&self, hook: LifecycleHook) -> Option<&str> {
         self.scripts.get(&hook).map(|s| s.as_str())
     }
+
+    /// Whether any install-phase hook (`preinstall`/`install`/`postinstall`) is
+    /// present — i.e. the package has an explicit install action.
+    pub fn has_install_lifecycle(&self) -> bool {
+        [
+            LifecycleHook::Preinstall,
+            LifecycleHook::Install,
+            LifecycleHook::Postinstall,
+        ]
+        .iter()
+        .any(|hook| self.scripts.contains_key(hook))
+    }
+
+    /// Whether an explicit `install` or `preinstall` hook is present. npm only
+    /// defaults a `binding.gyp` package's install action to `node-gyp rebuild`
+    /// when BOTH are absent, so either one suppresses the implicit native build.
+    pub fn suppresses_default_node_gyp(&self) -> bool {
+        self.scripts.contains_key(&LifecycleHook::Install)
+            || self.scripts.contains_key(&LifecycleHook::Preinstall)
+    }
+
+    /// Insert/override one hook. Used to synthesize the implicit
+    /// `node-gyp rebuild` install action for an allowed native package.
+    pub fn set(&mut self, hook: LifecycleHook, script: String) {
+        self.scripts.insert(hook, script);
+    }
 }
 
 /// Publish-related metadata extracted from package.json.
@@ -163,6 +189,14 @@ pub struct PackageInfo {
     pub scripts: HashMap<String, String>,
     pub lifecycle_scripts: LifecycleScripts,
     pub name: String, // Full scoped name, e.g. "@babel/parser"
+    /// Resolved version, used to match `allowScripts` `name@version` entries.
+    /// Empty when unknown (e.g. project root, or the lock entry omits it).
+    pub version: String,
+    /// True when this entry is a workspace `node_modules` link. Its install
+    /// lifecycle is owned by the workspace walk (`process_workspace_install_hooks`),
+    /// so it is first-party and must never be gated as a third-party dependency
+    /// by the `allowScripts` policy.
+    pub is_workspace_link: bool,
 }
 
 impl PackageInfo {
@@ -208,6 +242,10 @@ impl PackageInfo {
             lifecycle_scripts: LifecycleScripts::from_scripts(pkg.scripts_or_empty()),
             scripts: pkg.scripts_or_empty().clone(),
             name: pkg.name.clone(),
+            version: pkg.version.clone(),
+            // Project/workspace-source packages are loaded here and run via the
+            // workspace walk, not gated as dependencies.
+            is_workspace_link: false,
         })
     }
 
@@ -222,6 +260,10 @@ impl PackageInfo {
             lifecycle_scripts: LifecycleScripts::from_scripts(&pkg.scripts),
             scripts: pkg.scripts.clone(),
             name: pkg.name.clone(),
+            // PackageInstallView omits version; install-script gating runs on the
+            // lock-fed collect path, which sets version from the lock entry.
+            version: String::new(),
+            is_workspace_link: false,
         })
     }
 

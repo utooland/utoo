@@ -1,5 +1,5 @@
 use crate::service::package::PackageService;
-use crate::util::cli_enum::ScriptPolicy;
+use crate::util::script_policy::{InstallScriptMode, ScriptPolicyArgs};
 use anyhow::Result;
 use std::path::Path;
 use utoo_ruborist::lock::PackageLock;
@@ -7,29 +7,37 @@ use utoo_ruborist::lock::PackageLock;
 pub struct RebuildService;
 
 impl RebuildService {
-    /// Core rebuild method - only processes memory objects
+    /// Core rebuild method - only processes memory objects.
+    ///
+    /// This is where every local install path (install / update / link /
+    /// `utoo rebuild`) converges, so it owns resolving the install-time script
+    /// policy from the CLI args + config + root `package.json`.
     ///
     /// # Arguments
     /// * `package_lock` - Package lock information in memory
-    /// * `root_path` - Project root path
-    /// * `bins_only` - Whether to only process binary file linking, skipping script execution
+    /// * `root_path` - Project root path (also the source of `allowScripts`)
+    /// * `args` - CLI-level script policy flags
     pub async fn rebuild(
         package_lock: &PackageLock,
         root_path: &Path,
-        scripts: ScriptPolicy,
+        args: &ScriptPolicyArgs,
     ) -> Result<()> {
-        // Collect packages based on scripts parameter
+        let mode = InstallScriptMode::resolve(args, Some(root_path)).await?;
+
         let packages =
-            PackageService::collect_packages_from_lock(package_lock, root_path, scripts).await?;
+            PackageService::collect_packages_from_lock(package_lock, root_path, &mode).await?;
 
         if !packages.is_empty() {
             let execution_queues =
-                PackageService::create_execution_queues_with_options(packages, scripts)?;
-            PackageService::execute_queues_with_options(execution_queues, scripts).await?;
+                PackageService::create_execution_queues_with_options(packages, &mode)?;
+            PackageService::execute_queues_with_options(execution_queues, &mode).await?;
         }
 
-        // bins_only mode does not execute project or workspace hooks
-        if scripts == ScriptPolicy::Run {
+        // `--ignore-scripts` (IgnoreAll) also skips first-party project/workspace
+        // hooks, as before. The dependency `allowScripts` policy does NOT gate
+        // first-party hooks (they are operationally different), so policy and
+        // allow-all modes both run them.
+        if !mode.is_ignore_all() {
             // Run workspace `prepare`/`postinstall`/etc. in topological order
             // before the root project's hooks, since the root may import
             // build artifacts produced by a workspace's `prepare`.
@@ -168,7 +176,8 @@ mod tests {
 
         // Test rebuild with empty package lock
         let result =
-            RebuildService::rebuild(&package_lock, temp_dir.path(), ScriptPolicy::Run).await;
+            RebuildService::rebuild(&package_lock, temp_dir.path(), &ScriptPolicyArgs::default())
+                .await;
         assert!(
             result.is_ok(),
             "Rebuild with empty package lock should succeed"
@@ -184,7 +193,8 @@ mod tests {
 
         // Test rebuild without project package.json (should fail for project hooks)
         let result =
-            RebuildService::rebuild(&package_lock, temp_dir.path(), ScriptPolicy::Run).await;
+            RebuildService::rebuild(&package_lock, temp_dir.path(), &ScriptPolicyArgs::default())
+                .await;
         assert!(
             result.is_err(),
             "Rebuild without project package.json should fail"

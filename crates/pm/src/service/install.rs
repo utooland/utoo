@@ -1,4 +1,4 @@
-use crate::util::cli_enum::ScriptPolicy;
+use crate::util::script_policy::{InstallScriptMode, ScriptPolicyArgs};
 use anyhow::{Context as _, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::{HashMap, HashSet};
@@ -242,7 +242,7 @@ impl InstallService {
         action: PackageAction,
         specs: &[&str],
         workspace: Option<String>,
-        scripts: ScriptPolicy,
+        args: &ScriptPolicyArgs,
         save_type: SaveType,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
@@ -251,7 +251,7 @@ impl InstallService {
             action,
             specs,
             &workspace,
-            scripts
+            args
         );
 
         if specs.is_empty() {
@@ -279,7 +279,7 @@ impl InstallService {
             .await
             .context("Failed to build package-lock.json")?;
 
-        Self::install(scripts, &root_path, omit)
+        Self::install(args, &root_path, omit)
             .await
             .context("Failed to install packages")?;
 
@@ -287,7 +287,7 @@ impl InstallService {
     }
 
     pub async fn install(
-        scripts: ScriptPolicy,
+        args: &ScriptPolicyArgs,
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
@@ -377,7 +377,7 @@ impl InstallService {
         let clone_elapsed = link_start.elapsed();
         finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
-        RebuildService::rebuild(&package_lock, root_path, scripts).await?;
+        RebuildService::rebuild(&package_lock, root_path, args).await?;
 
         print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
@@ -392,7 +392,11 @@ impl InstallService {
     /// (matching `npm install -g` and bun). No wrapper `package.json` is written:
     /// the global `node_modules` is the source of truth, reified **additively**
     /// so previously-installed globals survive.
-    pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+    pub async fn install_global_package(
+        npm_spec: &str,
+        prefix: Option<&str>,
+        args: &ScriptPolicyArgs,
+    ) -> Result<()> {
         install_progress::start_install_run();
         let (name, resolved_version, version_spec) = resolve_package_spec(npm_spec).await?;
         // Resolvable spec for the synthetic dependency: registry ranges pinned to
@@ -455,13 +459,14 @@ impl InstallService {
         // Dependency lifecycle only — preinstall/install/postinstall + bin
         // linking for the tool and its deps. No project/workspace hooks, so no
         // `prepare`/`prepublish`, and no disk root `package.json` is required.
-        let packages =
-            PackageService::collect_packages_from_lock(&lock, &root_path, ScriptPolicy::Run)
-                .await?;
+        //
+        // There is no project `package.json` here, so the policy comes from
+        // global config + CLI `--allow-scripts` only (root_path = None).
+        let mode = InstallScriptMode::resolve(args, None).await?;
+        let packages = PackageService::collect_packages_from_lock(&lock, &root_path, &mode).await?;
         if !packages.is_empty() {
-            let queues =
-                PackageService::create_execution_queues_with_options(packages, ScriptPolicy::Run)?;
-            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await?;
+            let queues = PackageService::create_execution_queues_with_options(packages, &mode)?;
+            PackageService::execute_queues_with_options(queues, &mode).await?;
         }
 
         // Link the tool's own bin into the global bin dir.

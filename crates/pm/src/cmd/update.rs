@@ -1,9 +1,9 @@
 use crate::service::update::clean_package_lock;
-use crate::util::cli_enum::ScriptPolicy;
+use crate::util::script_policy::ScriptPolicyArgs;
 use crate::{cmd::install::install, helper::workspace::init_project_root};
 use anyhow::{Context, Result};
 
-pub async fn update(scripts: ScriptPolicy) -> Result<()> {
+pub async fn update(args: &ScriptPolicyArgs) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let root_path = init_project_root(&cwd).await?;
 
@@ -18,7 +18,7 @@ pub async fn update(scripts: ScriptPolicy) -> Result<()> {
     // clean_node_modules().await?;
 
     // Install dependencies
-    install(scripts, &root_path).await?;
+    install(args, &root_path).await?;
 
     Ok(())
 }

@@ -143,6 +143,8 @@ mod tests {
             scripts: Default::default(),
             lifecycle_scripts: LifecycleScripts::default(),
             name: "test-package".to_string(),
+            version: "1.0.0".to_string(),
+            is_workspace_link: false,
         };
         assert!(ScriptService::is_node_gyp_pkg(&package));
         // Case 2: binding.gyp does not exist

@@ -2069,6 +2069,161 @@ rm -rf "$BMC_DIR"
 trap - EXIT
 echo -e "${GREEN}PASS: bundled binary-mirror-config applied${NC}"
 
+# Case: install-time script policy (RFC #3145). Hermetic — uses only local
+# `file:` dependencies, no registry. Verifies the allowScripts gate end-to-end:
+# default-run, deny, allow, strict-fail, the CLI flags, and node-gyp detection.
+echo -e "${YELLOW}Case: install-time script policy (allowScripts)${NC}"
+ASP_DIR="$(mktemp -d)"
+trap 'rm -rf "$ASP_DIR"' EXIT
+
+# A local dependency whose postinstall writes a marker into its own dir.
+mkdir -p "$ASP_DIR/localdep"
+cat > "$ASP_DIR/localdep/package.json" <<'EOF'
+{ "name": "localdep", "version": "1.0.0",
+  "scripts": { "postinstall": "node -e \"require('fs').writeFileSync('ran','1')\"" } }
+EOF
+# A native-style dependency: binding.gyp, no explicit install script. Its
+# implicit `node-gyp rebuild` must be gated like any other install action.
+mkdir -p "$ASP_DIR/nativedep"
+cat > "$ASP_DIR/nativedep/package.json" <<'EOF'
+{ "name": "nativedep", "version": "1.0.0" }
+EOF
+echo '{}' > "$ASP_DIR/nativedep/binding.gyp"
+
+# Write proj/package.json from stdin and clear the marker before each run.
+asp_proj() {
+  rm -rf "$ASP_DIR/proj" && mkdir -p "$ASP_DIR/proj"
+  cat > "$ASP_DIR/proj/package.json"
+  rm -f "$ASP_DIR/localdep/ran"
+}
+asp_ran() { [ -f "$ASP_DIR/localdep/ran" ]; }
+
+# Default (no policy configured): scripts run, as before this RFC.
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0", "dependencies": { "localdep": "file:../localdep" } }
+EOF
+(cd "$ASP_DIR/proj" && utoo install >/dev/null 2>&1) \
+  || { echo -e "${RED}FAIL: default install errored${NC}"; exit 1; }
+asp_ran || { echo -e "${RED}FAIL: postinstall must run when no policy is set${NC}"; exit 1; }
+
+# Explicit deny: script skipped and reported.
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0",
+  "dependencies": { "localdep": "file:../localdep" },
+  "allowScripts": { "localdep": false } }
+EOF
+(cd "$ASP_DIR/proj" && utoo install 2>&1 | tee asp.out >/dev/null) \
+  || { echo -e "${RED}FAIL: install with deny errored${NC}"; exit 1; }
+if asp_ran; then echo -e "${RED}FAIL: denied script must not run${NC}"; exit 1; fi
+grep -q "install scripts skipped" "$ASP_DIR/proj/asp.out" \
+  || { echo -e "${RED}FAIL: skipped-scripts summary missing${NC}"; cat "$ASP_DIR/proj/asp.out"; exit 1; }
+
+# Explicit allow: script runs under an otherwise-enforcing policy.
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0",
+  "dependencies": { "localdep": "file:../localdep" },
+  "allowScripts": { "localdep": true } }
+EOF
+(cd "$ASP_DIR/proj" && utoo install >/dev/null 2>&1) \
+  || { echo -e "${RED}FAIL: install with allow errored${NC}"; exit 1; }
+asp_ran || { echo -e "${RED}FAIL: allowed script must run${NC}"; exit 1; }
+
+# Strict mode + unreviewed package: install fails before running anything.
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0",
+  "dependencies": { "localdep": "file:../localdep" } }
+EOF
+if (cd "$ASP_DIR/proj" && utoo install --strict-allow-scripts >/dev/null 2>&1); then
+  echo -e "${RED}FAIL: strict mode must fail on unreviewed scripts${NC}"; exit 1
+fi
+if asp_ran; then echo -e "${RED}FAIL: strict abort must not run scripts${NC}"; exit 1; fi
+
+# `--allow-scripts` one-shot satisfies strict mode for the named package.
+(cd "$ASP_DIR/proj" && utoo install --strict-allow-scripts --allow-scripts localdep >/dev/null 2>&1) \
+  || { echo -e "${RED}FAIL: --allow-scripts should satisfy strict${NC}"; exit 1; }
+asp_ran || { echo -e "${RED}FAIL: --allow-scripts must run the named script${NC}"; exit 1; }
+
+# `--ignore-scripts` wins over an allow entry.
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0",
+  "dependencies": { "localdep": "file:../localdep" },
+  "allowScripts": { "localdep": true } }
+EOF
+(cd "$ASP_DIR/proj" && utoo install --ignore-scripts >/dev/null 2>&1) \
+  || { echo -e "${RED}FAIL: --ignore-scripts install errored${NC}"; exit 1; }
+if asp_ran; then echo -e "${RED}FAIL: --ignore-scripts must skip even allowed scripts${NC}"; exit 1; fi
+
+# `--dangerously-allow-all-scripts` runs a denied script and warns.
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0",
+  "dependencies": { "localdep": "file:../localdep" },
+  "allowScripts": { "localdep": false } }
+EOF
+(cd "$ASP_DIR/proj" && utoo install --dangerously-allow-all-scripts 2>&1 | tee asp.out >/dev/null) \
+  || { echo -e "${RED}FAIL: dangerously install errored${NC}"; exit 1; }
+asp_ran || { echo -e "${RED}FAIL: dangerously must run denied scripts${NC}"; exit 1; }
+grep -qi "dangerously-allow-all-scripts" "$ASP_DIR/proj/asp.out" \
+  || { echo -e "${RED}FAIL: dangerously must print a warning${NC}"; exit 1; }
+
+# Implicit node-gyp: a binding.gyp package with no install script is gated, and
+# the skip summary flags it as node-gyp. (Left unreviewed under an active policy
+# so it is skipped rather than actually built.)
+asp_proj <<'EOF'
+{ "name": "proj", "version": "1.0.0",
+  "dependencies": { "localdep": "file:../localdep", "nativedep": "file:../nativedep" },
+  "allowScripts": { "localdep": true } }
+EOF
+(cd "$ASP_DIR/proj" && utoo install 2>&1 | tee asp.out >/dev/null) \
+  || { echo -e "${RED}FAIL: install with node-gyp dep errored${NC}"; exit 1; }
+grep -q "node-gyp" "$ASP_DIR/proj/asp.out" \
+  || { echo -e "${RED}FAIL: implicit node-gyp action must be reported as skipped node-gyp${NC}"; cat "$ASP_DIR/proj/asp.out"; exit 1; }
+
+# Cross-source precedence, with an isolated HOME so a temp global config can be
+# exercised without touching the runner's ~/.utoo. file: deps need no registry.
+ASP_HOME="$ASP_DIR/home"
+mkdir -p "$ASP_HOME/.utoo"
+
+# A global (team) deny must survive a project-local allow (deny sticky ACROSS
+# sources). package.json allows localdep; global config denies it → denied.
+asp_proj <<'EOF'
+{ "name":"proj","version":"1.0.0",
+  "dependencies":{"localdep":"file:../localdep"},
+  "allowScripts":{"localdep":true} }
+EOF
+printf '[allowScripts]\nlocaldep = false\n' > "$ASP_HOME/.utoo/config.toml"
+(cd "$ASP_DIR/proj" && HOME="$ASP_HOME" utoo install >/dev/null 2>&1) \
+  || { echo -e "${RED}FAIL: cross-source install errored${NC}"; exit 1; }
+if asp_ran; then echo -e "${RED}FAIL: a global deny must beat a project allow${NC}"; exit 1; fi
+
+# A config dangerously-allow-all-scripts must NOT override an explicit CLI
+# --strict-allow-scripts (the command line wins).
+printf '[values]\ndangerously-allow-all-scripts = "true"\n' > "$ASP_HOME/.utoo/config.toml"
+asp_proj <<'EOF'
+{ "name":"proj","version":"1.0.0","dependencies":{"localdep":"file:../localdep"} }
+EOF
+if (cd "$ASP_DIR/proj" && HOME="$ASP_HOME" utoo install --strict-allow-scripts >/dev/null 2>&1); then
+  echo -e "${RED}FAIL: config dangerously must not override CLI --strict-allow-scripts${NC}"; exit 1
+fi
+
+# A malformed project config fails the install (fail-closed) rather than
+# silently dropping the policy and running everything. (Uses the local
+# `.utoo.toml`; a malformed *global* config is separately auto-repaired by the
+# registry-probe cache write before the policy is read, so it isn't a reliable
+# fail-open vector to assert here.)
+rm -f "$ASP_HOME/.utoo/config.toml"
+asp_proj <<'EOF'
+{ "name":"proj","version":"1.0.0","dependencies":{"localdep":"file:../localdep"} }
+EOF
+printf 'not = = valid toml [[[\n' > "$ASP_DIR/proj/.utoo.toml"
+if (cd "$ASP_DIR/proj" && HOME="$ASP_HOME" utoo install >/dev/null 2>&1); then
+  echo -e "${RED}FAIL: a malformed project config must fail the install, not fail open${NC}"; exit 1
+fi
+if asp_ran; then echo -e "${RED}FAIL: malformed config must not run scripts${NC}"; exit 1; fi
+
+rm -rf "$ASP_DIR"
+trap - EXIT
+echo -e "${GREEN}PASS: install-time script policy enforced (allow/deny/strict/ignore/dangerously/node-gyp/cross-source)${NC}"
+
 # ---------------------------------------------------------------------------
 # Case: `utoo --filter <pkg> publish` from a workspace root resolves the member
 # and rewrites its `workspace:`/`catalog:` specifiers to concrete versions, and

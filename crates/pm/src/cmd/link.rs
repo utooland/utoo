@@ -6,9 +6,9 @@ use crate::cmd::install::install;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::workspace::update_cwd_to_project;
 use crate::model::package::PackageInfo;
-use crate::util::cli_enum::ScriptPolicy;
 use crate::util::linker::link;
 use crate::util::logger::log_time_end;
+use crate::util::script_policy::ScriptPolicyArgs;
 use crate::util::user_config::resolve_global_prefix;
 
 /// Entry point for the `link` command.
@@ -50,8 +50,8 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
         );
     }
 
-    // Install dependencies
-    install(ScriptPolicy::Run, &project_path)
+    // Install dependencies (default policy — `link` exposes no script flags).
+    install(&ScriptPolicyArgs::default(), &project_path)
         .await
         .context("Failed to prepare dependencies for package to link")?;
 
