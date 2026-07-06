@@ -41,9 +41,24 @@ impl Config {
             return Ok(config.clone());
         }
 
-        let mut config = Self::load_from_path(&Self::global_config_path()?).await?;
+        Self::load_levels().await?;
+        Ok(MERGED_CONFIG
+            .get()
+            .expect("load_levels populates the merged cache")
+            .clone())
+    }
 
-        let local_config = {
+    /// Read the global (`~/.utoo/config.toml`) and local (`.utoo.toml`) config
+    /// files once each and return the per-level views (`local` is `None` when
+    /// no `.utoo.toml` exists), populating the merged cache as a side effect.
+    ///
+    /// For callers that interleave other sources between the two levels
+    /// (registry resolution slots `.npmrc` files in between); everything else
+    /// should use `load`, which returns the merged view.
+    pub(crate) async fn load_levels() -> ConfigResult<(Self, Option<Self>)> {
+        let global = Self::load_from_path(&Self::global_config_path()?).await?;
+
+        let local = {
             let local_path = Self::local_config_path()?;
             if crate::fs::try_exists(&local_path).await? {
                 Some(Self::load_from_path(&local_path).await?)
@@ -51,16 +66,18 @@ impl Config {
                 None
             }
         };
-        if let Some(local) = local_config {
-            config.values.extend(local.values);
-            config.arrays.extend(local.arrays);
-            // Catalogs are project-local only; take them from the local config
-            config.catalog = local.catalog;
-            config.catalogs = local.catalogs;
-        }
 
-        let _ = MERGED_CONFIG.set(config.clone());
-        Ok(config)
+        let mut merged = global.clone();
+        if let Some(local) = &local {
+            merged.values.extend(local.values.clone());
+            merged.arrays.extend(local.arrays.clone());
+            // Catalogs are project-local only; take them from the local config
+            merged.catalog = local.catalog.clone();
+            merged.catalogs = local.catalogs.clone();
+        }
+        let _ = MERGED_CONFIG.set(merged);
+
+        Ok((global, local))
     }
 
     pub fn set(&mut self, key: &str, value: String, scope: ConfigScope) -> ConfigResult<()> {

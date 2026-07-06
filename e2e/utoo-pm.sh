@@ -2137,4 +2137,77 @@ rm -rf "$WSP_DIR"
 trap - EXIT
 echo -e "${GREEN}PASS: workspace --filter publish resolves protocols + topological order${NC}"
 
+# ---------------------------------------------------------------------------
+# Case: registry read from the project .npmrc (npm compat) + //host/:_authToken.
+# The stub registry REQUIRES `Authorization: Bearer <token>` on every request,
+# so a passing install proves three things at once:
+#   1. the project `.npmrc` `registry=` beats the global utoo config that this
+#      script sets at the top (project-level config must win, like npm);
+#   2. the `//host:port/:_authToken=` credential is matched (nerf-dart) and
+#      attached to both the manifest fetch and the tarball download;
+#   3. `${VAR}` env interpolation in .npmrc values works end-to-end.
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}Case: .npmrc registry= and //host/:_authToken${NC}"
+NPMRC_DIR=$(mktemp -d)
+NPMRC_CACHE=$(mktemp -d)
+mkdir -p "$NPMRC_DIR/pkg/npmrc-reg-pkg"
+cat > "$NPMRC_DIR/pkg/npmrc-reg-pkg/package.json" <<'EOF'
+{ "name": "npmrc-reg-pkg", "version": "1.0.0", "main": "index.js" }
+EOF
+echo "module.exports = 1;" > "$NPMRC_DIR/pkg/npmrc-reg-pkg/index.js"
+( cd "$NPMRC_DIR/pkg/npmrc-reg-pkg" && npm pack --silent >/dev/null 2>&1 \
+  && mv npmrc-reg-pkg-*.tgz "$NPMRC_DIR/npmrc-reg-pkg.tgz" )
+NPMRC_PORT=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close();})')
+node -e '
+const http=require("http"), fs=require("fs"), crypto=require("crypto"), path=require("path");
+const dir=process.argv[1], port=Number(process.argv[2]);
+const tgz=fs.readFileSync(path.join(dir,"npmrc-reg-pkg.tgz"));
+const integrity="sha512-"+crypto.createHash("sha512").update(tgz).digest("base64");
+http.createServer((req,res)=>{
+  if(req.headers.authorization!=="Bearer e2e-npmrc-token"){res.statusCode=401;return res.end("unauthorized");}
+  if(req.url==="/npmrc-reg-pkg.tgz"){return res.end(tgz);}
+  if(req.url.split("?")[0].startsWith("/npmrc-reg-pkg")){
+    const manifest={name:"npmrc-reg-pkg","dist-tags":{latest:"1.0.0"},versions:{"1.0.0":{
+      name:"npmrc-reg-pkg",version:"1.0.0",
+      dist:{tarball:"http://127.0.0.1:"+port+"/npmrc-reg-pkg.tgz",integrity}}}};
+    res.setHeader("content-type","application/json");
+    return res.end(JSON.stringify(manifest));
+  }
+  res.statusCode=404;res.end("nf");
+}).listen(port,"127.0.0.1");
+' "$NPMRC_DIR" "$NPMRC_PORT" &
+NPMRC_PID=$!
+npmrc_cleanup() { kill "$NPMRC_PID" 2>/dev/null; rm -rf "$NPMRC_DIR" "$NPMRC_CACHE"; }
+# Wait for the server to accept authenticated requests.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS -H "Authorization: Bearer e2e-npmrc-token" \
+    "http://127.0.0.1:$NPMRC_PORT/npmrc-reg-pkg.tgz" -o /dev/null 2>/dev/null; then break; fi
+  sleep 0.3
+done
+mkdir -p "$NPMRC_DIR/app"
+cat > "$NPMRC_DIR/app/package.json" <<'EOF'
+{ "name": "npmrc-app", "version": "1.0.0", "private": true,
+  "dependencies": { "npmrc-reg-pkg": "^1.0.0" } }
+EOF
+cat > "$NPMRC_DIR/app/.npmrc" <<EOF
+registry=http://127.0.0.1:$NPMRC_PORT
+//127.0.0.1:$NPMRC_PORT/:_authToken=\${E2E_NPMRC_TOKEN}
+EOF
+# NPM_TOKEN/NODE_AUTH_TOKEN/UTOO_REGISTRY are cleared so only the .npmrc path
+# can supply the registry and its credential.
+( cd "$NPMRC_DIR/app" && env -u NPM_TOKEN -u NODE_AUTH_TOKEN -u UTOO_REGISTRY \
+    E2E_NPMRC_TOKEN=e2e-npmrc-token UTOO_CACHE_DIR="$NPMRC_CACHE" utoo install --ignore-scripts ) \
+  || { echo -e "${RED}FAIL: install via .npmrc registry + _authToken failed${NC}"; npmrc_cleanup; exit 1; }
+if [ ! -f "$NPMRC_DIR/app/node_modules/npmrc-reg-pkg/package.json" ]; then
+    echo -e "${RED}FAIL: npmrc-reg-pkg not installed from the .npmrc registry${NC}"; npmrc_cleanup; exit 1
+fi
+# The tarball came from the configured (.npmrc) registry origin, so it is
+# trusted and must land in the shared cache (registry-tarball classification).
+if [ ! -d "$NPMRC_CACHE/npmrc-reg-pkg" ]; then
+    echo -e "${RED}FAIL: npmrc-reg-pkg missing from the global cache (registry origin not trusted?)${NC}"
+    npmrc_cleanup; exit 1
+fi
+npmrc_cleanup
+echo -e "${GREEN}PASS: .npmrc registry= and //host/:_authToken honored${NC}"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"

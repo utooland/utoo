@@ -5,6 +5,7 @@ use tokio::sync::OnceCell;
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
 use crate::util::http::client;
+use crate::util::npmrc;
 
 fn registry_api(registry: &str, path: &str) -> String {
     format!("{}{}", registry.trim_end_matches('/'), path)
@@ -34,6 +35,10 @@ fn token_key(registry: &str) -> String {
 }
 
 /// Resolve auth token for a specific registry.
+///
+/// Priority: `NPM_TOKEN`/`NODE_AUTH_TOKEN` env > utoo config (`ut login`
+/// writes `auth-token:<host>` to the global config) > `.npmrc`
+/// `//host/:_authToken=` credentials (project file first, npm walk-up rules).
 pub async fn resolve_token(registry: &str) -> Option<String> {
     for var in ["NPM_TOKEN", "NODE_AUTH_TOKEN"] {
         if let Ok(token) = std::env::var(var)
@@ -43,9 +48,14 @@ pub async fn resolve_token(registry: &str) -> Option<String> {
         }
     }
 
-    let config = Config::load(ConfigScope::Global).await.ok()?;
-    let token = config.get(&token_key(registry)).ok().flatten()?;
-    if token.is_empty() { None } else { Some(token) }
+    if let Ok(config) = Config::load(ConfigScope::Global).await
+        && let Ok(Some(token)) = config.get(&token_key(registry))
+        && !token.is_empty()
+    {
+        return Some(token);
+    }
+
+    npmrc::load().await.auth_token_for(registry)
 }
 
 /// Token for the configured registry, resolved once and cached for the process.
@@ -75,14 +85,21 @@ pub(crate) fn parse_registry(registry: &str) -> Option<Url> {
     }
 }
 
-/// Whether `url` targets the same host as `registry`. The leak guard for
-/// attaching a token to a tarball download: credentials go to the registry
-/// host only, never to a third-party CDN a manifest's `dist.tarball` points at.
+/// Whether `url` targets the same host **and port** as `registry`. The leak
+/// guard for attaching a token to a tarball download: credentials go to the
+/// registry origin only, never to a third-party CDN a manifest's `dist.tarball`
+/// points at. Port is part of the identity (npm's nerf-dart keys include it),
+/// so a token for `http://localhost:4873` is not sent to `http://localhost:8080`.
 fn same_host(url: &str, registry: &str) -> bool {
-    fn host(s: &str) -> Option<String> {
-        parse_registry(s)?.host_str().map(str::to_ascii_lowercase)
+    fn origin(s: &str) -> Option<(String, Option<u16>)> {
+        let url = parse_registry(s)?;
+        let host = url.host_str()?.to_ascii_lowercase();
+        // `port()` is None for absent or scheme-default ports (the url crate
+        // strips `:443` from https, `:80` from http), so http and https on the
+        // same host still match, while an explicit `:4873` vs `:8080` does not.
+        Some((host, url.port()))
     }
-    matches!((host(url), host(registry)), (Some(a), Some(b)) if a == b)
+    matches!((origin(url), origin(registry)), (Some(a), Some(b)) if a == b)
 }
 
 /// The Bearer token to attach when fetching `url`, or `None` when there is no
@@ -287,9 +304,14 @@ mod tests {
             "https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz",
             "registry.npmjs.org"
         ));
-        // Bare host with a port (e.g. a local Verdaccio) → matches by host.
+        // Bare host with a port (e.g. a local Verdaccio) → matches by host+port.
         assert!(same_host(
             "http://localhost:4873/pkg/-/pkg-1.0.0.tgz",
+            "localhost:4873"
+        ));
+        // Same host but a DIFFERENT explicit port → never leak the token.
+        assert!(!same_host(
+            "http://localhost:8080/pkg/-/pkg-1.0.0.tgz",
             "localhost:4873"
         ));
         // Host case is normalized.

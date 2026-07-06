@@ -31,6 +31,7 @@ pub mod json;
 pub mod linker;
 pub mod logger;
 pub mod manifest_store;
+pub mod npmrc;
 pub mod package_cache;
 pub mod platform_const;
 pub mod registry;
