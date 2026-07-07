@@ -1,5 +1,5 @@
 {
-  "version": "2.20.0",
+  "version": "2.20.1",
   "mirrors": {
     "china": {
       "ENVS": {
@@ -21,7 +21,6 @@
         "PUPPETEER_CHROME_DOWNLOAD_BASE_URL": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
         "PUPPETEER_CHROME_HEADLESS_SHELL_DOWNLOAD_BASE_URL": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
         "PLAYWRIGHT_DOWNLOAD_HOST": "https://cdn.npmmirror.com/binaries/playwright",
-        "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST": "https://cdn.npmmirror.com/binaries/chrome-for-testing",
         "SENTRYCLI_CDNURL": "https://cdn.npmmirror.com/binaries/sentry-cli",
         "SAUCECTL_INSTALL_BINARY_MIRROR": "https://cdn.npmmirror.com/binaries/saucectl",
         "RE2_DOWNLOAD_MIRROR": "https://cdn.npmmirror.com/binaries/node-re2",
