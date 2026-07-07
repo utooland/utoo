@@ -42,30 +42,70 @@ fn default_cache_dir() -> PathBuf {
         .join(".cache/nm")
 }
 
-pub async fn init_registry(registry: Option<String>) -> Result<()> {
-    // Priority: CLI argument > UTOO_REGISTRY env > config > auto-select
-    let (raw_registry, registry_source) = if let Some(reg) = registry {
-        tracing::debug!("Using registry from CLI: {}", reg);
-        (reg, "CLI")
-    } else if let Ok(env_reg) = std::env::var("UTOO_REGISTRY")
-        && !env_reg.is_empty()
-    {
-        tracing::debug!("Using registry from env: {}", env_reg);
-        (env_reg, "UTOO_REGISTRY")
-    } else {
-        let config_registry = Config::load(ConfigScope::Local)
-            .await
-            .ok()
-            .and_then(|c| c.get("registry").ok().flatten());
+/// Registry candidates from the config *profiles*, most specific first. These
+/// are consulted only when neither `--registry` nor `UTOO_REGISTRY` is set;
+/// both take precedence and short-circuit before any profile is read. `.npmrc`
+/// slots in per level: a project `.npmrc` beats the user-level utoo config (a
+/// project must be able to redirect any npm client, which is exactly what
+/// registry bridges and corporate proxies rely on), but never the same-level
+/// `.utoo.toml`, where utoo-native config stays authoritative.
+#[derive(Default)]
+struct ProfileRegistries {
+    project_config: Option<String>,
+    project_npmrc: Option<String>,
+    global_config: Option<String>,
+    user_npmrc: Option<String>,
+}
 
-        if let Some(ref reg) = config_registry {
-            tracing::debug!("Using registry from config: {}", reg);
-            (reg.clone(), "config")
-        } else {
-            // No config, auto-select fastest registry
-            (select_fastest_registry().await, "auto-select")
+fn pick_profile_registry(sources: ProfileRegistries) -> Option<(String, &'static str)> {
+    [
+        (sources.project_config, ".utoo.toml"),
+        (sources.project_npmrc, "project .npmrc"),
+        (sources.global_config, "global config"),
+        (sources.user_npmrc, "user .npmrc"),
+    ]
+    .into_iter()
+    .find_map(|(value, source)| value.filter(|v| !v.is_empty()).map(|v| (v, source)))
+}
+
+pub async fn init_registry(registry: Option<String>) -> Result<()> {
+    // init_registry is the process config chokepoint (see main.rs):
+    // `load_levels` seeds the merged-config cache that later ConfigValue reads
+    // rely on (from the invocation cwd, before any workspace chdir), and
+    // returns the per-level views used for registry resolution below. Fail loud
+    // on a malformed/unreadable utoo config rather than silently resolving
+    // against the wrong registry; the error carries the offending file + reason.
+    let (global_config, local_config) = Config::load_levels()
+        .await
+        .context("failed to load utoo config")?;
+
+    // An explicit `--registry` or `UTOO_REGISTRY` wins outright, so short-circuit
+    // before touching any profile: only when neither is set do we read the
+    // `.utoo.toml`/global `registry` keys and load `.npmrc` (see
+    // `ProfileRegistries` for the inter-profile precedence).
+    let (raw_registry, registry_source) = if let Some(reg) = registry.filter(|r| !r.is_empty()) {
+        (reg, "CLI")
+    } else if let Some(env) = std::env::var("UTOO_REGISTRY")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
+        (env, "UTOO_REGISTRY")
+    } else {
+        let npmrc = super::npmrc::load().await;
+        let registry_of = |c: &Config| c.get("registry").ok().flatten();
+        let sources = ProfileRegistries {
+            project_config: local_config.as_ref().and_then(registry_of),
+            project_npmrc: npmrc.project_registry(),
+            global_config: registry_of(&global_config),
+            user_npmrc: npmrc.user_registry(),
+        };
+        match pick_profile_registry(sources) {
+            Some(picked) => picked,
+            // Nothing configured anywhere, auto-select fastest registry
+            None => (select_fastest_registry().await, "auto-select"),
         }
     };
+    tracing::debug!("Using registry from {}: {}", registry_source, raw_registry);
 
     // Canonicalize at the single resolution chokepoint so every downstream
     // consumer sees a validated, slash-normalized URL. Explicit invalid values
@@ -586,6 +626,74 @@ mod tests {
         ));
         // Non-http resolveds are not registry tarballs.
         assert!(!is_registry_tarball("file:../foo.tgz"));
+    }
+
+    fn src(value: &str) -> Option<String> {
+        Some(value.to_string())
+    }
+
+    #[test]
+    fn pick_profile_registry_precedence_order() {
+        // `--registry` and `UTOO_REGISTRY` are handled ahead of these profiles
+        // (they short-circuit in init_registry), so this covers the inter-profile
+        // order only. Same-level utoo config beats the project .npmrc…
+        let picked = pick_profile_registry(ProfileRegistries {
+            project_config: src("https://project-toml.example.com"),
+            project_npmrc: src("https://project-npmrc.example.com"),
+            ..Default::default()
+        });
+        assert_eq!(
+            picked,
+            Some(("https://project-toml.example.com".to_string(), ".utoo.toml"))
+        );
+
+        // …but the project .npmrc beats the user-level global config: a
+        // project must be able to redirect any npm client (registry bridges,
+        // corporate proxies).
+        let picked = pick_profile_registry(ProfileRegistries {
+            project_npmrc: src("https://project-npmrc.example.com"),
+            global_config: src("https://global-toml.example.com"),
+            user_npmrc: src("https://user-npmrc.example.com"),
+            ..Default::default()
+        });
+        assert_eq!(
+            picked,
+            Some((
+                "https://project-npmrc.example.com".to_string(),
+                "project .npmrc"
+            ))
+        );
+
+        // User .npmrc is the last configured fallback before auto-select.
+        let picked = pick_profile_registry(ProfileRegistries {
+            user_npmrc: src("https://user-npmrc.example.com"),
+            ..Default::default()
+        });
+        assert_eq!(
+            picked,
+            Some(("https://user-npmrc.example.com".to_string(), "user .npmrc"))
+        );
+
+        // Nothing configured → None (caller auto-selects).
+        assert_eq!(pick_profile_registry(ProfileRegistries::default()), None);
+    }
+
+    #[test]
+    fn pick_profile_registry_skips_empty_values() {
+        // An empty config value is "unset", not a broken override, so a lower
+        // profile with a real value wins over a higher one left blank.
+        let picked = pick_profile_registry(ProfileRegistries {
+            project_config: Some(String::new()),
+            project_npmrc: src("https://project-npmrc.example.com"),
+            ..Default::default()
+        });
+        assert_eq!(
+            picked,
+            Some((
+                "https://project-npmrc.example.com".to_string(),
+                "project .npmrc"
+            ))
+        );
     }
 
     #[test]
