@@ -11,7 +11,8 @@
         "root": "$",
         "type": "promise"
       },
-      "async-value": "promise Promise.resolve({ default: \"async-value\", named: true })"
+      "async-value": "promise Promise.resolve({ default: \"async-value\", named: true })",
+      "async-esm-value": "promise Promise.resolve({ __esModule: true, default: \"async-esm-value\", named: \"esm-named\" })"
     }
   }
 }

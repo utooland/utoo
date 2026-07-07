@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 28, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/promise/input/index.ts"],"sourcesContent":["import $ from \"jquery\";\nimport value, { named } from \"async-value\";\n\nconsole.log($.ready, value, named);\n"],"names":["console","log","ready"],"mappings":";;QAAA;QACA;;;;;;;;QAEAA,QAAQC,GAAG,CAAC,qHAAC,CAACC,KAAK,EAAE,qHAAK,EAAE,mHAAK"}}]
-}

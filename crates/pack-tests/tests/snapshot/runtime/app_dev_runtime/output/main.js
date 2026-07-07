@@ -1610,6 +1610,12 @@ devContextPrototype.c = devModuleCache;
 runtimeModules = new Set();
 // Set flag to indicate we use ModuleWithDirection
 createModuleWithDirectionFlag = true;
+function getRefreshBoundaryExports(exports) {
+    if (typeof isAsyncModuleExt === 'function' && exports != null && typeof exports === 'object' && isAsyncModuleExt(exports)) {
+        return exports[turbopackExports];
+    }
+    return exports;
+}
 /**
  * Map from module ID to the chunks that contain this module.
  *
@@ -1716,7 +1722,7 @@ const DUMMY_REFRESH_CONTEXT = {
 /**
  * This is adapted from https://github.com/vercel/next.js/blob/3466862d9dc9c8bb3131712134d38757b918d1c0/packages/react-refresh-utils/internal/ReactRefreshModule.runtime.ts
  */ function registerExportsAndSetupBoundaryForReactRefresh(module, helpers) {
-    const currentExports = module.exports;
+    const currentExports = getRefreshBoundaryExports(module.exports);
     const prevExports = module.hot.data.prevExports ?? null;
     helpers.registerExportsForReactRefresh(currentExports, module.id);
     // A module can be accepted automatically based on its exports, e.g. when
