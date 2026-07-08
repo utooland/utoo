@@ -1,0 +1,17 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "index"
+      }
+    ],
+    "styles": {
+      "less": {
+        "loader": "less-loader-wrapper",
+        "implementation": "less",
+        "javascriptEnabled": true
+      }
+    }
+  }
+}
