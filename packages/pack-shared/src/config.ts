@@ -304,6 +304,7 @@ export interface ConfigComplete {
     emotion?: boolean | EmotionOptions;
     postcss?: JSONValue;
     less?: {
+      loader?: string;
       implementation?: string;
       [key: string]: any;
     };

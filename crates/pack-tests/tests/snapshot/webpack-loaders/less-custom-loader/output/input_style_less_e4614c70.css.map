@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/less-custom-loader/input/style.less.css"],"sourcesContent":[".less-loader-wrapper-marker { border-color: #13c2c2; }"],"names":[],"mappings":"AAAA"}}]
+}
