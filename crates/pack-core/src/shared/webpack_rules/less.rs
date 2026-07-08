@@ -10,8 +10,8 @@ use turbopack_node::transforms::webpack::WebpackLoaderItem;
 fn get_less_loader_name(less_options: &mut serde_json::Map<String, JsonValue>) -> Result<RcStr> {
     match less_options.remove("loader") {
         Some(JsonValue::String(loader)) if !loader.is_empty() => Ok(RcStr::from(loader)),
+        Some(JsonValue::Null) | None => Ok(rcstr!("less-loader")),
         Some(_) => bail!("styles.less.loader must be a non-empty string"),
-        None => Ok(rcstr!("less-loader")),
     }
 }
 
@@ -75,6 +75,20 @@ mod tests {
     #[test]
     fn defaults_to_less_loader_package_name() {
         let mut less_options = serde_json::Map::new();
+
+        let loader = get_less_loader_name(&mut less_options).unwrap();
+
+        assert_eq!(loader.to_string(), "less-loader");
+    }
+
+    #[test]
+    fn treats_null_less_loader_as_default() {
+        let mut less_options = json!({
+            "loader": null
+        })
+        .as_object()
+        .unwrap()
+        .clone();
 
         let loader = get_less_loader_name(&mut less_options).unwrap();
 
