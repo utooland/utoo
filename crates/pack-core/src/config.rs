@@ -43,6 +43,66 @@ use crate::{
     },
 };
 
+mod option_indexmap {
+    use std::hash::Hash;
+
+    use bincode::{
+        BorrowDecode, Decode, Encode,
+        de::{BorrowDecoder, Decoder},
+        enc::Encoder,
+        error::{DecodeError, EncodeError},
+    };
+    use turbo_tasks::FxIndexMap;
+
+    pub fn encode<E, K, V>(
+        map: &Option<FxIndexMap<K, V>>,
+        encoder: &mut E,
+    ) -> Result<(), EncodeError>
+    where
+        E: Encoder,
+        K: Encode,
+        V: Encode,
+    {
+        match map {
+            Some(map) => {
+                true.encode(encoder)?;
+                turbo_bincode::indexmap::encode(map, encoder)
+            }
+            None => false.encode(encoder),
+        }
+    }
+
+    pub fn decode<Context, D, K, V>(
+        decoder: &mut D,
+    ) -> Result<Option<FxIndexMap<K, V>>, DecodeError>
+    where
+        D: Decoder<Context = Context>,
+        K: Decode<Context> + Eq + Hash,
+        V: Decode<Context>,
+    {
+        if bool::decode(decoder)? {
+            turbo_bincode::indexmap::decode(decoder).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn borrow_decode<'de, Context, D, K, V>(
+        decoder: &mut D,
+    ) -> Result<Option<FxIndexMap<K, V>>, DecodeError>
+    where
+        D: BorrowDecoder<'de, Context = Context>,
+        K: BorrowDecode<'de, Context> + Eq + Hash,
+        V: BorrowDecode<'de, Context>,
+    {
+        if bool::borrow_decode(decoder)? {
+            turbo_bincode::indexmap::borrow_decode(decoder).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[turbo_tasks::value(transparent)]
 pub struct ModularizeImports(
     #[bincode(with = "turbo_bincode::indexmap")] FxIndexMap<String, ModularizeImportPackageConfig>,
@@ -169,23 +229,21 @@ pub struct Config {
     entry: Vec<EntryOptions>,
     module: Option<ModuleConfig>,
     resolve: Option<ResolveConfig>,
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    #[bincode(with = "option_indexmap")]
     externals: Option<FxIndexMap<RcStr, ExternalConfig>>,
     output: Option<OutputConfig>,
     target: Option<RcStr>,
     source_maps: Option<bool>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     define: Option<FxIndexMap<String, JsonValue>>,
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    #[bincode(with = "option_indexmap")]
     provider: Option<FxIndexMap<RcStr, ProviderConfigValue>>,
     images: Option<ImageConfig>,
     pub styles: Option<StyleConfig>,
     react: Option<ReactConfig>,
     optimization: Option<OptimizationConfig>,
     stats: Option<bool>,
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
     react_compiler: Option<ReactCompilerOptionsOrBoolean>,
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
     experimental: Option<ExperimentalConfig>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     swc_plugins: Option<Vec<(RcStr, serde_json::Value)>>,
@@ -427,7 +485,7 @@ pub struct OptimizationConfig {
     pub minify: Option<bool>,
     pub tree_shaking: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    #[bincode(with = "option_indexmap")]
     pub modularize_imports: Option<FxIndexMap<String, ModularizeImportPackageConfig>>,
     pub transpile_packages: Option<Vec<RcStr>>,
     pub remove_console: Option<RemoveConsoleConfig>,
@@ -945,7 +1003,16 @@ pub struct ReactCompilerOptions {
 }
 
 #[derive(
-    Clone, Debug, PartialEq, Serialize, Deserialize, TraceRawVcs, NonLocalValue, OperationValue,
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
 )]
 #[serde(untagged)]
 pub enum ReactCompilerOptionsOrBoolean {
@@ -975,7 +1042,6 @@ pub struct ReactCompilerTargetConfig(ReactCompilerTarget);
 #[serde(rename_all = "camelCase")]
 pub struct ExperimentalConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub react_compiler: Option<ReactCompilerOptionsOrBoolean>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[bincode(with = "turbo_bincode::serde_self_describing")]
