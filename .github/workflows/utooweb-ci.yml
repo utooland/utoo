@@ -37,6 +37,8 @@ jobs:
       #     shared-key: utooweb-ci
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
+        with:
+          utoo-version: 1.0.32
 
       - name: Install dependencies
         run: |
