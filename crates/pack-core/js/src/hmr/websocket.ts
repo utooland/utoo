@@ -67,7 +67,6 @@ export interface HMROptions {
   path: string;
 }
 
-let reconnections = 0;
 let reloading = false;
 let serverSessionId: number | null = null;
 
@@ -79,7 +78,6 @@ export function connectHMR(options: HMROptions) {
     console.log("[HMR] connecting...");
 
     function handleOnline() {
-      reconnections = 0;
       window.console.log("[HMR] connected");
 
       // Send the turbopack-connected message to trigger handleSocketConnected
@@ -148,27 +146,25 @@ export function connectHMR(options: HMROptions) {
       }
     }
 
-    let timer: ReturnType<typeof setTimeout>;
-    function handleDisconnect() {
-      source.onerror = null;
-      source.onclose = null;
-      source.close();
-      reconnections++;
-      // After 25 reconnects we'll want to reload the page as it indicates the dev server is no longer running.
-      if (reconnections > 25) {
-        reloading = true;
-        window.location.reload();
+    function handleDisconnect(event?: Event) {
+      if (event && event.target !== source) {
         return;
       }
 
-      clearTimeout(timer);
-      // Try again after 5 seconds
-      timer = setTimeout(init, reconnections > 5 ? 5000 : 1000);
+      if (source) {
+        source.onerror = null;
+        source.onclose = null;
+        source.close();
+        source = null;
+      }
+
+      window.console.warn("[HMR] disconnected");
     }
 
     source = new WebSocket(`${getSocketUrl()}${options.path}`);
     source.onopen = handleOnline;
     source.onerror = handleDisconnect;
+    source.onclose = handleDisconnect;
     source.onmessage = handleMessage;
   }
 
