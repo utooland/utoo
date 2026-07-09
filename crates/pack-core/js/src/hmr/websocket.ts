@@ -146,7 +146,11 @@ export function connectHMR(options: HMROptions) {
       }
     }
 
-    function handleDisconnect() {
+    function handleDisconnect(event?: Event) {
+      if (event && event.target !== source) {
+        return;
+      }
+
       if (source) {
         source.onerror = null;
         source.onclose = null;
