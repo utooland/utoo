@@ -1,6 +1,6 @@
 use crate::fs;
 use crate::util::json::read_json_file;
-use crate::util::user_config::get_registry;
+use crate::util::user_config::{get_registry, get_supports_semver};
 use anyhow::{Context, Result};
 use regex::Regex;
 use serde::Deserialize;
@@ -336,7 +336,8 @@ async fn handle_cypress(
 }
 
 pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
-    // Only rewrite binary hosts on the npmmirror registry the config targets.
+    // Registries with semver resolution are cnpm-compatible and proxy binary
+    // downloads through the bundled npmmirror configuration.
     if should_skip_binary_mirror() {
         return Ok(());
     }
@@ -384,36 +385,30 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The bundled config redirects binary downloads to npmmirror's China CDNs, so
-/// it is only correct on the npmmirror registry. Apply it there and skip
-/// everywhere else: official npm has no mirror layer, and other registries
-/// (yarnpkg, GitHub Packages, private/non-China mirrors) would otherwise get
-/// China CDN hosts and ~30 China mirror env vars forced onto downloads they
-/// never opted into.
-///
-/// Earlier this fetched the config from the *configured* registry, so the gate
-/// could be "skip official npm" — a registry that didn't serve the config
-/// 404'd and was skipped implicitly. With the config bundled there is no such
-/// fetch, so the gate is made explicit here.
+/// The registries that support semver resolution are cnpm-compatible registry
+/// proxies. They use the bundled npmmirror configuration for binary downloads,
+/// even when their own hostname is not under `npmmirror.com` (for example the
+/// Ant Group registry). Official npm and registries explicitly detected as not
+/// supporting semver keep their upstream binary hosts.
 fn should_skip_binary_mirror() -> bool {
     *SKIP_BINARY_MIRROR.get_or_init(|| {
         let registry = get_registry();
-        let skip = !is_china_mirror_registry(&registry);
+        let skip = should_skip_binary_mirror_for(get_supports_semver());
         if skip {
-            tracing::debug!("Skipping binary mirror for non-npmmirror registry: {registry}");
+            tracing::debug!(
+                "Skipping binary mirror for registry without semver support: {registry}"
+            );
         }
         skip
     })
 }
 
-/// Whether `registry` is the npmmirror China registry the bundled mirror config
-/// targets. Matches the host so a path suffix or trailing slash still counts.
-fn is_china_mirror_registry(registry: &str) -> bool {
-    registry.contains("npmmirror.com")
+fn should_skip_binary_mirror_for(supports_semver: Option<bool>) -> bool {
+    !supports_semver.unwrap_or(false)
 }
 
 pub fn get_envs() -> Option<&'static BTreeMap<String, String>> {
-    // Only inject China mirror envs on the npmmirror registry the config targets.
+    // Only inject mirror envs for cnpm-compatible registries.
     if should_skip_binary_mirror() {
         return None;
     }
@@ -429,15 +424,10 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_only_npmmirror_gets_binary_mirror() {
-        // The bundled config rewrites to npmmirror CDNs, so it applies only on
-        // npmmirror — not official npm, and not other registries that would get
-        // China hosts forced onto downloads they never opted into.
-        assert!(is_china_mirror_registry("https://registry.npmmirror.com"));
-        assert!(is_china_mirror_registry("https://registry.npmmirror.com/"));
-        assert!(!is_china_mirror_registry("https://registry.npmjs.org"));
-        assert!(!is_china_mirror_registry("https://registry.yarnpkg.com"));
-        assert!(!is_china_mirror_registry("https://npm.pkg.github.com"));
+    fn test_binary_mirror_follows_semver_support() {
+        assert!(!should_skip_binary_mirror_for(Some(true)));
+        assert!(should_skip_binary_mirror_for(Some(false)));
+        assert!(should_skip_binary_mirror_for(None));
     }
 
     /// The bundled config is the source of truth at runtime, so a re-sync that
