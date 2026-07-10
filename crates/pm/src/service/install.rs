@@ -24,6 +24,7 @@ use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
+use crate::util::proxy_env::print_proxy_env_hint_once;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::progress::PackageTarballInfo;
 
@@ -291,6 +292,7 @@ impl InstallService {
         root_path: &Path,
         omit: &HashSet<OmitType>,
     ) -> Result<()> {
+        print_proxy_env_hint_once();
         install_progress::start_install_run();
         let lock_path = root_path.join("package-lock.json");
         // Treat a failing freshness check as stale: regenerate rather than
@@ -393,6 +395,7 @@ impl InstallService {
     /// the global `node_modules` is the source of truth, reified **additively**
     /// so previously-installed globals survive.
     pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+        print_proxy_env_hint_once();
         install_progress::start_install_run();
         let (name, resolved_version, version_spec) = resolve_package_spec(npm_spec).await?;
         // Resolvable spec for the synthetic dependency: registry ranges pinned to
