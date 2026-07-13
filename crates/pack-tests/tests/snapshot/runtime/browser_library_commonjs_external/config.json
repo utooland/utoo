@@ -1,0 +1,20 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "BrowserLibrary"
+        }
+      }
+    ],
+    "externals": {
+      "external-value": {
+        "root": "ExternalValue",
+        "commonjs": "../external.cjs"
+      }
+    }
+  },
+  "runtimeType": "Production"
+}

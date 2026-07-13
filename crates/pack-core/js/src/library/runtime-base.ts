@@ -61,3 +61,37 @@ function getChunkFromRegistration(
     throw new Error("chunk path is empty");
   }
 }
+
+/**
+ * Load CommonJS externals when a UMD bundle runs in a CommonJS environment.
+ * Browser-targeted UMD bundles need this too because their wrapper supports
+ * both global and CommonJS consumers.
+ */
+function externalRequire(
+  id: ModuleId,
+  thunk: () => any,
+  esm: boolean = false,
+): Exports | EsmNamespaceObject {
+  let raw;
+  try {
+    raw = thunk();
+  } catch (err) {
+    throw new Error(`Failed to load external module ${id}: ${err}`);
+  }
+
+  if (!esm || raw.__esModule) {
+    return raw;
+  }
+
+  return interopEsm(raw, createNS(raw), true);
+}
+
+externalRequire.resolve = (
+  id: string,
+  options?: {
+    paths?: string[];
+  },
+) => {
+  return require.resolve(id, options);
+};
+contextPrototype.x = externalRequire;
