@@ -88,6 +88,17 @@ export interface HotReloaderInterface {
   close(): Promise<void>;
 }
 
+export interface CompileDoneResult {
+  errors: CompilationError[];
+  warnings: CompilationError[];
+}
+
+export type OnCompileDone = (result: CompileDoneResult) => void | Promise<void>;
+
+export interface HotReloaderOptions {
+  onCompileDone?: OnCompileDone;
+}
+
 export type ChangeSubscriptions = Map<
   string,
   Promise<AsyncIterableIterator<TurbopackResult>>
@@ -126,27 +137,40 @@ function hasBlockingResultIssues(result: TurbopackResult) {
   );
 }
 
-function addIssuesToErrors(
-  errors: Map<string, CompilationError>,
+function addIssuesToResult(
+  result: {
+    errors: Map<string, CompilationError>;
+    warnings: Map<string, CompilationError>;
+  },
   issues: EntryIssuesMap,
 ) {
   for (const issueMap of issues.values()) {
     for (const [key, issue] of issueMap) {
-      if (issue.severity === "warning") {
-        continue;
-      }
-
-      errors.set(key, {
+      const message = {
         message: formatIssue(issue, false),
-      });
+      };
+
+      if (issue.severity === "warning") {
+        result.warnings.set(key, message);
+      } else {
+        result.errors.set(key, message);
+      }
     }
   }
 }
 
-function getCompilationErrors(issues: EntryIssuesMap) {
+function getCompilationResult(...issuesList: EntryIssuesMap[]) {
   const errors = new Map<string, CompilationError>();
-  addIssuesToErrors(errors, issues);
-  return [...errors.values()];
+  const warnings = new Map<string, CompilationError>();
+
+  for (const issues of issuesList) {
+    addIssuesToResult({ errors, warnings }, issues);
+  }
+
+  return {
+    errors: [...errors.values()],
+    warnings: [...warnings.values()],
+  };
 }
 
 function getClientIssueKey(id: string) {
@@ -157,6 +181,7 @@ export async function createHotReloader(
   bundleOptions: BundleOptions,
   projectPath?: string,
   rootPath?: string,
+  options: HotReloaderOptions = {},
 ): Promise<HotReloaderInterface> {
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
@@ -250,6 +275,7 @@ export async function createHotReloader(
 
   let currentWatchedEntrypoints: Endpoint[] = [];
   let backgroundWatchersStarted = false;
+  let backgroundWatchersInitialized = false;
   let backgroundWatchGeneration = 0;
   const backgroundEndpointWriteTasks = new Map<Endpoint, Promise<void>>();
   let backgroundProjectWriteTask: Promise<void> | undefined;
@@ -302,6 +328,18 @@ export async function createHotReloader(
     sendEnqueuedMessagesDebounce();
   }
 
+  async function notifyCompileDone(result: CompileDoneResult) {
+    if (!options.onCompileDone) {
+      return;
+    }
+
+    try {
+      await options.onCompileDone(result);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   const writtenEndpointPaths = new Map<Endpoint, NapiWrittenEndpoint>();
 
   function updateWrittenEndpointPaths(
@@ -318,6 +356,15 @@ export async function createHotReloader(
         writtenEndpointPaths.set(endpoint, written);
       }
     });
+  }
+
+  function markBlockingOutputIssues(result: TurbopackResult) {
+    if (hasBlockingResultIssues(result)) {
+      hmrEventHappened = true;
+      sendEnqueuedMessagesDebounce();
+      return true;
+    }
+    return false;
   }
 
   async function regenerateHtml() {
@@ -339,7 +386,16 @@ export async function createHotReloader(
 
   async function writeAllEntrypointsToDisk() {
     const result = await project.writeAllEntrypointsToDisk();
-    processIssues(result, true, true);
+    processIssues(
+      currentEntryIssues,
+      "entrypoints:all:output",
+      result,
+      false,
+      true,
+    );
+    if (markBlockingOutputIssues(result)) {
+      return;
+    }
     updateWrittenEndpointPaths(result.apps, result.appPaths);
     updateWrittenEndpointPaths(result.libraries, result.libraryPaths);
     await regenerateHtml();
@@ -347,7 +403,17 @@ export async function createHotReloader(
 
   async function writeEntrypointToDisk(entrypoint: Endpoint) {
     const result = await entrypoint.writeToDisk();
-    processIssues(result, true, true);
+    const entrypointIndex = currentWatchedEntrypoints.indexOf(entrypoint);
+    processIssues(
+      currentEntryIssues,
+      `entrypoint:${entrypointIndex}:output`,
+      result,
+      false,
+      true,
+    );
+    if (markBlockingOutputIssues(result)) {
+      return;
+    }
     writtenEndpointPaths.set(entrypoint, result);
     await regenerateHtml();
   }
@@ -360,10 +426,12 @@ export async function createHotReloader(
     }
   }
 
-  async function disposeBackgroundWatchSubscriptions() {
+  async function disposeBackgroundWatchSubscriptions(clearIssues = true) {
     const subscriptions = [...backgroundWatchSubscriptions];
     backgroundWatchSubscriptions.clear();
-    currentEntryIssues.clear();
+    if (clearIssues) {
+      currentEntryIssues.clear();
+    }
     backgroundEndpointWriteTasks.clear();
     backgroundProjectWriteTask = undefined;
     await Promise.all(
@@ -414,11 +482,13 @@ export async function createHotReloader(
   async function refreshBackgroundWatchers() {
     const generation = ++backgroundWatchGeneration;
 
-    await disposeBackgroundWatchSubscriptions();
+    await disposeBackgroundWatchSubscriptions(backgroundWatchersInitialized);
 
     if (!backgroundWatchersStarted || closed) {
       return;
     }
+
+    backgroundWatchersInitialized = true;
 
     await Promise.all(
       currentWatchedEntrypoints.map(async (entrypoint) => {
@@ -645,13 +715,13 @@ export async function createHotReloader(
         };
         sendToClient(client, turbopackConnected);
 
-        const errors = getCompilationErrors(currentEntryIssues);
+        const { errors, warnings } = getCompilationResult(currentEntryIssues);
 
         (async function () {
           const sync: SyncAction = {
             action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC,
             errors,
-            warnings: [],
+            warnings,
             hash: "",
           };
 
@@ -676,11 +746,11 @@ export async function createHotReloader(
       };
       sendToClient(ws, turbopackConnected);
 
-      const errors = getCompilationErrors(currentEntryIssues);
+      const { errors, warnings } = getCompilationResult(currentEntryIssues);
       const sync: SyncAction = {
         action: HMR_ACTIONS_SENT_TO_BROWSER.SYNC,
         errors,
-        warnings: [],
+        warnings,
         hash: "",
       };
       sendToClient(ws, sync);
@@ -799,6 +869,7 @@ export async function createHotReloader(
 
   // Write empty manifests
   await currentEntriesHandling;
+  await notifyCompileDone(getCompilationResult(currentEntryIssues));
 
   async function handleProjectUpdates() {
     for await (const updateMessage of project.updateInfoSubscribe(30)) {
@@ -810,8 +881,8 @@ export async function createHotReloader(
         case "end": {
           sendEnqueuedMessages();
 
-          const errors = new Map<string, CompilationError>();
-          addIssuesToErrors(errors, currentEntryIssues);
+          const result = getCompilationResult(currentEntryIssues);
+          await notifyCompileDone(result);
 
           for (const client of clients) {
             const state = clientStates.get(client);
@@ -819,14 +890,16 @@ export async function createHotReloader(
               continue;
             }
 
-            const clientErrors = new Map(errors);
-            addIssuesToErrors(clientErrors, state.clientIssues);
+            const clientResult = getCompilationResult(
+              currentEntryIssues,
+              state.clientIssues,
+            );
 
             sendToClient(client, {
               action: HMR_ACTIONS_SENT_TO_BROWSER.BUILT,
               hash: String(++hmrHash),
-              errors: [...clientErrors.values()],
-              warnings: [],
+              errors: clientResult.errors,
+              warnings: clientResult.warnings,
             });
           }
 

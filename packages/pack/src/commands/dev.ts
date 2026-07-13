@@ -17,7 +17,7 @@ import {
   resolveBundleOptions,
   type WebpackConfig,
 } from "../config/webpackCompat";
-import type { HotReloaderInterface } from "../core/hmr";
+import type { HotReloaderInterface, OnCompileDone } from "../core/hmr";
 import { createHotReloader } from "../core/hmr";
 import { createHttpProxyMiddleware } from "../core/proxyHono";
 import { getOutputPath } from "../utils/cleanOutput";
@@ -114,6 +114,11 @@ export interface StartServerOptions {
     port: number;
     hostname: string;
   }) => void | Promise<void>;
+  /**
+   * Called after the initial dev compilation and every following rebuild with
+   * the same structured errors and warnings sent through HMR.
+   */
+  onCompileDone?: OnCompileDone;
 }
 
 /** Options for honoServe excluding fetch; we only use HTTP or HTTPS (no HTTP/2). */
@@ -243,6 +248,9 @@ async function runDev(
     bundleOptions,
     projectPathResolved,
     rootPathResolved,
+    {
+      onCompileDone: serverOptions?.onCompileDone,
+    },
   );
   await hotReloader.start();
 
