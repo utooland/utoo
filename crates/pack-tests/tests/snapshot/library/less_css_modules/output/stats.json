@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "./main.js",
-      "size": 9395,
+      "size": 10265,
       "hash": "",
       "files": [
         "./main.js"
@@ -29,21 +29,21 @@
   "assets": [
     {
       "type": "asset",
-      "name": "input_index.less.css.map",
+      "name": "icon.2854cc11.svg",
       "info": {},
-      "size": 297,
+      "size": 124,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_index.less.css.map"
+        "icon.2854cc11.svg"
       ]
     },
     {
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 9395,
+      "size": 10265,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -55,7 +55,7 @@
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 15528,
+      "size": 16326,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -71,7 +71,7 @@
       "chunks": [
         "./main.js"
       ],
-      "size": 59
+      "size": 85
     }
   ]
 }
