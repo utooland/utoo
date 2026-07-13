@@ -1,4 +1,8 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)", (function(__turbopack_context__){
+
+__turbopack_context__.v("/* [project]/style/inline_css_postcss/input/test.css [client] (css) */\n.workbench-tree-group {\n  position: relative;\n}\n\n/* [project]/style/inline_css_postcss/input/conditional.css [client] (css, screen and (width >= 1px)) */\n@media screen and (width >= 1px) {\n.conditional-import {\n  display: grid;\n}\n\n}\n\n/* [project]/style/inline_css_postcss/input/style.css [client] (css) */\n.inline-postcss {\n  width: 2rem;\n  height: 1rem;\n  margin: .5rem .25rem;\n}\n\n");
+}),
 "[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 /**
@@ -221,19 +225,20 @@ module.exports = function(list, options) {
     };
 };
 }),
-"[project]/style/inline_css_postcss/input/style.css.js [client] (inline css, ecmascript)", ((__turbopack_context__) => {
+"[project]/style/inline_css_postcss/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
+var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$29$__ = __turbopack_context__.i("[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)");
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [client] (ecmascript)");
 ;
-var content = "@import \"./test.css\";\n\n.inline-postcss {\n  width: 2rem;\n  height: 1rem;\n  margin: .5rem .25rem;\n}\n";
+;
 var options = {};
 options.insert = "head";
 options.singleton = false;
 var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"])([
     [
         "style/inline_css_postcss/input/style.css",
-        content,
+        __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$29$__["default"],
         undefined,
         undefined
     ]
@@ -244,7 +249,7 @@ __turbopack_context__.s([]);
 "[project]/style/inline_css_postcss/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css$2e$js__$5b$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i("[project]/style/inline_css_postcss/input/style.css.js [client] (inline css, ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css$2e$js__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/style/inline_css_postcss/input/style.css.js { INLINE_CSS_CONTENT => "[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)" } [client] (inline css, ecmascript)');
 ;
 console.log("inline css postcss test");
 __turbopack_context__.s([]);
