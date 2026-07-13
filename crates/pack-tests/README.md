@@ -29,4 +29,10 @@ automatically update all outputs using the `UPDATE` command line env:
 UPDATE=1 cargo nextest run -E 'test(snapshot)'
 ```
 
+## Runtime Assertions
+
+Add an `assert.js` file to a snapshot case when the generated output must also
+be executed. The test runner invokes it with Node.js from the case directory
+after the output matches its snapshot.
+
 [nextest]: https://nexte.st/

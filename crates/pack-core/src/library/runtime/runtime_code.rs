@@ -60,7 +60,7 @@ pub async fn get_library_runtime_code(
 
     writedoc!(
         code,
-        r#"            
+        r#"
             if (!Array.isArray(__UTOOPACK__)) {{
                 return;
             }}

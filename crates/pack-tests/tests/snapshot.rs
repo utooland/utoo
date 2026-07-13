@@ -18,6 +18,7 @@ use std::{
     collections::VecDeque,
     fs, io,
     path::{Path, PathBuf},
+    process::Command,
     sync::{LazyLock, Mutex},
 };
 use turbo_rcstr::rcstr;
@@ -111,7 +112,31 @@ fn test(resource: PathBuf) {
     }
 
     let _guard = SNAPSHOT_TEST_LOCK.lock().unwrap();
-    run(resource).unwrap();
+    run(resource.clone()).unwrap();
+    run_assertion(&resource).unwrap();
+}
+
+fn run_assertion(resource: &Path) -> Result<()> {
+    let assertion = resource.join("assert.js");
+    if !assertion.exists() {
+        return Ok(());
+    }
+
+    let output = Command::new("node")
+        .arg("assert.js")
+        .current_dir(resource)
+        .output()
+        .context("Failed to execute snapshot assertion")?;
+
+    anyhow::ensure!(
+        output.status.success(),
+        "Snapshot assertion failed for {}\nstdout:\n{}\nstderr:\n{}",
+        resource.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    Ok(())
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]

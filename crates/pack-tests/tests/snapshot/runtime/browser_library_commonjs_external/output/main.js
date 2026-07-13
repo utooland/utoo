@@ -615,48 +615,48 @@ function registerChunk(registration) {
 }
 /**
  * This file contains the runtime code specific to the Turbopack
- * ECMAScript Node.js runtime for library builds.
+ * ECMAScript DOM runtime for library builds.
  *
  * It will be appended to the base runtime code in place of
- * runtime-backend-dom.ts when the target platform is Node.js.
+ * runtime-backend-node.ts when the target platform is browser/web.
  *
  * Since library builds produce a single, self-contained chunk,
  * no dynamic chunk loading is needed. The BACKEND simply registers
  * modules and instantiates runtime entries.
+ *
+ * The only DOM-specific addition is `loadScript` for script externals
+ * that need to be loaded from CDN or other external sources.
  */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
-async function externalImport(id) {
-    let raw;
-    try {
-        raw = await import(id);
-    } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
-        throw new Error(`Failed to load external module ${id}: ${err}`);
-    }
-    if (raw && raw.__esModule && raw.default && "default" in raw.default) {
-        return interopEsm(raw.default, createNS(raw), true);
-    }
-    return raw;
-}
-contextPrototype.y = externalImport;
+const loadedScripts = new Map();
 /**
- * Exports a URL value. No suffix is added in Node.js runtime.
- */ function exportUrl(url, id) {
-    exportValue.call(this, url, id);
+ * Load an external script by creating a <script> tag.
+ * This is used for script externals that need to be loaded from CDN or other external sources.
+ */ function loadScript(scriptUrl) {
+    // Return cached promise if script is already loading or loaded
+    let promise = loadedScripts.get(scriptUrl);
+    if (promise) {
+        return promise;
+    }
+    promise = new Promise((resolve, reject)=>{
+        const script = document.createElement("script");
+        script.src = scriptUrl;
+        script.onload = ()=>resolve();
+        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
+        document.head.appendChild(script);
+    });
+    loadedScripts.set(scriptUrl, promise);
+    return promise;
 }
-contextPrototype.q = exportUrl;
+contextPrototype.S = loadScript;
 (()=>{
     BACKEND = {
         registerChunk (chunk, params) {
-            const chunkPath = typeof chunk === "string" ? chunk : chunk.src;
             if (params == null) {
                 return;
             }
             if (params.runtimeModuleIds.length > 0) {
                 for (const moduleId of params.runtimeModuleIds){
-                    getOrInstantiateRuntimeModule(chunkPath, moduleId);
+                    getOrInstantiateRuntimeModule(chunk, moduleId);
                 }
             }
         }
@@ -666,7 +666,7 @@ const chunksToRegister = __UTOOPACK__;
 __UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    const runtimeModuleIds = ["[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)"];
+    const runtimeModuleIds = ["[project]/runtime/browser_library_commonjs_external/input/index.js [library-client] (ecmascript)"];
     let exports;
     for (let i = 0; i < runtimeModuleIds.length; i++) {
         const module = moduleCache[runtimeModuleIds[i]];
@@ -685,27 +685,34 @@ function factory () {
 if (typeof exports === 'object' && typeof module === 'object') {
     module.exports = factory();
 } else if (typeof exports === 'object') {
-    exports["NodeRuntimeLibrary"] = factory();
+    exports["BrowserLibrary"] = factory();
 } else {
-    globalThis["NodeRuntimeLibrary"] = factory();
+    globalThis["BrowserLibrary"] = factory();
 }
 })([
 ["main.js",
 
-"[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)", ((__turbopack_context__) => {
+"[externals]/root ExternalValue commonjs ../external.cjs [external] (root ExternalValue commonjs ../external.cjs, umd)", ((__turbopack_context__) => {
 "use strict";
 
-function answer() {
-    return 42;
-}
+let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("../external.cjs", () => require("../external.cjs")); } else { mod = globalThis["ExternalValue"] }
+
+__turbopack_context__.v(mod);
+}),
+"[project]/runtime/browser_library_commonjs_external/input/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__$5b$externals$5d2f$root__ExternalValue__commonjs__$2e2e2f$external$2e$cjs__$5b$external$5d$__$28$root__ExternalValue__commonjs__$2e2e2f$external$2e$cjs$2c$__umd$29$__ = __turbopack_context__.i("[externals]/root ExternalValue commonjs ../external.cjs [external] (root ExternalValue commonjs ../external.cjs, umd)");
+;
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__$5b$externals$5d2f$root__ExternalValue__commonjs__$2e2e2f$external$2e$cjs__$5b$external$5d$__$28$root__ExternalValue__commonjs__$2e2e2f$external$2e$cjs$2c$__umd$29$__["default"];
 __turbopack_context__.s([
-    "answer",
+    "default",
     0,
-    answer
+    __TURBOPACK__default__export__
 ]);
 }),
 ],
-["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)"]}],
+["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/browser_library_commonjs_external/input/index.js [library-client] (ecmascript)"]}],
 ]);
 
 
