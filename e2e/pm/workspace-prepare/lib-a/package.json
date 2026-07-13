@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "main": "lib/index.js",
   "bin": {
-    "lib-a-cli": "bin/cli.js"
+    "lib-a-cli": "lib/cli.js"
   },
   "scripts": {
-    "prepare": "mkdir -p lib && printf 'module.exports=\"lib-a-built\";' > lib/index.js",
+    "prepare": "mkdir -p lib && printf 'module.exports=\"lib-a-built\";' > lib/index.js && printf '#!/usr/bin/env node\\nconsole.log(\"lib-a-cli\");\\n' > lib/cli.js",
     "postinstall": "mkdir -p .markers && echo x >> .markers/postinstall"
   }
 }
