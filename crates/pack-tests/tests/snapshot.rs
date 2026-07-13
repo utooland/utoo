@@ -118,7 +118,7 @@ fn test(resource: PathBuf) {
 
 fn run_assertion(resource: &Path) -> Result<()> {
     let assertion = resource.join("assert.js");
-    if !assertion.exists() {
+    if !assertion.try_exists()? {
         return Ok(());
     }
 
