@@ -5,7 +5,6 @@ use turbopack_core::source_transform::SourceTransform;
 
 use crate::{
     config::Config,
-    mode::Mode,
     shared::transforms::{
         get_image_rule, get_inline_css_rule, get_wasm_rule, inline_css::module::InjectType,
         modularize_imports::get_modularize_imports_rule,
@@ -14,7 +13,6 @@ use crate::{
 
 pub async fn get_client_transforms_rules(
     config: Vc<Config>,
-    mode: Vc<Mode>,
     foreign_code: bool,
     postcss_transform: Option<ResolvedVc<Box<dyn SourceTransform>>>,
 ) -> Result<Vec<ModuleRule>> {
@@ -50,10 +48,20 @@ pub async fn get_client_transforms_rules(
             .and_then(|v| v.as_str())
             .map(InjectType::from_str)
             .unwrap_or(InjectType::Style);
-
-        let minify = *config.minify(mode).await?;
+        let css_modules_pattern = config
+            .styles()
+            .await?
+            .css_modules
+            .as_ref()
+            .and_then(|css_modules| css_modules.local_ident_pattern());
         rules.push(
-            get_inline_css_rule(insert.into(), inject_type, minify, postcss_transform).await?,
+            get_inline_css_rule(
+                insert.into(),
+                inject_type,
+                css_modules_pattern,
+                postcss_transform,
+            )
+            .await?,
         );
     }
 

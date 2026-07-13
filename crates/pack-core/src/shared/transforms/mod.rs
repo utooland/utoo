@@ -77,7 +77,7 @@ pub async fn get_wasm_rule() -> Result<ModuleRule> {
 pub async fn get_inline_css_rule(
     insert: RcStr,
     inject_type: InjectType,
-    minify: bool,
+    css_modules_pattern: Option<RcStr>,
     postcss_transform: Option<ResolvedVc<Box<dyn SourceTransform>>>,
 ) -> Result<ModuleRule> {
     let mut effects = vec![];
@@ -90,7 +90,7 @@ pub async fn get_inline_css_rule(
 
     effects.push(ModuleRuleEffect::ModuleType(ModuleType::Custom(
         ResolvedVc::upcast(
-            InlineCssModuleType::new(insert, inject_type, minify)
+            InlineCssModuleType::new(insert, inject_type, css_modules_pattern)
                 .to_resolved()
                 .await?,
         ),

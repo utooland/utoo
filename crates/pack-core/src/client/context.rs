@@ -304,9 +304,9 @@ pub async fn get_client_module_options_context(
         };
 
     let mut client_rules =
-        get_client_transforms_rules(config, mode, false, inline_postcss_transform).await?;
+        get_client_transforms_rules(config, false, inline_postcss_transform).await?;
     let mut foreign_client_rules =
-        get_client_transforms_rules(config, mode, true, inline_foreign_postcss_transform).await?;
+        get_client_transforms_rules(config, true, inline_foreign_postcss_transform).await?;
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(
