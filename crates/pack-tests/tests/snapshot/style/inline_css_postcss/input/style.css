@@ -1,4 +1,5 @@
 @import './test.css';
+@import './conditional.css' screen and (min-width: 1px);
 
 .inline-postcss {
   width: 32px;

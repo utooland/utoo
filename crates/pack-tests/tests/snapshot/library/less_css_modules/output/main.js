@@ -3,6 +3,10 @@
 })([
 ["main.js",
 
+37, (function(__turbopack_context__){
+
+__turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.index-less__-C211G__widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
+}),
 15, ((__turbopack_context__, module, exports) => {
 
 /**
@@ -225,19 +229,20 @@ module.exports = function(list, options) {
     };
 };
 }),
-67, ((__turbopack_context__) => {
+23, ((__turbopack_context__) => {
 "use strict";
 
+var __TURBOPACK__imported__module__37__ = __turbopack_context__.i(37);
 var __TURBOPACK__imported__module__15__ = __turbopack_context__.i(15);
 ;
-var content = ".widget-button {\n  color: red;\n}\n";
+;
 var options = {};
 options.insert = "head";
 options.singleton = false;
 var update = (0, __TURBOPACK__imported__module__15__["default"])([
     [
         "library/less_css_modules/input/index.less.css",
-        content,
+        __TURBOPACK__imported__module__37__["default"],
         undefined,
         undefined
     ]
