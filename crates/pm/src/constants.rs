@@ -15,6 +15,10 @@ pub mod cmd {
     pub const UPDATE_ALIAS: &str = "u";
     pub const UPDATE_ABOUT: &str = "Remove node_modules and reinstall";
 
+    pub const OUTDATED_NAME: &str = "outdated";
+    pub const OUTDATED_ALIAS: &str = "out";
+    pub const OUTDATED_ABOUT: &str = "Check for outdated direct dependencies";
+
     pub const INSTALL_NAME: &str = "install";
     pub const INSTALL_ABOUT: &str = "Install project dependencies";
 

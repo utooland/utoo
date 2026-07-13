@@ -371,6 +371,12 @@ async fn async_main() -> Result<()> {
             update(args, ScriptPolicy::Run).await?;
             log_time_end("All packages updated");
         }
+        Some(Commands::Outdated { patterns }) => {
+            let filter = WorkspaceFilter::from_flags(cli.workspace, cli.workspaces);
+            if cmd::outdated::outdated(patterns, filter).await? {
+                process::exit(1);
+            }
+        }
         Some(Commands::List { package }) => {
             let cwd = std::env::current_dir()?;
             list_dependencies(&cwd, &package).await?;

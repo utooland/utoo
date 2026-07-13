@@ -213,6 +213,31 @@ fn resolve_dep_target(
         .and_then(|p| path_index.get(&p).copied())
 }
 
+/// Resolve one dependency edge from an importer/package lock path to the
+/// nearest package entry selected by npm's `node_modules` ancestor lookup.
+///
+/// This is the read-only counterpart of the graph seeding logic above. Query
+/// commands such as `outdated` need the exact lock entry behind an importer
+/// edge without reconstructing the full resolver graph or guessing that every
+/// dependency is hoisted to the root.
+pub fn resolve_lock_dependency<'a>(
+    lock: &'a PackageLock,
+    from_path: &str,
+    dep_name: &str,
+) -> Option<(&'a str, &'a LockPackage)> {
+    let from_path = to_lock_key(from_path);
+    let resolved = resolve_dep_path(&from_path, dep_name, |candidate| {
+        lock.packages
+            .keys()
+            .any(|path| to_lock_key(path) == candidate)
+    })?;
+
+    lock.packages
+        .iter()
+        .find(|(path, _)| to_lock_key(path) == resolved)
+        .map(|(path, package)| (path.as_str(), package))
+}
+
 /// Whether `lock` is internally complete enough to seed: every **prod**
 /// dependency recorded in a regular (non-root, non-link) entry resolves — via
 /// npm hoisting — to *some* existing lock entry.

@@ -51,6 +51,7 @@ pub mod manifest {
 
 /// Package lock types (package-lock.json).
 pub mod lock {
+    pub use crate::model::lock_codec::resolve_lock_dependency;
     pub use crate::model::package_lock::{LockPackage, LockPackageNode, PackageLock};
 }
 

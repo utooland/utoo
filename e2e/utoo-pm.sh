@@ -2288,4 +2288,87 @@ fi
 npmrc_cleanup
 echo -e "${GREEN}PASS: .npmrc registry= and //host/:_authToken honored${NC}"
 
+# ---------------------------------------------------------------------------
+# Case: `ut outdated` reports direct dependencies from the lockfile and uses
+# the declared package name for filtering. A local registry keeps Current,
+# Wanted and Latest deterministic while covering normal, scoped, npm alias and
+# overridden packages without downloading any tarballs.
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}Case: outdated normal, scoped, alias and override dependencies${NC}"
+OUTDATED_FIXTURE="$PWD/e2e/pm/outdated"
+OUTDATED_DIR=$(mktemp -d)
+OUTDATED_CACHE=$(mktemp -d)
+cp "$OUTDATED_FIXTURE/package.json" "$OUTDATED_FIXTURE/package-lock.json" "$OUTDATED_DIR/"
+OUTDATED_PORT=$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close();})')
+node "$OUTDATED_FIXTURE/registry.cjs" "$OUTDATED_PORT" &
+OUTDATED_PID=$!
+outdated_cleanup() {
+  kill "$OUTDATED_PID" 2>/dev/null || true
+  wait "$OUTDATED_PID" 2>/dev/null || true
+  rm -rf "$OUTDATED_DIR" "$OUTDATED_CACHE"
+}
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS "http://127.0.0.1:$OUTDATED_PORT/outdated-normal" -o /dev/null 2>/dev/null; then break; fi
+  sleep 0.3
+done
+cat > "$OUTDATED_DIR/.npmrc" <<EOF
+registry=http://127.0.0.1:$OUTDATED_PORT
+EOF
+
+set +e
+( cd "$OUTDATED_DIR" && NO_COLOR=1 UTOO_CACHE_DIR="$OUTDATED_CACHE" utoo outdated ) > "$OUTDATED_DIR/all.out" 2>&1
+OUTDATED_STATUS=$?
+set -e
+if [ "$OUTDATED_STATUS" -ne 1 ]; then
+  echo -e "${RED}FAIL: outdated dependencies must exit 1 (got $OUTDATED_STATUS)${NC}"
+  cat "$OUTDATED_DIR/all.out"
+  outdated_cleanup
+  exit 1
+fi
+for expected in \
+  '@outdated/scope 3.0.0 3.1.0 4.0.0' \
+  'outdated-alias 5.0.0 5.1.0 6.0.0' \
+  'outdated-normal 1.0.0 1.2.0 2.0.0' \
+  'outdated-overridden 7.0.0 7.0.0 8.0.0'; do
+  if ! awk -v expected="$expected" '
+    BEGIN { split(expected, value, " ") }
+    $1 == value[1] && $2 == value[2] && $3 == value[3] && $4 == value[4] { found=1 }
+    END { exit !found }
+  ' "$OUTDATED_DIR/all.out"; then
+    echo -e "${RED}FAIL: outdated output missing row: $expected${NC}"
+    cat "$OUTDATED_DIR/all.out"
+    outdated_cleanup
+    exit 1
+  fi
+done
+
+# Patterns use OR semantics, match scoped declaration names, and match aliases
+# by their alias slot rather than by the real registry package name.
+set +e
+( cd "$OUTDATED_DIR" && NO_COLOR=1 UTOO_CACHE_DIR="$OUTDATED_CACHE" \
+  utoo outdated '@outdated/*' outdated-alias ) > "$OUTDATED_DIR/filtered.out" 2>&1
+FILTERED_STATUS=$?
+set -e
+if [ "$FILTERED_STATUS" -ne 1 ] \
+  || ! grep -q '^@outdated/scope ' "$OUTDATED_DIR/filtered.out" \
+  || ! grep -q '^outdated-alias ' "$OUTDATED_DIR/filtered.out" \
+  || grep -q '^outdated-normal ' "$OUTDATED_DIR/filtered.out" \
+  || grep -q '^outdated-overridden ' "$OUTDATED_DIR/filtered.out"; then
+  echo -e "${RED}FAIL: outdated scoped/alias pattern filtering is incorrect${NC}"
+  cat "$OUTDATED_DIR/filtered.out"
+  outdated_cleanup
+  exit 1
+fi
+
+# A pattern with no matching direct dependency is a successful empty result.
+if ! ( cd "$OUTDATED_DIR" && NO_COLOR=1 UTOO_CACHE_DIR="$OUTDATED_CACHE" \
+  utoo outdated does-not-exist > "$OUTDATED_DIR/empty.out" 2>&1 ); then
+  echo -e "${RED}FAIL: an empty outdated result must exit 0${NC}"
+  cat "$OUTDATED_DIR/empty.out"
+  outdated_cleanup
+  exit 1
+fi
+outdated_cleanup
+echo -e "${GREEN}PASS: outdated normal, scoped, alias, override and pattern cases${NC}"
+
 echo -e "${GREEN}All e2e tests passed successfully!${NC}"
