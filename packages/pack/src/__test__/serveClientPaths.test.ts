@@ -12,8 +12,10 @@ const viteNode = path.join(repoRoot, "node_modules/vite-node/vite-node.mjs");
 
 function runServeClientPathsFixture() {
   return new Promise<unknown>((resolve, reject) => {
+    const targetDir = path.join(repoRoot, "target");
+    fs.mkdirSync(targetDir, { recursive: true });
     const projectPath = fs.mkdtempSync(
-      path.join(repoRoot, "target/serve-client-paths-"),
+      path.join(targetDir, "serve-client-paths-"),
     );
     const port = 44_200 + Math.floor(Math.random() * 1000);
     const child = spawn(
@@ -44,30 +46,37 @@ function runServeClientPathsFixture() {
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("error", reject);
+    const cleanup = () => {
+      fs.rmSync(projectPath, { recursive: true, force: true });
+    };
+
+    child.on("error", (error) => {
+      cleanup();
+      reject(error);
+    });
     child.on("exit", (code, signal) => {
-      if (code !== 0) {
-        reject(
-          new Error(
+      try {
+        if (code !== 0) {
+          throw new Error(
             `serve client paths fixture failed with code ${code}, signal ${signal}\n${stderr}\n${stdout}`,
-          ),
-        );
-        return;
-      }
+          );
+        }
 
-      const line = stdout
-        .split(/\r?\n/)
-        .find((item) => item.startsWith("__CLIENT_PATHS_SNAPSHOT__"));
-      if (!line) {
-        reject(
-          new Error(
+        const line = stdout
+          .split(/\r?\n/)
+          .find((item) => item.startsWith("__CLIENT_PATHS_SNAPSHOT__"));
+        if (!line) {
+          throw new Error(
             `serve client paths fixture did not print client paths\n${stderr}\n${stdout}`,
-          ),
-        );
-        return;
-      }
+          );
+        }
 
-      resolve(JSON.parse(line.slice("__CLIENT_PATHS_SNAPSHOT__".length)));
+        resolve(JSON.parse(line.slice("__CLIENT_PATHS_SNAPSHOT__".length)));
+      } catch (error) {
+        reject(error);
+      } finally {
+        cleanup();
+      }
     });
   });
 }
