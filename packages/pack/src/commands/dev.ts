@@ -99,6 +99,13 @@ export interface SelfSignedCertificate {
   rootCA?: string;
 }
 
+export interface DevServerReadyContext {
+  port: number;
+  hostname: string;
+  /** Initial client asset paths written for all configured endpoints. */
+  clientPaths: string[];
+}
+
 export interface StartServerOptions {
   port: number;
   https?: boolean;
@@ -110,10 +117,7 @@ export interface StartServerOptions {
    * listening. Integrations can await this instead of polling the internal
    * server port.
    */
-  onReady?: (context: {
-    port: number;
-    hostname: string;
-  }) => void | Promise<void>;
+  onReady?: (context: DevServerReadyContext) => void | Promise<void>;
 }
 
 /** Options for honoServe excluding fetch; we only use HTTP or HTTPS (no HTTP/2). */
@@ -338,6 +342,7 @@ async function runDev(
   await serverOptions?.onReady?.({
     port: serveOptsBase.port,
     hostname: serveOptsBase.hostname,
+    clientPaths: hotReloader.getClientPaths(),
   });
 
   if (serverOptions?.logServerInfo !== false) {

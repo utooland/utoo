@@ -65,6 +65,7 @@ export interface WSLike {
 export interface HotReloaderInterface {
   turbopackProject?: Project;
   serverStats: WebpackStats | null;
+  getClientPaths(): string[];
   setHmrServerError(error: Error | null): void;
   clearHmrServerError(): void;
   start(): Promise<void>;
@@ -564,6 +565,16 @@ export async function createHotReloader(
   const hotReloader: HotReloaderInterface = {
     turbopackProject: project,
     serverStats: null,
+
+    getClientPaths() {
+      return [
+        ...new Set(
+          [...writtenEndpointPaths.values()].flatMap(
+            (endpoint) => endpoint.clientPaths,
+          ),
+        ),
+      ];
+    },
 
     onHMR(req, socket: Socket, head, onUpgrade) {
       wsServer.handleUpgrade(req, socket, head, (client) => {
