@@ -262,6 +262,8 @@ export interface ConfigComplete {
           keepFnames?: boolean;
         };
     minify?: boolean;
+    /** Extract legal comments to `[file].LICENSE.txt` when minifying library output. */
+    extractComments?: boolean;
     treeShaking?: boolean;
     splitChunks?: Record<
       "js" | "css",

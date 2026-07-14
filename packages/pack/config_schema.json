@@ -1288,6 +1288,13 @@
             }
           ]
         },
+        "extractComments": {
+          "description": "Whether to extract legal comments to [file].LICENSE.txt when minifying library output",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "minify": {
           "description": "Whether to minify the output",
           "type": [

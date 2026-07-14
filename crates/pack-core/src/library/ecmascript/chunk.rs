@@ -17,10 +17,11 @@ use turbopack_core::{
     module_graph::ModuleGraph,
     output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
     source_map::{GenerateSourceMap, SourceMapAsset},
+    virtual_output::VirtualOutputAsset,
 };
 use turbopack_ecmascript::{
     chunk::{EcmascriptChunk, EcmascriptChunkData, EcmascriptChunkPlaceable},
-    minify::{get_compress_options, minify},
+    minify::{get_compress_options, minify, minify_with_legal_comments},
     utils::StringifyJs,
 };
 use turbopack_ecmascript_runtime::RuntimeType;
@@ -35,6 +36,12 @@ pub struct EcmascriptLibraryEvaluateChunk {
     other_chunks: ResolvedVc<OutputAssets>,
     module_graph: ResolvedVc<ModuleGraph>,
     pub(crate) evaluatable_assets: ResolvedVc<EvaluatableAssets>,
+}
+
+#[turbo_tasks::value(shared)]
+struct EcmascriptLibraryChunkCode {
+    code: ResolvedVc<Code>,
+    license_comments: Option<RcStr>,
 }
 
 #[turbo_tasks::value_impl]
@@ -60,7 +67,7 @@ impl EcmascriptLibraryEvaluateChunk {
     }
 
     #[turbo_tasks::function]
-    async fn code(self: Vc<Self>) -> Result<Vc<Code>> {
+    async fn processed_code(self: Vc<Self>) -> Result<Vc<EcmascriptLibraryChunkCode>> {
         let this = self.await?;
 
         let output_root = this.chunking_context.output_root().await?;
@@ -205,17 +212,59 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let mut code = code.build();
 
+        let mut license_comments = None;
         if let MinifyType::Minify { mangle, compress } = this.chunking_context.await?.minify_type()
         {
-            code = minify(
-                code,
-                source_maps,
-                mangle,
-                get_compress_options(compress, mangle),
-            )?;
+            let compress_options = get_compress_options(compress, mangle);
+            if this.chunking_context.await?.extract_comments() {
+                let (minified_code, comments) =
+                    minify_with_legal_comments(code, source_maps, mangle, compress_options)?;
+                code = minified_code;
+
+                if !comments.is_empty() {
+                    let license_filename =
+                        format!("{}.LICENSE.txt", self.path().await?.file_name());
+                    let mut code_with_banner = CodeBuilder::default();
+                    writeln!(
+                        code_with_banner,
+                        "/*! For license information please see {license_filename} */"
+                    )?;
+                    code_with_banner.push_code(&code);
+                    code = code_with_banner.build();
+                    license_comments = Some(format!("{}\n", comments.join("\n\n")).into());
+                }
+            } else {
+                code = minify(code, source_maps, mangle, compress_options)?;
+            }
         }
 
-        Ok(code.cell())
+        Ok(EcmascriptLibraryChunkCode {
+            code: code.resolved_cell(),
+            license_comments,
+        }
+        .cell())
+    }
+
+    #[turbo_tasks::function]
+    async fn code(self: Vc<Self>) -> Result<Vc<Code>> {
+        Ok(*self.processed_code().await?.code)
+    }
+
+    #[turbo_tasks::function]
+    async fn license_asset(self: Vc<Self>) -> Result<Vc<VirtualOutputAsset>> {
+        let processed_code = self.processed_code().await?;
+        let Some(license_comments) = processed_code.license_comments.as_ref() else {
+            bail!("license asset requested without extracted license comments")
+        };
+        let chunk_path = self.path().await?;
+        let license_path = chunk_path.append(".LICENSE.txt")?;
+
+        Ok(VirtualOutputAsset::new(
+            license_path,
+            AssetContent::file(
+                FileContent::Content(File::from(license_comments.to_string())).cell(),
+            ),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -293,14 +342,24 @@ impl OutputAssetsReference for EcmascriptLibraryEvaluateChunk {
             .chunking_context
             .reference_chunk_source_maps(Vc::upcast(self))
             .await?;
+        let include_license = self.processed_code().await?.license_comments.is_some();
         let ref_assets = chunk_references.assets.await?;
-        let mut assets =
-            Vec::with_capacity(ref_assets.len() + if include_source_map { 1 } else { 0 });
+        let mut assets = Vec::with_capacity(
+            ref_assets.len()
+                + if include_source_map { 1 } else { 0 }
+                + if include_license { 1 } else { 0 },
+        );
 
         assets.extend(ref_assets.iter().copied());
 
         if include_source_map {
             assets.push(ResolvedVc::upcast(self.source_map().to_resolved().await?));
+        }
+
+        if include_license {
+            assets.push(ResolvedVc::upcast(
+                self.license_asset().to_resolved().await?,
+            ));
         }
 
         Ok(OutputAssetsWithReferenced {

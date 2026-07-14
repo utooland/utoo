@@ -124,6 +124,7 @@ pub async fn get_library_chunking_context(
     } else {
         MinifyType::NoMinify
     })
+    .extract_comments(*config.extract_comments().await?)
     .source_maps(if *config.source_maps().await? {
         SourceMapsType::Full
     } else {

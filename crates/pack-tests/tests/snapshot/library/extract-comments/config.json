@@ -1,0 +1,23 @@
+{
+  "runtimeType": "Production",
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "MyLibrary"
+        }
+      }
+    ],
+    "optimization": {
+      "extractComments": true,
+      "minify": true,
+      "moduleIds": "named"
+    },
+    "output": {
+      "filename": "[name].[contenthash:8].js"
+    },
+    "sourceMaps": false
+  }
+}

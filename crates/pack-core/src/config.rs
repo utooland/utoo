@@ -483,6 +483,8 @@ pub struct OptimizationConfig {
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     pub compress: Option<JsonValue>,
     pub minify: Option<bool>,
+    /// Extract legal comments to a separate LICENSE file when minifying library output.
+    pub extract_comments: Option<bool>,
     pub tree_shaking: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
     #[bincode(with = "option_indexmap")]
@@ -1890,6 +1892,16 @@ impl Config {
         Ok(Vc::cell(
             minify.unwrap_or(matches!(*mode.await?, Mode::Production)),
         ))
+    }
+
+    #[turbo_tasks::function]
+    pub fn extract_comments(&self) -> Vc<bool> {
+        Vc::cell(
+            self.optimization
+                .as_ref()
+                .and_then(|op| op.extract_comments)
+                .unwrap_or(false),
+        )
     }
 
     #[turbo_tasks::function]
