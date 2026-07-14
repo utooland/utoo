@@ -34,7 +34,15 @@ impl RebuildService {
             // before the root project's hooks, since the root may import
             // build artifacts produced by a workspace's `prepare`.
             PackageService::process_workspace_install_hooks(root_path).await?;
+            // npm builds link/workspace packages separately: `prepare` runs
+            // before their bins are linked. This also covers bin targets that
+            // are created by the workspace's prepare script.
+            PackageService::link_workspace_bins(root_path).await?;
             PackageService::process_project_hooks(root_path).await?;
+        } else {
+            // With scripts disabled, still link workspace bins that already
+            // exist on disk.
+            PackageService::link_workspace_bins(root_path).await?;
         }
 
         Ok(())
