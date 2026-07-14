@@ -3,19 +3,6 @@
 })([
 ["main.js",
 
-77, ((__turbopack_context__) => {
-"use strict";
-
-// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/middle.js [library-client] (ecmascript)
-;
-// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/inner.js [library-client] (ecmascript)
-;
-var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
-;
-console.log('y', __TURBOPACK__imported__module__148__["default"]);
-;
-__turbopack_context__.s([], 77);
-}),
 148, ((__turbopack_context__) => {
 "use strict";
 
@@ -85,6 +72,18 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__1
 ], 148);
 }),
+855, ((__turbopack_context__, module, exports) => {
+
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
+}),
+888, ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
+;
+console.log('x', __TURBOPACK__imported__module__148__["default"]);
+__turbopack_context__.s([]);
+}),
 554, ((__turbopack_context__, module, exports) => {
 
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(77)), 1000);
@@ -98,17 +97,18 @@ var __TURBOPACK__imported__module__554__ = __turbopack_context__.i(554);
 ;
 __turbopack_context__.s([]);
 }),
-855, ((__turbopack_context__, module, exports) => {
-
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
-}),
-888, ((__turbopack_context__) => {
+77, ((__turbopack_context__) => {
 "use strict";
 
+// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/middle.js [library-client] (ecmascript)
+;
+// MERGED MODULE: [project]/concatenate_modules/library-shared/input/y/inner.js [library-client] (ecmascript)
+;
 var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
 ;
-console.log('x', __TURBOPACK__imported__module__148__["default"]);
-__turbopack_context__.s([]);
+console.log('y', __TURBOPACK__imported__module__148__["default"]);
+;
+__turbopack_context__.s([], 77);
 }),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":[498]}],
