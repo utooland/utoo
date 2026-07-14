@@ -36,7 +36,7 @@ function normalizeStats(stats: any) {
             assets: (entrypoint.assets ?? [])
               .map((asset: any) =>
                 normalizeFileName(
-                  typeof asset === "string" ? asset : (asset.name ?? ""),
+                  typeof asset === "string" ? asset : (asset?.name ?? ""),
                 ),
               )
               .sort(),
