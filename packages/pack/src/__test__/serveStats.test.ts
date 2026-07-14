@@ -97,6 +97,22 @@ describe("serve stats", () => {
             "name": "src_index_<hash>.js",
             "type": "asset",
           },
+          {
+            "name": "src_lazy_<hash>.js",
+            "type": "asset",
+          },
+          {
+            "name": "src_lazy_<hash>.js",
+            "type": "asset",
+          },
+          {
+            "name": "src_lazy_<hash>.js.map",
+            "type": "asset",
+          },
+          {
+            "name": "src_lazy_<hash>.js.map",
+            "type": "asset",
+          },
         ],
         "entrypoints": {
           "main": {
@@ -104,11 +120,13 @@ describe("serve stats", () => {
               "_root-of-the-server___<hash>.js",
               "main.js",
               "src_index_<hash>.js",
+              "src_lazy_<hash>.js",
             ],
             "chunks": [
               "_root-of-the-server___<hash>.js",
               "main.js",
               "src_index_<hash>.js",
+              "src_lazy_<hash>.js",
             ],
           },
         },

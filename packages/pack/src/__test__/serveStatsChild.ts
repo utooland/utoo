@@ -28,19 +28,23 @@ function normalizeStats(stats: any) {
         a.name.localeCompare(b.name),
       ),
     entrypoints: Object.fromEntries(
-      Object.entries<any>(stats.entrypoints ?? {}).map(([name, entrypoint]) => [
-        name,
-        {
-          assets: (entrypoint.assets ?? []).map((asset: any) =>
-            normalizeFileName(
-              typeof asset === "string" ? asset : (asset.name ?? ""),
-            ),
-          ),
-          chunks: (entrypoint.chunks ?? []).map((chunk: any) =>
-            normalizeFileName(String(chunk)),
-          ),
-        },
-      ]),
+      Object.entries<any>(stats.entrypoints ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, entrypoint]) => [
+          name,
+          {
+            assets: (entrypoint.assets ?? [])
+              .map((asset: any) =>
+                normalizeFileName(
+                  typeof asset === "string" ? asset : (asset.name ?? ""),
+                ),
+              )
+              .sort(),
+            chunks: (entrypoint.chunks ?? [])
+              .map((chunk: any) => normalizeFileName(String(chunk)))
+              .sort(),
+          },
+        ]),
     ),
     htmlGenerated: fs.existsSync(htmlPath),
   };
@@ -69,8 +73,9 @@ async function main() {
   fs.mkdirSync(srcDir, { recursive: true });
   fs.writeFileSync(
     path.join(srcDir, "index.js"),
-    'console.log("serve stats snapshot");\n',
+    'import("./lazy.js").then(({ default: value }) => console.log(value));\n',
   );
+  fs.writeFileSync(path.join(srcDir, "lazy.js"), 'export default "lazy";\n');
 
   await serve(
     {
