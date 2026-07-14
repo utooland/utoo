@@ -4,6 +4,10 @@ import * as webpackCompat from "./config/webpackCompat";
 
 export { build };
 export { serve };
+export type {
+  DevServerReadyContext,
+  StartServerOptions,
+} from "./commands/dev";
 export { defineConfig } from "./defineConfig";
 
 const utoopack = { build, serve };
