@@ -523,6 +523,13 @@ pub struct SchemaOptimizationConfig {
     #[schemars(description = "Whether to minify the output")]
     pub minify: Option<bool>,
 
+    /// Whether to extract legal comments to a separate LICENSE file
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to extract legal comments to [file].LICENSE.txt when minifying library output"
+    )]
+    pub extract_comments: Option<bool>,
+
     /// Whether to enable tree shaking
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Whether to enable tree shaking")]
