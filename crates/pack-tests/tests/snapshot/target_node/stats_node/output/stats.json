@@ -129,8 +129,8 @@
       "name": "target_node/stats_node/input/index.js",
       "id": "target_node/stats_node/input/index.js",
       "chunks": [
-        "./main.js",
-        "./_root-of-the-server___7e972a20.js"
+        "./_root-of-the-server___7e972a20.js",
+        "./main.js"
       ],
       "size": 147
     },
