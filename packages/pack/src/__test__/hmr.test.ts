@@ -34,6 +34,7 @@ describe("HMR client delivery", () => {
 
     expect(stateA.turbopackUpdates).toEqual([{ ...update, issues: [] }]);
     expect(stateB.turbopackUpdates).toEqual([]);
+    expect(update.issues).toEqual([{ severity: "warning" }]);
   });
 
   it("preserves distinct resources even when their instructions are equal", () => {
@@ -67,6 +68,20 @@ describe("HMR subscription lifecycle", () => {
     const subscriptions = new Map([["route", subscription]]);
 
     unsubscribeClient(subscriptions, "route");
+
+    expect(subscriptions.has("route")).toBe(false);
+    expect(subscription.return).toHaveBeenCalledOnce();
+  });
+
+  it("absorbs iterator cleanup failures after deleting the subscription", async () => {
+    const subscription = {
+      return: vi.fn(() => Promise.reject(new Error("cleanup failed"))),
+    };
+    const subscriptions = new Map([["route", subscription]]);
+
+    await expect(
+      unsubscribeClient(subscriptions, "route"),
+    ).resolves.toBeUndefined();
 
     expect(subscriptions.has("route")).toBe(false);
     expect(subscription.return).toHaveBeenCalledOnce();

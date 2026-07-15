@@ -10,8 +10,8 @@ export function enqueueTurbopackUpdateForClient<
   client: Client,
   payload: Update,
 ) {
-  payload.issues = [];
-  clientStates.get(client)?.turbopackUpdates.push(payload);
+  const update = { ...payload, issues: [] } as Update;
+  clientStates.get(client)?.turbopackUpdates.push(update);
 }
 
 export interface ReturnableSubscription {
@@ -28,7 +28,14 @@ export function unsubscribeClient<Subscription extends ReturnableSubscription>(
   }
 
   subscriptions.delete(id);
-  subscription.return?.();
+  try {
+    return Promise.resolve(subscription.return?.()).then(
+      () => undefined,
+      () => undefined,
+    );
+  } catch {
+    return Promise.resolve();
+  }
 }
 
 export function deleteClientSubscriptionIfCurrent<Subscription>(
