@@ -25,5 +25,6 @@
         "script": "https://example.com/lib/script2.js"
       }
     }
-  }
+  },
+  "runtimeType": "Production"
 }
