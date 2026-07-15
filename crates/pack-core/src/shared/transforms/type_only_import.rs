@@ -1,6 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use swc_core::ecma::ast::{ImportDecl, ImportSpecifier, ModuleDecl, ModuleItem, Program};
+use swc_core::ecma::ast::{
+    ExportSpecifier, ImportDecl, ImportSpecifier, ModuleDecl, ModuleItem, NamedExport, Program,
+};
 use turbopack::module_options::ModuleRule;
 use turbopack_ecmascript::{CustomTransformer, TransformContext};
 
@@ -14,12 +16,13 @@ pub fn get_type_only_import_rule(enable_mdx_rs: bool) -> ModuleRule {
     )
 }
 
-/// Normalizes `import { type Foo }` to the AST equivalent of `import type { Foo }`
-/// when every specifier is type-only.
+/// Normalizes inline type-only imports and exports to their declaration-level
+/// equivalents when every specifier is type-only.
 ///
 /// Utoopack enables SWC's `verbatimModuleSyntax` behavior by default so unused value
 /// imports survive classic JSX transforms. Without this normalization, SWC preserves
-/// an all-type named import as `import {}` and creates an unintended runtime dependency.
+/// all-type named imports and exports as `import {}` or `export {}` and creates
+/// unintended runtime dependencies.
 #[derive(Debug)]
 struct TypeOnlyImportTransformer;
 
@@ -36,12 +39,40 @@ impl CustomTransformer for TypeOnlyImportTransformer {
         };
 
         for item in &mut module.body {
-            if let ModuleItem::ModuleDecl(ModuleDecl::Import(import)) = item {
-                normalize_type_only_import(import);
+            match item {
+                ModuleItem::ModuleDecl(ModuleDecl::Import(import)) => {
+                    normalize_type_only_import(import);
+                }
+                ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(export)) => {
+                    normalize_type_only_export(export);
+                }
+                _ => {}
             }
         }
 
         Ok(())
+    }
+}
+
+fn normalize_type_only_export(export: &mut NamedExport) {
+    if export.type_only || export.specifiers.is_empty() {
+        return;
+    }
+
+    let all_specifiers_are_type_only = export.specifiers.iter().all(|specifier| {
+        matches!(
+            specifier,
+            ExportSpecifier::Named(named) if named.is_type_only
+        )
+    });
+
+    if all_specifiers_are_type_only {
+        export.type_only = true;
+        for specifier in &mut export.specifiers {
+            if let ExportSpecifier::Named(named) = specifier {
+                named.is_type_only = false;
+            }
+        }
     }
 }
 
