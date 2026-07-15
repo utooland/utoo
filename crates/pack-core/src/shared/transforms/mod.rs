@@ -25,6 +25,7 @@ pub mod remove_console;
 pub mod styled_components;
 pub mod styled_jsx;
 pub mod swc_ecma_transform_plugins;
+pub mod type_only_import;
 pub mod wasm;
 pub mod webpack_public_path;
 
