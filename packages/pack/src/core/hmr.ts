@@ -198,6 +198,7 @@ export async function createHotReloader(
       {
         processEnv: bundleOptions.processEnv ?? {},
         watch: {
+          ...bundleOptions.watch,
           enable: true,
         },
         dev: true,
