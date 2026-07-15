@@ -26,6 +26,12 @@ import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
+import {
+  deleteClientSubscriptionIfCurrent,
+  enqueueTurbopackUpdateForClient,
+  isCurrentClientSubscription,
+  unsubscribeClient,
+} from "./hmrClientState";
 import { projectFactory } from "./project";
 import { Endpoint, Project, Update as TurbopackUpdate } from "./types";
 
@@ -293,12 +299,8 @@ export async function createHotReloader(
   }
   const sendEnqueuedMessagesDebounce = debounce(sendEnqueuedMessages, 2);
 
-  function sendTurbopackMessage(payload: TurbopackUpdate) {
-    payload.issues = [];
-
-    for (const client of clients) {
-      clientStates.get(client)?.turbopackUpdates.push(payload);
-    }
+  function sendTurbopackMessage(client: WSLike, payload: TurbopackUpdate) {
+    enqueueTurbopackUpdateForClient(clientStates, client, payload);
 
     hmrEventHappened = true;
     sendEnqueuedMessagesDebounce();
@@ -502,10 +504,22 @@ export async function createHotReloader(
       for await (const data of subscription) {
         processIssues(state.clientIssues, issueKey, data, false, true);
         if (data.type !== "issues") {
-          sendTurbopackMessage(data);
+          sendTurbopackMessage(client, data);
         }
       }
     } catch (e) {
+      if (
+        !isCurrentClientSubscription(
+          clientStates,
+          client,
+          state,
+          id,
+          subscription,
+        )
+      ) {
+        return;
+      }
+
       // The client might be using an HMR session from a previous server, tell them
       // to fully reload the page to resolve the issue. We can't use
       // `hotReloader.send` since that would force every connected client to
@@ -517,6 +531,12 @@ export async function createHotReloader(
       sendToClient(client, reloadAction);
       client.close();
       return;
+    } finally {
+      if (
+        deleteClientSubscriptionIfCurrent(state.subscriptions, id, subscription)
+      ) {
+        state.clientIssues.delete(issueKey);
+      }
     }
   }
 
@@ -526,8 +546,7 @@ export async function createHotReloader(
       return;
     }
 
-    const subscription = state.subscriptions.get(id);
-    subscription?.return!();
+    unsubscribeClient(state.subscriptions, id);
     state.clientIssues.delete(getClientIssueKey(id));
   }
 
