@@ -45,6 +45,7 @@ use crate::{
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
+            type_only_import::get_type_only_import_rule,
         },
         webpack_rules::{WebpackLoaderBuiltinCondition, webpack_loader_options},
     },
@@ -159,6 +160,9 @@ pub async fn get_server_module_options_context(
 
     let mut server_rules = get_server_transforms_rules(config, false).await?;
     let mut foreign_server_rules = get_server_transforms_rules(config, true).await?;
+
+    server_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
+    foreign_server_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(

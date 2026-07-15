@@ -1,0 +1,16 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.tsx",
+                "name": "main"
+            }
+        ],
+        "optimization": {
+            "minify": false
+        },
+        "react": {
+            "runtime": "classic"
+        }
+    }
+}
