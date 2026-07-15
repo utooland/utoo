@@ -1,7 +1,8 @@
 const assert = require("node:assert");
 const fs = require("node:fs");
+const path = require("node:path");
 
-const runtime = fs.readFileSync("./output/main.js", "utf8");
+const runtime = fs.readFileSync(path.join(__dirname, "output", "main.js"), "utf8");
 
 assert.match(
   runtime,
