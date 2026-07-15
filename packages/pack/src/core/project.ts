@@ -389,6 +389,10 @@ async function rustifyPartialProjectOptions(
     config:
       options.config && (await serializeConfig(options.config, !!options.dev)),
     processEnv: options.processEnv && rustifyEnv(options.processEnv),
+    watch: options.watch && {
+      ...options.watch,
+      enable: options.watch.enable ?? false,
+    },
   };
 }
 
@@ -411,6 +415,10 @@ async function rustifyProjectOptions(
     packPath: normalizePath(options.packPath),
     config: await serializeConfig(options.config, options.dev),
     processEnv: rustifyEnv(options.processEnv ?? {}),
+    watch: {
+      ...options.watch,
+      enable: options.watch.enable ?? false,
+    },
   };
 }
 
