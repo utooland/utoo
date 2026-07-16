@@ -1,8 +1,8 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-728, ((__turbopack_context__) => {
+727, ((__turbopack_context__) => {
 
 __turbopack_context__.q("/sw.3abde911.js");}),
-101, ((__turbopack_context__) => {
+473, ((__turbopack_context__) => {
 
 __turbopack_context__.q("/MainWorker.f5cc1aa6.js");}),
 730, ((__turbopack_context__) => {
@@ -71,21 +71,21 @@ __turbopack_context__.s([
     generateCreateWorker
 ]);
 }),
-544, ((__turbopack_context__) => {
+675, ((__turbopack_context__) => {
 
-__turbopack_context__.v(__turbopack_context__.r(730)["default"]("turbopack-worker-_client-fs___664a0dec.js", ["node_modules_muse-browser_processes_main_MainWorker_eb43b288.js","turbopack-node_modules_muse-browser_processes_main_MainWorker_6170eba7.js"]));
+__turbopack_context__.v(__turbopack_context__.r(730)["default"]("turbopack-worker-_client-fs___664a0dec.js", ["node_modules_static-url-package_processes_main_MainWorker_c161afb6.js","turbopack-node_modules_static-url-package_processes_main_MainWorker_b41ea254.js"]));
 }),
-154, ((__turbopack_context__) => {
+936, ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
-        return __turbopack_context__.F("node_modules/muse-browser/index.js");
+        return __turbopack_context__.F("node_modules/static-url-package/index.js");
     }
 };
-const resourceProxyUrl = new __turbopack_context__.U(__turbopack_context__.r(728)).toString();
+const resourceProxyUrl = new __turbopack_context__.U(__turbopack_context__.r(727)).toString();
 function createMainWorker() {
-    return __turbopack_context__.r(544)(Worker);
+    return __turbopack_context__.r(675)(Worker);
 }
 __turbopack_context__.s([
     "createMainWorker",
@@ -99,11 +99,11 @@ __turbopack_context__.s([
 197, ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__154__ = __turbopack_context__.i(154);
+var __TURBOPACK__imported__module__936__ = __turbopack_context__.i(936);
 ;
-console.log(__TURBOPACK__imported__module__154__["createMainWorker"], __TURBOPACK__imported__module__154__["resourceProxyUrl"]);
+console.log(__TURBOPACK__imported__module__936__["createMainWorker"], __TURBOPACK__imported__module__936__["resourceProxyUrl"]);
 __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=_root-of-the-server___ceb67244.js.map
+//# sourceMappingURL=_root-of-the-server___b9fc4bc9.js.map

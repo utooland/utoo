@@ -1,6 +1,6 @@
 import {
   createMainWorker,
   resourceProxyUrl,
-} from 'muse-browser'
+} from 'static-url-package'
 
 console.log(createMainWorker, resourceProxyUrl)
