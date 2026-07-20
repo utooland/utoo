@@ -34,6 +34,7 @@ import {
   deleteClientSubscriptionIfCurrent,
   enqueueTurbopackUpdateForClient,
   isCurrentClientSubscription,
+  unsubscribeAllClientSubscriptions,
   unsubscribeClient,
 } from "./hmrClientState";
 import { projectFactory } from "./project";
@@ -617,9 +618,7 @@ export async function createHotReloader(
 
         client.on("close", () => {
           // Remove active subscriptions
-          for (const subscription of subscriptions.values()) {
-            subscription.return?.();
-          }
+          void unsubscribeAllClientSubscriptions(subscriptions);
           clientStates.delete(client);
           clients.delete(client);
         });
@@ -726,9 +725,7 @@ export async function createHotReloader(
     unregisterClient(ws) {
       const state = clientStates.get(ws);
       if (state) {
-        for (const subscription of state.subscriptions.values()) {
-          subscription.return?.();
-        }
+        void unsubscribeAllClientSubscriptions(state.subscriptions);
       }
       clientStates.delete(ws);
       clients.delete(ws);

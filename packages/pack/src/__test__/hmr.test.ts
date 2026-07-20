@@ -3,6 +3,7 @@ import {
   deleteClientSubscriptionIfCurrent,
   enqueueTurbopackUpdateForClient,
   isCurrentClientSubscription,
+  unsubscribeAllClientSubscriptions,
   unsubscribeClient,
 } from "../core/hmrClientState";
 
@@ -63,6 +64,36 @@ describe("HMR client delivery", () => {
 });
 
 describe("HMR subscription lifecycle", () => {
+  it("safely cleans every subscription when a client disconnects", async () => {
+    const remainingSizes: number[] = [];
+    const subscriptions = new Map([
+      [
+        "throwing",
+        {
+          return: vi.fn(() => {
+            remainingSizes.push(subscriptions.size);
+            throw new Error("cleanup failed");
+          }),
+        },
+      ],
+      [
+        "rejecting",
+        {
+          return: vi.fn(() => {
+            remainingSizes.push(subscriptions.size);
+            return Promise.reject(new Error("async cleanup failed"));
+          }),
+        },
+      ],
+    ]);
+
+    const cleanup = unsubscribeAllClientSubscriptions(subscriptions);
+
+    expect(subscriptions.size).toBe(0);
+    expect(remainingSizes).toEqual([0, 0]);
+    await expect(cleanup).resolves.toBeUndefined();
+  });
+
   it("deletes a subscription before returning it so it can resubscribe", () => {
     const subscription = { return: vi.fn() };
     const subscriptions = new Map([["route", subscription]]);
