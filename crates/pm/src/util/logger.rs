@@ -8,9 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::util::format_print::{HeartbeatScript, print_script_heartbeat};
 use crate::util::install_progress;
 
+use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::{Lazy, OnceCell};
-use owo_colors::OwoColorize;
 
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
@@ -82,7 +82,7 @@ impl Drop for ProgressConsoleWriter {
         }
         PROGRESS_BAR.suspend(|| {
             use std::io::Write;
-            let _ = std::io::stdout().write_all(&self.0);
+            let _ = std::io::stderr().write_all(&self.0);
         });
     }
 }
@@ -92,14 +92,24 @@ static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
 
 /// Initialize tracing subscriber with console and file output
 /// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
-pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
+pub fn init_tracing(verbose: bool, quiet: bool) -> Result<(PathBuf, WorkerGuard)> {
     // 1. Build environment filters
     // Note: Binary name is "utoo", so module paths start with "utoo::" not "utoo_pm::"
 
     // Console filter: verbose mode shows debug, otherwise show info+
-    let console_level = if verbose { "debug" } else { "info" };
-    let console_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}")));
+    let console_level = if quiet {
+        "off"
+    } else if verbose {
+        "debug"
+    } else {
+        "info"
+    };
+    let console_filter = if quiet {
+        EnvFilter::new("off")
+    } else {
+        EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}")))
+    };
 
     // File filter: always capture debug+ for troubleshooting
     let file_filter = EnvFilter::new("utoo=debug");
@@ -118,7 +128,7 @@ pub fn init_tracing(verbose: bool) -> Result<(PathBuf, WorkerGuard)> {
     LOG_FILE_PATH.set(log_path.clone()).ok();
 
     // 3. Detect if stdout is a TTY (terminal) to decide on colors
-    let is_tty = std::io::stdout().is_terminal();
+    let is_tty = std::io::stderr().is_terminal();
 
     // 4. Build subscriber with different filters for console and file
     Registry::default()
@@ -159,6 +169,9 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
 /// degrade just as quietly. Plain `println!` would instead panic with
 /// "failed printing to stdout: Broken pipe" at the finish line.
 fn println_lossy(args: std::fmt::Arguments<'_>) {
+    if crate::util::invocation::json() || crate::util::invocation::quiet() {
+        return;
+    }
     use std::io::Write;
     // Lock once so the line and its newline are written under a single lock
     // (no interleaving with other writers), and stream `args` straight to the
@@ -345,7 +358,7 @@ fn stop_render_task() {
 }
 
 pub fn start_progress_bar() {
-    if !*IS_TTY {
+    if !*IS_TTY || crate::util::invocation::json() || crate::util::invocation::quiet() {
         return;
     }
     install_progress::reset_phase_state();

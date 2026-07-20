@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -30,10 +31,38 @@ pub async fn publish(
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let roots = resolve_publish_roots(&cwd, filter).await?;
+    let mut packages = Vec::with_capacity(roots.len());
     for root in roots {
-        publish_one(&root, tag, mode, otp, access, provenance).await?;
+        packages.push(publish_one(&root, tag, mode, otp, access, provenance).await?);
     }
-    Ok(())
+    let output = PublishOutput {
+        dry_run: mode == RunMode::DryRun,
+        packages,
+    };
+    crate::util::presenter::emit("publish", &output, || {
+        let mut stdout = io::stdout().lock();
+        for package in &output.packages {
+            if output.dry_run {
+                print_resolved_protocol_deps(&mut stdout, &package.resolved_dependencies)?;
+                writeln!(
+                    stdout,
+                    "{}",
+                    format!(
+                        "(dry run) Would publish {}@{} to {} with tag '{}'",
+                        package.name, package.version, package.registry, package.tag
+                    )
+                    .yellow()
+                )?;
+            } else {
+                writeln!(
+                    stdout,
+                    "{}",
+                    format!("+ {}@{}", package.name, package.version).green()
+                )?;
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Resolve the set of package directories to publish, preserving workspace
@@ -72,7 +101,7 @@ async fn publish_one(
     otp: Option<&str>,
     access: Option<PublishAccess>,
     provenance: bool,
-) -> Result<()> {
+) -> Result<PublishedPackage> {
     // Run each publish from inside its own package directory, matching the
     // single-package flow (`update_cwd_to_project`). The filtered path anchors
     // resolution at the workspace root, so without this every member would
@@ -87,6 +116,7 @@ async fn publish_one(
 
     let tag = meta.resolve_tag(tag)?;
     let access = meta.resolve_access(access)?;
+    let access_name: &'static str = access.into();
     // CLI `--provenance` OR `publishConfig.provenance` OR `NPM_CONFIG_PROVENANCE`.
     let provenance = meta.resolve_provenance(provenance);
     let registry = meta
@@ -107,29 +137,18 @@ async fn publish_one(
     })
     .await?;
 
-    let mut stdout = io::stdout().lock();
-    if mode == RunMode::DryRun {
-        // Surface `workspace:`/`catalog:` specifiers rewritten to concrete
-        // versions so the user can confirm resolution before publishing.
-        print_resolved_protocol_deps(&mut stdout, &pkg, &result.pack.manifest)?;
-        writeln!(
-            stdout,
-            "{}",
-            format!(
-                "(dry run) Would publish {}@{} to {} with tag '{}'",
-                result.pack.name, result.pack.version, result.registry, result.tag
-            )
-            .yellow()
-        )?;
-    } else {
-        writeln!(
-            stdout,
-            "{}",
-            format!("+ {}@{}", result.pack.name, result.pack.version).green()
-        )?;
-    }
-
-    Ok(())
+    Ok(PublishedPackage {
+        name: result.pack.name,
+        version: result.pack.version,
+        registry: result.registry,
+        tag: result.tag,
+        access: access_name,
+        provenance,
+        files: result.pack.files.len(),
+        packed_size: result.pack.packed_size,
+        integrity: result.pack.integrity,
+        resolved_dependencies: resolved_protocol_deps(&pkg, &result.pack.manifest),
+    })
 }
 
 /// Print dependencies whose `workspace:`/`catalog:` specifier was rewritten to a
@@ -139,9 +158,32 @@ async fn publish_one(
 /// standalone package), nothing is printed. Entries are sorted for stable output.
 fn print_resolved_protocol_deps(
     w: &mut impl Write,
+    rewritten: &[ResolvedDependency],
+) -> io::Result<()> {
+    if rewritten.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(w, "{}", "Resolved workspace/catalog dependencies:".dimmed())?;
+    for dep in rewritten {
+        writeln!(
+            w,
+            "  {} {}: {} {} {}",
+            dep.dependency_type.dimmed(),
+            dep.name,
+            dep.from,
+            "->".dimmed(),
+            dep.to.green()
+        )?;
+    }
+    writeln!(w)?;
+    Ok(())
+}
+
+fn resolved_protocol_deps(
     original: &PackageJson,
     resolved: &PackageJson,
-) -> io::Result<()> {
+) -> Vec<ResolvedDependency> {
     type DepMap = Option<HashMap<String, String>>;
     let maps: [(&str, &DepMap, &DepMap); 4] = [
         (
@@ -166,7 +208,7 @@ fn print_resolved_protocol_deps(
         ),
     ];
 
-    let mut rewritten: Vec<(&str, &str, &str, &str)> = Vec::new();
+    let mut rewritten = Vec::new();
     for (label, orig, res) in maps {
         let (Some(orig), Some(res)) = (orig, res) else {
             continue;
@@ -175,27 +217,49 @@ fn print_resolved_protocol_deps(
             if Protocol::strip_prefix(spec).is_some()
                 && let Some(resolved_spec) = res.get(name)
             {
-                rewritten.push((label, name, spec, resolved_spec));
+                rewritten.push(ResolvedDependency {
+                    dependency_type: label.to_string(),
+                    name: name.clone(),
+                    from: spec.clone(),
+                    to: resolved_spec.clone(),
+                });
             }
         }
     }
 
-    if rewritten.is_empty() {
-        return Ok(());
-    }
+    rewritten
+        .sort_unstable_by(|a, b| (&a.dependency_type, &a.name).cmp(&(&b.dependency_type, &b.name)));
+    rewritten
+}
 
-    rewritten.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-    writeln!(w, "{}", "Resolved workspace/catalog dependencies:".dimmed())?;
-    for (label, name, orig_spec, resolved_spec) in rewritten {
-        writeln!(
-            w,
-            "  {} {name}: {} {} {}",
-            label.dimmed(),
-            orig_spec,
-            "->".dimmed(),
-            resolved_spec.green()
-        )?;
-    }
-    writeln!(w)?;
-    Ok(())
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishOutput {
+    dry_run: bool,
+    packages: Vec<PublishedPackage>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublishedPackage {
+    name: String,
+    version: String,
+    registry: String,
+    tag: String,
+    access: &'static str,
+    provenance: bool,
+    files: usize,
+    packed_size: u64,
+    integrity: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    resolved_dependencies: Vec<ResolvedDependency>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolvedDependency {
+    dependency_type: String,
+    name: String,
+    from: String,
+    to: String,
 }

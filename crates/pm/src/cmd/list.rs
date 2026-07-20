@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use petgraph::graph::NodeIndex;
+use serde::Serialize;
 
 use crate::service::dependency_graph::{LockGraphService, build_dep_tree};
 use crate::util::format_print::print_dep_tree;
@@ -22,9 +24,7 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
     let graph = LockGraphService::from_lock_file(&lock_file_path)
         .context("Failed to load and parse package-lock.json")?;
 
-    show_package_dependencies(&graph, package_name)?;
-
-    Ok(())
+    show_package_dependencies(&graph, package_name)
 }
 
 /// Display dependency information for a specific package
@@ -35,8 +35,52 @@ fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Re
         return Ok(());
     }
     let tree = build_dep_tree(&node_paths);
-    print_dep_tree(&tree, graph, "", true, &[package_name]);
-    Ok(())
+    let output = ListOutput {
+        package: package_name,
+        dependencies: tree
+            .children
+            .values()
+            .filter_map(|node| dependency_node(node, graph))
+            .collect(),
+    };
+    crate::util::presenter::emit("list", &output, || {
+        print_dep_tree(&tree, graph, "", true, &[package_name]);
+        Ok(())
+    })
+}
+
+fn dependency_node(
+    node: &crate::service::dependency_graph::DepTreeNode,
+    graph: &LockGraphService,
+) -> Option<DependencyNode> {
+    if node.index == NodeIndex::end() {
+        return None;
+    }
+    let package = graph.get_graph().node_weight(node.index)?;
+    Some(DependencyNode {
+        name: package.name().to_string(),
+        version: package.version().to_string(),
+        path: package.path.clone(),
+        dependencies: node
+            .children
+            .values()
+            .filter_map(|child| dependency_node(child, graph))
+            .collect(),
+    })
+}
+
+#[derive(Serialize)]
+struct ListOutput<'a> {
+    package: &'a str,
+    dependencies: Vec<DependencyNode>,
+}
+
+#[derive(Serialize)]
+struct DependencyNode {
+    name: String,
+    version: String,
+    path: String,
+    dependencies: Vec<DependencyNode>,
 }
 
 #[cfg(test)]

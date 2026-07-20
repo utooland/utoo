@@ -23,7 +23,7 @@ use crate::constants::APP_VERSION;
 use crate::util::http::client_builder;
 use crate::util::user_config::get_registry;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -49,6 +49,10 @@ const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours
 ///
 /// Either way this function returns quickly and never blocks the main command.
 pub async fn init_auto_update() {
+    if crate::util::invocation::json() || crate::util::invocation::quiet() {
+        return;
+    }
+
     let force = std::env::var("UTOO_FORCE_UPDATE").is_ok_and(|v| v == "1" || v == "true");
 
     // UTOO_FORCE_UPDATE=1: skip all guards, fetch and update immediately

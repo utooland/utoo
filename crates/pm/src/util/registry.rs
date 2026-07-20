@@ -77,17 +77,19 @@ pub async fn select_fastest_registry() -> String {
         }
     };
 
-    eprintln!(
-        "{} {} ({})",
-        "Registry:".dimmed(),
-        registry.cyan(),
-        latency_info
-    );
-    eprintln!(
-        "{} {}",
-        "Tip:".dimmed(),
-        format!("ut config set registry {} --global", registry).yellow()
-    );
+    if !crate::util::invocation::json() && !crate::util::invocation::quiet() {
+        eprintln!(
+            "{} {} ({})",
+            "Registry:".dimmed(),
+            registry.cyan(),
+            latency_info
+        );
+        eprintln!(
+            "{} {}",
+            "Tip:".dimmed(),
+            format!("ut config set registry {} --global", registry).yellow()
+        );
+    }
 
     registry
 }

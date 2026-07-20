@@ -21,6 +21,13 @@ pub async fn run(
     let (script_name, filter) = if let Some(name) = script_name {
         (name.to_string(), filter)
     } else {
+        if !crate::util::invocation::interactive() {
+            return Err(crate::error::CliError::usage(
+                "a script name is required in non-interactive mode",
+            )
+            .with_suggestion("run `utoo run <script>`")
+            .into());
+        }
         let single_ws = match &filter {
             WorkspaceFilter::Selected(ws) if ws.len() == 1 => Some(ws[0].as_str()),
             _ => None,

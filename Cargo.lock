@@ -10686,7 +10686,6 @@ dependencies = [
  "mockito",
  "once_cell",
  "open",
- "owo-colors",
  "pathdiff",
  "petgraph 0.6.5",
  "rayon",

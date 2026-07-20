@@ -54,7 +54,11 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     ScriptService::execute_script(
         &package_info,
         LifecycleHook::Prepack,
-        ScriptOutput::Verbose,
+        if crate::util::invocation::json() {
+            ScriptOutput::Silent
+        } else {
+            ScriptOutput::Verbose
+        },
         None,
     )
     .await?;
@@ -106,7 +110,11 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     ScriptService::execute_script(
         &package_info,
         LifecycleHook::Postpack,
-        ScriptOutput::Verbose,
+        if crate::util::invocation::json() {
+            ScriptOutput::Silent
+        } else {
+            ScriptOutput::Verbose
+        },
         None,
     )
     .await?;

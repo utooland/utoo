@@ -24,6 +24,7 @@ use crate::util::user_config::{
 mod cli;
 mod cmd;
 mod constants;
+mod error;
 mod fs;
 mod helper;
 mod model;
@@ -49,13 +50,40 @@ fn main() {
         // `utoo run <script>` mirrors the script: a non-zero `exit N` becomes
         // N, and a signal death (e.g. SIGPIPE from `script | head`) becomes
         // 128+N. Any other error keeps the generic exit code 1.
-        let exit_code = e.downcast_ref::<ScriptExit>().map_or(1, |s| s.code);
-        if let Some(chain) = util::format_print::format_resolve_chain(&e) {
-            tracing::error!("{:#}\n\n{chain}", e);
+        let exit_code = e
+            .downcast_ref::<ScriptExit>()
+            .map_or_else(|| error::classify(&e).exit_code() as i32, |s| s.code);
+        let chain = util::format_print::format_resolve_chain(&e);
+        if util::invocation::json() {
+            let cli_error = e.downcast_ref::<error::CliError>();
+            let mut payload = serde_json::json!({
+                "error": {
+                    "category": error::classify(&e),
+                    "code": exit_code,
+                    "message": cli_error.map_or_else(|| format!("{e:#}"), |e| e.message().to_string()),
+                }
+            });
+            if let Some(suggestion) = cli_error.and_then(error::CliError::suggestion) {
+                payload["error"]["suggestion"] = suggestion.into();
+            }
+            if let Some(chain) = &chain {
+                payload["error"]["requiredBy"] = chain
+                    .lines()
+                    .skip(1)
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+                    .into();
+            }
+            eprintln!("{payload}");
+        } else if let Some(chain) = chain {
+            eprintln!("error: {e:#}\n\n{chain}");
         } else {
-            tracing::error!("{:#}", e);
+            eprintln!("error: {e:#}");
         }
-        if let Some(log_path) = get_log_file_path() {
+        if !util::invocation::json()
+            && !util::invocation::quiet()
+            && let Some(log_path) = get_log_file_path()
+        {
             eprintln!("Full logs saved to: {}", log_path.display());
         }
         process::exit(exit_code);
@@ -64,6 +92,12 @@ fn main() {
 
 async fn async_main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+
+    util::invocation::configure_color(
+        args.iter()
+            .any(|arg| matches!(arg.as_str(), "--json" | "--no-color"))
+            || std::env::var_os("NO_COLOR").is_some(),
+    );
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
@@ -74,7 +108,41 @@ async fn async_main() -> Result<()> {
     }
 
     log_time(); // Start global timer
-    let cli = Cli::parse();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            if args.iter().any(|arg| arg == "--json")
+                && !matches!(
+                    error.kind(),
+                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                )
+            {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({
+                        "error": {
+                            "category": "usage",
+                            "code": 2,
+                            "message": error.to_string().trim(),
+                        }
+                    })
+                );
+                process::exit(2);
+            }
+            error.exit();
+        }
+    };
+    util::invocation::init(util::invocation::Invocation {
+        json: cli.json,
+        quiet: cli.quiet,
+        no_color: cli.no_color,
+    });
+    if cli.json
+        && let Some(command) = &cli.command
+        && !command.supports_json()
+    {
+        return Err(error::CliError::usage("--json is not supported by this command yet").into());
+    }
 
     // Check for version flag
     if cli.version {
@@ -117,7 +185,8 @@ async fn async_main() -> Result<()> {
     }
 
     // Initialize tracing (replaces set_verbose)
-    let (log_file, _guard) = init_tracing(cli.verbose).context("Failed to initialize logging")?;
+    let (log_file, _guard) =
+        init_tracing(cli.verbose, cli.quiet || cli.json).context("Failed to initialize logging")?;
 
     tracing::debug!(
         log_file = %log_file.display(),
@@ -259,6 +328,9 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Config { command }) => {
             cmd::config::run(command).await?;
+        }
+        Some(Commands::Skill { command }) => {
+            cmd::skill::run(command).await?;
         }
         None => match cli.script_name {
             // A bare `utoo <name>`: custom command from config, else script

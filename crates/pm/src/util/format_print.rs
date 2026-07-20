@@ -390,13 +390,11 @@ pub fn print_dep_tree(
     }
 }
 
-/// Display helpers for `ut view`. Kept in their own module because they use
-/// `owo_colors` while the rest of this file uses `colored`; both traits have
-/// blanket-style impls whose methods collide when imported in the same scope.
+/// Display helpers for `ut view`.
 mod package_view {
     use anyhow::Result;
     use chrono::Utc;
-    use owo_colors::OwoColorize;
+    use colored::Colorize;
     use utoo_ruborist::manifest::{FullManifest, VersionManifest};
 
     use super::print_grid;
@@ -459,7 +457,7 @@ mod package_view {
             version_manifest.core.version.bright_green(),
             license.yellow(),
             deps_str.cyan(),
-            versions_count.magenta()
+            versions_count.to_string().magenta()
         );
 
         if !description.is_empty() {
@@ -582,7 +580,7 @@ mod package_view {
             println!(
                 "\n{} {}",
                 "dependencies:".bright_yellow().bold(),
-                dependencies.len().white()
+                dependencies.len().to_string().white()
             );
 
             let show_count = 24;

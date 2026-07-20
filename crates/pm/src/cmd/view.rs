@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result, anyhow};
+use serde::Serialize;
 use utoo_ruborist::manifest::VersionManifest;
 use utoo_ruborist::service::{MetadataFormat, fetch_full_manifest_fresh};
 use utoo_ruborist::util::parse_package_spec;
@@ -45,10 +46,46 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
         .get_full_version(&resolved_version)
         .ok_or_else(|| anyhow!("Version {} not found for {}", resolved_version, name))?;
 
-    // Print package information in npm view format
-    print_package_info(&full_manifest, &version_manifest)?;
+    let output = ViewOutput {
+        name: &version_manifest.core.name,
+        version: &version_manifest.core.version,
+        description: version_manifest
+            .description
+            .as_deref()
+            .or(full_manifest.description.as_deref()),
+        license: version_manifest
+            .core
+            .license
+            .as_deref()
+            .or(full_manifest.license.as_deref()),
+        homepage: version_manifest
+            .homepage
+            .as_deref()
+            .or(full_manifest.homepage.as_deref()),
+        dependencies: version_manifest.core.dependencies.as_ref(),
+        dist_tags: &full_manifest.dist_tags,
+        dist: &version_manifest.core.dist,
+    };
+    crate::util::presenter::emit("view", &output, || {
+        print_package_info(&full_manifest, &version_manifest)
+    })
+}
 
-    Ok(())
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ViewOutput<'a> {
+    name: &'a str,
+    version: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    license: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    homepage: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dependencies: Option<&'a std::collections::HashMap<String, String>>,
+    dist_tags: &'a std::collections::HashMap<String, String>,
+    dist: &'a utoo_ruborist::manifest::Dist,
 }
 
 #[cfg(test)]

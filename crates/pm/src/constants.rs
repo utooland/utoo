@@ -84,4 +84,7 @@ pub mod cmd {
     pub const COMPLETIONS_ALIAS: &str = "cmp";
     pub const COMPLETIONS_ABOUT: &str = "Generate shell completion scripts";
     pub const COMPLETIONS_LONG_ABOUT: &str = "Generate shell completion scripts\n\nAdd to your shell config:\n  bash:  echo 'eval \"$(utoo completions bash)\"' >> ~/.bashrc\n  zsh:   echo 'eval \"$(utoo completions zsh)\"' >> ~/.zshrc\n  fish:  utoo completions fish > ~/.config/fish/completions/utoo.fish";
+
+    pub const SKILL_NAME: &str = "skill";
+    pub const SKILL_ABOUT: &str = "Install the official utoo Agent Skill";
 }

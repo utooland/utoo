@@ -64,7 +64,11 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::PrepublishOnly,
-        ScriptOutput::Verbose,
+        if crate::util::invocation::json() {
+            ScriptOutput::Silent
+        } else {
+            ScriptOutput::Verbose
+        },
         None,
     )
     .await?;
@@ -75,7 +79,9 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     let tarball_data = &pack_result.tarball_data;
     let shasum = compute_shasum(tarball_data);
 
-    print_pack_details(&mut std::io::stdout().lock(), &pack_result, Some(&shasum))?;
+    if !crate::util::invocation::json() {
+        print_pack_details(&mut std::io::stdout().lock(), &pack_result, Some(&shasum))?;
+    }
 
     if opts.mode == RunMode::DryRun {
         return Ok(PublishResult {
@@ -155,14 +161,22 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::Publish,
-        ScriptOutput::Verbose,
+        if crate::util::invocation::json() {
+            ScriptOutput::Silent
+        } else {
+            ScriptOutput::Verbose
+        },
         None,
     )
     .await?;
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::Postpublish,
-        ScriptOutput::Verbose,
+        if crate::util::invocation::json() {
+            ScriptOutput::Silent
+        } else {
+            ScriptOutput::Verbose
+        },
         None,
     )
     .await?;

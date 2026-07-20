@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Result, anyhow};
+use serde::Serialize;
 
 use crate::cli::ConfigCommands;
 use crate::util::cli_enum::ConfigScope;
@@ -31,14 +32,22 @@ fn parse_key_val(s: &str) -> Result<(String, String)> {
 
 pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -> Result<()> {
     let mut config = Config::load(scope).await?;
-    config.set(&key, value, scope)?;
+    config.set(&key, value.clone(), scope)?;
     let label = if scope == ConfigScope::Global {
         "global"
     } else {
         "local"
     };
-    println!("Successfully set {key} ({label})");
-    Ok(())
+    let output = ConfigSetOutput {
+        key: &key,
+        value: &value,
+        scope: label,
+        changed: true,
+    };
+    crate::util::presenter::emit("config set", &output, || {
+        println!("Successfully set {key} ({label})");
+        Ok(())
+    })
 }
 
 pub async fn handle_config_get(
@@ -52,14 +61,15 @@ pub async fn handle_config_get(
         .collect();
 
     if let Some(value) = overrides.get(&key) {
-        println!("{value}");
+        emit_config_get(&key, value, "override")?;
     } else {
         let config = Config::load(scope).await?;
         match config.get(&key)? {
-            Some(value) => println!("{value}"),
+            Some(value) => emit_config_get(&key, &value, scope_label(scope))?,
             None => {
-                eprintln!("Key '{key}' not found");
-                std::process::exit(1);
+                return Err(
+                    crate::error::CliError::not_found(format!("Key '{key}' not found")).into(),
+                );
             }
         }
     }
@@ -73,14 +83,67 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
         ConfigScope::Local => config.get_local_config_path()?,
     };
 
-    println!("Configuration file: {}", config_path.display());
-    println!();
+    let values: BTreeMap<&str, &str> = config
+        .list()?
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let arrays: BTreeMap<&str, &Vec<String>> = config
+        .list_arrays()
+        .map(|(key, values)| (key.as_str(), values))
+        .collect();
+    let output = ConfigListOutput {
+        path: config_path.display().to_string(),
+        scope: scope_label(scope),
+        values,
+        arrays,
+    };
+    crate::util::presenter::emit("config list", &output, || {
+        println!("Configuration file: {}", config_path.display());
+        println!();
+        for (key, value) in config.list()? {
+            println!("{key} = {value}");
+        }
+        for (key, values) in config.list_arrays() {
+            println!("{key} = [{}]", values.join(", "));
+        }
+        Ok(())
+    })
+}
 
-    for (key, value) in config.list()? {
-        println!("{key} = {value}");
+fn emit_config_get(key: &str, value: &str, source: &str) -> Result<()> {
+    let output = ConfigGetOutput { key, value, source };
+    crate::util::presenter::emit("config get", &output, || {
+        println!("{value}");
+        Ok(())
+    })
+}
+
+fn scope_label(scope: ConfigScope) -> &'static str {
+    match scope {
+        ConfigScope::Global => "global",
+        ConfigScope::Local => "local",
     }
-    for (key, values) in config.list_arrays() {
-        println!("{key} = [{}]", values.join(", "));
-    }
-    Ok(())
+}
+
+#[derive(Serialize)]
+struct ConfigSetOutput<'a> {
+    key: &'a str,
+    value: &'a str,
+    scope: &'a str,
+    changed: bool,
+}
+
+#[derive(Serialize)]
+struct ConfigGetOutput<'a> {
+    key: &'a str,
+    value: &'a str,
+    source: &'a str,
+}
+
+#[derive(Serialize)]
+struct ConfigListOutput<'a> {
+    path: String,
+    scope: &'a str,
+    values: BTreeMap<&'a str, &'a str>,
+    arrays: BTreeMap<&'a str, &'a Vec<String>>,
 }

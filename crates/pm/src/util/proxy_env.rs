@@ -24,6 +24,10 @@ where
 }
 
 pub fn print_proxy_env_hint_once() {
+    if crate::util::invocation::json() || crate::util::invocation::quiet() {
+        return;
+    }
+
     PRINT_PROXY_HINT_ONCE.call_once(|| {
         let detected =
             collect_proxy_env_vars_from(PROXY_ENV_VARS.map(|key| (key, std::env::var_os(key))));

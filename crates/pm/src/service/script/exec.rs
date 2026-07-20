@@ -248,11 +248,19 @@ impl ScriptService {
                     // rather than letting the install bail cleanly.
                     use std::io::Write as _;
                     if !output.stdout.is_empty() {
-                        let _ = writeln!(
-                            std::io::stdout(),
-                            "{}",
-                            String::from_utf8_lossy(&output.stdout)
-                        );
+                        if crate::util::invocation::json() {
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "{}",
+                                String::from_utf8_lossy(&output.stdout)
+                            );
+                        } else {
+                            let _ = writeln!(
+                                std::io::stdout(),
+                                "{}",
+                                String::from_utf8_lossy(&output.stdout)
+                            );
+                        }
                     }
                     if !output.stderr.is_empty() {
                         let _ = writeln!(

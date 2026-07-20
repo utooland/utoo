@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use colored::Colorize;
 use once_cell::sync::Lazy;
-use owo_colors::OwoColorize;
 
 /// Process-lifetime tarball bytes fetched from the network (counted as chunks
 /// arrive, so retries count their real traffic).
@@ -440,7 +440,11 @@ fn decimal_width(n: u64) -> usize {
 /// never shrinks mid-phase.
 pub fn format_counter(pos: u64, len: u64) -> String {
     let width = decimal_width(len);
-    format!("{}/{}", format!("{pos:>width$}").green(), len.magenta())
+    format!(
+        "{}/{}",
+        format!("{pos:>width$}").green(),
+        len.to_string().magenta()
+    )
 }
 
 #[cfg(test)]

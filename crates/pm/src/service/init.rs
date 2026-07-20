@@ -21,6 +21,14 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
         bail!("package.json already exists in {}", cwd.display());
     }
 
+    if !yes && !crate::util::invocation::interactive() {
+        return Err(crate::error::CliError::usage(
+            "refusing to prompt for package metadata in non-interactive mode",
+        )
+        .with_suggestion("re-run with `utoo init --yes`")
+        .into());
+    }
+
     let cwd_clone = cwd.clone();
     let pkg = if yes {
         tokio::task::spawn_blocking(move || build_default_package(&cwd_clone)).await?

@@ -39,7 +39,6 @@ indicatif          = "0.17.8"
 libc               = "0.2"
 once_cell          = "1.19"
 open               = "5"
-owo-colors         = { workspace = true }
 pathdiff           = { workspace = true }
 petgraph           = "0.6"
 rayon              = { workspace = true }

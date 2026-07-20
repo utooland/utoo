@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use clap::Args;
+use serde::Serialize;
 
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
@@ -69,6 +70,8 @@ pub struct InstallArgs {
 /// Folds `--production` and `--legacy-peer-deps` into the omit set, then
 /// installs either the given specs (globally or locally) or the whole project.
 pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()> {
+    let requested = args.specs.clone();
+    let global = args.global;
     // Build omit config: production = omit dev + optional
     let mut omit_set: HashSet<OmitType> = args.omit.into_iter().collect();
     if args.production {
@@ -86,14 +89,13 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
     }
 
     if args.specs.is_empty() {
-        install_cwd(ScriptPolicy::from(args.ignore_scripts)).await
+        install_cwd_inner(ScriptPolicy::from(args.ignore_scripts)).await?;
     } else if args.global {
         // For global installs, process packages one by one
         for spec in args.specs.iter() {
             install_global_package(spec, args.prefix.as_deref()).await?;
         }
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
-        Ok(())
     } else {
         let save_type = SaveType::from_flags(args.save_dev, args.save_peer, args.save_optional);
         let spec_refs: Vec<&str> = args.specs.iter().map(|s| s.as_str()).collect();
@@ -107,8 +109,9 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         .await?;
         // Log install result with correct singular/plural form in one line
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
-        Ok(())
     }
+    let operation = if requested.is_empty() { "sync" } else { "add" };
+    emit_install_result("install", operation, &requested, global)
 }
 
 /// Entry point for the `uninstall` command.
@@ -137,11 +140,42 @@ pub async fn uninstall(
 /// Install all dependencies of the project containing the current directory.
 /// Shared by bare `utoo` and `utoo install` without specs.
 pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
+    install_cwd_inner(scripts).await?;
+    emit_install_result("install", "sync", &[], false)
+}
+
+async fn install_cwd_inner(scripts: ScriptPolicy) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root_path = init_project_root(&cwd).await?;
     install(scripts, &root_path).await?;
     log_time_end("All packages installed");
     Ok(())
+}
+
+fn emit_install_result(
+    command: &str,
+    operation: &str,
+    packages: &[String],
+    global: bool,
+) -> Result<()> {
+    let output = InstallOutput {
+        operation,
+        changed: true,
+        packages,
+        global,
+        downloaded_bytes: crate::util::install_progress::downloaded_bytes(),
+    };
+    crate::util::presenter::emit(command, &output, || Ok(()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallOutput<'a> {
+    operation: &'a str,
+    changed: bool,
+    packages: &'a [String],
+    global: bool,
+    downloaded_bytes: u64,
 }
 
 /// Run the `--from <pm>` migration pre-step.
