@@ -1,0 +1,25 @@
+{
+  "output": {
+    "publicPath": "/preview/dist",
+    "filename": "[name].[contenthash:8].js"
+  },
+  "entry": [
+    {
+      "import": "./src/index.tsx",
+      "name": "index"
+    }
+  ],
+  "server": {
+    "entry": "./src/server.ts",
+    "output": {
+      "path": "dist-server",
+      "filename": "[name].[contenthash:8].js"
+    },
+    "function": {
+      "clientProxy": "@evjs/client/internal/server-functions",
+      "serverRegister": "@evjs/server/internal/server-functions"
+    }
+  },
+  "nodePolyfill": true,
+  "stats": true
+}

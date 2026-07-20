@@ -92,6 +92,10 @@ test("builds the utooweb demo and previews dist/index.html", async ({
 
   await expandDirectory(page.getByTestId("file-tree-directory-root"));
   await expandDirectory(page.getByTestId("file-tree-directory-dist"));
+  await expandDirectory(page.getByTestId("file-tree-directory-dist-server"));
+  await expect(
+    page.getByTestId(/^file-tree-file-dist-server-index-[a-f0-9]{8}-js$/),
+  ).toBeVisible();
 
   const indexHtml = page.getByTestId("file-tree-file-dist-index-html");
   await expect(indexHtml).toBeVisible();
@@ -99,6 +103,7 @@ test("builds the utooweb demo and previews dist/index.html", async ({
 
   await expect(page.getByTestId("preview-iframe")).toBeVisible();
   const preview = page.frameLocator('[data-testid="preview-iframe"]');
+  await expect(preview.getByText("Server Function Order Demo")).toBeVisible();
   await expect(
     preview.getByText("Advanced Tailwind CSS v3 Examples"),
   ).toBeVisible({ timeout: 2 * 60 * 1000 });

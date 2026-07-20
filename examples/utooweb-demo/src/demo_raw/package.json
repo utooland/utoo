@@ -4,7 +4,9 @@
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "antd": "^5"
+    "antd": "^5",
+    "@evjs/client": "0.2.14",
+    "@evjs/server": "0.2.14"
   },
   "devDependencies": {
     "@tailwindcss/line-clamp": "^0.4.4",

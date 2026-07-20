@@ -2,7 +2,6 @@ import { Project as UtooProject } from "@utoo/web";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileTreeNode } from "../types";
 import { generateHtml } from "../utils/htmlGenerator";
-import { utoopackConfig } from "../utoopackConfig";
 
 export interface UseDevOptions {
   /** Auto start dev mode when project is ready */
@@ -81,7 +80,6 @@ export const useDev = (
       setIsBuilding(true);
 
       project.dev({
-        config: utoopackConfig,
         onUpdate: (result) => {
           console.log(
             `%cDev:%c Build completed`,
