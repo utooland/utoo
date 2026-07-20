@@ -3,9 +3,12 @@
   "version": "{{version}}",
   "description": "Utoo CLI tool",
   "bin": {
-    "utoo": "bin/utoo",
-    "ut": "bin/utoo",
-    "utx": "bin/utx"
+    "utoo": "bin/utoo.js",
+    "ut": "bin/utoo.js",
+    "utx": "bin/utx.js"
+  },
+  "engines": {
+    "node": ">=16"
   },
   "repository": {
     "type": "git",
@@ -19,8 +22,5 @@
     "@utoo/utoo-win32-x64": "{{version}}"
   },
   "os": ["darwin", "linux", "win32"],
-  "cpu": ["x64", "arm64"],
-  "scripts": {
-    "postinstall": "node ./postinstall.js"
-  }
+  "cpu": ["x64", "arm64"]
 }

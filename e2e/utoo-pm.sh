@@ -861,67 +861,82 @@ REPO_ROOT=$(cd "$(dirname "$0")/.."; pwd)
 
 pushd "$PACK_DIR"
 
-# Build a utoo npm package using the vendor templates
-mkdir -p pkg/bin
-# Use the actual built binary from the e2e environment
+# Build a platform package containing the actual native binary.
+PLATFORM_OS=$(node -p 'process.platform')
+PLATFORM_ARCH=$(node -p 'process.arch')
+PLATFORM_NAME="utoo-$PLATFORM_OS-$PLATFORM_ARCH"
+mkdir -p platform/bin
 UTOO_BIN=$(which utoo)
-cp "$UTOO_BIN" pkg/bin/utoo
-chmod +x pkg/bin/utoo
+cp "$UTOO_BIN" platform/bin/utoo
+chmod +x platform/bin/utoo
+cat > platform/package.json << PKGJSON
+{
+  "name": "@utoo/$PLATFORM_NAME",
+  "version": "0.0.0-e2e-test",
+  "os": ["$PLATFORM_OS"],
+  "cpu": ["$PLATFORM_ARCH"]
+}
+PKGJSON
+pushd platform
+PLATFORM_TARBALL="$PACK_DIR/platform/$(npm pack --silent)"
+popd
 
-# Create package.json
-cat > pkg/package.json << 'PKGJSON'
+# Build the immutable main package from the real launcher templates. The local
+# file dependency keeps this test offline while exercising npm's optional
+# dependency installation and bin-shim generation.
+mkdir -p pkg/bin
+cp "$REPO_ROOT/vendor/templates/launcher.utoo.js.template" pkg/bin/launcher.js
+cp "$REPO_ROOT/vendor/templates/utoo.utoo.js.template" pkg/bin/utoo.js
+cp "$REPO_ROOT/vendor/templates/utx.utoo.js.template" pkg/bin/utx.js
+chmod +x pkg/bin/utoo.js pkg/bin/utx.js
+cat > pkg/package.json << PKGJSON
 {
   "name": "utoo",
   "version": "0.0.0-e2e-test",
-  "bin": { "utoo": "bin/utoo", "ut": "bin/utoo" },
-  "scripts": { "postinstall": "echo postinstall-ok" }
+  "bin": {
+    "utoo": "bin/utoo.js",
+    "ut": "bin/utoo.js",
+    "utx": "bin/utx.js"
+  },
+  "optionalDependencies": {
+    "@utoo/$PLATFORM_NAME": "file:$PLATFORM_TARBALL"
+  }
 }
 PKGJSON
 
-# Pack it
-cd pkg
-npm pack 2>&1
-TARBALL=$(ls utoo-*.tgz)
+pushd pkg
+TARBALL="$PACK_DIR/pkg/$(npm pack --silent)"
+popd
 echo "Packed: $TARBALL"
 
-# Install globally to a temp prefix
-npm install -g "$TARBALL" --prefix="$INSTALL_PREFIX" 2>&1
+# Install globally with lifecycle scripts disabled. The command must still work.
+npm install -g "$TARBALL" --prefix="$INSTALL_PREFIX" --ignore-scripts 2>&1
 echo "Installed to: $INSTALL_PREFIX"
 
-# Verify the binary works
-INSTALLED_UTOO="$INSTALL_PREFIX/bin/utoo"
-if [ ! -f "$INSTALLED_UTOO" ]; then
-    # Try lib path on some systems
-    INSTALLED_UTOO="$INSTALL_PREFIX/lib/node_modules/utoo/bin/utoo"
-fi
-
-if [ ! -f "$INSTALLED_UTOO" ]; then
-    echo -e "${RED}FAIL: utoo binary not found after npm install -g${NC}"
+# Verify npm generated the public launcher and installed the native artifact.
+SYMLINK_UTOO="$INSTALL_PREFIX/bin/utoo"
+if [ ! -L "$SYMLINK_UTOO" ] && [ ! -f "$SYMLINK_UTOO" ]; then
+    echo -e "${RED}FAIL: utoo launcher not found after npm install -g${NC}"
     ls -R "$INSTALL_PREFIX" 2>/dev/null | head -20
     exit 1
 fi
-
-# Verify it's not a placeholder
-if head -1 "$INSTALLED_UTOO" | grep -q "placeholder"; then
-    echo -e "${RED}FAIL: installed binary is still a placeholder${NC}"
+[ -n "$(find "$INSTALL_PREFIX" -path "*/@utoo/$PLATFORM_NAME/bin/utoo" -type f -print -quit)" ] \
+    || { echo -e "${RED}FAIL: optional native artifact not installed${NC}"; exit 1; }
+if node -e 'const p=require(process.argv[1]); process.exit(p.scripts ? 1 : 0)' \
+    "$INSTALL_PREFIX/lib/node_modules/utoo/package.json"; then
+    :
+else
+    echo -e "${RED}FAIL: installed main package contains lifecycle scripts${NC}"
     exit 1
 fi
 
-"$INSTALLED_UTOO" --version
+"$SYMLINK_UTOO" --version
 echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
 
-# Regression: a global install run THROUGH the npm-style bin symlink must resolve
-# the prefix to $INSTALL_PREFIX, NOT to utoo's own package dir. current_exe()
-# resolves the symlink to <prefix>/lib/node_modules/utoo/bin/utoo, so a naive
-# parent-dir inference would drop bins into utoo's package bin / node_modules
-# instead of <prefix>/bin and <prefix>/lib/node_modules.
+# Regression: the native executable now lives in a nested optional package. The
+# launcher must propagate the public managed-package root so global operations
+# still infer $INSTALL_PREFIX rather than the platform package's node_modules.
 echo -e "${YELLOW}  Subtest: global install resolves npm-style prefix${NC}"
-SYMLINK_UTOO="$INSTALL_PREFIX/bin/utoo"
-if [ ! -L "$SYMLINK_UTOO" ] && [ ! -f "$SYMLINK_UTOO" ]; then
-    echo -e "${RED}FAIL: expected npm bin entry at $SYMLINK_UTOO${NC}"
-    exit 1
-fi
-
 "$SYMLINK_UTOO" install -g cowsay --registry=https://registry.npmjs.org \
     || { echo -e "${RED}FAIL: global install cowsay via npm-installed utoo${NC}"; exit 1; }
 

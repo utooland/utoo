@@ -3,4 +3,4 @@
 
 const { main } = require("./launcher.js");
 
-main(["x", ...process.argv.slice(2)]);
+main(process.argv.slice(2));

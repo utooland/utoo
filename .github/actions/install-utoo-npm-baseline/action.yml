@@ -1,5 +1,5 @@
 name: install-utoo-npm-baseline
-description: Install latest published `utoo` from npm into a temp directory and set $UTOO_NPM_BIN. Used by bench-phases jobs to add a published-version baseline column alongside the current-branch utoo. Installed locally (not -g) so it doesn't shadow $GITHUB_WORKSPACE/dist/utoo on PATH; npm's node_modules/.bin/ symlink isn't always populated for local installs, so we point at node_modules/utoo/bin/utoo (the package's `bin` field) directly.
+description: Install latest published `utoo` from npm into a temp directory and set $UTOO_NPM_BIN. Used by bench-phases jobs to add a published-version baseline column alongside the current-branch utoo. Installed locally (not -g) so it doesn't shadow $GITHUB_WORKSPACE/dist/utoo on PATH; npm's node_modules/.bin/ symlink isn't always populated for local installs, so we point at the package's bin entry directly.
 
 runs:
   using: composite
@@ -10,7 +10,13 @@ runs:
         mkdir -p /tmp/utoo-npm-pkg && cd /tmp/utoo-npm-pkg
         npm init -y >/dev/null
         npm install utoo --no-audit --no-fund --no-progress
-        UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+        # New releases use an immutable JS launcher; retain the old path while
+        # CI still compares against a release from before RFC #3246.
+        if [ -f "$PWD/node_modules/utoo/bin/utoo.js" ]; then
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo.js"
+        else
+          UTOO_NPM_BIN="$PWD/node_modules/utoo/bin/utoo"
+        fi
         chmod +x "$UTOO_NPM_BIN"
         "$UTOO_NPM_BIN" --version
         echo "UTOO_NPM_BIN=$UTOO_NPM_BIN" >> $GITHUB_ENV
