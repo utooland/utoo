@@ -18,6 +18,28 @@ export interface ReturnableSubscription {
   return?: () => unknown;
 }
 
+function returnSubscription(subscription: ReturnableSubscription) {
+  try {
+    return Promise.resolve(subscription.return?.()).then(
+      () => undefined,
+      () => undefined,
+    );
+  } catch {
+    return Promise.resolve();
+  }
+}
+
+export function unsubscribeAllClientSubscriptions<
+  Subscription extends ReturnableSubscription,
+>(subscriptions: Map<string, Subscription>) {
+  const activeSubscriptions = [...subscriptions.values()];
+  subscriptions.clear();
+
+  return Promise.all(activeSubscriptions.map(returnSubscription)).then(
+    () => undefined,
+  );
+}
+
 export function unsubscribeClient<Subscription extends ReturnableSubscription>(
   subscriptions: Map<string, Subscription>,
   id: string,
@@ -28,14 +50,7 @@ export function unsubscribeClient<Subscription extends ReturnableSubscription>(
   }
 
   subscriptions.delete(id);
-  try {
-    return Promise.resolve(subscription.return?.()).then(
-      () => undefined,
-      () => undefined,
-    );
-  } catch {
-    return Promise.resolve();
-  }
+  return returnSubscription(subscription);
 }
 
 export function deleteClientSubscriptionIfCurrent<Subscription>(
