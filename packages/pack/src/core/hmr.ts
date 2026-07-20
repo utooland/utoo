@@ -22,7 +22,9 @@ import { debounce, getPackPath, processIssues } from "../utils/common";
 import {
   isPersistentCachingEnabled,
   isTruthyEnv,
-  normalizeTurbopackMemoryEviction,
+  normalizeDevTurbopackMemoryEviction,
+  shouldShutdownDevTurbopackProject,
+  shouldUseDevTurbopackBackgroundPersistence,
 } from "../utils/env";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
@@ -31,9 +33,11 @@ import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import {
+  createHmrTimingReporter,
+  createSharedHmrSubscriptionRegistry,
   deleteClientSubscriptionIfCurrent,
   enqueueTurbopackUpdateForClient,
-  isCurrentClientSubscription,
+  type ReturnableSubscription,
   unsubscribeAllClientSubscriptions,
   unsubscribeClient,
 } from "./hmrClientState";
@@ -112,7 +116,7 @@ export type StartBuilding = (id: string, forceRebuild: boolean) => () => void;
 export type ClientState = {
   hmrPayloads: Map<string, HMR_ACTION_TYPES>;
   turbopackUpdates: TurbopackUpdate[];
-  subscriptions: Map<string, AsyncIterator<any>>;
+  subscriptions: Map<string, ReturnableSubscription>;
   clientIssues: EntryIssuesMap;
 };
 
@@ -180,11 +184,20 @@ export async function createHotReloader(
   const persistentCaching = isPersistentCachingEnabled(
     bundleOptions.config.persistentCaching,
   );
-  const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
+  const turbopackMemoryEviction = normalizeDevTurbopackMemoryEviction(
     bundleOptions.config.turbopackMemoryEviction,
+    process.env.TURBO_ENGINE_EVICT_AFTER_SNAPSHOT,
   ) as MemoryEvictionMode;
   const smallPreallocation = isTruthyEnv(
     process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
+  );
+  const backgroundPersistence = shouldUseDevTurbopackBackgroundPersistence(
+    (
+      bundleOptions.config as typeof bundleOptions.config & {
+        turbopackBackgroundPersistence?: boolean;
+      }
+    ).turbopackBackgroundPersistence,
+    process.env.UTOO_TURBOPACK_BACKGROUND_PERSISTENCE,
   );
   const persistentCacheLock = await acquirePersistentCacheLock(
     resolvedProjectPath,
@@ -239,6 +252,10 @@ export async function createHotReloader(
         persistentCaching,
         turbopackMemoryEviction,
         smallPreallocation,
+        // A large single-page graph can spend tens of seconds serializing a
+        // background snapshot and starve HMR. Keep reading the persistent cache,
+        // but defer writes until shutdown unless explicitly opted back in.
+        isShortSession: persistentCaching && !backgroundPersistence,
       },
     );
   } catch (error) {
@@ -253,11 +270,14 @@ export async function createHotReloader(
     (resolve) => (currentEntriesHandlingResolve = resolve),
   );
 
-  let hmrEventHappened = false;
   let hmrHash = 0;
+  const hmrTimingReporter = createHmrTimingReporter();
 
   const clients = new Set<WSLike>();
   const clientStates = new WeakMap<WSLike, ClientState>();
+  const hmrSubscriptions = createSharedHmrSubscriptionRegistry<
+    TurbopackResult<TurbopackUpdate>
+  >((id) => project.hmrEvents(id));
   const currentEntryIssues: EntryIssuesMap = new Map();
   const backgroundWatchSubscriptions = new Set<
     AsyncIterableIterator<TurbopackResult>
@@ -280,6 +300,7 @@ export async function createHotReloader(
       return;
     }
 
+    let sentTurbopackUpdate = false;
     for (const client of clients) {
       const state = clientStates.get(client);
       if (!state) {
@@ -287,7 +308,7 @@ export async function createHotReloader(
       }
 
       if (hasBlockingIssues(state.clientIssues)) {
-        return;
+        continue;
       }
 
       for (const payload of state.hmrPayloads.values()) {
@@ -301,6 +322,18 @@ export async function createHotReloader(
           data: state.turbopackUpdates,
         });
         state.turbopackUpdates.length = 0;
+        sentTurbopackUpdate = true;
+      }
+    }
+
+    if (sentTurbopackUpdate) {
+      const duration = hmrTimingReporter.markHmrUpdate();
+      if (duration !== undefined) {
+        const timeMessage =
+          duration > 2000
+            ? `${Math.round(duration / 100) / 10}s`
+            : `${duration}ms`;
+        console.log(`HMR payload sent in ${timeMessage}`);
       }
     }
   }
@@ -308,8 +341,6 @@ export async function createHotReloader(
 
   function sendTurbopackMessage(client: WSLike, payload: TurbopackUpdate) {
     enqueueTurbopackUpdateForClient(clientStates, client, payload);
-
-    hmrEventHappened = true;
     sendEnqueuedMessagesDebounce();
   }
 
@@ -403,7 +434,6 @@ export async function createHotReloader(
         }
 
         await writeOutputToDisk(entrypoint);
-        hmrEventHappened = true;
       })
       .finally(() => {
         if (shouldCreateWebpackStats) {
@@ -462,7 +492,6 @@ export async function createHotReloader(
               processIssues(currentEntryIssues, issueKey, data, false, true);
 
               if (hasBlockingResultIssues(data)) {
-                hmrEventHappened = true;
                 sendEnqueuedMessagesDebounce();
                 continue;
               }
@@ -493,58 +522,53 @@ export async function createHotReloader(
     );
   }
 
-  async function subscribeToHmrEvents(client: WSLike, id: string) {
+  function subscribeToHmrEvents(client: WSLike, id: string) {
     const state = clientStates.get(client);
     if (!state || state.subscriptions.has(id)) {
       return;
     }
 
-    const subscription = project!.hmrEvents(id);
-    state.subscriptions.set(id, subscription);
     const issueKey = getClientIssueKey(id);
-
-    // The subscription will always emit once, which is the initial
-    // computation. This is not a change, so swallow it.
-    try {
-      await subscription.next();
-
-      for await (const data of subscription) {
-        processIssues(state.clientIssues, issueKey, data, false, true);
-        if (data.type !== "issues") {
-          sendTurbopackMessage(client, data);
+    let subscription: ReturnableSubscription;
+    subscription = hmrSubscriptions.subscribe(id, {
+      onIssues(issues) {
+        if (clientStates.get(client) !== state) return;
+        processIssues(state.clientIssues, issueKey, { issues }, false, true);
+      },
+      onUpdate(data) {
+        if (clientStates.get(client) !== state) return;
+        sendTurbopackMessage(client, data);
+      },
+      onError(error) {
+        if (
+          clientStates.get(client) !== state ||
+          state.subscriptions.get(id) !== subscription
+        ) {
+          return;
         }
-      }
-    } catch (e) {
-      if (
-        !isCurrentClientSubscription(
-          clientStates,
-          client,
-          state,
-          id,
-          subscription,
-        )
-      ) {
-        return;
-      }
 
-      // The client might be using an HMR session from a previous server, tell them
-      // to fully reload the page to resolve the issue. We can't use
-      // `hotReloader.send` since that would force every connected client to
-      // reload, only this client is out of date.
-      const reloadAction: ReloadAction = {
-        action: HMR_ACTIONS_SENT_TO_BROWSER.RELOAD,
-        data: `error in HMR event subscription for ${id}: ${e}`,
-      };
-      sendToClient(client, reloadAction);
-      client.close();
-      return;
-    } finally {
-      if (
-        deleteClientSubscriptionIfCurrent(state.subscriptions, id, subscription)
-      ) {
-        state.clientIssues.delete(issueKey);
-      }
-    }
+        // The client might be using an HMR session from a previous server, tell
+        // only subscribers of this resource to reload.
+        const reloadAction: ReloadAction = {
+          action: HMR_ACTIONS_SENT_TO_BROWSER.RELOAD,
+          data: `error in HMR event subscription for ${id}: ${error}`,
+        };
+        sendToClient(client, reloadAction);
+        client.close();
+      },
+      onComplete() {
+        if (
+          deleteClientSubscriptionIfCurrent(
+            state.subscriptions,
+            id,
+            subscription,
+          )
+        ) {
+          state.clientIssues.delete(issueKey);
+        }
+      },
+    });
+    state.subscriptions.set(id, subscription);
   }
 
   function unsubscribeFromHmrEvents(client: WSLike, id: string) {
@@ -606,7 +630,7 @@ export async function createHotReloader(
     onHMR(req, socket: Socket, head, onUpgrade) {
       wsServer.handleUpgrade(req, socket, head, (client) => {
         onUpgrade?.(client);
-        const subscriptions: Map<string, AsyncIterator<any>> = new Map();
+        const subscriptions: Map<string, ReturnableSubscription> = new Map();
 
         clients.add(client);
         clientStates.set(client, {
@@ -697,7 +721,7 @@ export async function createHotReloader(
     },
 
     registerClient(ws) {
-      const subscriptions: Map<string, AsyncIterator<any>> = new Map();
+      const subscriptions: Map<string, ReturnableSubscription> = new Map();
       clients.add(ws);
       clientStates.set(ws, {
         hmrPayloads: new Map(),
@@ -805,8 +829,20 @@ export async function createHotReloader(
     async close() {
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
+      const clientSubscriptionCleanup = [...clients].map((client) => {
+        const state = clientStates.get(client);
+        return state
+          ? unsubscribeAllClientSubscriptions(state.subscriptions)
+          : Promise.resolve();
+      });
       closePromise ??= (
-        persistentCaching ? project.shutdown() : project.onExit()
+        shouldShutdownDevTurbopackProject(
+          bundleOptions.config.persistentCaching,
+          persistentCaching,
+          backgroundPersistence,
+        )
+          ? project.shutdown()
+          : project.onExit()
       )
         .catch((err) => {
           console.error(err);
@@ -820,7 +856,11 @@ export async function createHotReloader(
       }
       clients.clear();
 
-      await Promise.all([disposePromise, closePromise]);
+      await Promise.all([
+        disposePromise,
+        closePromise,
+        ...clientSubscriptionCleanup,
+      ]);
     },
   };
 
@@ -836,6 +876,7 @@ export async function createHotReloader(
     for await (const updateMessage of project.updateInfoSubscribe(30)) {
       switch (updateMessage.updateType) {
         case "start": {
+          hmrTimingReporter.start();
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });
           console.log("Compiling...");
           break;
@@ -863,13 +904,7 @@ export async function createHotReloader(
             });
           }
 
-          if (hmrEventHappened) {
-            const time = updateMessage.value!.duration;
-            const timeMessage =
-              time > 2000 ? `${Math.round(time / 100) / 10}s` : `${time}ms`;
-            console.log(`Compiled in ${timeMessage}`);
-            hmrEventHappened = false;
-          }
+          hmrTimingReporter.end();
           break;
         }
         default:

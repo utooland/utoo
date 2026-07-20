@@ -344,6 +344,12 @@ export interface ConfigComplete {
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
   turbopackMemoryEviction?: boolean | "full";
+  /**
+   * Persist Turbopack's development cache periodically in the background.
+   * Disable this for very large graphs where snapshot work can contend with HMR.
+   * @default true
+   */
+  turbopackBackgroundPersistence?: boolean;
   nodePolyfill?: boolean;
   mdx?: MdxOptions;
   devServer?: DevServerConfig;

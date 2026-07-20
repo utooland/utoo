@@ -1,3 +1,4 @@
+import type { RestartUpdate } from "@utoo/pack-shared";
 import {
   HmrIdentifiers,
   NapiIssue,
@@ -42,7 +43,7 @@ export interface PartialUpdate extends BaseUpdate {
   };
 }
 
-export type Update = IssuesUpdate | PartialUpdate;
+export type Update = IssuesUpdate | PartialUpdate | RestartUpdate;
 
 export interface ProjectOptions extends BundleOptions {
   /**

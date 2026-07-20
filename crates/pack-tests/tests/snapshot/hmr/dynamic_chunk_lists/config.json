@@ -1,0 +1,19 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "sourceMaps": false,
+    "optimization": {
+      "minify": false
+    },
+    "output": {
+      "path": "output"
+    }
+  },
+  "runtimeType": "Development"
+}

@@ -233,6 +233,13 @@
           "type": "null"
         }
       ]
+    },
+    "turbopackBackgroundPersistence": {
+      "description": "Persist Turbopack's development cache periodically in the background. Disable this for very large graphs where snapshot work can contend with HMR.",
+      "type": [
+        "boolean",
+        "null"
+      ]
     }
   },
   "definitions": {

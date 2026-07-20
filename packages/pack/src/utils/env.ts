@@ -3,7 +3,7 @@ export function isTruthyEnv(value: string | undefined): boolean {
 }
 
 export function isPersistentCachingEnabled(
-  configuredValue: boolean | undefined,
+  configuredValue: boolean | null | undefined,
 ): boolean {
   return (
     !isTruthyEnv(process.env.DISABLE_PERSISTENT_CACHE?.toLowerCase()) &&
@@ -11,9 +11,38 @@ export function isPersistentCachingEnabled(
   );
 }
 
-export function normalizeTurbopackMemoryEviction(
-  value: boolean | "full" | undefined,
-): "off" | "full" {
+export function shouldUseDevTurbopackBackgroundPersistence(
+  value: boolean | null | undefined,
+  rawEnv: string | undefined,
+): boolean {
+  if (value != null) {
+    return value;
+  }
+  if (rawEnv === undefined) {
+    return true;
+  }
+  return isTruthyEnv(rawEnv);
+}
+
+export function shouldShutdownDevTurbopackProject(
+  configuredPersistentCaching: boolean | null | undefined,
+  persistentCaching: boolean,
+  backgroundPersistence: boolean,
+): boolean {
+  return (
+    persistentCaching &&
+    (configuredPersistentCaching === true || !backgroundPersistence)
+  );
+}
+
+type TurbopackMemoryEvictionConfig = boolean | "full" | undefined;
+type TurbopackMemoryEvictionMode = "off" | "full";
+
+function normalizeTurbopackMemoryEviction(
+  value: TurbopackMemoryEvictionConfig,
+  rawEnv: string | undefined,
+  defaultMode: TurbopackMemoryEvictionMode,
+): TurbopackMemoryEvictionMode {
   if (value === false) {
     return "off";
   }
@@ -21,6 +50,22 @@ export function normalizeTurbopackMemoryEviction(
     return "full";
   }
 
-  const rawEnv = process.env.TURBO_ENGINE_EVICT_AFTER_SNAPSHOT;
-  return rawEnv == null || rawEnv === "1" || rawEnv === "true" ? "full" : "off";
+  if (rawEnv === undefined) {
+    return defaultMode;
+  }
+  return isTruthyEnv(rawEnv) ? "full" : "off";
+}
+
+export function normalizeDevTurbopackMemoryEviction(
+  value: TurbopackMemoryEvictionConfig,
+  rawEnv: string | undefined,
+): TurbopackMemoryEvictionMode {
+  return normalizeTurbopackMemoryEviction(value, rawEnv, "full");
+}
+
+export function normalizeBuildTurbopackMemoryEviction(
+  value: TurbopackMemoryEvictionConfig,
+  rawEnv: string | undefined,
+): TurbopackMemoryEvictionMode {
+  return normalizeTurbopackMemoryEviction(value, rawEnv, "full");
 }

@@ -686,6 +686,7 @@ pub async fn get_client_chunking_context(
     if mode.is_development() {
         builder = builder
             .hot_module_replacement()
+            .dynamic_hmr_chunk_lists()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
     } else {

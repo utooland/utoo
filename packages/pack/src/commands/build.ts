@@ -12,7 +12,7 @@ import { blockStdout, getPackPath } from "../utils/common";
 import {
   isPersistentCachingEnabled,
   isTruthyEnv,
-  normalizeTurbopackMemoryEviction,
+  normalizeBuildTurbopackMemoryEviction,
 } from "../utils/env";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
@@ -55,8 +55,9 @@ async function buildInternal(
   const persistentCaching = isPersistentCachingEnabled(
     bundleOptions.config.persistentCaching,
   );
-  const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
+  const turbopackMemoryEviction = normalizeBuildTurbopackMemoryEviction(
     bundleOptions.config.turbopackMemoryEviction,
+    process.env.TURBO_ENGINE_EVICT_AFTER_SNAPSHOT,
   ) as MemoryEvictionMode;
   const smallPreallocation = isTruthyEnv(
     process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
