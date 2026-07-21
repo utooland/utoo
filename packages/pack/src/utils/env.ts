@@ -6,7 +6,7 @@ export function isPersistentCachingEnabled(
   configuredValue: boolean | undefined,
 ): boolean {
   return (
-    !isTruthyEnv(process.env.DISABLE_PERSISTENT_CACHE) &&
+    !isTruthyEnv(process.env.DISABLE_PERSISTENT_CACHE?.toLowerCase()) &&
     (configuredValue ?? true)
   );
 }

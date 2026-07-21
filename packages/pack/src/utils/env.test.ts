@@ -24,7 +24,7 @@ describe("isPersistentCachingEnabled", () => {
     expect(isPersistentCachingEnabled(false)).toBe(false);
   });
 
-  it.each(["1", "true"])(
+  it.each(["1", "true", "TRUE", "True"])(
     "disables persistent caching when the environment variable is %s",
     (value) => {
       process.env.DISABLE_PERSISTENT_CACHE = value;
