@@ -38,27 +38,6 @@ function getSocketProtocol() {
     : "ws";
 }
 
-function getQiankunPublicPathOrigin() {
-  const injectedPublicPath = (
-    globalThis as typeof globalThis & {
-      __INJECTED_PUBLIC_PATH_BY_QIANKUN__?: unknown;
-    }
-  ).__INJECTED_PUBLIC_PATH_BY_QIANKUN__;
-  if (
-    typeof injectedPublicPath !== "string" ||
-    !/^(https?:)?\/\//i.test(injectedPublicPath)
-  ) {
-    return;
-  }
-
-  try {
-    return new URL(
-      injectedPublicPath,
-      typeof location !== "undefined" ? location.href : undefined,
-    ).origin;
-  } catch {}
-}
-
 function getSocketUrl() {
   const socketServer = process.env.SOCKET_SERVER;
   if (socketServer) {
@@ -79,18 +58,9 @@ function getSocketUrl() {
     } catch {}
   }
 
-  // A qiankun child runs in the parent's window, so `location` points at the
-  // parent dev server. Use qiankun's injected child entry URL, not the generic
-  // runtime public path, which may point at an asset CDN.
-  const qiankunOrigin = getQiankunPublicPathOrigin();
-  if (qiankunOrigin) {
-    const parsed = new URL(qiankunOrigin);
-    const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${parsed.host}`;
-  }
-
   const { hostname, port } = location;
-  return `${getSocketProtocol()}://${hostname}${port ? `:${port}` : ""}`;
+  const protocol = getSocketProtocol();
+  return `${protocol}://${hostname}${port ? `:${port}` : ""}`;
 }
 
 export interface HMROptions {
