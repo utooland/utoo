@@ -401,6 +401,22 @@ seed_for_phase() {
       [ -f aube-lock.yaml ] && cp -f aube-lock.yaml "$LOCK_STASH/aube-lock.yaml"
       ;;
   esac
+  # A successful lock-generation command is not enough: some PM/config
+  # combinations can exit zero without writing the expected lockfile. Never
+  # let prepare fall through and time an install against stale state.
+  if [[ "$phase" == p3_* || "$phase" == p4_* ]]; then
+    local expected_lock
+    case "$pm" in
+      bun) expected_lock="$LOCK_STASH/bun.lock" ;;
+      pnpm) expected_lock="$LOCK_STASH/pnpm-lock.yaml" ;;
+      aube) expected_lock="$LOCK_STASH/aube-lock.yaml" ;;
+      *) expected_lock="$LOCK_STASH/package-lock.json" ;;
+    esac
+    if [ ! -f "$expected_lock" ]; then
+      echo -e "  ${RED}$pm $phase did not produce expected lockfile: $expected_lock${NC}" >&2
+      return 1
+    fi
+  fi
   # Phase 4 also needs a pre-warmed cache.
   if [[ "$phase" == p4_* ]]; then
     local cache
@@ -505,7 +521,10 @@ run_phase_matrix() {
   # CDN edge POP populated per PM before any timed window opens.
   echo -e "  ${CYAN}warmup round${NC} (${live_pms[*]})"
   for pm in "${live_pms[@]}"; do
-    bash "$RESULTS_DIR/prep_${phase}_${pm}.sh" > /dev/null 2>&1 || true
+    if ! bash "$RESULTS_DIR/prep_${phase}_${pm}.sh" > /dev/null 2>&1; then
+      echo -e "  ${RED}$pm $phase warmup prepare failed — aborting invalid phase${NC}" >&2
+      return 1
+    fi
     bash "$RESULTS_DIR/cmd_${phase}_${pm}.sh" \
       > "$RESULTS_DIR/warmup_${phase}_${pm}.log" 2>&1 || true
   done
@@ -527,7 +546,10 @@ run_phase_matrix() {
     fi
     echo -e "  ${CYAN}round $r/$runs${NC} (${round_order[*]})"
     for pm in "${round_order[@]}"; do
-      bash "$RESULTS_DIR/prep_${phase}_${pm}.sh" > /dev/null 2>&1 || true
+      if ! bash "$RESULTS_DIR/prep_${phase}_${pm}.sh" > /dev/null 2>&1; then
+        echo -e "  ${RED}$pm $phase round $r prepare failed — aborting invalid phase${NC}" >&2
+        return 1
+      fi
       if ! bash "$METRICS_WRAPPER" \
         "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_metrics.jsonl" \
         bash "$RESULTS_DIR/cmd_${phase}_${pm}.sh" \
