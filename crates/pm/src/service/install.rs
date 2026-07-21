@@ -18,6 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
+use crate::util::cloner::ClonePolicy;
 use crate::util::install_progress;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
@@ -28,7 +29,7 @@ use crate::util::proxy_env::print_proxy_env_hint_once;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::progress::PackageTarballInfo;
 
-use super::binary::update_package_binary;
+use super::binary::{requires_private_copy, update_package_binary};
 use super::clean::clean_deps;
 
 /// Check if a package should be omitted based on omit config
@@ -183,13 +184,27 @@ async fn reify_packages(
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
                     let target_path = cwd.join(path);
                     let scheduler = scheduler.clone();
+                    // Packages with lifecycle scripts and packages patched by
+                    // the binary-mirror pass are both mutated after cloning.
+                    // Keep them private instead of hardlinking from cache.
+                    let policy = if package.has_install_scripts() || requires_private_copy(&name) {
+                        ClonePolicy::Private
+                    } else {
+                        ClonePolicy::Shared
+                    };
 
                     // Check if this is an optional dependency
                     let is_optional = package.is_optional();
 
                     clone_tasks.push(async move {
                         if let Err(e) = scheduler
-                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                            .ensure_clone(
+                                name.clone(),
+                                version,
+                                resolved,
+                                target_path.clone(),
+                                policy,
+                            )
                             .await
                         {
                             if is_optional {
