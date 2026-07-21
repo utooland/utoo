@@ -5,12 +5,13 @@
 import { connect } from "@vercel/turbopack-ecmascript-runtime/browser/dev/hmr-client/hmr-client";
 import { addMessageListener, connectHMR, sendMessage } from "./messageport";
 
-export function initHMR() {
+export function initHMR(chunkUpdateListenersGlobal: string) {
   // First register the HMR client listeners
   connect({
     addMessageListener,
     sendMessage,
     onUpdateError: console.error,
+    chunkUpdateListenersGlobal,
   });
 
   // Then start listening for MessagePort connection from parent window

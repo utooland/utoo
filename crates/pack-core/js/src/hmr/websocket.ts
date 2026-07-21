@@ -38,6 +38,19 @@ function getSocketProtocol() {
     : "ws";
 }
 
+function getRuntimePublicPathOrigin() {
+  const publicPath = (
+    globalThis as typeof globalThis & { publicPath?: unknown }
+  ).publicPath;
+  if (typeof publicPath !== "string" || publicPath.length === 0) {
+    return;
+  }
+
+  try {
+    return new URL(publicPath, location.href).origin;
+  } catch {}
+}
+
 function getSocketUrl() {
   const socketServer = process.env.SOCKET_SERVER;
   if (socketServer) {
@@ -58,9 +71,18 @@ function getSocketUrl() {
     } catch {}
   }
 
+  // A qiankun child runs in the parent's window, so `location` points at the
+  // parent dev server. Umi exposes the child's injected entry URL as the
+  // runtime public path; use its origin for the child's HMR connection.
+  const runtimeOrigin = getRuntimePublicPathOrigin();
+  if (runtimeOrigin) {
+    const parsed = new URL(runtimeOrigin);
+    const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${parsed.host}`;
+  }
+
   const { hostname, port } = location;
-  const protocol = getSocketProtocol();
-  return `${protocol}://${hostname}${port ? `:${port}` : ""}`;
+  return `${getSocketProtocol()}://${hostname}${port ? `:${port}` : ""}`;
 }
 
 export interface HMROptions {
