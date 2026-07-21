@@ -544,6 +544,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install aube
+        if: contains(github.event.inputs.phases_pm_list, 'aube')
+        run: npm install -g @endevco/aube@1.29.1
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: linux
@@ -572,6 +575,7 @@ jobs:
           if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           "$UTOO_NEXT_BIN" --version
           bun --version
+          if command -v aube >/dev/null; then aube --version; fi
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
@@ -579,6 +583,7 @@ jobs:
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
                  /tmp/utoo-next-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
+                 /tmp/aube-bench-data /tmp/aube-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -664,6 +669,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install aube
+        if: contains(github.event.inputs.phases_pm_list, 'aube')
+        run: npm install -g @endevco/aube@1.29.1
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: mac
@@ -674,12 +682,14 @@ jobs:
           utoo --version
           "$UTOO_NPM_BIN" --version
           bun --version
+          if command -v aube >/dev/null; then aube --version; fi
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
+                 /tmp/aube-bench-data /tmp/aube-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
