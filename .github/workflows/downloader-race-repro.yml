@@ -2,51 +2,229 @@ name: downloader-race-repro
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "utoo release tag to test"
+        required: false
+        default: "utoo-v1.1.4"
+      attempts:
+        description: "stress attempts"
+        required: false
+        default: "15"
+      parallelism:
+        description: "parallel utoo install processes"
+        required: false
+        default: "24"
   pull_request:
     paths:
       - ".github/workflows/downloader-race-repro.yml"
-      - "crates/pm/src/util/downloader.rs"
 
 permissions:
   contents: read
 
 jobs:
-  linux-repro:
-    name: linux downloader race repro
+  linux-release-repro:
+    name: linux release cache race repro
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      UTOO_RELEASE_TAG: "utoo-v1.1.4"
+      ATTEMPTS: "15"
+      PARALLELISM: "24"
+      INSTALL_TIMEOUT: "75s"
+      RESOLVED_WAIT_TIMEOUT: "45"
+      REGISTRY: "https://registry.npmjs.org"
     steps:
-      - uses: actions/checkout@v4
+      - name: Initialize runtime paths
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: nightly-2026-01-04
+          echo "CACHE_DIR=$RUNNER_TEMP/utoo-npm-cache" >> "$GITHUB_ENV"
+          echo "LOG_DIR=$RUNNER_TEMP/utoo-repro-logs" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/utoo-repro-logs"
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: downloader-race-repro-linux
+      - name: Apply manual inputs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Try to reproduce zero-length resolved cache
+          echo "UTOO_RELEASE_TAG=${{ github.event.inputs.release_tag }}" >> "$GITHUB_ENV"
+          echo "ATTEMPTS=${{ github.event.inputs.attempts }}" >> "$GITHUB_ENV"
+          echo "PARALLELISM=${{ github.event.inputs.parallelism }}" >> "$GITHUB_ENV"
+
+      - name: Download utoo release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/utoo-release" "$LOG_DIR"
+          gh release download "$UTOO_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "utoo-linux-x64.tar.gz" \
+            --dir "$RUNNER_TEMP/utoo-release"
+
+          tar -xzf "$RUNNER_TEMP/utoo-release/utoo-linux-x64.tar.gz" -C "$RUNNER_TEMP/utoo-release"
+          chmod +x "$RUNNER_TEMP/utoo-release/utoo"
+          echo "$RUNNER_TEMP/utoo-release" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/utoo-release/utoo" --version
+
+      - name: Create repro project template
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/utoo-repro-template"
+          cat > "$RUNNER_TEMP/utoo-repro-template/package.json" <<'JSON'
+          {
+            "name": "utoo-cache-race-repro",
+            "version": "0.0.0",
+            "private": true,
+            "dependencies": {
+              "@babel/plugin-transform-react-jsx-source": "7.29.7",
+              "cookie-es": "3.1.1",
+              "d3-time-format": "4.1.0",
+              "date-fns": "4.4.0",
+              "recharts-scale": "0.4.5",
+              "tapable": "2.3.3"
+            }
+          }
+          JSON
+
+      - name: Stress shared cache with release utoo
         shell: bash
         run: |
           set -uo pipefail
 
-          test_name='downloader::tests::repro_download_can_leave_zero_file_if_racing_process_dies_after_resolved'
-          for attempt in $(seq 1 30); do
-            echo "::group::attempt ${attempt}"
-            cargo test -p utoo-pm "${test_name}" -- --ignored --nocapture
-            status=$?
+          UTOO_BIN="$(command -v utoo)"
+          ZERO_LIST="$RUNNER_TEMP/zero-package-json.txt"
+          : > "$ZERO_LIST"
+
+          scan_zero_package_json() {
+            find "$CACHE_DIR" -type f -path '*/package/package.json' -size 0c -print 2>/dev/null | sort
+          }
+
+          dump_cache_summary() {
+            local attempt="$1"
+            local mode="$2"
+            {
+              echo "attempt=$attempt mode=$mode"
+              echo "cache_dir=$CACHE_DIR"
+              find "$CACHE_DIR" -maxdepth 4 -type f \( -name package.json -o -name _resolved \) \
+                -printf '%s %p\n' 2>/dev/null | sort || true
+            } > "$LOG_DIR/cache-summary-${mode}-${attempt}.txt"
+          }
+
+          start_installers() {
+            local attempt="$1"
+            local mode="$2"
+            local workdir="$RUNNER_TEMP/repro-${mode}-${attempt}"
+            mkdir -p "$workdir"
+
+            PIDS=()
+            for idx in $(seq 1 "$PARALLELISM"); do
+              local project="$workdir/project-$idx"
+              mkdir -p "$project"
+              cp "$RUNNER_TEMP/utoo-repro-template/package.json" "$project/package.json"
+              (
+                cd "$project"
+                UTOO_CACHE_DIR="$CACHE_DIR" UTOO_REGISTRY="$REGISTRY" \
+                  timeout --kill-after=3s "$INSTALL_TIMEOUT" "$UTOO_BIN" \
+                    --cache-dir "$CACHE_DIR" \
+                    --registry "$REGISTRY" \
+                    install --ignore-scripts \
+                    > "$LOG_DIR/install-${mode}-${attempt}-${idx}.log" 2>&1
+              ) &
+              PIDS+=("$!")
+            done
+          }
+
+          wait_installers() {
+            local status=0
+            for pid in "${PIDS[@]}"; do
+              if ! wait "$pid"; then
+                status=1
+              fi
+            done
+            return "$status"
+          }
+
+          kill_after_resolved() {
+            local deadline=$((SECONDS + RESOLVED_WAIT_TIMEOUT))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if find "$CACHE_DIR" -type f -name _resolved -print -quit 2>/dev/null | grep -q .; then
+                sleep 0.02
+                local killed=0
+                for pid in $(printf '%s\n' "${PIDS[@]}" | shuf); do
+                  local state
+                  state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+                  if [ -n "$state" ] && [ "${state#Z}" = "$state" ]; then
+                    kill -9 "$pid" 2>/dev/null || true
+                    killed=$((killed + 1))
+                  fi
+                done
+                echo "killed $killed installers after _resolved appeared"
+                return 0
+              fi
+              sleep 0.01
+            done
+            echo "no _resolved observed before kill deadline"
+          }
+
+          run_attempt() {
+            local attempt="$1"
+            local mode="$2"
+
+            rm -rf "$CACHE_DIR"
+            mkdir -p "$CACHE_DIR"
+
+            echo "::group::attempt $attempt ($mode)"
+            start_installers "$attempt" "$mode"
+            if [ "$mode" = "kill-after-resolved" ]; then
+              kill_after_resolved
+            fi
+
+            wait_installers || true
+            scan_zero_package_json | tee "$ZERO_LIST"
+            dump_cache_summary "$attempt" "$mode"
             echo "::endgroup::"
 
-            if [ "${status}" -eq 0 ]; then
-              echo "::notice::Reproduced zero-length package.json in resolved downloader cache on attempt ${attempt}."
+            if [ -s "$ZERO_LIST" ]; then
+              echo "::error::Reproduced zero-byte cache package.json with release $UTOO_RELEASE_TAG on attempt $attempt ($mode)."
+              cat "$ZERO_LIST"
+              return 0
+            fi
+
+            return 1
+          }
+
+          echo "utoo=$UTOO_BIN"
+          echo "release=$UTOO_RELEASE_TAG attempts=$ATTEMPTS parallelism=$PARALLELISM install_timeout=$INSTALL_TIMEOUT registry=$REGISTRY"
+
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            if [ "$attempt" -eq 1 ] && run_attempt "$attempt" "passive"; then
               exit 0
             fi
 
-            echo "attempt ${attempt} did not hit the zero-length window"
+            if run_attempt "$attempt" "kill-after-resolved"; then
+              exit 0
+            fi
+
+            echo "attempt $attempt did not leave a zero-byte package.json"
           done
 
-          echo "::error::Did not reproduce zero-length package.json after 30 attempts."
+          echo "::error::Did not reproduce a zero-byte cache package.json after $ATTEMPTS release-based attempts."
           exit 1
+
+      - name: Upload repro logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: utoo-release-cache-race-logs
+          path: |
+            ${{ runner.temp }}/utoo-repro-logs
+            ${{ runner.temp }}/zero-package-json.txt
+          if-no-files-found: ignore
