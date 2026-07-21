@@ -150,7 +150,7 @@ pub(crate) fn module_rule_match_js_no_url(enable_mdx_rs: bool) -> RuleCondition 
 
     RuleCondition::all(vec![
         RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
-            Some(UrlReferenceSubType::Undefined),
+            None,
         ))),
         RuleCondition::any(conditions),
     ])
