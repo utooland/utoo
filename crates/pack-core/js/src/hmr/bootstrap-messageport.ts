@@ -1,3 +1,3 @@
 import { initHMR } from "./client-messageport";
 
-initHMR();
+initHMR("TURBOPACK_CHUNK_UPDATE_LISTENERS");
