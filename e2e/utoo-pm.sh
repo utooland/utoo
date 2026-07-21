@@ -578,6 +578,60 @@ else
   echo -e "${YELLOW}SKIP: cross-device cache case (non-Linux or no /dev/shm)${NC}"
 fi
 
+# Case 8.8: install-script packages must be private copies on Linux. The
+# registry cache is normally hardlinked into node_modules, but lifecycle
+# scripts can mutate package files during `utoo rebuild`; sharing those files
+# would corrupt the cache and sibling package instances. `deasync` has an
+# install script but is deliberately not a binary-mirror package, so this
+# isolates the `hasInstallScript` clone policy from mirror rewriting.
+echo -e "${YELLOW}Case 8.8: install-script package uses copy, not hardlink${NC}"
+if [ "$(uname -s)" = "Linux" ]; then
+  SCRIPT_COPY_ROOT="$(mktemp -d)"
+  SCRIPT_COPY_PROJECT="$SCRIPT_COPY_ROOT/project"
+  SCRIPT_COPY_CACHE="$SCRIPT_COPY_ROOT/cache"
+  script_copy_cleanup() { rm -rf "$SCRIPT_COPY_ROOT" 2>/dev/null || true; }
+
+  mkdir -p "$SCRIPT_COPY_PROJECT"
+  printf '%s\n' '{"name":"install-script-copy-e2e","version":"1.0.0","private":true,"dependencies":{"deasync":"0.1.30"}}' \
+    > "$SCRIPT_COPY_PROJECT/package.json"
+  (cd "$SCRIPT_COPY_PROJECT" && UTOO_CACHE_DIR="$SCRIPT_COPY_CACHE" utoo install --ignore-scripts) \
+    || { echo -e "${RED}FAIL: install-script copy fixture install failed${NC}"; script_copy_cleanup; exit 1; }
+
+  node -e '
+const lock = require(process.argv[1]);
+const pkg = lock.packages["node_modules/deasync"];
+if (!pkg || pkg.hasInstallScript !== true) {
+  console.error("expected deasync lock entry with hasInstallScript=true", pkg);
+  process.exit(1);
+}
+' "$SCRIPT_COPY_PROJECT/package-lock.json" \
+    || { echo -e "${RED}FAIL: deasync lock entry lost hasInstallScript${NC}"; script_copy_cleanup; exit 1; }
+
+  SCRIPT_COPY_SOURCE="$SCRIPT_COPY_CACHE/deasync/0.1.30/package/package.json"
+  SCRIPT_COPY_TARGET="$SCRIPT_COPY_PROJECT/node_modules/deasync/package.json"
+  [ -f "$SCRIPT_COPY_SOURCE" ] && [ -f "$SCRIPT_COPY_TARGET" ] \
+    || { echo -e "${RED}FAIL: deasync source or target package.json missing${NC}"; script_copy_cleanup; exit 1; }
+
+  source_inode=$(stat -c '%i' "$SCRIPT_COPY_SOURCE")
+  target_inode=$(stat -c '%i' "$SCRIPT_COPY_TARGET")
+  if [ "$source_inode" = "$target_inode" ]; then
+    echo -e "${RED}FAIL: install-script package was hardlinked (inode $source_inode)${NC}"
+    script_copy_cleanup
+    exit 1
+  fi
+
+  printf '%s\n' '__utoo_install_script_copy_e2e__' > "$SCRIPT_COPY_TARGET"
+  if grep -q '__utoo_install_script_copy_e2e__' "$SCRIPT_COPY_SOURCE"; then
+    echo -e "${RED}FAIL: target mutation leaked into the package cache${NC}"
+    script_copy_cleanup
+    exit 1
+  fi
+  script_copy_cleanup
+  echo -e "${GREEN}PASS: install-script package is copied and cache-isolated${NC}"
+else
+  echo -e "${YELLOW}SKIP: install-script hardlink assertion is Linux-only${NC}"
+fi
+
 # Case 9: reinstall ant-design by npmjs.org
 echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
