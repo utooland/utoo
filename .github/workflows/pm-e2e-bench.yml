@@ -544,6 +544,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install pnpm
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - name: Install aube
         if: contains(github.event.inputs.phases_pm_list, 'aube')
         run: npm install -g @endevco/aube@1.29.1
@@ -583,6 +588,7 @@ jobs:
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
                  /tmp/utoo-next-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
+                 /tmp/pnpm-bench-store \
                  /tmp/aube-bench-data /tmp/aube-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
@@ -669,6 +675,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install pnpm
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - name: Install aube
         if: contains(github.event.inputs.phases_pm_list, 'aube')
         run: npm install -g @endevco/aube@1.29.1
@@ -689,6 +700,7 @@ jobs:
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
+                 /tmp/pnpm-bench-store \
                  /tmp/aube-bench-data /tmp/aube-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
