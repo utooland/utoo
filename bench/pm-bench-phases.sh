@@ -444,7 +444,9 @@ install_cmd() {
     utoo-next) echo "$UTOO_NEXT_BIN install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
     utoo-alt)  echo "env $UTOO_ALT_ENV utoo install --ignore-scripts --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
     bun)       echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
-    pnpm)      echo "pnpm install --ignore-scripts --no-frozen-lockfile --config.package-manager-strict=false --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    # Some npm projects set `package-lock=false` in .npmrc. pnpm maps that to
+    # its own lockfile switch, so force it back on for lock-based p3/p4 parity.
+    pnpm)      echo "pnpm install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --config.package-manager-strict=false --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
     aube)      echo "env XDG_DATA_HOME=$AUBE_DATA XDG_CACHE_HOME=$AUBE_CACHE NPM_CONFIG_REGISTRY=$REGISTRY aube install --ignore-scripts --reporter silent" ;;
   esac
 }
@@ -456,7 +458,7 @@ resolve_cmd() {
     utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
     utoo-alt)  echo "env $UTOO_ALT_ENV utoo deps --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
     bun)       echo "bun install --lockfile-only --registry=$REGISTRY" ;;
-    pnpm)      echo "pnpm install --lockfile-only --ignore-scripts --config.package-manager-strict=false --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm)      echo "pnpm install --lockfile-only --ignore-scripts --config.lockfile=true --config.package-manager-strict=false --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
     aube)      echo "env XDG_DATA_HOME=$AUBE_DATA XDG_CACHE_HOME=$AUBE_CACHE NPM_CONFIG_REGISTRY=$REGISTRY aube install --lockfile-only --ignore-scripts --reporter silent" ;;
   esac
 }
