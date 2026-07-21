@@ -817,6 +817,7 @@ export async function createHotReloader(
       switch (updateMessage.updateType) {
         case "start": {
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });
+          console.log("Compiling...");
           break;
         }
         case "end": {
