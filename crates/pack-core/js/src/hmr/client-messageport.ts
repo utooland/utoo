@@ -5,7 +5,9 @@
 import { connect } from "@vercel/turbopack-ecmascript-runtime/browser/dev/hmr-client/hmr-client";
 import { addMessageListener, connectHMR, sendMessage } from "./messageport";
 
-export function initHMR(chunkUpdateListenersGlobal: string) {
+export function initHMR(
+  chunkUpdateListenersGlobal = "TURBOPACK_CHUNK_UPDATE_LISTENERS",
+) {
   // First register the HMR client listeners
   connect({
     addMessageListener,
