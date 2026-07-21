@@ -230,6 +230,15 @@ function localCommand(manager, project, name, args, options = {}) {
       status: options.status,
     });
   }
+  // Bun owns command resolution for its installed package bins. In particular,
+  // its Windows layout does not expose npm-style `<name>.cmd` shims.
+  if (manager === "bun") {
+    return run("bun", ["run", name, ...args], {
+      cwd: project,
+      capture: true,
+      status: options.status,
+    });
+  }
   const suffix = process.platform === "win32" ? ".cmd" : "";
   return run(join(project, "node_modules", ".bin", `${name}${suffix}`), args, {
     cwd: project,
