@@ -11,11 +11,10 @@
 # previously produced `@utoo/utoo-mingw64_nt-10.0-26100-x64` (404 on
 # npm). All Windows kernel slugs must collapse to OS=win32.
 #
-# Note: the `utoo` package's postinstall is now Node
-# (vendor/templates/postinstall.utoo.js.template), which reads
-# process.platform / process.arch and so is immune to this whole class of
-# uname-drift bug. Its self-heal + Windows prefix paths are covered by
-# e2e/placeholder-self-heal.sh and e2e/utoo-pm.ps1.
+# Note: the main `utoo` package no longer has a postinstall. Its immutable Node
+# launcher reads process.platform / process.arch and is covered by
+# e2e/npm-launcher.sh and e2e/utoo-pm.ps1. This test remains for the legacy
+# generic binary-package shell template.
 
 set -u
 

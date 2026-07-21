@@ -294,19 +294,35 @@ Write-Yellow "Case: npm pack and install -g utoo"
 $packDir = Join-Path $env:TEMP "utoo-e2e-pack-$(Get-Random)"
 $installPrefix = Join-Path $env:TEMP "utoo-e2e-prefix-$(Get-Random)"
 try {
-    New-Item -ItemType Directory -Path "$packDir\pkg\bin" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$packDir\pkg\bin", "$packDir\platform\bin" -Force | Out-Null
     New-Item -ItemType Directory -Path $installPrefix -Force | Out-Null
 
-    # Copy the actual built binary
+    # Pack the current Windows native binary as the optional platform package.
     $utooBin = (Get-Command utoo).Source
-    Copy-Item $utooBin "$packDir\pkg\bin\utoo.exe"
+    Copy-Item $utooBin "$packDir\platform\bin\utoo.exe"
+    $nodeArch = (node -p "process.arch").Trim()
+    $platformName = "utoo-win32-$nodeArch"
+    @{
+        name = "@utoo/$platformName"
+        version = "0.0.0-e2e-test"
+        os = @("win32")
+        cpu = @($nodeArch)
+    } | ConvertTo-Json | Set-Content "$packDir\platform\package.json"
+    Push-Location "$packDir\platform"
+    npm pack 2>&1
+    $platformTarball = (Get-ChildItem "utoo-*.tgz" | Select-Object -First 1).FullName
+    Pop-Location
 
-    # Create package.json
+    # Build the main package from the real immutable launcher templates.
+    $tplDir = Join-Path (Split-Path $PSScriptRoot -Parent) "vendor/templates"
+    Copy-Item "$tplDir\launcher.utoo.js.template" "$packDir\pkg\bin\launcher.js"
+    Copy-Item "$tplDir\utoo.utoo.js.template" "$packDir\pkg\bin\utoo.js"
+    Copy-Item "$tplDir\utx.utoo.js.template" "$packDir\pkg\bin\utx.js"
     @{
         name = "utoo"
         version = "0.0.0-e2e-test"
-        bin = @{ utoo = "bin/utoo"; ut = "bin/utoo" }
-        scripts = @{ postinstall = "echo postinstall-ok" }
+        bin = @{ utoo = "bin/utoo.js"; ut = "bin/utoo.js"; utx = "bin/utx.js" }
+        optionalDependencies = @{ "@utoo/$platformName" = "file:$platformTarball" }
     } | ConvertTo-Json | Set-Content "$packDir\pkg\package.json"
 
     # Pack
@@ -315,32 +331,25 @@ try {
     $tarball = Get-ChildItem "utoo-*.tgz" | Select-Object -First 1
     Write-Host "Packed: $($tarball.Name)"
 
-    # Install globally to temp prefix
-    npm install -g $tarball.FullName "--prefix=$installPrefix" 2>&1
+    # Install with lifecycle scripts disabled. The launcher path must still work.
+    npm install -g $tarball.FullName "--prefix=$installPrefix" --ignore-scripts 2>&1
     Write-Host "Installed to: $installPrefix"
 
-    # Verify the binary exists in the package dir (not the npm shim)
-    $candidatePaths = @(
-        (Join-Path $installPrefix "node_modules\utoo\bin\utoo.exe"),
-        (Join-Path $installPrefix "node_modules\utoo\bin\utoo")
-    )
-    $installedUtoo = $null
-    foreach ($p in $candidatePaths) {
-        if (Test-Path $p) { $installedUtoo = $p; break }
-    }
-    if (-not $installedUtoo) {
+    # Verify npm generated the public shim and installed the optional artifact.
+    $installedUtoo = Join-Path $installPrefix "utoo.cmd"
+    if (-not (Test-Path $installedUtoo)) {
         Write-Host "Contents of install prefix:"
         Get-ChildItem -Recurse $installPrefix | Select-Object FullName | Format-Table
-        throw "utoo binary not found after npm install -g"
+        throw "utoo.cmd launcher not found after npm install -g"
     }
-
-    Write-Host "Found binary at: $installedUtoo"
-
-    # Verify it's not a placeholder (read first bytes, not text)
-    $bytes = [System.IO.File]::ReadAllBytes($installedUtoo)
-    $header = [System.Text.Encoding]::ASCII.GetString($bytes, 0, [Math]::Min(100, $bytes.Length))
-    if ($header.Contains("placeholder")) {
-        throw "installed binary is still a placeholder"
+    $nativeArtifact = Get-ChildItem -Path $installPrefix -Recurse -Filter "utoo.exe" |
+        Where-Object { $_.FullName -match [regex]::Escape("@utoo") } |
+        Select-Object -First 1
+    if (-not $nativeArtifact) { throw "optional utoo.exe artifact was not installed" }
+    $installedManifest = Get-Content (Join-Path $installPrefix "node_modules\utoo\package.json") -Raw |
+        ConvertFrom-Json
+    if ($null -ne $installedManifest.scripts) {
+        throw "installed main package unexpectedly contains lifecycle scripts"
     }
 
     & $installedUtoo --version
@@ -348,11 +357,9 @@ try {
 
     Write-Green "PASS: npm pack + install -g works correctly"
 
-    # Regression: a global install run THROUGH the npm-installed binary must
-    # resolve the prefix to $installPrefix. On Windows npm places executable
-    # shims directly in the prefix ROOT (not a bin subdir) and packages under
-    # <prefix>\node_modules; a naive parent-dir inference would drop them under
-    # utoo's own package dir instead.
+    # The native executable is nested in the optional package. The launcher
+    # must propagate the public managed-package root so global operations still
+    # infer $installPrefix.
     Write-Yellow "  Subtest: global install resolves npm-style prefix (Windows)"
     & $installedUtoo install -g cowsay --registry=https://registry.npmjs.org
     if ($LASTEXITCODE -ne 0) { throw "global install cowsay via npm-installed utoo failed" }
@@ -403,17 +410,13 @@ finally {
     Remove-Item -Recurse -Force $installPrefix -ErrorAction SilentlyContinue
 }
 
-# Case: real templates bootstrap via `node postinstall.js` (no `sh` on PATH).
-# Regression guard for the Windows global-install breakage: the published `utoo`
-# package used to run `sh ./postinstall.sh`, which fails on a stock Windows box
-# (cmd.exe has no `sh`). The fast path now runs through node, always present
-# during `npm install`. We stage the exact files vendor/scripts/npm-utoo.sh
-# publishes, drop the built binary in as the optional platform dep, simulate
-# npm's generated shims in the prefix root, then run the real postinstall and
-# assert it produces a working native `utoo.exe`.
-Write-Yellow "Case: postinstall.js bootstraps native binary on Windows (no sh)"
+# Case: the real immutable launcher resolves and runs the optional Windows
+# artifact without lifecycle hooks or prefix mutation. Stage exactly the files
+# published by vendor/scripts/npm-utoo.sh and npm-binary.sh, plus inert npm shim
+# fixtures that must remain untouched.
+Write-Yellow "Case: immutable npm launcher runs the Windows platform artifact"
 $tplDir = Join-Path (Split-Path $PSScriptRoot -Parent) "vendor/templates"
-$bootPrefix = Join-Path $env:TEMP "utoo-e2e-bootstrap-$(Get-Random)"
+$bootPrefix = Join-Path $env:TEMP "utoo-e2e-launcher-$(Get-Random)"
 try {
     $pkgDir = Join-Path $bootPrefix "node_modules\utoo"
     $optDir = Join-Path $bootPrefix "node_modules\@utoo\utoo-win32-x64"
@@ -422,45 +425,35 @@ try {
     # Render the main package exactly like vendor/scripts/npm-utoo.sh.
     (Get-Content "$tplDir\utoo.package.json.template" -Raw).Replace("{{version}}", "9.9.9-e2e") |
         Set-Content "$pkgDir\package.json"
-    Copy-Item "$tplDir\postinstall.utoo.js.template" "$pkgDir\postinstall.js"
-    Copy-Item "$tplDir\placeholder.utoo.js.template" "$pkgDir\bin\utoo"
-    Copy-Item "$tplDir\utx.utoo.js.template" "$pkgDir\bin\utx"
+    Copy-Item "$tplDir\launcher.utoo.js.template" "$pkgDir\bin\launcher.js"
+    Copy-Item "$tplDir\utoo.utoo.js.template" "$pkgDir\bin\utoo.js"
+    Copy-Item "$tplDir\utx.utoo.js.template" "$pkgDir\bin\utx.js"
 
-    # Optional platform dep ships the PE binary as bin/utoo (npm-binary.sh).
-    Copy-Item (Get-Command utoo).Source "$optDir\bin\utoo"
-    '{"name":"@utoo/utoo-win32-x64","version":"9.9.9-e2e","os":"win32","cpu":"x64"}' |
+    # Optional platform dep ships the PE binary directly as bin/utoo.exe.
+    Copy-Item (Get-Command utoo).Source "$optDir\bin\utoo.exe"
+    '{"name":"@utoo/utoo-win32-x64","version":"9.9.9-e2e","os":["win32"],"cpu":["x64","arm64"]}' |
         Set-Content "$optDir\package.json"
 
-    # Simulate the shims npm generates for the placeholder; postinstall must
-    # replace/remove them so `utoo` resolves to the native exe.
+    # Simulate package-manager shims. Runtime execution must not replace or
+    # remove any of them.
     foreach ($s in "utoo", "utoo.cmd", "utoo.ps1", "ut", "ut.cmd", "ut.ps1", "utx.ps1") {
-        New-Item -ItemType File -Path (Join-Path $bootPrefix $s) -Force | Out-Null
+        Set-Content (Join-Path $bootPrefix $s) "shim-fixture-$s"
     }
+    $launcherHash = (Get-FileHash "$pkgDir\bin\launcher.js").Hash
+    $binaryHash = (Get-FileHash "$optDir\bin\utoo.exe").Hash
 
-    # The real postinstall — invoked through node, never sh.
-    Push-Location $pkgDir
-    try {
-        node postinstall.js
-        if ($LASTEXITCODE -ne 0) { throw "postinstall.js exited $LASTEXITCODE" }
+    node "$pkgDir\bin\utoo.js" --version
+    if ($LASTEXITCODE -ne 0) { throw "Windows launcher failed to run utoo.exe" }
+
+    foreach ($s in "utoo", "utoo.cmd", "utoo.ps1", "ut", "ut.cmd", "ut.ps1", "utx.ps1") {
+        $content = (Get-Content (Join-Path $bootPrefix $s) -Raw).Trim()
+        if ($content -ne "shim-fixture-$s") { throw "launcher modified package-manager shim: $s" }
     }
-    finally { Pop-Location }
+    if (Test-Path (Join-Path $bootPrefix "utoo.exe")) { throw "launcher copied utoo.exe into prefix" }
+    if ((Get-FileHash "$pkgDir\bin\launcher.js").Hash -ne $launcherHash) { throw "launcher mutated itself" }
+    if ((Get-FileHash "$optDir\bin\utoo.exe").Hash -ne $binaryHash) { throw "launcher mutated native artifact" }
 
-    $bootUtoo = Join-Path $bootPrefix "utoo.exe"
-    if (-not (Test-Path $bootUtoo)) { throw "postinstall did not produce utoo.exe in the prefix" }
-    if (-not (Test-Path (Join-Path $bootPrefix "ut.exe"))) { throw "postinstall did not produce ut.exe alias" }
-    $utx = Join-Path $bootPrefix "utx.cmd"
-    if (-not (Test-Path $utx)) { throw "postinstall did not produce utx.cmd" }
-    if ((Get-Content $utx -Raw) -notmatch "utoo.exe x") { throw "utx.cmd does not delegate to 'utoo x'" }
-
-    # npm's placeholder shims must be gone (the native exe replaces them).
-    foreach ($s in "utoo.cmd", "utoo.ps1", "ut.cmd", "ut.ps1", "utx.ps1") {
-        if (Test-Path (Join-Path $bootPrefix $s)) { throw "leftover npm shim not removed: $s" }
-    }
-
-    & $bootUtoo --version
-    if ($LASTEXITCODE -ne 0) { throw "bootstrapped utoo.exe --version failed" }
-
-    Write-Green "PASS: postinstall.js bootstraps a working native binary without sh"
+    Write-Green "PASS: launcher executes utoo.exe without hooks or prefix mutation"
 }
 finally {
     Remove-Item -Recurse -Force $bootPrefix -ErrorAction SilentlyContinue

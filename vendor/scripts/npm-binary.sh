@@ -51,24 +51,38 @@ PLATFORM_DIR="$WORK_DIR/binary"
 mkdir -p "$PLATFORM_DIR/bin"
 
 # render binary package.json template
+CPU_VALUES="\"$CPU\""
+# Windows 11 on ARM64 can run x64 binaries under emulation. Until utoo ships a
+# native win32-arm64 artifact, allow npm to install the x64 package there too.
+if [ "$OS" = "win32" ] && [ "$CPU" = "x64" ]; then
+  CPU_VALUES='"x64", "arm64"'
+fi
+
 cat ../templates/binary.package.json.template | \
     awk -v name="$NAME" \
         -v version="$VERSION" \
         -v platform="$OS-$CPU" \
         -v os="$OS" \
         -v cpu="$CPU" \
+        -v cpu_values="$CPU_VALUES" \
     '{
         gsub(/{{name}}/, name);
         gsub(/{{version}}/, version);
         gsub(/{{platform}}/, platform);
         gsub(/{{os}}/, os);
         gsub(/{{cpu}}/, cpu);
+        gsub(/{{cpu_values}}/, cpu_values);
         print;
     }' > "$PLATFORM_DIR/package.json"
 
-# cp binary
-cp "$BINARY" "$PLATFORM_DIR/bin/$NAME"
-chmod +x "$PLATFORM_DIR/bin/$NAME"
+# Copy the immutable native artifact. Windows launchers target the explicit
+# .exe path; POSIX launchers target the extensionless executable.
+TARGET_NAME="$NAME"
+if [ "$OS" = "win32" ]; then
+  TARGET_NAME="$NAME.exe"
+fi
+cp "$BINARY" "$PLATFORM_DIR/bin/$TARGET_NAME"
+chmod +x "$PLATFORM_DIR/bin/$TARGET_NAME"
 
 # do publish; pass --dry-run for verification without publishing
 cd "$PLATFORM_DIR"

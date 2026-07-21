@@ -1,0 +1,191 @@
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { spawn } = require("child_process");
+
+const TARGETS = Object.freeze({
+  "darwin-x64": {
+    packageName: "@utoo/utoo-darwin-x64",
+    executable: "bin/utoo",
+  },
+  "darwin-arm64": {
+    packageName: "@utoo/utoo-darwin-arm64",
+    executable: "bin/utoo",
+  },
+  "linux-x64": {
+    packageName: "@utoo/utoo-linux-x64",
+    executable: "bin/utoo",
+  },
+  "linux-arm64": {
+    packageName: "@utoo/utoo-linux-arm64",
+    executable: "bin/utoo",
+  },
+  "win32-x64": {
+    packageName: "@utoo/utoo-win32-x64",
+    executable: "bin/utoo.exe",
+  },
+});
+
+class LauncherError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "LauncherError";
+    this.cause = cause;
+  }
+}
+
+function normalizeArch(arch) {
+  if (arch === "amd64") return "x64";
+  if (arch === "aarch64") return "arm64";
+  return arch;
+}
+
+function resolveTarget(platform = process.platform, arch = process.arch) {
+  let normalizedArch = normalizeArch(arch);
+  // Windows 11 on ARM64 can run x64 binaries under emulation. The platform
+  // package declares both CPU values so package managers install it for either
+  // architecture until a native win32-arm64 artifact is published.
+  if (platform === "win32" && normalizedArch === "arm64") {
+    normalizedArch = "x64";
+  }
+
+  const target = TARGETS[`${platform}-${normalizedArch}`];
+  if (!target) {
+    throw new LauncherError(`unsupported platform: ${platform}-${arch}`);
+  }
+  return target;
+}
+
+function packageVersion() {
+  try {
+    return require("../package.json").version;
+  } catch {
+    return "unknown";
+  }
+}
+
+function missingArtifactMessage(target, platform, arch) {
+  return [
+    `native binary for ${platform}-${arch} is missing`,
+    `expected optional package: ${target.packageName}@${packageVersion()}`,
+    "reinstall utoo without omitting optional dependencies",
+  ].join("\n");
+}
+
+function findBinary(
+  target,
+  platform = process.platform,
+  arch = process.arch,
+  resolvePackage = require.resolve,
+) {
+  let packageJson;
+  try {
+    packageJson = resolvePackage(`${target.packageName}/package.json`);
+  } catch (error) {
+    throw new LauncherError(
+      missingArtifactMessage(target, platform, arch),
+      error,
+    );
+  }
+
+  const binary = path.join(path.dirname(packageJson), target.executable);
+  if (!fs.existsSync(binary)) {
+    throw new LauncherError(
+      `${missingArtifactMessage(target, platform, arch)}\nexpected file: ${binary}`,
+    );
+  }
+  return binary;
+}
+
+function spawnNative(binary, args, spawnImpl = spawn) {
+  const env = {
+    ...process.env,
+    // The native executable lives inside an optional dependency. Preserve the
+    // main package root so utoo can infer npm-style global prefixes from the
+    // public package rather than from the nested platform artifact.
+    UTOO_MANAGED_PACKAGE_ROOT: fs.realpathSync(path.join(__dirname, "..")),
+  };
+  const child = spawnImpl(binary, args, { stdio: "inherit", env });
+  const signalHandlers = new Map();
+
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    const handler = () => {
+      if (!child.killed) {
+        try {
+          child.kill(signal);
+        } catch {
+          // The child may have exited between the killed check and kill().
+        }
+      }
+    };
+    signalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+
+  const cleanup = () => {
+    for (const [signal, handler] of signalHandlers) {
+      process.removeListener(signal, handler);
+    }
+  };
+
+  return new Promise((resolve, reject) => {
+    child.once("error", (error) => {
+      cleanup();
+      reject(new LauncherError(`failed to start native binary ${binary}`, error));
+    });
+    child.once("exit", (exitCode, signal) => {
+      cleanup();
+      resolve({ exitCode: exitCode ?? 1, signal });
+    });
+  });
+}
+
+async function run(args, options = {}) {
+  const platform = options.platform || process.platform;
+  const arch = options.arch || process.arch;
+  const target = resolveTarget(platform, arch);
+  const binary = findBinary(
+    target,
+    platform,
+    arch,
+    options.resolvePackage || require.resolve,
+  );
+  try {
+    return await spawnNative(binary, args, options.spawnImpl || spawn);
+  } catch (error) {
+    throw new LauncherError(
+      [
+        `failed to start native binary: ${binary}`,
+        `platform package: ${target.packageName}@${packageVersion()}`,
+        "reinstall utoo without omitting optional dependencies",
+      ].join("\n"),
+      error.cause || error,
+    );
+  }
+}
+
+async function main(args) {
+  try {
+    const result = await run(args);
+    if (result.signal) {
+      process.kill(process.pid, result.signal);
+      return;
+    }
+    process.exit(result.exitCode);
+  } catch (error) {
+    const detail = error.cause?.message;
+    console.error(
+      `utoo: ${error.message}${detail ? `\ncaused by: ${detail}` : ""}`,
+    );
+    process.exit(1);
+  }
+}
+
+module.exports = {
+  findBinary,
+  main,
+  resolveTarget,
+  run,
+  spawnNative,
+};
