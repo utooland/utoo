@@ -1,9 +1,9 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+(globalThis["utooChunk_appDev"] || (globalThis["utooChunk_appDev"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
     {"otherChunks":["input_index_fe72225c.js"],"runtimeModuleIds":[41]}
 ]);
 (() => {
-if (!Array.isArray(globalThis["TURBOPACK"])) {
+if (!Array.isArray(globalThis["utooChunk_appDev"])) {
     return;
 }
 
@@ -11,6 +11,10 @@ var CHUNK_BASE_PATH = "/";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
 var RUNTIME_PUBLIC_PATH = "/";
+globalThis["utooChunk_appDev_CHUNK_UPDATE_LISTENERS"] ||= [];
+var CHUNK_UPDATE_LISTENERS = {
+    push: (registration) => globalThis["utooChunk_appDev_CHUNK_UPDATE_LISTENERS"].push(registration),
+};
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
 var CHUNK_LOAD_RETRY_MAX_ATTEMPTS = 1;
@@ -1995,7 +1999,7 @@ function registerChunk(registration) {
     const chunkListPath = getPathFromScript(chunkListScript);
     // The "chunk" is also registered to finish the loading in the backend
     BACKEND.registerChunk(chunkListPath);
-    globalThis.TURBOPACK_CHUNK_UPDATE_LISTENERS.push([
+    CHUNK_UPDATE_LISTENERS.push([
         chunkListPath,
         handleApply.bind(null, chunkListPath)
     ]);
@@ -2017,7 +2021,6 @@ function registerChunk(registration) {
         markChunkListAsRuntime(chunkListPath);
     }
 }
-globalThis.TURBOPACK_CHUNK_UPDATE_LISTENERS ??= [];
 /**
  * This file contains the runtime code specific to the Turbopack ECMAScript DOM runtime.
  *
@@ -2368,11 +2371,11 @@ function _eval({ code, url, map }) {
     // eslint-disable-next-line no-eval
     return eval(code);
 }
-var chunksToRegister = globalThis["TURBOPACK"];
-globalThis["TURBOPACK"] = { push: registerChunk };
+var chunksToRegister = globalThis["utooChunk_appDev"];
+globalThis["utooChunk_appDev"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
-var chunkListsToRegister = globalThis["TURBOPACK_CHUNK_LISTS"] || [];
-globalThis["TURBOPACK_CHUNK_LISTS"] = { push: registerChunkList };
+var chunkListsToRegister = globalThis["utooChunk_appDev_CHUNK_LISTS"] || [];
+globalThis["utooChunk_appDev_CHUNK_LISTS"] = { push: registerChunkList };
 chunkListsToRegister.forEach(registerChunkList);
 })();
 

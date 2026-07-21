@@ -6,9 +6,12 @@
         "name": "main"
       }
     ],
+    "output": {
+      "chunkLoadingGlobal": "appDev"
+    },
     "optimization": {
       "minify": false
     }
   },
   "runtimeType": "Development"
-} 
+}
