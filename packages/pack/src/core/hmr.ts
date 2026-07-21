@@ -19,7 +19,11 @@ import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
-import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
+import {
+  isPersistentCachingEnabled,
+  isTruthyEnv,
+  normalizeTurbopackMemoryEviction,
+} from "../utils/env";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
@@ -166,7 +170,9 @@ export async function createHotReloader(
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
-  const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const persistentCaching = isPersistentCachingEnabled(
+    bundleOptions.config.persistentCaching,
+  );
   const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
     bundleOptions.config.turbopackMemoryEviction,
   ) as MemoryEvictionMode;
@@ -213,7 +219,7 @@ export async function createHotReloader(
             minify: false,
             moduleIds: "named",
           },
-          persistentCaching: bundleOptions?.config?.persistentCaching ?? true,
+          persistentCaching,
           pluginRuntimeStrategy:
             bundleOptions?.config?.pluginRuntimeStrategy ??
             (useWorkerThreads() ? "workerThreads" : "childProcesses"),
@@ -784,9 +790,7 @@ export async function createHotReloader(
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
       closePromise ??= (
-        bundleOptions.config.persistentCaching
-          ? project.shutdown()
-          : project.onExit()
+        persistentCaching ? project.shutdown() : project.onExit()
       )
         .catch((err) => {
           console.error(err);
