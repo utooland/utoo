@@ -2,42 +2,42 @@ use anyhow::{Context, Result};
 use pack_api::{
     endpoint::Endpoint,
     entrypoint::{
-        EntrypointsWithIssues, get_all_written_entrypoints_with_issues_operation,
-        get_entrypoints_with_issues_operation,
+        get_all_written_entrypoints_with_issues_operation, get_entrypoints_with_issues_operation,
+        EntrypointsWithIssues,
     },
-    hmr::{HmrUpdateWithIssues, hmr_update_with_issues_operation},
+    hmr::{hmr_update_with_issues_operation, HmrUpdateWithIssues},
     project::{ProjectContainer, ProjectOptions, WatchOptions},
     turbo_tasks::UtooTurboTasks,
     utils::StyledStringSerialize,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     ops::Deref,
     path::PathBuf,
     str::FromStr,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     time::Duration,
 };
 use tokio::{sync::mpsc::unbounded_channel, time::Instant};
-use turbo_rcstr::{RcStr, rcstr};
+use turbo_rcstr::{rcstr, RcStr};
 use turbo_tasks::TaskId;
 use turbo_tasks::{
-    Completion, OperationVc, PrettyPrintError, ReadConsistency, ResolvedVc, TransientInstance,
-    TurboTasks, Vc, read_strongly_consistent_and_apply_effects,
+    read_strongly_consistent_and_apply_effects, Completion, OperationVc, PrettyPrintError,
+    ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
 };
-use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
+use turbo_tasks_backend::{noop_backing_storage, BackendOptions, TurboTasksBackend};
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos as SourcePosInner,
     version::{PartialUpdate, TotalUpdate, Update, Version, VersionState},
 };
-use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 use crate::fs::Fs;
 use crate::tokio_runtime::runtime;

@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
-use crate::pm::{self, OPFS_PROJECT, with_project};
+use crate::pm::{self, with_project, OPFS_PROJECT};
 use crate::tokio_runtime::init_tokio_runtime;
 
 #[cfg(feature = "utoopack")]
