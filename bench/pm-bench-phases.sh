@@ -382,9 +382,13 @@ seed_for_phase() {
       ;;
     p3_*:pnpm|p4_*:pnpm)
       if [ ! -f pnpm-lock.yaml ] && [ ! -f "$LOCK_STASH/pnpm-lock.yaml" ]; then
-        echo -e "  ${CYAN}seed: running \`pnpm install --lockfile-only\` to generate pnpm-lock.yaml${NC}"
+        # pnpm's lockfile-only path is not equivalent to its install path for
+        # every real-world workspace. Seed with a full untimed install, then
+        # p3's prepare deletes the store while p4 intentionally keeps it.
+        echo -e "  ${CYAN}seed: running full pnpm install to generate pnpm-lock.yaml/store${NC}"
         rm -f package-lock.json bun.lock aube-lock.yaml
-        retry 3 bash -c "$(resolve_cmd pnpm) >> '$seed_log' 2>&1" || return 1
+        rm -rf node_modules
+        retry 3 bash -c "$(install_cmd pnpm) >> '$seed_log' 2>&1" || return 1
       fi
       [ -f pnpm-lock.yaml ] && cp -f pnpm-lock.yaml "$LOCK_STASH/pnpm-lock.yaml"
       ;;
@@ -620,7 +624,7 @@ RESULTS_DIR="$RESULTS_DIR" node -e "
     const key = parseKey(f, '.json');
     if (!key) continue;
     let data; try { data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); } catch (_) { continue; }
-    const r = data.results[0];
+    const r = Array.isArray(data.results) ? data.results[0] : null;
     if (!r) continue;
     (timing[key.phase] ??= {})[key.pm] = { mean: r.mean, stddev: r.stddev, min: r.min, max: r.max };
   }
