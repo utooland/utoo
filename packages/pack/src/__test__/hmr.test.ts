@@ -196,8 +196,8 @@ describe("HMR subscription lifecycle", () => {
     });
 
     expect(createSubscription).toHaveBeenCalledExactlyOnceWith("route");
-    expect(clientA.onIssues).toHaveBeenCalledWith([]);
-    expect(clientB.onIssues).toHaveBeenCalledWith([]);
+    expect(clientA.onIssues).toHaveBeenCalledWith([], "issues");
+    expect(clientB.onIssues).toHaveBeenCalledWith([], "issues");
   });
 
   it("returns the shared iterator only after its last subscriber leaves", async () => {
@@ -219,25 +219,56 @@ describe("HMR subscription lifecycle", () => {
     expect(iterator.return).toHaveBeenCalledOnce();
   });
 
-  it("seeds a joining subscriber with latest issues without replaying a partial", async () => {
+  it("seeds a joining subscriber from a stable issues baseline", async () => {
     const iterator = createControlledHmrEvents<any>();
-    const registry = createSharedHmrSubscriptionRegistry(() => iterator);
+    const createSubscription = vi.fn(() => iterator);
+    const registry = createSharedHmrSubscriptionRegistry(createSubscription);
     const clientA = { onIssues: vi.fn(), onUpdate: vi.fn() };
     const clientB = { onIssues: vi.fn(), onUpdate: vi.fn() };
 
     registry.subscribe("route", clientA);
     iterator.emit({
-      type: "partial",
+      type: "issues",
       issues: [{ severity: "warning", message: "latest" }],
-      instruction: {},
     });
-    await vi.waitFor(() => expect(clientA.onUpdate).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(clientA.onIssues).toHaveBeenCalledOnce());
 
     registry.subscribe("route", clientB);
 
-    expect(clientB.onIssues).toHaveBeenCalledExactlyOnceWith([
-      { severity: "warning", message: "latest" },
-    ]);
+    expect(createSubscription).toHaveBeenCalledOnce();
+    expect(clientB.onIssues).toHaveBeenCalledExactlyOnceWith(
+      [{ severity: "warning", message: "latest" }],
+      "issues",
+    );
+    expect(clientB.onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("creates a fresh baseline for a subscriber joining after an update", async () => {
+    const iteratorA = createControlledHmrEvents<any>();
+    const iteratorB = createControlledHmrEvents<any>();
+    const createSubscription = vi
+      .fn()
+      .mockReturnValueOnce(iteratorA)
+      .mockReturnValueOnce(iteratorB);
+    const registry = createSharedHmrSubscriptionRegistry(createSubscription);
+    const clientA = { onIssues: vi.fn(), onUpdate: vi.fn() };
+    const clientB = { onIssues: vi.fn(), onUpdate: vi.fn() };
+
+    registry.subscribe("route", clientA);
+    const update = { type: "partial", issues: [], instruction: {} };
+    iteratorA.emit(update);
+    await vi.waitFor(() =>
+      expect(clientA.onUpdate).toHaveBeenCalledWith(update),
+    );
+
+    registry.subscribe("route", clientB);
+    expect(createSubscription).toHaveBeenCalledTimes(2);
+    expect(clientB.onIssues).not.toHaveBeenCalled();
+
+    iteratorB.emit({ type: "issues", issues: [] });
+    await vi.waitFor(() =>
+      expect(clientB.onIssues).toHaveBeenCalledWith([], "issues"),
+    );
     expect(clientB.onUpdate).not.toHaveBeenCalled();
   });
 
@@ -255,7 +286,10 @@ describe("HMR subscription lifecycle", () => {
     iterator.emit({ type: "issues", issues: [{ severity: "warning" }] });
     await vi.waitFor(() => expect(clientB.onIssues).toHaveBeenCalledOnce());
 
-    expect(clientB.onIssues).toHaveBeenCalledWith([{ severity: "warning" }]);
+    expect(clientB.onIssues).toHaveBeenCalledWith(
+      [{ severity: "warning" }],
+      "issues",
+    );
   });
 
   it("keeps one subscriber callback failure from stopping other clients", async () => {

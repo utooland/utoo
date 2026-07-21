@@ -553,9 +553,14 @@ export function projectFactory() {
       })();
     }
 
-    hmrEvents(identifier: string) {
+    hmrEvents(identifier: string, expectedVersion?: string) {
       return subscribe<TurbopackResult<Update>>(true, async (callback) =>
-        binding.projectHmrEvents(this._nativeProject, identifier, callback),
+        binding.projectHmrEvents(
+          this._nativeProject,
+          identifier,
+          callback,
+          expectedVersion,
+        ),
       );
     }
 

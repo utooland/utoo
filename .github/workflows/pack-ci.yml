@@ -165,16 +165,44 @@ jobs:
         if: ${{ !matrix.settings.docker }}
         shell: bash
 
+  hmr_e2e:
+    name: utoopack-ci-hmr-e2e
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pack)'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-05-15
+      - name: Setup Utoo
+        uses: utooland/setup-utoo@v1
+      - name: Install dependencies
+        run: utoo install
+      - name: Build @utoo/pack
+        run: npm run build:local --workspace @utoo/pack
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run HMR browser regression tests
+        run: npm run test:e2e:pack-hmr
+
   success:
     name: utoopack-ci-success
     runs-on: ubuntu-latest
     if: always()
     needs:
       - test
+      - hmr_e2e
     steps:
       - name: Check success
         run: |
-          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ]; then
+          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ] || [ "${{ needs.hmr_e2e.result }}" == "failure" ] || [ "${{ needs.hmr_e2e.result }}" == "cancelled" ]; then
             echo "Tests failed or were cancelled"
             exit 1
           else

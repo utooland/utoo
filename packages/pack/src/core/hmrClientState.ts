@@ -46,8 +46,10 @@ export async function consumeHmrSubscription<Result extends { type: string }>(
   }
 }
 
-export interface SharedHmrSubscriber<Result extends { issues: unknown[] }> {
-  onIssues: (issues: Result["issues"]) => void;
+export interface SharedHmrSubscriber<
+  Result extends { type: string; issues: unknown[] },
+> {
+  onIssues: (issues: Result["issues"], resultType: Result["type"]) => void;
   onUpdate: (result: Result) => void;
   onError?: (error: unknown) => void;
   onComplete?: () => void;
@@ -60,6 +62,7 @@ export function createSharedHmrSubscriptionRegistry<
   type Member = { active: boolean; subscriber: Subscriber };
   type Entry = {
     latestIssues?: Result["issues"];
+    latestResultType?: Result["type"];
     subscription: AsyncIterableIterator<Result>;
     subscribers: Set<Member>;
   };
@@ -79,11 +82,22 @@ export function createSharedHmrSubscriptionRegistry<
     try {
       for await (const result of entry.subscription) {
         entry.latestIssues = [...result.issues] as Result["issues"];
+        entry.latestResultType = result.type;
+        if (result.type !== "issues" && entries.get(id) === entry) {
+          // A late subscriber cannot reuse a stream after its version state has
+          // advanced: it would receive the latest issues but miss the update
+          // which advanced that state. Keep serving existing subscribers, but
+          // force future ones to establish and validate a fresh baseline.
+          entries.delete(id);
+        }
         for (const member of [...entry.subscribers]) {
           if (!member.active) continue;
           const { subscriber } = member;
           try {
-            subscriber.onIssues([...entry.latestIssues] as Result["issues"]);
+            subscriber.onIssues(
+              [...entry.latestIssues] as Result["issues"],
+              result.type,
+            );
             if (member.active && result.type !== "issues") {
               subscriber.onUpdate(result);
             }
@@ -126,9 +140,12 @@ export function createSharedHmrSubscriptionRegistry<
       }
       const member: Member = { active: true, subscriber };
       entry.subscribers.add(member);
-      if (entry.latestIssues) {
+      if (entry.latestIssues && entry.latestResultType) {
         try {
-          subscriber.onIssues([...entry.latestIssues] as Result["issues"]);
+          subscriber.onIssues(
+            [...entry.latestIssues] as Result["issues"],
+            entry.latestResultType,
+          );
         } catch (error) {
           reportSubscriberError(member, error);
         }

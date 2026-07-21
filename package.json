@@ -8,6 +8,7 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "test:e2e:utooweb": "playwright test -c e2e/utoo-web/playwright.config.ts",
+    "test:e2e:pack-hmr": "playwright test -c e2e/pack-hmr/playwright.config.ts",
     "vitest:all": "turbo run test --filter=@utoo/pack --filter=@utoo/pack-shared",
     "lint": "turbo run lint",
     "dev": "turbo run dev",

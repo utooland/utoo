@@ -48,6 +48,7 @@ export interface EcmascriptMergedUpdate {
 export interface BaseUpdate {
   resource: ResourceIdentifier;
   issues: HmrIssue[];
+  validation?: string;
 }
 
 export interface IssuesUpdate extends BaseUpdate {
@@ -155,6 +156,8 @@ export type HMR_ACTION_TYPES =
 export interface TurbopackSubscribeMessage {
   type: "turbopack-subscribe";
   path: string;
+  version?: string;
+  validation?: string;
 }
 
 export interface TurbopackUnsubscribeMessage {

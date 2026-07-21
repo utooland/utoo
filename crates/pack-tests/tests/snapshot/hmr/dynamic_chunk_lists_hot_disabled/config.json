@@ -8,7 +8,7 @@
     ],
     "mode": "development",
     "devServer": {
-      "hot": true
+      "hot": false
     },
     "sourceMaps": false,
     "optimization": {

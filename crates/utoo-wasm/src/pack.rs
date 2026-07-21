@@ -2,33 +2,42 @@ use anyhow::{Context, Result};
 use pack_api::{
     endpoint::Endpoint,
     entrypoint::{
-        get_all_written_entrypoints_with_issues_operation, get_entrypoints_with_issues_operation,
-        EntrypointsWithIssues,
+        EntrypointsWithIssues, get_all_written_entrypoints_with_issues_operation,
+        get_entrypoints_with_issues_operation,
     },
-    hmr::{hmr_update_with_issues_operation, HmrUpdateWithIssues},
+    hmr::{HmrUpdateWithIssues, hmr_update_with_issues_operation},
     project::{ProjectContainer, ProjectOptions, WatchOptions},
     turbo_tasks::UtooTurboTasks,
     utils::StyledStringSerialize,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{json, Value};
-use std::{ops::Deref, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use serde_json::{Value, json};
+use std::{
+    ops::Deref,
+    path::PathBuf,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{sync::mpsc::unbounded_channel, time::Instant};
-use turbo_rcstr::{rcstr, RcStr};
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::TaskId;
 use turbo_tasks::{
-    read_strongly_consistent_and_apply_effects, Completion, OperationVc, PrettyPrintError,
-    ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
+    Completion, OperationVc, PrettyPrintError, ReadConsistency, ResolvedVc, TransientInstance,
+    TurboTasks, Vc, read_strongly_consistent_and_apply_effects,
 };
-use turbo_tasks_backend::{noop_backing_storage, BackendOptions, TurboTasksBackend};
+use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     issue::{PlainIssue, PlainIssueSource, PlainSource},
     source_pos::SourcePos as SourcePosInner,
-    version::{PartialUpdate, TotalUpdate, Update, VersionState},
+    version::{PartialUpdate, TotalUpdate, Update, Version, VersionState},
 };
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
 use crate::fs::Fs;
 use crate::tokio_runtime::runtime;
@@ -54,7 +63,7 @@ pub struct RootTask {
 impl Drop for RootTask {
     fn drop(&mut self) {
         tracing::debug!("RootTask dropped, subscription will be stopped");
-        // TODO: dispose the root task
+        self.turbo_tasks.dispose_root_task(self.task_id);
     }
 }
 
@@ -570,10 +579,13 @@ pub fn project_write_all_to_disk(callback: js_sys::Function) {
 pub async fn project_hmr_events(
     identifier: String,
     callback: js_sys::Function,
+    expected_version: Option<String>,
 ) -> Result<RootTask, wasm_bindgen::JsError> {
     use wasm_bindgen::JsError;
 
     let identifier: RcStr = identifier.into();
+    let expected_version = expected_version.map(RcStr::from);
+    let check_expected_version = Arc::new(AtomicBool::new(expected_version.is_some()));
 
     let pack_project = GLOBAL_PACK_PROJECT
         .read()
@@ -594,11 +606,15 @@ pub async fn project_hmr_events(
         .spawn({
             let identifier = identifier.clone();
             let session = session.clone();
+            let expected_version = expected_version.clone();
+            let check_expected_version = check_expected_version.clone();
             async move {
                 turbo_tasks_clone.spawn_root_task(move || {
                     let identifier = identifier.clone();
                     let session = session.clone();
                     let tx = tx.clone();
+                    let expected_version = expected_version.clone();
+                    let check_expected_version = check_expected_version.clone();
                     async move {
                         tracing::debug!("hmrSubscribe root task executing for {}", identifier);
 
@@ -607,6 +623,17 @@ pub async fn project_hmr_events(
                             .hmr_version_state(identifier.clone(), session)
                             .to_resolved()
                             .await?;
+                        let should_check_expected_version =
+                            check_expected_version.load(Ordering::Acquire);
+                        let version_mismatch = if should_check_expected_version {
+                            if let Some(expected_version) = expected_version {
+                                state.get().id().owned().await? != expected_version
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
 
                         let update_op =
                             hmr_update_with_issues_operation(project, identifier.clone(), state);
@@ -640,6 +667,11 @@ pub async fn project_hmr_events(
                                 "resource": { "path": identifier.to_string() },
                                 "issues": []
                             }),
+                            _ if version_mismatch => serde_json::json!({
+                                "type": "restart",
+                                "resource": { "path": identifier.to_string() },
+                                "issues": issues_json
+                            }),
                             Update::None => serde_json::json!({
                                 "type": "issues",
                                 "resource": { "path": identifier.to_string() },
@@ -661,8 +693,9 @@ pub async fn project_hmr_events(
                         };
 
                         tracing::debug!("hmrSubscribe sending update for {}", identifier);
-                        if let Ok(json_str) = serde_json::to_string(&result_json) {
-                            let _ = tx.send(json_str);
+                        let json_str = serde_json::to_string(&result_json)?;
+                        if tx.send(json_str).is_ok() && should_check_expected_version {
+                            check_expected_version.store(false, Ordering::Release);
                         }
 
                         Ok(Completion::new())

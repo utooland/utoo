@@ -19,7 +19,12 @@ export interface HmrServerOptions {
   /** Session ID for this HMR server instance */
   sessionId?: number;
   /** Callback when a client subscribes to an HMR path */
-  onSubscribe?: (path: string, client: HmrClient) => void;
+  onSubscribe?: (
+    path: string,
+    client: HmrClient,
+    expectedVersion?: string,
+    validation?: string,
+  ) => void | Promise<void>;
   /** Callback when a client unsubscribes from an HMR path */
   onUnsubscribe?: (path: string, client: HmrClient) => void;
 }
@@ -132,12 +137,25 @@ export class HmrServer {
 
       if ("type" in message) {
         switch (message.type) {
-          case "turbopack-subscribe":
-            this.subscribe(client, (message as { path: string }).path);
+          case "turbopack-subscribe": {
+            const subscribeMessage = message as {
+              path: string;
+              version?: string;
+              validation?: string;
+            };
+            this.subscribe(
+              client,
+              subscribeMessage.path,
+              subscribeMessage.version,
+              subscribeMessage.validation,
+            );
             break;
-          case "turbopack-unsubscribe":
-            this.unsubscribe(client, (message as { path: string }).path);
+          }
+          case "turbopack-unsubscribe": {
+            const unsubscribeMessage = message as { path: string };
+            this.unsubscribe(client, unsubscribeMessage.path);
             break;
+          }
         }
       }
 
@@ -170,14 +188,19 @@ export class HmrServer {
     }
   }
 
-  private subscribe(client: HmrClient, path: string) {
+  private subscribe(
+    client: HmrClient,
+    path: string,
+    expectedVersion?: string,
+    validation?: string,
+  ) {
     let clients = this.subscriptions.get(path);
     if (!clients) {
       clients = new Set();
       this.subscriptions.set(path, clients);
     }
     clients.add(client);
-    this.options.onSubscribe?.(path, client);
+    void this.options.onSubscribe?.(path, client, expectedVersion, validation);
   }
 
   private unsubscribe(client: HmrClient, path: string) {

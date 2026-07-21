@@ -1,6 +1,7 @@
 import { type ConfigComplete, type UpdateMessage } from "@utoo/pack-shared";
 import {
   DepsOptions,
+  HmrSubscribeOptions,
   InstallOptions,
   PackFile,
   ProjectEndpoint,
@@ -28,6 +29,9 @@ class InternalEndpoint implements ProjectEndpoint {
   private rootTask?: RootTask;
   // Keep HMR root tasks alive (keyed by identifier)
   private hmrRootTasks: Map<string, RootTask> = new Map();
+  // Monotonic generations prevent a slow, cancelled subscription from replacing
+  // a newer subscription that uses the same client/path key.
+  private hmrSubscriptionGenerations: Map<string, number> = new Map();
 
   // This should be called only once
   async mount(opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">) {
@@ -200,9 +204,48 @@ class InternalEndpoint implements ProjectEndpoint {
     return await ProjectInternal.sigMd5(content);
   }
 
-  async hmrSubscribe(identifier: string, callback: (update: unknown) => void) {
-    const rootTask = await ProjectInternal.hmrEvents(identifier, callback);
-    this.hmrRootTasks.set(identifier, rootTask);
+  async hmrSubscribe(
+    identifier: string,
+    callback: (update: unknown) => void,
+    options?: HmrSubscribeOptions,
+  ) {
+    const subscriptionId = options?.subscriptionId ?? identifier;
+    const generation =
+      (this.hmrSubscriptionGenerations.get(subscriptionId) ?? 0) + 1;
+    this.hmrSubscriptionGenerations.set(subscriptionId, generation);
+
+    this.hmrRootTasks.get(subscriptionId)?.free();
+    this.hmrRootTasks.delete(subscriptionId);
+
+    const rootTask = await ProjectInternal.hmrEvents(
+      identifier,
+      (update: unknown) => {
+        if (
+          this.hmrSubscriptionGenerations.get(subscriptionId) === generation
+        ) {
+          callback(
+            options?.validation === undefined
+              ? update
+              : { ...(update as object), validation: options.validation },
+          );
+        }
+      },
+      options?.expectedVersion,
+    );
+
+    if (this.hmrSubscriptionGenerations.get(subscriptionId) !== generation) {
+      rootTask.free();
+      return;
+    }
+    this.hmrRootTasks.set(subscriptionId, rootTask);
+  }
+
+  hmrUnsubscribe(subscriptionId: string) {
+    const generation =
+      (this.hmrSubscriptionGenerations.get(subscriptionId) ?? 0) + 1;
+    this.hmrSubscriptionGenerations.set(subscriptionId, generation);
+    this.hmrRootTasks.get(subscriptionId)?.free();
+    this.hmrRootTasks.delete(subscriptionId);
   }
 
   updateInfoSubscribe(

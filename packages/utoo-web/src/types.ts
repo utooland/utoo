@@ -117,6 +117,13 @@ export interface InstallOptions {
   omit?: OmitType[];
 }
 
+export interface HmrSubscribeOptions {
+  expectedVersion?: string;
+  subscriptionId?: string;
+  /** Opaque generation token echoed on every update for this subscription. */
+  validation?: string;
+}
+
 export interface ProjectEndpoint {
   deps: (options?: DepsOptions) => Promise<string>;
   install: (packageLock: string, options?: InstallOptions) => Promise<void>;
@@ -138,7 +145,10 @@ export interface ProjectEndpoint {
   hmrSubscribe: (
     identifier: string,
     callback: (update: unknown) => void,
+    options?: HmrSubscribeOptions,
   ) => void | Promise<void>;
+  /** Cancel an HMR subscription previously created with the same subscription ID. */
+  hmrUnsubscribe?: (subscriptionId: string) => void | Promise<void>;
   /** Subscribe to compilation lifecycle events (start/end). */
   updateInfoSubscribe: (
     aggregationMs: number,

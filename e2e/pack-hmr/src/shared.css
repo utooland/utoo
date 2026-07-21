@@ -1,0 +1,4 @@
+#a,
+#b {
+  --pack-hmr-shared: "shared-css-v1";
+}

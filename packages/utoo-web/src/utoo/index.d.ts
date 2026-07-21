@@ -120,7 +120,7 @@ export class Project {
      * Subscribe to HMR events for a specific identifier.
      * Returns a RootTask that must be held by JS to keep the subscription active.
      */
-    static hmrEvents(identifier: string, callback: Function): Promise<RootTask>;
+    static hmrEvents(identifier: string, callback: Function, expected_version?: string | null): Promise<RootTask>;
     static init(thread_url: string): void;
     /**
      * Install dependencies - downloads tgz files only, extracts on-demand when files are read

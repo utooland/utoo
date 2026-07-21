@@ -93,13 +93,14 @@ pub async fn get_client_compile_time_info(
     define_env: Vc<EnvMap>,
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
+    watch: Vc<bool>,
+    hot: Vc<bool>,
 ) -> Result<Vc<CompileTimeInfo>> {
+    let mode_ref = mode.await?;
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
         "process.env.NODE_ENV".into(),
-        serde_json::to_string(mode.await?.node_env())
-            .unwrap()
-            .into(),
+        serde_json::to_string(mode_ref.node_env()).unwrap().into(),
     )]);
     let define_env = Vc::cell(define_env);
     let environment = BrowserEnvironment {
@@ -117,6 +118,7 @@ pub async fn get_client_compile_time_info(
     )
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .hot_module_replacement_enabled(mode_ref.is_development() && *watch.await? && *hot.await?)
     .cell()
     .await
 }
@@ -555,6 +557,8 @@ pub async fn get_client_resolve_options_context(
 #[derive(Clone, Debug, PartialEq, Eq, Hash, TraceRawVcs, Encode, Decode)]
 pub struct ClientChunkingContextOptions {
     pub mode: Vc<Mode>,
+    pub watch: Vc<bool>,
+    pub hot: Vc<bool>,
     pub root_path: FileSystemPath,
     pub client_root: FileSystemPath,
     pub client_root_to_root_path: RcStr,
@@ -580,6 +584,8 @@ pub async fn get_client_chunking_context(
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let ClientChunkingContextOptions {
         mode,
+        watch,
+        hot,
         root_path,
         client_root,
         client_root_to_root_path,
@@ -685,10 +691,12 @@ pub async fn get_client_chunking_context(
 
     if mode.is_development() {
         builder = builder
-            .hot_module_replacement()
-            .dynamic_hmr_chunk_lists()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
+
+        if *watch.await? && *hot.await? {
+            builder = builder.hot_module_replacement().dynamic_hmr_chunk_lists();
+        }
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;

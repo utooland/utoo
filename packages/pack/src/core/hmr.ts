@@ -136,6 +136,12 @@ function hasBlockingIssues(issues: EntryIssuesMap) {
   return false;
 }
 
+function hasCriticalHmrIssues(issues: TurbopackUpdate["issues"]) {
+  return issues.some((issue) =>
+    ["bug", "error", "fatal"].includes(issue.severity),
+  );
+}
+
 function hasBlockingResultIssues(result: TurbopackResult) {
   return result.issues.some(
     (issue) => issue.severity === "error" || issue.severity === "fatal",
@@ -277,7 +283,14 @@ export async function createHotReloader(
   const clientStates = new WeakMap<WSLike, ClientState>();
   const hmrSubscriptions = createSharedHmrSubscriptionRegistry<
     TurbopackResult<TurbopackUpdate>
-  >((id) => project.hmrEvents(id));
+  >((subscriptionKey) => {
+    const [id, expectedVersion] = JSON.parse(subscriptionKey) as [
+      string,
+      string | null,
+      string | null,
+    ];
+    return project.hmrEvents(id, expectedVersion ?? undefined);
+  });
   const currentEntryIssues: EntryIssuesMap = new Map();
   const backgroundWatchSubscriptions = new Set<
     AsyncIterableIterator<TurbopackResult>
@@ -286,6 +299,7 @@ export async function createHotReloader(
   let currentWatchedEntrypoints: Endpoint[] = [];
   let backgroundWatchersStarted = false;
   let backgroundWatchGeneration = 0;
+  let hmrBuildInProgress = false;
   const backgroundEndpointWriteTasks = new Map<Endpoint, Promise<void>>();
   let backgroundProjectWriteTask: Promise<void> | undefined;
   let closed = false;
@@ -337,9 +351,19 @@ export async function createHotReloader(
       }
     }
   }
-  const sendEnqueuedMessagesDebounce = debounce(sendEnqueuedMessages, 2);
+  const sendEnqueuedMessagesDebounce = debounce(() => {
+    // Every chunk-list subscription computes its own update, but all updates
+    // from one project build must reach the browser as one transaction. A
+    // timer firing mid-build would otherwise make shared modules apply twice.
+    if (!hmrBuildInProgress) {
+      sendEnqueuedMessages();
+    }
+  }, 2);
 
-  function sendTurbopackMessage(client: WSLike, payload: TurbopackUpdate) {
+  function sendTurbopackMessage(
+    client: WSLike,
+    payload: TurbopackUpdate & { validation?: string },
+  ) {
     enqueueTurbopackUpdateForClient(clientStates, client, payload);
     sendEnqueuedMessagesDebounce();
   }
@@ -522,22 +546,61 @@ export async function createHotReloader(
     );
   }
 
-  function subscribeToHmrEvents(client: WSLike, id: string) {
+  function subscribeToHmrEvents(
+    client: WSLike,
+    id: string,
+    expectedVersion?: string,
+    validation?: string,
+  ) {
     const state = clientStates.get(client);
     if (!state || state.subscriptions.has(id)) {
       return;
     }
 
     const issueKey = getClientIssueKey(id);
+    let subscriptionReady = false;
     let subscription: ReturnableSubscription;
-    subscription = hmrSubscriptions.subscribe(id, {
-      onIssues(issues) {
+    const subscriptionKey = JSON.stringify([
+      id,
+      expectedVersion ?? null,
+      validation ?? null,
+    ]);
+    subscription = hmrSubscriptions.subscribe(subscriptionKey, {
+      onIssues(issues, resultType) {
         if (clientStates.get(client) !== state) return;
         processIssues(state.clientIssues, issueKey, { issues }, false, true);
+
+        if (
+          !subscriptionReady &&
+          !hasCriticalHmrIssues(issues) &&
+          resultType === "issues"
+        ) {
+          subscriptionReady = true;
+          // A normal first result (or a cached baseline for a shared native
+          // subscription) proves that VersionState is ready. Terminal results
+          // must reach the client directly and reject the dynamic bootstrap.
+          const readyUpdate: TurbopackUpdate & { validation?: string } = {
+            type: "issues",
+            resource: { path: id, headers: undefined },
+            issues,
+            validation,
+          };
+          sendToClient(client, {
+            action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE,
+            data: readyUpdate,
+          });
+        }
       },
       onUpdate(data) {
         if (clientStates.get(client) !== state) return;
-        sendTurbopackMessage(client, data);
+        if (data.type === "partial" && !hasCriticalHmrIssues(data.issues)) {
+          subscriptionReady = true;
+        }
+        sendTurbopackMessage(client, { ...data, validation });
+        if (data.type === "notFound") {
+          void unsubscribeClient(state.subscriptions, id);
+          state.clientIssues.delete(issueKey);
+        }
       },
       onError(error) {
         if (
@@ -685,7 +748,16 @@ export async function createHotReloader(
           // Turbopack messages
           switch (parsedData.type) {
             case "turbopack-subscribe":
-              subscribeToHmrEvents(client, parsedData.path);
+              subscribeToHmrEvents(
+                client,
+                parsedData.path,
+                typeof parsedData.version === "string"
+                  ? parsedData.version
+                  : undefined,
+                typeof parsedData.validation === "string"
+                  ? parsedData.validation
+                  : undefined,
+              );
               break;
 
             case "turbopack-unsubscribe":
@@ -788,7 +860,16 @@ export async function createHotReloader(
 
       switch (parsedData.type) {
         case "turbopack-subscribe":
-          subscribeToHmrEvents(ws, parsedData.path);
+          subscribeToHmrEvents(
+            ws,
+            parsedData.path,
+            typeof parsedData.version === "string"
+              ? parsedData.version
+              : undefined,
+            typeof parsedData.validation === "string"
+              ? parsedData.validation
+              : undefined,
+          );
           break;
         case "turbopack-unsubscribe":
           unsubscribeFromHmrEvents(ws, parsedData.path);
@@ -876,12 +957,14 @@ export async function createHotReloader(
     for await (const updateMessage of project.updateInfoSubscribe(30)) {
       switch (updateMessage.updateType) {
         case "start": {
+          hmrBuildInProgress = true;
           hmrTimingReporter.start();
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });
           console.log("Compiling...");
           break;
         }
         case "end": {
+          hmrBuildInProgress = false;
           sendEnqueuedMessages();
 
           const errors = new Map<string, CompilationError>();

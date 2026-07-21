@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
-use crate::pm::{self, with_project, OPFS_PROJECT};
+use crate::pm::{self, OPFS_PROJECT, with_project};
 use crate::tokio_runtime::init_tokio_runtime;
 
 #[cfg(feature = "utoopack")]
@@ -126,8 +126,9 @@ impl Project {
     pub async fn hmr_events(
         identifier: String,
         callback: js_sys::Function,
+        expected_version: Option<String>,
     ) -> Result<RootTask, JsError> {
-        pack::project_hmr_events(identifier, callback).await
+        pack::project_hmr_events(identifier, callback, expected_version).await
     }
 
     /// Subscribe to compilation lifecycle events.

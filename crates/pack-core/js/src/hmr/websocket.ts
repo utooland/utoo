@@ -12,6 +12,9 @@ type WebSocketMessage =
 let source: WebSocket | null = null;
 let eventCallbacks: Array<(event: WebSocketMessage) => void> = [];
 
+const INITIAL_RECONNECT_DELAY_MS = 500;
+const MAX_RECONNECT_DELAY_MS = 5_000;
+
 // Helper function to dispatch messages to all event callbacks
 function dispatchMessage(message: WebSocketMessage) {
   for (const eventCallback of eventCallbacks) {
@@ -72,21 +75,89 @@ let serverSessionId: number | null = null;
 
 // This is not used by Next.js, but it is used by the standalone turbopack-cli
 export function connectHMR(options: HMROptions) {
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
+  let pageIsUnloading = false;
+
+  function clearReconnectTimer() {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
+  function closeSocket(socket: WebSocket) {
+    socket.onopen = null;
+    socket.onerror = null;
+    socket.onclose = null;
+    socket.onmessage = null;
+
+    if (source === socket) {
+      source = null;
+    }
+
+    if (
+      socket.readyState === WebSocket.CONNECTING ||
+      socket.readyState === WebSocket.OPEN
+    ) {
+      socket.close();
+    }
+  }
+
+  function scheduleReconnect() {
+    if (reconnectTimer !== null || pageIsUnloading || reloading) {
+      return;
+    }
+
+    const delay = Math.min(
+      INITIAL_RECONNECT_DELAY_MS * 2 ** reconnectAttempts,
+      MAX_RECONNECT_DELAY_MS,
+    );
+    reconnectAttempts += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      init();
+    }, delay);
+  }
+
   function init() {
-    if (source) source.close();
+    if (pageIsUnloading || reloading) {
+      return;
+    }
+
+    if (source) {
+      closeSocket(source);
+    }
 
     console.log("[HMR] connecting...");
 
-    function handleOnline() {
-      window.console.log("[HMR] connected");
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(`${getSocketUrl()}${options.path}`);
+    } catch (error) {
+      console.error("[HMR] Failed to create WebSocket:", error);
+      scheduleReconnect();
+      return;
+    }
 
-      // Send the turbopack-connected message to trigger handleSocketConnected
-      const connected: WebSocketMessage = { type: "turbopack-connected" };
-      dispatchMessage(connected);
+    source = socket;
+
+    function handleOnline() {
+      if (source !== socket || pageIsUnloading || reloading) {
+        closeSocket(socket);
+        return;
+      }
+
+      reconnectAttempts = 0;
+      window.console.log("[HMR] connected");
+      // Direct turbopack-dev-server does not send a separate connected frame.
+      // Utoo does, but the socket-open notification is sufficient to restore
+      // subscriptions in both cases.
+      dispatchMessage({ type: "turbopack-connected" });
     }
 
     function handleMessage(event: MessageEvent<string>) {
-      if (reloading) {
+      if (source !== socket || reloading) {
         return;
       }
 
@@ -99,22 +170,21 @@ export function connectHMR(options: HMROptions) {
             serverSessionId !== null &&
             serverSessionId !== msg.data.sessionId
           ) {
-            window.location.reload();
             reloading = true;
+            window.location.reload();
             return;
           }
 
           serverSessionId = msg.data.sessionId;
 
-          // Convert to turbopack format and trigger handleSocketConnected
-          const connected: WebSocketMessage = { type: "turbopack-connected" };
-          dispatchMessage(connected);
+          // Socket open already restored subscriptions. This frame only carries
+          // the Utoo server session id used to detect server restarts.
           return;
         }
 
         if (msg.action === "reload") {
-          window.location.reload();
           reloading = true;
+          window.location.reload();
           return;
         }
 
@@ -146,27 +216,40 @@ export function connectHMR(options: HMROptions) {
       }
     }
 
-    function handleDisconnect(event?: Event) {
-      if (event && event.target !== source) {
+    function handleDisconnect(event: Event) {
+      if (event.target !== socket || source !== socket) {
         return;
       }
 
-      if (source) {
-        source.onerror = null;
-        source.onclose = null;
-        source.close();
-        source = null;
-      }
-
+      closeSocket(socket);
       window.console.warn("[HMR] disconnected");
+      scheduleReconnect();
     }
 
-    source = new WebSocket(`${getSocketUrl()}${options.path}`);
-    source.onopen = handleOnline;
-    source.onerror = handleDisconnect;
-    source.onclose = handleDisconnect;
-    source.onmessage = handleMessage;
+    socket.onopen = handleOnline;
+    socket.onerror = handleDisconnect;
+    socket.onclose = handleDisconnect;
+    socket.onmessage = handleMessage;
   }
+
+  // `pagehide` is not fired when a beforeunload prompt is cancelled, so it is
+  // safe to use as the point where reconnects should stop.
+  window.addEventListener("pagehide", () => {
+    pageIsUnloading = true;
+    clearReconnectTimer();
+    if (source) {
+      closeSocket(source);
+    }
+  });
+
+  // A page restored from the back-forward cache needs a fresh HMR transport.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      pageIsUnloading = false;
+      reconnectAttempts = 0;
+      init();
+    }
+  });
 
   init();
 }

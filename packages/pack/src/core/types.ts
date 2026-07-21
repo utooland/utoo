@@ -1,4 +1,4 @@
-import type { RestartUpdate } from "@utoo/pack-shared";
+import type { NotFoundUpdate, RestartUpdate } from "@utoo/pack-shared";
 import {
   HmrIdentifiers,
   NapiIssue,
@@ -43,7 +43,11 @@ export interface PartialUpdate extends BaseUpdate {
   };
 }
 
-export type Update = IssuesUpdate | PartialUpdate | RestartUpdate;
+export type Update =
+  | IssuesUpdate
+  | PartialUpdate
+  | RestartUpdate
+  | NotFoundUpdate;
 
 export interface ProjectOptions extends BundleOptions {
   /**
@@ -67,7 +71,10 @@ export interface Project {
     TurbopackResult<RawEntrypoints>
   >;
 
-  hmrEvents(identifier: string): AsyncIterableIterator<TurbopackResult<Update>>;
+  hmrEvents(
+    identifier: string,
+    expectedVersion?: string,
+  ): AsyncIterableIterator<TurbopackResult<Update>>;
 
   hmrIdentifiersSubscribe(): AsyncIterableIterator<
     TurbopackResult<HmrIdentifiers>

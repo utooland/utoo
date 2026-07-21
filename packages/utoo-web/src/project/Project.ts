@@ -1,6 +1,8 @@
 import {
   type ConfigComplete,
+  HMR_ACTIONS_SENT_TO_BROWSER,
   handleIssues,
+  type TurbopackUpdate,
   type UpdateMessage,
 } from "@utoo/pack-shared";
 import * as comlink from "comlink";
@@ -11,6 +13,7 @@ import {
   BuildOutput,
   DepsOptions,
   Dirent,
+  HmrSubscribeOptions,
   InstallOptions,
   PackFile,
   ProjectEndpoint,
@@ -28,6 +31,10 @@ let ProjectWorker: Worker;
 
 const ConnectedPorts = new Set<MessagePort>();
 
+type RemoteProjectEndpoint = ProjectEndpoint & {
+  hmrUnsubscribe: NonNullable<ProjectEndpoint["hmrUnsubscribe"]>;
+};
+
 export class Project implements ProjectEndpoint {
   #mount: Promise<void>;
 
@@ -39,7 +46,7 @@ export class Project implements ProjectEndpoint {
   private hmrServer?: HmrServer;
 
   private remote: comlink.Remote<
-    ProjectEndpoint & {
+    RemoteProjectEndpoint & {
       mount: (
         opt: Omit<ProjectOptions, "workerUrl" | "serviceWorker">,
       ) => Promise<void>;
@@ -139,10 +146,24 @@ export class Project implements ProjectEndpoint {
     // Create HmrServer lazily on first dev() call
     if (!this.hmrServer) {
       this.hmrServer = new HmrServer({
-        onSubscribe: async (path, client) => {
-          await this.hmrSubscribe(path, (update) => {
-            this.hmrServer!.sendUpdate(path, update as any);
-          });
+        onSubscribe: async (path, client, expectedVersion, validation) => {
+          await this.hmrSubscribe(
+            path,
+            (update) => {
+              client.send({
+                action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_MESSAGE,
+                data: update as TurbopackUpdate,
+              });
+            },
+            {
+              expectedVersion,
+              subscriptionId: `${client.id}:${path}`,
+              validation,
+            },
+          );
+        },
+        onUnsubscribe: (path, client) => {
+          void this.hmrUnsubscribe(`${client.id}:${path}`);
         },
       });
     }
@@ -162,8 +183,17 @@ export class Project implements ProjectEndpoint {
   public async hmrSubscribe(
     identifier: string,
     callback: (update: unknown) => void,
+    options?: HmrSubscribeOptions,
   ): Promise<void> {
-    await this.remote.hmrSubscribe(identifier, comlink.proxy(callback));
+    await this.remote.hmrSubscribe(
+      identifier,
+      comlink.proxy(callback),
+      options,
+    );
+  }
+
+  public async hmrUnsubscribe(subscriptionId: string): Promise<void> {
+    await this.remote.hmrUnsubscribe(subscriptionId);
   }
 
   public updateInfoSubscribe(

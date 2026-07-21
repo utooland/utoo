@@ -2,6 +2,7 @@ import { type ConfigComplete } from "@utoo/pack-shared";
 import * as comlink from "comlink";
 import {
   DepsOptions,
+  HmrSubscribeOptions,
   InstallOptions,
   PackFile,
   ProjectEndpoint,
@@ -10,8 +11,12 @@ import {
   UpdateMessage,
 } from "../types";
 
+type RemoteProjectEndpoint = ProjectEndpoint & {
+  hmrUnsubscribe: NonNullable<ProjectEndpoint["hmrUnsubscribe"]>;
+};
+
 export class ForkedProject implements ProjectEndpoint {
-  private endpoint: comlink.Remote<ProjectEndpoint>;
+  private endpoint: comlink.Remote<RemoteProjectEndpoint>;
 
   constructor(port: MessagePort) {
     this.endpoint ??= comlink.wrap(port);
@@ -44,8 +49,17 @@ export class ForkedProject implements ProjectEndpoint {
   public async hmrSubscribe(
     identifier: string,
     callback: (update: unknown) => void,
+    options?: HmrSubscribeOptions,
   ): Promise<void> {
-    await this.endpoint.hmrSubscribe(identifier, comlink.proxy(callback));
+    await this.endpoint.hmrSubscribe(
+      identifier,
+      comlink.proxy(callback),
+      options,
+    );
+  }
+
+  public async hmrUnsubscribe(subscriptionId: string): Promise<void> {
+    await this.endpoint.hmrUnsubscribe(subscriptionId);
   }
 
   public updateInfoSubscribe(

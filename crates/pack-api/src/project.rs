@@ -1167,11 +1167,15 @@ impl Project {
 
     #[turbo_tasks::function]
     pub(super) async fn client_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
+        let watch = self.watch.enable;
+        let hot = self.config.dev_server().await?.hot.unwrap_or_default();
         Ok(get_client_compile_time_info(
             (*self.config.target().await?).clone(),
             client_define_env(*self.config, self.process_env).await?,
             self.config.mode(),
             self.config.provider_config(),
+            Vc::cell(watch),
+            Vc::cell(hot),
         ))
     }
 
@@ -1190,12 +1194,18 @@ impl Project {
     pub(super) async fn compile_time_info_for_platform(&self) -> Result<Vc<CompileTimeInfo>> {
         let target = (*self.config.target().await?).clone();
         match &*self.config.platform().await? {
-            Platform::Web => Ok(get_client_compile_time_info(
-                target,
-                client_define_env(*self.config, self.process_env).await?,
-                self.config.mode(),
-                self.config.provider_config(),
-            )),
+            Platform::Web => {
+                let watch = self.watch.enable;
+                let hot = self.config.dev_server().await?.hot.unwrap_or_default();
+                Ok(get_client_compile_time_info(
+                    target,
+                    client_define_env(*self.config, self.process_env).await?,
+                    self.config.mode(),
+                    self.config.provider_config(),
+                    Vc::cell(watch),
+                    Vc::cell(hot),
+                ))
+            }
             Platform::Node => Ok(get_server_compile_time_info(
                 target,
                 self.config.define_env(),
@@ -1209,6 +1219,8 @@ impl Project {
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let mode = self.mode();
         let config = self.config();
+        let watch = self.await?.watch.enable;
+        let hot = config.dev_server().await?.hot.unwrap_or_default();
         let source_maps = if *config.source_maps().await? {
             SourceMapsType::Full
         } else {
@@ -1216,6 +1228,8 @@ impl Project {
         };
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode,
+            watch: Vc::cell(watch),
+            hot: Vc::cell(hot),
             root_path: self.project_path().owned().await?,
             client_root: self.client_root().owned().await?,
             client_root_to_root_path: rcstr!("/ROOT"),

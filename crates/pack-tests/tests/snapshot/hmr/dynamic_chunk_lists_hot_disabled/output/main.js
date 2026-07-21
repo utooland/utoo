@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_lazy_b90c1087.js","_root-of-the-server___7c304173.js"],"runtimeModuleIds":["[@utoo/pack-runtime]/react-refresh/runtime.ts [client] (ecmascript)","[@utoo/pack-runtime]/hmr/bootstrap.ts [client] (ecmascript)","[project]/hmr/dynamic_chunk_lists/input/index.js [client] (ecmascript)"]}
+    {"otherChunks":["input_lazy_b65347b5.js","_root-of-the-server___2651c4ea.js"],"runtimeModuleIds":["[@utoo/pack-runtime]/react-refresh/runtime.ts [client] (ecmascript)","[project]/hmr/dynamic_chunk_lists_hot_disabled/input/index.js [client] (ecmascript)"]}
 ]);
 (() => {
 if (!Array.isArray(globalThis["TURBOPACK"])) {
