@@ -1,34 +1,35 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+  access,
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templates = join(repoRoot, "vendor", "templates");
-const sandbox = mkdtempSync(join(tmpdir(), "utoo-launcher-pm-"));
+const sandbox = await mkdtemp(join(tmpdir(), "utoo-launcher-pm-"));
 const version = "9.9.9-e2e";
 const requestedManagers = process.argv.slice(2);
 const managers = requestedManagers.length
   ? requestedManagers
   : ["npm", "pnpm", "yarn", "bun"];
 
-process.on("exit", () => {
+async function exists(path) {
   try {
-    rmSync(sandbox, { recursive: true, force: true });
+    await access(path);
+    return true;
   } catch {
-    // A Windows scanner can briefly retain a copied executable after exit.
+    return false;
   }
-});
+}
 
 function executable(command) {
   if (process.platform !== "win32") return command;
@@ -52,36 +53,65 @@ function run(command, args, options = {}) {
   const spawnArgs = useCommandShell
     ? ["/d", "/s", "/c", "call", resolvedCommand, ...args]
     : args;
-  const result = spawnSync(spawnCommand, spawnArgs, {
-    cwd: options.cwd,
-    env: options.env || process.env,
-    encoding: "utf8",
-    stdio: options.capture ? "pipe" : "inherit",
+  return new Promise((resolve, reject) => {
+    const child = spawn(spawnCommand, spawnArgs, {
+      cwd: options.cwd,
+      env: options.env || process.env,
+      stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    });
+    let stdout = "";
+    let stderr = "";
+
+    if (options.capture) {
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+    }
+
+    child.once("error", (error) => {
+      reject(
+        new Error(`${command} ${args.join(" ")} failed: ${error.message}`, {
+          cause: error,
+        }),
+      );
+    });
+    child.once("close", (status, signal) => {
+      if (status !== (options.status ?? 0)) {
+        const detail = [stdout, stderr, signal && `signal: ${signal}`]
+          .filter(Boolean)
+          .join("\n");
+        reject(
+          new Error(
+            `${command} ${args.join(" ")} exited ${status}\n${detail}`,
+          ),
+        );
+        return;
+      }
+      resolve(`${stdout}${stderr}`);
+    });
   });
-  if (result.error || result.status !== (options.status ?? 0)) {
-    const detail = [result.stdout, result.stderr, result.error?.message]
-      .filter(Boolean)
-      .join("\n");
-    throw new Error(
-      `${command} ${args.join(" ")} exited ${result.status}\n${detail}`,
-    );
-  }
-  return `${result.stdout || ""}${result.stderr || ""}`;
 }
 
 function writeJson(path, value) {
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  return writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function fileSpec(path) {
   return `file:${path.replaceAll("\\", "/")}`;
 }
 
-function pack(directory) {
-  const tarball = run("npm", ["pack", "--silent"], {
-    cwd: directory,
-    capture: true,
-  }).trim();
+async function pack(directory) {
+  const tarball = (
+    await run("npm", ["pack", "--silent"], {
+      cwd: directory,
+      capture: true,
+    })
+  ).trim();
   return join(directory, tarball.split(/\r?\n/).at(-1));
 }
 
@@ -104,21 +134,23 @@ function target() {
   };
 }
 
-function buildPackages() {
+async function buildPackages() {
   const selected = target();
   const platformDir = join(sandbox, "platform");
   const mainDir = join(sandbox, "main");
-  mkdirSync(join(platformDir, "bin"), { recursive: true });
-  mkdirSync(join(mainDir, "bin"), { recursive: true });
+  await Promise.all([
+    mkdir(join(platformDir, "bin"), { recursive: true }),
+    mkdir(join(mainDir, "bin"), { recursive: true }),
+  ]);
 
   const nativePath = join(platformDir, "bin", selected.executable);
   if (process.platform === "win32") {
     // A PE executable is required for the Windows launcher path. Node itself is
     // a convenient native fixture and lets the test validate exact argv/exit
     // forwarding without compiling another program.
-    copyFileSync(process.execPath, nativePath);
+    await copyFile(process.execPath, nativePath);
   } else {
-    writeFileSync(
+    await writeFile(
       nativePath,
       [
         "#!/bin/sh",
@@ -133,10 +165,10 @@ function buildPackages() {
         "",
       ].join("\n"),
     );
-    chmodSync(nativePath, 0o755);
+    await chmod(nativePath, 0o755);
   }
 
-  writeJson(join(platformDir, "package.json"), {
+  await writeJson(join(platformDir, "package.json"), {
     name: selected.packageName,
     version,
     preferUnplugged: true,
@@ -146,25 +178,29 @@ function buildPackages() {
         ? ["x64", "arm64"]
         : [selected.arch],
   });
-  const platformTarball = pack(platformDir);
+  const platformTarball = await pack(platformDir);
 
-  copyFileSync(
-    join(templates, "launcher.utoo.js.template"),
-    join(mainDir, "bin", "launcher.js"),
-  );
-  copyFileSync(
-    join(templates, "utoo.utoo.js.template"),
-    join(mainDir, "bin", "utoo.js"),
-  );
-  copyFileSync(
-    join(templates, "utx.utoo.js.template"),
-    join(mainDir, "bin", "utx.js"),
-  );
+  await Promise.all([
+    copyFile(
+      join(templates, "launcher.utoo.js.template"),
+      join(mainDir, "bin", "launcher.js"),
+    ),
+    copyFile(
+      join(templates, "utoo.utoo.js.template"),
+      join(mainDir, "bin", "utoo.js"),
+    ),
+    copyFile(
+      join(templates, "utx.utoo.js.template"),
+      join(mainDir, "bin", "utx.js"),
+    ),
+  ]);
   if (process.platform !== "win32") {
-    chmodSync(join(mainDir, "bin", "utoo.js"), 0o755);
-    chmodSync(join(mainDir, "bin", "utx.js"), 0o755);
+    await Promise.all([
+      chmod(join(mainDir, "bin", "utoo.js"), 0o755),
+      chmod(join(mainDir, "bin", "utx.js"), 0o755),
+    ]);
   }
-  writeJson(join(mainDir, "package.json"), {
+  await writeJson(join(mainDir, "package.json"), {
     name: "utoo",
     version,
     bin: {
@@ -181,8 +217,8 @@ function buildPackages() {
   return pack(mainDir);
 }
 
-function installLocal(manager, mainTarball, project) {
-  writeJson(join(project, "package.json"), {
+async function installLocal(manager, mainTarball, project) {
+  await writeJson(join(project, "package.json"), {
     name: `utoo-launcher-${manager}-e2e`,
     private: true,
     packageManager: manager === "yarn" ? "yarn@4.9.2" : undefined,
@@ -190,31 +226,33 @@ function installLocal(manager, mainTarball, project) {
 
   const spec = fileSpec(mainTarball);
   if (manager === "npm") {
-    run(
+    await run(
       "npm",
       ["install", "--ignore-scripts", "--no-audit", "--no-fund", spec],
       { cwd: project },
     );
   } else if (manager === "pnpm") {
-    run("pnpm", ["add", "--ignore-scripts", `utoo@${spec}`], {
+    await run("pnpm", ["add", "--ignore-scripts", `utoo@${spec}`], {
       cwd: project,
     });
   } else if (manager === "yarn") {
-    const yarnVersion = run("yarn", ["--version"], {
-      cwd: project,
-      capture: true,
-    }).trim();
+    const yarnVersion = (
+      await run("yarn", ["--version"], {
+        cwd: project,
+        capture: true,
+      })
+    ).trim();
     if (Number.parseInt(yarnVersion, 10) >= 2) {
-      writeFileSync(
+      await writeFile(
         join(project, ".yarnrc.yml"),
         "nodeLinker: pnp\nenableScripts: false\n",
       );
-      run("yarn", ["add", `utoo@${spec}`], { cwd: project });
+      await run("yarn", ["add", `utoo@${spec}`], { cwd: project });
     } else {
-      run("yarn", ["add", "--ignore-scripts", spec], { cwd: project });
+      await run("yarn", ["add", "--ignore-scripts", spec], { cwd: project });
     }
   } else if (manager === "bun") {
-    run("bun", ["add", "--ignore-scripts", `utoo@${spec}`], {
+    await run("bun", ["add", "--ignore-scripts", `utoo@${spec}`], {
       cwd: project,
     });
   } else {
@@ -222,8 +260,8 @@ function installLocal(manager, mainTarball, project) {
   }
 }
 
-function localCommand(manager, project, name, args, options = {}) {
-  if (manager === "yarn" && !existsSync(join(project, "node_modules"))) {
+async function localCommand(manager, project, name, args, options = {}) {
+  if (manager === "yarn" && !(await exists(join(project, "node_modules")))) {
     return run("yarn", [name, ...args], {
       cwd: project,
       capture: true,
@@ -255,12 +293,12 @@ function assertIncludes(actual, expected, context) {
   }
 }
 
-function verifyCommands(manager, project) {
+async function verifyCommands(manager, project) {
   if (process.platform === "win32") {
     const printArgs =
       "console.log('ROOT=' + (process.env.UTOO_MANAGED_PACKAGE_ROOT || ''));" +
       "console.log(JSON.stringify(process.argv.slice(1)))";
-    const output = localCommand(manager, project, "utoo", [
+    const output = await localCommand(manager, project, "utoo", [
       "-e",
       printArgs,
       "space arg",
@@ -270,25 +308,25 @@ function verifyCommands(manager, project) {
       throw new Error(`${manager} managed root was empty:\n${output}`);
     }
     assertIncludes(output, '["space arg","你好"]', `${manager} argv`);
-    localCommand(manager, project, "utoo", ["-e", "process.exit(23)"], {
+    await localCommand(manager, project, "utoo", ["-e", "process.exit(23)"], {
       status: 23,
     });
     assertIncludes(
-      localCommand(manager, project, "ut", ["--version"]),
+      await localCommand(manager, project, "ut", ["--version"]),
       process.version,
       `${manager} ut alias`,
     );
-    writeFileSync(
+    await writeFile(
       join(project, "x"),
       "console.log(JSON.stringify(process.argv.slice(2)))\n",
     );
     assertIncludes(
-      localCommand(manager, project, "utx", ["space arg", "你好"]),
+      await localCommand(manager, project, "utx", ["space arg", "你好"]),
       '["space arg","你好"]',
       `${manager} utx`,
     );
   } else {
-    const output = localCommand(manager, project, "utoo", [
+    const output = await localCommand(manager, project, "utoo", [
       "hello",
       "space arg",
       "你好",
@@ -299,40 +337,46 @@ function verifyCommands(manager, project) {
     assertIncludes(output, "ARGC=3", `${manager} argc`);
     assertIncludes(output, "ARGV[2]=space arg", `${manager} spaced argv`);
     assertIncludes(output, "ARGV[3]=你好", `${manager} Unicode argv`);
-    localCommand(manager, project, "utoo", ["exit-23"], { status: 23 });
+    await localCommand(manager, project, "utoo", ["exit-23"], { status: 23 });
     assertIncludes(
-      localCommand(manager, project, "ut", ["alias"]),
+      await localCommand(manager, project, "ut", ["alias"]),
       "ARGV[1]=alias",
       `${manager} ut alias`,
     );
-    const utx = localCommand(manager, project, "utx", ["space arg", "你好"]);
+    const utx = await localCommand(manager, project, "utx", [
+      "space arg",
+      "你好",
+    ]);
     assertIncludes(utx, "ARGV[1]=x", `${manager} utx command`);
     assertIncludes(utx, "ARGV[3]=你好", `${manager} utx argv`);
   }
 }
 
-function verifyManifest(manager, project) {
-  if (manager === "yarn" && !existsSync(join(project, "node_modules"))) {
+async function verifyManifest(manager, project) {
+  if (manager === "yarn" && !(await exists(join(project, "node_modules")))) {
     const script =
       "const p=require('utoo/package.json');process.exit(p.scripts ? 1 : 0)";
-    run("yarn", ["node", "-e", script], { cwd: project });
+    await run("yarn", ["node", "-e", script], { cwd: project });
     return;
   }
   const manifest = JSON.parse(
-    readFileSync(join(project, "node_modules", "utoo", "package.json")),
+    await readFile(
+      join(project, "node_modules", "utoo", "package.json"),
+      "utf8",
+    ),
   );
   if (manifest.scripts) throw new Error(`${manager} installed lifecycle scripts`);
 }
 
-function verifyGlobal(manager, mainTarball) {
+async function verifyGlobal(manager, mainTarball) {
   if (manager !== "npm" && manager !== "pnpm") return;
   const prefix = join(sandbox, `${manager}-global`);
-  mkdirSync(prefix, { recursive: true });
+  await mkdir(prefix, { recursive: true });
   const spec = fileSpec(mainTarball);
   let binDir;
 
   if (manager === "npm") {
-    run("npm", [
+    await run("npm", [
       "install",
       "--global",
       "--ignore-scripts",
@@ -345,8 +389,8 @@ function verifyGlobal(manager, mainTarball) {
     binDir = process.platform === "win32" ? prefix : join(prefix, "bin");
   } else {
     binDir = join(prefix, "bin");
-    mkdirSync(binDir, { recursive: true });
-    run(
+    await mkdir(binDir, { recursive: true });
+    await run(
       "pnpm",
       [
         "add",
@@ -367,9 +411,9 @@ function verifyGlobal(manager, mainTarball) {
   }
 
   const project = join(sandbox, `${manager}-global-cwd`);
-  mkdirSync(project, { recursive: true });
+  await mkdir(project, { recursive: true });
   const suffix = process.platform === "win32" ? ".cmd" : "";
-  const output = run(
+  const output = await run(
     join(binDir, `utoo${suffix}`),
     process.platform === "win32" ? ["--version"] : ["global"],
     { cwd: project, capture: true },
@@ -381,14 +425,24 @@ function verifyGlobal(manager, mainTarball) {
   );
 }
 
-const mainTarball = buildPackages();
-for (const manager of managers) {
-  const project = join(sandbox, `${manager}-local`);
-  mkdirSync(project, { recursive: true });
-  process.stdout.write(`\n== ${manager} (${process.platform}-${process.arch}) ==\n`);
-  installLocal(manager, mainTarball, project);
-  verifyCommands(manager, project);
-  verifyManifest(manager, project);
-  verifyGlobal(manager, mainTarball);
-  process.stdout.write(`PASS ${manager}\n`);
+try {
+  const mainTarball = await buildPackages();
+  for (const manager of managers) {
+    const project = join(sandbox, `${manager}-local`);
+    await mkdir(project, { recursive: true });
+    process.stdout.write(
+      `\n== ${manager} (${process.platform}-${process.arch}) ==\n`,
+    );
+    await installLocal(manager, mainTarball, project);
+    await verifyCommands(manager, project);
+    await verifyManifest(manager, project);
+    await verifyGlobal(manager, mainTarball);
+    process.stdout.write(`PASS ${manager}\n`);
+  }
+} finally {
+  try {
+    await rm(sandbox, { recursive: true, force: true });
+  } catch {
+    // A Windows scanner can briefly retain a copied executable after exit.
+  }
 }
