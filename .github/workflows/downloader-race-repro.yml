@@ -1,0 +1,52 @@
+name: downloader-race-repro
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/downloader-race-repro.yml"
+      - "crates/pm/src/util/downloader.rs"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-repro:
+    name: linux downloader race repro
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-01-04
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: downloader-race-repro-linux
+
+      - name: Try to reproduce zero-length resolved cache
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          test_name='downloader::tests::repro_download_can_leave_zero_file_if_racing_process_dies_after_resolved'
+          for attempt in $(seq 1 30); do
+            echo "::group::attempt ${attempt}"
+            cargo test -p utoo-pm "${test_name}" -- --ignored --nocapture
+            status=$?
+            echo "::endgroup::"
+
+            if [ "${status}" -eq 0 ]; then
+              echo "::notice::Reproduced zero-length package.json in resolved downloader cache on attempt ${attempt}."
+              exit 0
+            fi
+
+            echo "attempt ${attempt} did not hit the zero-length window"
+          done
+
+          echo "::error::Did not reproduce zero-length package.json after 30 attempts."
+          exit 1
