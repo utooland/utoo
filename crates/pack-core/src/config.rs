@@ -160,8 +160,6 @@ pub struct ProviderConfig(
 pub struct ServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
     pub entry: Option<ServerEntry>,
-    /// Additional named server entries emitted alongside the primary entry.
-    pub entries: Option<Vec<ServerEntryOptions>>,
     /// Configuration for Server Functions (RPC)
     pub function: Option<ServerFunctionConfig>,
     /*
@@ -187,26 +185,19 @@ pub struct ServerConfig {
 #[serde(untagged)]
 pub enum ServerEntry {
     Import(RcStr),
-    Options(ServerEntryOptions),
+    Entries(Vec<ServerEntryOptions>),
 }
 
 impl ServerEntry {
-    pub fn name(&self) -> RcStr {
+    pub fn has_entries(&self) -> bool {
         match self {
-            Self::Import(_) => rcstr!("index"),
-            Self::Options(options) => options.name.clone(),
+            Self::Import(_) => true,
+            Self::Entries(entries) => !entries.is_empty(),
         }
     }
 
-    pub fn import(&self) -> &RcStr {
-        match self {
-            Self::Import(import) => import,
-            Self::Options(options) => &options.import,
-        }
-    }
-
-    pub fn has_explicit_name(&self) -> bool {
-        matches!(self, Self::Options(_))
+    pub fn has_named_entries(&self) -> bool {
+        matches!(self, Self::Entries(entries) if !entries.is_empty())
     }
 }
 
@@ -2054,11 +2045,11 @@ mod tests {
         let config: Config = serde_json::from_value(serde_json::json!({
             "entry": [],
             "server": {
-                "entry": {
-                    "name": "server",
-                    "import": "./src/server.ts"
-                },
-                "entries": [
+                "entry": [
+                    {
+                        "name": "server",
+                        "import": "./src/server.ts"
+                    },
                     {
                         "name": "index-server",
                         "import": "./src/pages/index.server.ts"
@@ -2070,14 +2061,15 @@ mod tests {
 
         let server = config.server.unwrap();
         assert!(matches!(
-            server.entry,
-            Some(ServerEntry::Options(ServerEntryOptions { ref name, ref import }))
-                if name == "server" && import == "./src/server.ts"
-        ));
-        assert!(matches!(
-            server.entries.as_deref(),
-            Some([ServerEntryOptions { name, import }])
-                if name == "index-server" && import == "./src/pages/index.server.ts"
+            server.entry.as_ref(),
+            Some(ServerEntry::Entries(entries))
+                if matches!(entries.as_slice(), [
+                    ServerEntryOptions { name: server_name, import: server_import },
+                    ServerEntryOptions { name: page_name, import: page_import }
+                ] if server_name == "server"
+                    && server_import == "./src/server.ts"
+                    && page_name == "index-server"
+                    && page_import == "./src/pages/index.server.ts")
         ));
 
         let legacy: Config = serde_json::from_value(serde_json::json!({

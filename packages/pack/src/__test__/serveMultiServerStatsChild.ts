@@ -89,8 +89,8 @@ async function main() {
         entry: [{ import: "./src/app.ts", name: "app" }],
         output: { path: "./dist/client", clean: true },
         server: {
-          entry: { name: "server", import: "./src/server.ts" },
-          entries: [
+          entry: [
+            { name: "server", import: "./src/server.ts" },
             { name: "index-server", import: "./src/index.server.ts" },
             { name: "detail-server", import: "./src/detail.server.ts" },
           ],

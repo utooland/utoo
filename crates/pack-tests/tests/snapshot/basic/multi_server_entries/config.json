@@ -11,11 +11,11 @@
       "path": "output/client"
     },
     "server": {
-      "entry": {
-        "name": "server",
-        "import": "input/server.ts"
-      },
-      "entries": [
+      "entry": [
+        {
+          "name": "server",
+          "import": "input/server.ts"
+        },
         {
           "name": "index-server",
           "import": "input/index.server.ts"

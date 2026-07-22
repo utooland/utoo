@@ -1374,11 +1374,7 @@ impl Project {
         let uses_named_server_entries = server_config
             .entry
             .as_ref()
-            .is_some_and(|entry| entry.has_explicit_name())
-            || server_config
-                .entries
-                .as_ref()
-                .is_some_and(|entries| !entries.is_empty());
+            .is_some_and(|entry| entry.has_named_entries());
         // The legacy scalar server entry historically used the top-level output filename.
         // Apply the server-specific template only for the named multi-entry API.
         let filename_override = uses_named_server_entries

@@ -251,10 +251,6 @@ pub struct SchemaServerConfig {
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
     pub entry: Option<SchemaServerEntry>,
 
-    /// Additional named server entries emitted alongside the primary entry.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub entries: Option<Vec<SchemaServerEntryOptions>>,
-
     /// Configuration for Server Functions (RPC)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Configuration for Server Functions (RPC) boundaries")]
@@ -269,7 +265,7 @@ pub struct SchemaServerConfig {
 #[serde(untagged)]
 pub enum SchemaServerEntry {
     Import(String),
-    Options(SchemaServerEntryOptions),
+    Entries(Vec<SchemaServerEntryOptions>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1587,8 +1583,8 @@ mod tests {
         let config: CompleteConfig = serde_json::from_str(
             r#"{
               "server": {
-                "entry": { "name": "server", "import": "./src/server.ts" },
-                "entries": [
+                "entry": [
+                  { "name": "server", "import": "./src/server.ts" },
                   { "name": "index-server", "import": "./src/pages/index.server.ts" }
                 ],
                 "output": {
@@ -1602,11 +1598,16 @@ mod tests {
 
         let server = config.server.unwrap();
         assert!(matches!(
-            server.entry,
-            Some(SchemaServerEntry::Options(SchemaServerEntryOptions { ref name, ref import }))
-                if name == "server" && import == "./src/server.ts"
+            server.entry.as_ref(),
+            Some(SchemaServerEntry::Entries(entries))
+                if matches!(entries.as_slice(), [
+                    SchemaServerEntryOptions { name: server_name, import: server_import },
+                    SchemaServerEntryOptions { name: page_name, import: page_import }
+                ] if server_name == "server"
+                    && server_import == "./src/server.ts"
+                    && page_name == "index-server"
+                    && page_import == "./src/pages/index.server.ts")
         ));
-        assert_eq!(server.entries.unwrap()[0].name, "index-server");
         assert_eq!(server.output.unwrap().path.as_deref(), Some("dist/server"));
 
         let legacy: CompleteConfig =

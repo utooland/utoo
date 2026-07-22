@@ -1725,16 +1725,6 @@
       "description": "Server-side configuration",
       "type": "object",
       "properties": {
-        "entries": {
-          "description": "Additional named server entries emitted alongside the primary entry.",
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "$ref": "#/definitions/SchemaServerEntryOptions"
-          }
-        },
         "entry": {
           "description": "Entry point for the server runtime (e.g. \"src/server.ts\")",
           "anyOf": [
@@ -1776,7 +1766,10 @@
           "type": "string"
         },
         {
-          "$ref": "#/definitions/SchemaServerEntryOptions"
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaServerEntryOptions"
+          }
         }
       ]
     },

@@ -3,7 +3,7 @@ use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
 };
-use pack_core::config::Platform;
+use pack_core::config::{Platform, ServerEntry};
 use pack_core::server_reference::server_reference_module::ServerReferenceModule;
 use pack_core::server_reference::server_reference_transition::ServerReferenceTransition;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -498,11 +498,10 @@ impl Endpoint for AppEndpoint {
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
             let server_output = if server_config.function.is_some()
-                || server_config.entry.is_some()
                 || server_config
-                    .entries
+                    .entry
                     .as_ref()
-                    .is_some_and(|entries| !entries.is_empty())
+                    .is_some_and(|entry| entry.has_entries())
             {
                 Some(
                     self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries),
@@ -620,26 +619,25 @@ impl AppEndpoint {
 
         let server_config = project.config().server().await?;
         let mut entry_specs = Vec::new();
-        let has_additional_entries = server_config
-            .entries
-            .as_ref()
-            .is_some_and(|entries| !entries.is_empty());
         if let Some(entry) = &server_config.entry {
-            entry_specs.push((
-                entry.name(),
-                Some(entry.import().clone()),
-                true,
-                entry.has_explicit_name() || has_additional_entries,
-            ));
-        } else if !server_function_assets.is_empty() {
-            entry_specs.push((rcstr!("index"), None, true, false));
+            match entry {
+                ServerEntry::Import(import) => {
+                    entry_specs.push((rcstr!("index"), Some(import.clone()), true, false));
+                }
+                ServerEntry::Entries(entries) => {
+                    entry_specs.extend(entries.iter().enumerate().map(|(index, entry)| {
+                        (
+                            entry.name.clone(),
+                            Some(entry.import.clone()),
+                            index == 0,
+                            true,
+                        )
+                    }));
+                }
+            }
         }
-        if let Some(entries) = &server_config.entries {
-            entry_specs.extend(
-                entries
-                    .iter()
-                    .map(|entry| (entry.name.clone(), Some(entry.import.clone()), false, true)),
-            );
+        if entry_specs.is_empty() && !server_function_assets.is_empty() {
+            entry_specs.push((rcstr!("index"), None, true, false));
         }
 
         let mut entry_names = turbo_tasks::FxIndexSet::default();

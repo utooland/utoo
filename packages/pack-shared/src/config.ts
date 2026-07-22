@@ -18,10 +18,11 @@ export interface ServerEntryOptions {
 }
 
 /**
- * The primary server entry. A string preserves the legacy `index` entry name.
- * Use the object form when consumers need a stable entrypoint name in stats.
+ * Server entries. A string preserves the legacy single `index` entry behavior.
+ * In array form, the first entry is the primary server runtime and receives
+ * Server Functions; the remaining entries are emitted independently.
  */
-export type ServerEntry = string | ServerEntryOptions;
+export type ServerEntry = string | ServerEntryOptions[];
 
 export interface LibraryOptions {
   name?: string;
@@ -367,8 +368,6 @@ export interface ConfigComplete {
   server?: {
     /** Entry point for the server runtime (e.g. "src/server.ts") */
     entry?: ServerEntry;
-    /** Additional named server entries emitted alongside the primary entry. */
-    entries?: ServerEntryOptions[];
     output?: {
       /** Output path for server chunks, relative to project root. */
       path?: string;
