@@ -673,19 +673,6 @@ browserContextPrototype.l = loadChunk;
 function loadInitialChunk(chunkPath, chunkData) {
     return loadChunkInternal(SourceType.Runtime, chunkPath, chunkData);
 }
-function getVersionedChunkUrl(chunkPath, versionToken) {
-    const chunkUrl = getChunkRelativeUrl(chunkPath);
-    const separator = chunkUrl.includes('?') ? '&' : '?';
-    return `${chunkUrl}${separator}hmr=${encodeURIComponent(versionToken)}`;
-}
-/**
- * Dynamic chunk-list manifests have already done their own availability
- * calculation. Load the exact member URL for this manifest generation so an
- * older in-flight request cannot be reused by a replacement generation.
- */ function loadVersionedInitialChunk(chunkPath, chunkData, versionToken) {
-    const memberChunkPath = getChunkPath(chunkData);
-    return loadChunkByUrlInternal(SourceType.Runtime, chunkPath, getVersionedChunkUrl(memberChunkPath, versionToken));
-}
 async function loadChunkInternal(sourceType, sourceData, chunkData) {
     if (typeof chunkData === 'string') {
         return loadChunkPath(sourceType, sourceData, chunkData);
@@ -882,21 +869,6 @@ function getPathFromScript(chunkScript) {
  * Determine the chunk to register. Note that this function has side-effects!
  */ function getChunkFromRegistration(chunk) {
     if (typeof chunk === 'string') {
-        if (typeof document !== 'undefined') {
-            const src = document.currentScript?.getAttribute('src');
-            if (src && getPathFromScript({
-                src
-            }) === chunk) {
-                return {
-                    src
-                };
-            }
-        }
-        if (typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' && TURBOPACK_NEXT_CHUNK_URLS.length > 0) {
-            return {
-                src: TURBOPACK_NEXT_CHUNK_URLS.pop()
-            };
-        }
         return chunk;
     } else if (!chunk) {
         if (typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined') {
@@ -1674,7 +1646,6 @@ const pendingHmrTasks = [];
 const chunkListGenerations = new Map();
 let nextChunkListGeneration = 1;
 let activeHmrTask;
-const discardedChunkRegistrations = new Set();
 const dynamicMemberChunkUrlOwners = new Map();
 /**
  * Gets or instantiates a runtime module.
@@ -2398,15 +2369,12 @@ function terminateDynamicChunkListLoad(chunkListPath, state, error) {
     state.bootstrapping = false;
     state.terminated = true;
     state.rejectSubscribed?.(error);
-    BACKEND.rejectChunk?.(chunkListPath, error);
+    DEV_BACKEND.rejectChunk?.(chunkListPath, error);
     for (const [chunkPath, chunkUrl] of state.memberChunkUrls){
         releaseDynamicMemberChunkUrlOwner(chunkListPath, state.generation, chunkPath, chunkUrl);
     }
 }
 function addDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkUrl) {
-    // Reusing the same content-version URL is safe: a tombstone for an older
-    // generation represents identical content and must not discard this load.
-    discardedChunkRegistrations.delete(chunkUrl);
     let owners = dynamicMemberChunkUrlOwners.get(chunkUrl);
     if (!owners) {
         owners = new Map();
@@ -2422,9 +2390,8 @@ function releaseDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkPath,
     dynamicMemberChunkUrlOwners.delete(chunkUrl);
     if (isJs(chunkUrl)) {
         // Executed factories are already tracked by logical chunk ownership. The
-        // exact URL still needs a tombstone so a cancelled in-flight script cannot
-        // register stale factories after this generation has been discarded.
-        discardedChunkRegistrations.add(chunkUrl);
+        // exact URL is removed so a cancelled in-flight script cannot satisfy a
+        // later request for the same logical chunk.
         DEV_BACKEND.unloadChunkExact?.(chunkUrl);
     } else {
         const hasOtherChunkListOwner = [
@@ -2455,6 +2422,22 @@ function loadVersionedDynamicMemberChunk(chunkListPath, chunkData, versionToken)
         return DEV_BACKEND.loadChunkReplacing(chunkUrl);
     }
     return loadVersionedInitialChunk(chunkListPath, chunkData, versionToken);
+}
+function getVersionedChunkUrl(chunkPath, versionToken) {
+    const chunkUrl = getChunkRelativeUrl(chunkPath);
+    const separator = chunkUrl.includes('?') ? '&' : '?';
+    return `${chunkUrl}${separator}hmr=${encodeURIComponent(versionToken)}`;
+}
+function isVersionedDynamicMemberChunkUrl(chunkUrl) {
+    return /(?:[?&])hmr=/.test(chunkUrl);
+}
+/**
+ * Dynamic chunk-list manifests have already done their own availability
+ * calculation. Load the exact member URL for this manifest generation so an
+ * older in-flight request cannot be reused by a replacement generation.
+ */ function loadVersionedInitialChunk(chunkPath, chunkData, versionToken) {
+    const memberChunkPath = getChunkPath(chunkData);
+    return loadChunkByUrlInternal(SourceType.Runtime, chunkPath, getVersionedChunkUrl(memberChunkPath, versionToken));
 }
 /**
  * Disposes of a chunk list and its corresponding exclusive chunks.
@@ -2535,29 +2518,63 @@ function loadVersionedDynamicMemberChunk(chunkListPath, chunkData, versionToken)
  */ function markChunkListAsRuntime(chunkListPath) {
     runtimeChunkLists.add(chunkListPath);
 }
+function getDevChunkFromRegistration(chunk) {
+    if (typeof chunk === 'string') {
+        if (typeof document !== 'undefined') {
+            const src = document.currentScript?.getAttribute('src');
+            if (src && getPathFromScript({
+                src
+            }) === chunk) {
+                return {
+                    src
+                };
+            }
+        }
+        if (typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' && TURBOPACK_NEXT_CHUNK_URLS.length > 0) {
+            return {
+                src: TURBOPACK_NEXT_CHUNK_URLS.pop()
+            };
+        }
+    }
+    return getChunkFromRegistration(chunk);
+}
 function registerChunk(registration) {
-    const chunk = getChunkFromRegistration(registration[0]);
+    const chunk = getDevChunkFromRegistration(registration[0]);
+    const chunkPath = getPathFromScript(chunk);
+    const chunkUrl = getUrlFromScript(chunk);
+    const canonicalChunkUrl = getChunkRelativeUrl(chunkPath);
     let runtimeParams;
     // When bootstrapping we are passed a single runtimeParams object so we can distinguish purely based on length
     if (registration.length === 2) {
         runtimeParams = registration[1];
     } else {
-        let chunkPath = getPathFromScript(chunk);
-        const chunkUrl = getUrlFromScript(chunk);
         runtimeParams = undefined;
-        if (discardedChunkRegistrations.delete(chunkUrl)) {
-            const result = BACKEND.registerChunk(chunk, runtimeParams);
+        if (chunkUrl !== canonicalChunkUrl && isVersionedDynamicMemberChunkUrl(chunkUrl) && !dynamicMemberChunkUrlOwners.has(chunkUrl)) {
+            // Registration can race with cancellation even after its script element
+            // was removed. Only a live owner may install this content-versioned
+            // chunk; a later owner of the same URL is safe because its content is
+            // identical.
             DEV_BACKEND.unloadChunkExact?.(chunkUrl);
-            return result;
+            return;
         }
         installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories, (id)=>addModuleToChunk(id, chunkPath));
     }
-    return BACKEND.registerChunk(chunk, runtimeParams);
+    if (runtimeParams === undefined && chunkUrl !== canonicalChunkUrl && DEV_BACKEND.resolveChunk) {
+        // Versioned development chunks have their own resolver. Resolving the
+        // canonical path here could let an older generation wake a newer load.
+        DEV_BACKEND.resolveChunk(chunkUrl);
+        return;
+    }
+    const result = BACKEND.registerChunk(chunk, runtimeParams);
+    if (chunkUrl !== canonicalChunkUrl) {
+        DEV_BACKEND.resolveChunk?.(chunkUrl);
+    }
+    return result;
 }
 /**
  * Subscribes to chunk list updates from the update server and applies them.
  */ function registerChunkList(chunkList) {
-    const chunkListScript = getChunkFromRegistration(chunkList.script);
+    const chunkListScript = getDevChunkFromRegistration(chunkList.script);
     const chunkListPath = getPathFromScript(chunkListScript);
     const generation = nextChunkListGeneration++;
     chunkListGenerations.set(chunkListPath, generation);
@@ -2584,7 +2601,7 @@ function registerChunk(registration) {
         // instead of waiting forever for an onSubscribed acknowledgement.
         void Promise.all(chunkList.chunks.map((chunkData)=>loadInitialChunk(chunkListPath, chunkData))).then(()=>BACKEND.registerChunk(chunkListPath), (cause)=>{
             const error = cause instanceof Error ? cause : new Error(`Failed to load a worker dynamic chunk group: ${String(cause)}`);
-            BACKEND.rejectChunk?.(chunkListPath, error);
+            DEV_BACKEND.rejectChunk?.(chunkListPath, error);
         });
         return;
     }
@@ -2709,7 +2726,7 @@ let BACKEND;
     BACKEND = {
         async registerChunk (chunk, params) {
             let chunkPath = getPathFromScript(chunk);
-            let chunkUrl = getUrlFromScript(chunk);
+            let chunkUrl = getUrlFromScript(chunkPath);
             const resolver = getOrCreateResolver(chunkUrl);
             resolver.resolve();
             if (params == null) {
@@ -2734,13 +2751,6 @@ let BACKEND;
      * has been loaded.
      */ loadChunkCached (sourceType, chunkUrl) {
             return doLoadChunk(sourceType, chunkUrl);
-        },
-        rejectChunk (chunkPath, error) {
-            const chunkUrl = getUrlFromScript(chunkPath);
-            const resolver = chunkResolvers.get(chunkUrl);
-            if (resolver) {
-                rejectChunkResolver(chunkUrl, resolver, error);
-            }
         }
     };
     function getOrCreateResolver(chunkUrl) {
@@ -2964,9 +2974,7 @@ let DEV_BACKEND;
             const decodedChunkUrl = decodeURI(chunkUrl);
             const exactLinks = document.querySelectorAll(`link[rel=stylesheet][href="${chunkUrl}"],link[rel=stylesheet][href^="${chunkUrl}${cacheBusterSeparator}"],link[rel=stylesheet][href="${decodedChunkUrl}"],link[rel=stylesheet][href^="${decodedChunkUrl}${cacheBusterSeparator}"]`);
             const baseLinks = document.querySelectorAll(`link[rel=stylesheet][href="${baseChunkUrl}"],link[rel=stylesheet][href^="${baseChunkUrl}?"],link[rel=stylesheet][href="${decodedBaseChunkUrl}"],link[rel=stylesheet][href^="${decodedBaseChunkUrl}?"]`);
-            const load = exactLinks.length > 0 || baseLinks.length === 0 ? BACKEND.loadChunkCached(SourceType.Runtime, chunkUrl) : DEV_BACKEND.reloadChunk(chunkUrl).then(()=>BACKEND.registerChunk({
-                    src: chunkUrl
-                }));
+            const load = exactLinks.length > 0 ? resolveChunkResolver(chunkUrl) : baseLinks.length === 0 ? BACKEND.loadChunkCached(SourceType.Runtime, chunkUrl) : DEV_BACKEND.reloadChunk(chunkUrl).then(()=>resolveChunkResolver(chunkUrl));
             replacingCssLoads.set(chunkUrl, load);
             void load.then(()=>{
                 if (replacingCssLoads.get(chunkUrl) === load) {
@@ -2984,6 +2992,14 @@ let DEV_BACKEND;
         },
         unloadChunkExact (chunkUrl) {
             unloadChunk(chunkUrl, true);
+        },
+        rejectChunk (chunkPath, error) {
+            const chunkUrl = getUrlFromScript(chunkPath);
+            const resolver = chunkResolvers.get(chunkUrl);
+            if (resolver) rejectResolver(chunkUrl, resolver, error);
+        },
+        resolveChunk (chunkUrl) {
+            resolveChunkResolver(chunkUrl);
         },
         reloadChunk (chunkUrl) {
             return new Promise((resolve, reject)=>{
@@ -3076,6 +3092,37 @@ let DEV_BACKEND;
         },
         restart: ()=>self.location.reload()
     };
+    function rejectResolver(chunkUrl, resolver, error) {
+        if (chunkResolvers.get(chunkUrl) === resolver) {
+            chunkResolvers.delete(chunkUrl);
+        }
+        resolver.reject(error);
+    }
+    function resolveChunkResolver(chunkUrl) {
+        let resolver = chunkResolvers.get(chunkUrl);
+        if (!resolver) {
+            let resolve;
+            let reject;
+            const promise = new Promise((innerResolve, innerReject)=>{
+                resolve = innerResolve;
+                reject = innerReject;
+            });
+            resolver = {
+                resolved: false,
+                loadingStarted: false,
+                retryAttempts: 0,
+                promise,
+                resolve: ()=>{
+                    resolver.resolved = true;
+                    resolve();
+                },
+                reject: reject
+            };
+            chunkResolvers.set(chunkUrl, resolver);
+        }
+        resolver.resolve();
+        return resolver.promise;
+    }
     function unloadChunk(chunkUrl, exact) {
         deleteResolvers(chunkUrl, exact);
         const baseChunkUrl = chunkUrl.split('?')[0];
@@ -3096,7 +3143,7 @@ let DEV_BACKEND;
         const path = exact ? chunkUrl : baseChunkUrl;
         const suffix = exact ? path.includes('?') ? '&' : '?' : '?';
         if (isCss(chunkUrl)) {
-            const links = document.querySelectorAll(exact ? `link[href="${path}"],link[href^="${path}${suffix}"],link[href="${decodedChunkUrl}"],link[href^="${decodedChunkUrl}${suffix}"]` : `link[href="${path}"],link[href^="${path}${suffix}"],link[href="${decodedChunkUrl}"],link[href^="${decodedChunkUrl}${suffix}"]`);
+            const links = document.querySelectorAll(`link[href="${path}"],link[href^="${path}${suffix}"],link[href="${decodedChunkUrl}"],link[href^="${decodedChunkUrl}${suffix}"]`);
             for (const link of Array.from(links)){
                 link.remove();
             }
@@ -3104,7 +3151,7 @@ let DEV_BACKEND;
             // Unloading a JS chunk would have no effect once it has executed, but
             // removing the exact stale registration keeps the DOM and resolver cache
             // bounded without touching a newer generation of the same chunk path.
-            const scripts = document.querySelectorAll(exact ? `script[src="${path}"],script[src^="${path}${suffix}"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}${suffix}"]` : `script[src="${path}"],script[src^="${path}${suffix}"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}${suffix}"]`);
+            const scripts = document.querySelectorAll(`script[src="${path}"],script[src^="${path}${suffix}"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}${suffix}"]`);
             for (const script of Array.from(scripts)){
                 script.remove();
             }
@@ -3123,7 +3170,7 @@ let DEV_BACKEND;
             if (resolver.resolved) {
                 chunkResolvers.delete(resolverUrl);
             } else {
-                rejectChunkResolver(resolverUrl, resolver, new Error(`Chunk ${resolverUrl} was unloaded while loading.`));
+                rejectResolver(resolverUrl, resolver, new Error(`Chunk ${resolverUrl} was unloaded while loading.`));
             }
         }
     }

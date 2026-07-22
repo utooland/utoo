@@ -64,18 +64,36 @@ async function mutateAndWaitForBuild(page: Page, mutate: () => void) {
     .poll(() => pageReadySockets.get(page)?.size ?? 0)
     .toBeGreaterThan(0);
   const frameStart = frames.length;
+  let buildInProgress = false;
+  for (const frame of frames.slice(0, frameStart)) {
+    const action = frameAction(frame);
+    if (action === "building") buildInProgress = true;
+    if (action === "built") buildInProgress = false;
+  }
   mutate();
-  await expect
-    .poll(() => {
-      let building = false;
-      for (const frame of frames.slice(frameStart)) {
-        const action = frameAction(frame);
-        if (action === "building") building = true;
-        if (building && action === "built") return true;
-      }
-      return false;
-    })
-    .toBe(true);
+  try {
+    await expect
+      .poll(() => {
+        // A mutation can join compilation work that was already started by a
+        // lazy chunk load. In that case BUILDING legitimately precedes
+        // frameStart. Preserve that unmatched BUILDING state, but do not treat
+        // a subscription baseline message as mutation-triggered activity.
+        let activity = buildInProgress;
+        for (const frame of frames.slice(frameStart)) {
+          const action = frameAction(frame);
+          if (action === "building") activity = true;
+          if (activity && action === "built") return true;
+        }
+        return false;
+      })
+      .toBe(true);
+  } catch (error) {
+    console.error(
+      "HMR frames received after the test mutation:",
+      frames.slice(frameStart).map(frameAction),
+    );
+    throw error;
+  }
 }
 
 test.afterEach(async () => {
