@@ -11,6 +11,18 @@ export interface EntryOptions {
   html?: HtmlConfig;
 }
 
+/** A named server entry compiled as an independently addressable Node.js bundle. */
+export interface ServerEntryOptions {
+  name: string;
+  import: string;
+}
+
+/**
+ * The primary server entry. A string preserves the legacy `index` entry name.
+ * Use the object form when consumers need a stable entrypoint name in stats.
+ */
+export type ServerEntry = string | ServerEntryOptions;
+
 export interface LibraryOptions {
   name?: string;
   export?: Array<string>;
@@ -354,7 +366,9 @@ export interface ConfigComplete {
   devServer?: DevServerConfig;
   server?: {
     /** Entry point for the server runtime (e.g. "src/server.ts") */
-    entry?: string;
+    entry?: ServerEntry;
+    /** Additional named server entries emitted alongside the primary entry. */
+    entries?: ServerEntryOptions[];
     output?: {
       /** Output path for server chunks, relative to project root. */
       path?: string;

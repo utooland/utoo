@@ -159,7 +159,9 @@ pub struct ProviderConfig(
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
-    pub entry: Option<RcStr>,
+    pub entry: Option<ServerEntry>,
+    /// Additional named server entries emitted alongside the primary entry.
+    pub entries: Option<Vec<ServerEntryOptions>>,
     /// Configuration for Server Functions (RPC)
     pub function: Option<ServerFunctionConfig>,
     /*
@@ -178,6 +180,42 @@ pub struct ServerConfig {
     */
     /// Server output configuration
     pub output: Option<ServerOutputConfig>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(untagged)]
+pub enum ServerEntry {
+    Import(RcStr),
+    Options(ServerEntryOptions),
+}
+
+impl ServerEntry {
+    pub fn name(&self) -> RcStr {
+        match self {
+            Self::Import(_) => rcstr!("index"),
+            Self::Options(options) => options.name.clone(),
+        }
+    }
+
+    pub fn import(&self) -> &RcStr {
+        match self {
+            Self::Import(import) => import,
+            Self::Options(options) => &options.import,
+        }
+    }
+
+    pub fn has_explicit_name(&self) -> bool {
+        matches!(self, Self::Options(_))
+    }
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerEntryOptions {
+    pub name: RcStr,
+    pub import: RcStr,
 }
 
 #[turbo_tasks::value(eq = "manual")]
@@ -2010,6 +2048,48 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_server_entries_deserialization() {
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "server": {
+                "entry": {
+                    "name": "server",
+                    "import": "./src/server.ts"
+                },
+                "entries": [
+                    {
+                        "name": "index-server",
+                        "import": "./src/pages/index.server.ts"
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let server = config.server.unwrap();
+        assert!(matches!(
+            server.entry,
+            Some(ServerEntry::Options(ServerEntryOptions { ref name, ref import }))
+                if name == "server" && import == "./src/server.ts"
+        ));
+        assert!(matches!(
+            server.entries.as_deref(),
+            Some([ServerEntryOptions { name, import }])
+                if name == "index-server" && import == "./src/pages/index.server.ts"
+        ));
+
+        let legacy: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "server": { "entry": "./src/server.ts" }
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy.server.unwrap().entry,
+            Some(ServerEntry::Import(import)) if import == "./src/server.ts"
+        ));
+    }
 
     #[test]
     fn test_externals_deserialization() {

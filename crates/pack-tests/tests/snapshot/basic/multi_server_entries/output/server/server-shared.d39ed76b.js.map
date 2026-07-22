@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 5, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries/input/shared.ts"],"sourcesContent":["export const shared = \"shared dependency\";\n"],"names":["shared"],"mappings":";;;;AAAO,MAAMA,SAAS"}}]
+}

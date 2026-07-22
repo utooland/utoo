@@ -5,11 +5,8 @@ if (!Array.isArray(__UTOOPACK__)) {
 
 const CHUNK_BASE_PATH = "";
 const CHUNK_SUFFIX_PATH = "";
-const RELATIVE_ROOT_PATH = "..";
+const RELATIVE_ROOT_PATH = "/ROOT";
 const RUNTIME_PUBLIC_PATH = "";
-// Library builds deliberately collapse JavaScript into one chunk, so the
-// component-chunk runtime path is unsupported in this custom runtime.
-const SUPPORT_COMPONENT_CHUNKS = false;
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -99,7 +96,7 @@ function createModuleWithDirection(id) {
 const BindingTag_Value = 0;
 /**
  * Adds the getters to the exports object.
- */ function esm(exports, bindings, dynamic) {
+ */ function esm(exports, bindings) {
     defineProp(exports, '__esModule', {
         value: true
     });
@@ -137,18 +134,11 @@ const BindingTag_Value = 0;
             }
         }
     }
-    // The properties defined above are already non-configurable and
-    // non-writable, so the namespace's existing exports are effectively
-    // immutable. Sealing additionally makes the object non-extensible, matching
-    // real ESM-namespace semantics. Modules with dynamic re-exports
-    // (`export *` from a CommonJS module) must stay extensible so the dynamic
-    // export proxy can surface keys discovered at runtime, so skip the seal for
-    // them.
-    if (!dynamic) Object.seal(exports);
+    Object.seal(exports);
 }
 /**
  * Makes the module an ESM with exports
- */ function esmExport(bindings, id, dynamic) {
+ */ function esmExport(bindings, id) {
     let module;
     let exports;
     if (id != null) {
@@ -159,72 +149,24 @@ const BindingTag_Value = 0;
         exports = this.e;
     }
     module.namespaceObject = exports;
-    esm(exports, bindings, dynamic);
+    esm(exports, bindings);
 }
 contextPrototype.s = esmExport;
 function ensureDynamicExports(module, exports) {
     let reexportedObjects = REEXPORTED_OBJECTS.get(module);
     if (!reexportedObjects) {
         REEXPORTED_OBJECTS.set(module, reexportedObjects = []);
-        // Returns the re-exported object that provides `prop` as an own property,
-        // or `undefined` if none does. The traps share this logic so they always
-        // agree on which keys are synthesized from `reexportedObjects`. `default`
-        // is never re-exported by `export *`, so it is never synthesized.
-        const reexportOwning = (prop)=>{
-            if (prop !== 'default') {
-                for (const obj of reexportedObjects){
-                    if (hasOwnProperty.call(obj, prop)) return obj;
-                }
-            }
-            return undefined;
-        };
-        // Modules with dynamic re-exports are not sealed by `esm()`, so the
-        // target beneath the namespace stays extensible. That is what lets the
-        // `ownKeys` and `getOwnPropertyDescriptor` traps legally report keys that
-        // exist on `reexportedObjects` but not on the target itself.
         module.exports = module.namespaceObject = new Proxy(exports, {
             get (target, prop) {
                 if (hasOwnProperty.call(target, prop) || prop === 'default' || prop === '__esModule') {
                     return Reflect.get(target, prop);
                 }
-                const obj = reexportOwning(prop);
-                return obj && Reflect.get(obj, prop);
+                for (const obj of reexportedObjects){
+                    const value = Reflect.get(obj, prop);
+                    if (value !== undefined) return value;
+                }
+                return undefined;
             },
-            // The namespace is read-only, like a real esm namespace object. The
-            // re-exported modules can still mutate their own exports (exposed live
-            // via `get`), but mutating the namespace itself is rejected. Refusing
-            // here, rather than forwarding to the extensible target, also prevents an
-            // assignment/definition from shadowing a dynamic re-export. It also
-            // prevents delete from removing a static export.
-            set () {
-                return false;
-            },
-            defineProperty () {
-                return false;
-            },
-            deleteProperty () {
-                return false;
-            },
-            // The `has` trap ensures that `'exportName' in starImports` will reflect
-            // the truth of whether a key is exported.
-            has (target, prop) {
-                if (Reflect.has(target, prop)) return true;
-                if (prop === 'default' || prop === '__esModule') return false;
-                return reexportOwning(prop) !== undefined;
-            },
-            // ownKeys and getOwnPropertyDescriptor together make the keys enumerable.
-            // If a value is returned from `ownKeys` but its property descriptor is
-            // not enumerable, it will not be visible to iterator methods.
-            // Collectively, they allow code like the following:
-            //
-            // ```
-            // // module.js re-exports dynamic CJS exports
-            // export * from './legacyModule.cjs'
-            //
-            // // from another JS file, reference the re-exported dynamic values
-            // import * as Namespace from './module.js'
-            // Object.keys(Namespace)
-            // ```
             ownKeys (target) {
                 const keys = Reflect.ownKeys(target);
                 for (const obj of reexportedObjects){
@@ -233,22 +175,6 @@ function ensureDynamicExports(module, exports) {
                     }
                 }
                 return keys;
-            },
-            getOwnPropertyDescriptor (target, prop) {
-                const own = Reflect.getOwnPropertyDescriptor(target, prop);
-                if (own || prop === 'default' || prop === '__esModule') return own;
-                const obj = reexportOwning(prop);
-                if (obj) {
-                    // Synthetic keys don't exist on the target, so they MUST be
-                    // reported as configurable. However the set/delete traps above will
-                    // prevent them from actually being changed
-                    return {
-                        enumerable: true,
-                        configurable: true,
-                        get: ()=>Reflect.get(obj, prop)
-                    };
-                }
-                return undefined;
             }
         });
     }
@@ -616,41 +542,6 @@ externalRequire.resolve = (id, options)=>{
     return require.resolve(id, options);
 };
 contextPrototype.x = externalRequire;
-/**
- * Adds Webpack-compatible ESM metadata to external values while preserving
- * native ESM live bindings.
- */ function externalNamespace(mod) {
-    if (mod && mod.__esModule) return mod;
-    const ns = Object.create(null);
-    const isEsmNamespace = mod && toStringTag && mod[toStringTag] === "Module";
-    if (mod && (typeof mod === "object" || typeof mod === "function")) {
-        for(const key in mod){
-            if (key === "__esModule" || !isEsmNamespace && key === "default") {
-                continue;
-            }
-            Object.defineProperty(ns, key, {
-                enumerable: true,
-                get: createGetter(mod, key)
-            });
-        }
-    }
-    if (!isEsmNamespace) {
-        Object.defineProperty(ns, "default", {
-            enumerable: true,
-            value: mod
-        });
-    }
-    Object.defineProperty(ns, "__esModule", {
-        value: true
-    });
-    if (toStringTag) {
-        Object.defineProperty(ns, toStringTag, {
-            value: "Module"
-        });
-    }
-    return ns;
-}
-contextPrototype.N = externalNamespace;
 /// <reference path="./runtime-base.ts" />
 /// <reference path="./dummy.ts" />
 const moduleCache = {};
@@ -711,14 +602,7 @@ function instantiateModule(id, sourceType, sourceData) {
 }
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function registerChunk(registration) {
-    // An inlined entry-only registration is a bare params object (no source chunk).
-    if (!Array.isArray(registration)) {
-        return BACKEND.registerChunk(undefined, registration);
-    }
     const chunk = getChunkFromRegistration(registration[0]);
-    if (SUPPORT_COMPONENT_CHUNKS) {
-        markChunkComponentsAvailable(chunk);
-    }
     let runtimeParams;
     // When bootstrapping we are passed a single runtimeParams object so we can distinguish purely based on length
     if (registration.length === 2) {
@@ -793,7 +677,7 @@ const chunksToRegister = __UTOOPACK__;
 __UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    const runtimeModuleIds = ["[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)"];
+    const runtimeModuleIds = ["[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)"];
     let exports;
     for (let i = 0; i < runtimeModuleIds.length; i++) {
         const module = moduleCache[runtimeModuleIds[i]];
@@ -812,28 +696,26 @@ function factory () {
 if (typeof exports === 'object' && typeof module === 'object') {
     module.exports = factory();
 } else if (typeof exports === 'object') {
-    exports["NodeRuntimeLibrary"] = factory();
+    var a = factory();
+    for(var i in a) exports[i] = a[i];
 } else {
-    globalThis["NodeRuntimeLibrary"] = factory();
+    var a = factory();
+    for(var i in a) globalThis[i] = a[i];
 }
 })([
-["main.js",
+["index-server.a6c5891b.js",
 
-"[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-function answer() {
-    return 42;
-}
-__turbopack_context__.s([
-    "answer",
-    0,
-    answer
-]);
+__turbopack_context__.s([]);
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/multi_server_entries/input/shared.ts [server] (ecmascript)");
+;
+console.log("index page server", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
 }),
 ],
-["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)"]}],
+["index-server.a6c5891b.js", {"otherChunks":["server-shared.d39ed76b.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)"]}],
 ]);
 
 
-//# sourceMappingURL=main.js.map
+//# sourceMappingURL=index-server.a6c5891b.js.map

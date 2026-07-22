@@ -249,12 +249,45 @@ pub struct SchemaServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
-    pub entry: Option<String>,
+    pub entry: Option<SchemaServerEntry>,
+
+    /// Additional named server entries emitted alongside the primary entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entries: Option<Vec<SchemaServerEntryOptions>>,
 
     /// Configuration for Server Functions (RPC)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Configuration for Server Functions (RPC) boundaries")]
     pub function: Option<SchemaServerFunctionConfig>,
+
+    /// Server output configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<SchemaServerOutputConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaServerEntry {
+    Import(String),
+    Options(SchemaServerEntryOptions),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerEntryOptions {
+    pub name: String,
+    pub import: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerOutputConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunk_filename: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1547,5 +1580,40 @@ mod tests {
             .unwrap();
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].0, "@swc/plugin-emotion");
+    }
+
+    #[test]
+    fn test_server_entries_deserialization() {
+        let config: CompleteConfig = serde_json::from_str(
+            r#"{
+              "server": {
+                "entry": { "name": "server", "import": "./src/server.ts" },
+                "entries": [
+                  { "name": "index-server", "import": "./src/pages/index.server.ts" }
+                ],
+                "output": {
+                  "path": "dist/server",
+                  "filename": "[name].[contenthash:8].js"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let server = config.server.unwrap();
+        assert!(matches!(
+            server.entry,
+            Some(SchemaServerEntry::Options(SchemaServerEntryOptions { ref name, ref import }))
+                if name == "server" && import == "./src/server.ts"
+        ));
+        assert_eq!(server.entries.unwrap()[0].name, "index-server");
+        assert_eq!(server.output.unwrap().path.as_deref(), Some("dist/server"));
+
+        let legacy: CompleteConfig =
+            serde_json::from_str(r#"{ "server": { "entry": "./src/server.ts" } }"#).unwrap();
+        assert!(matches!(
+            legacy.server.unwrap().entry,
+            Some(SchemaServerEntry::Import(import)) if import == "./src/server.ts"
+        ));
     }
 }

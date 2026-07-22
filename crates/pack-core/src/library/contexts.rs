@@ -23,6 +23,9 @@ use super::LibraryChunkingContext;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, TraceRawVcs, Encode, Decode)]
 pub struct LibraryChunkingContextOptions {
     pub name: Vc<Option<RcStr>>,
+    pub preserve_entry_name: bool,
+    pub shared_chunks: bool,
+    pub filename_override: Option<RcStr>,
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
     pub output_root: FileSystemPath,
@@ -53,6 +56,9 @@ pub async fn get_library_chunking_context(
 ) -> Result<Vc<Box<dyn ChunkingContext>>> {
     let LibraryChunkingContextOptions {
         name,
+        preserve_entry_name,
+        shared_chunks,
+        filename_override,
         mode,
         root_path,
         output_root,
@@ -135,13 +141,15 @@ pub async fn get_library_chunking_context(
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)
     .nested_async_availability(*nested_async_chunking.await?)
+    .preserve_entry_name(preserve_entry_name)
+    .shared_chunks(shared_chunks)
     .is_node_platform(matches!(&*platform, Platform::Node));
 
     if let Some(name) = (*name.await?).clone() {
         builder = builder.name(name);
     }
 
-    if let Some(filename) = &output.filename {
+    if let Some(filename) = filename_override.as_ref().or(output.filename.as_ref()) {
         builder = builder.filename(filename.clone());
     }
 

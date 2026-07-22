@@ -1,0 +1,39 @@
+{
+  "runtimeType": "Production",
+  "config": {
+    "entry": [
+      {
+        "import": "input/app.ts",
+        "name": "app"
+      }
+    ],
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "entry": {
+        "name": "server",
+        "import": "input/server.ts"
+      },
+      "entries": [
+        {
+          "name": "index-server",
+          "import": "input/index.server.ts"
+        },
+        {
+          "name": "detail-server",
+          "import": "input/detail.server.ts"
+        }
+      ],
+      "output": {
+        "path": "output/server",
+        "filename": "[name].[contenthash:8].js"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "stats": true
+  }
+}

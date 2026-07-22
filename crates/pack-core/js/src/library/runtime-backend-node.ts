@@ -5,9 +5,9 @@
  * It will be appended to the base runtime code in place of
  * runtime-backend-dom.ts when the target platform is Node.js.
  *
- * Since library builds produce a single, self-contained chunk,
- * no dynamic chunk loading is needed. The BACKEND simply registers
- * modules and instantiates runtime entries.
+ * Server library entry chunks can reference shared chunks. Those chunks are
+ * CommonJS modules exporting compressed module factories, so the backend can
+ * load them synchronously before instantiating runtime entries.
  */
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -56,6 +56,25 @@ contextPrototype.q = exportUrl;
 
       if (params == null) {
         return;
+      }
+
+      const otherChunks = (
+        params as RuntimeParams & { otherChunks: ChunkData[] }
+      ).otherChunks;
+      const nodePath = require("path");
+      for (const otherChunk of otherChunks) {
+        const otherChunkPath = getChunkPath(otherChunk);
+        if (!/\.(?:c|m)?js(?:\?|$)/.test(otherChunkPath)) {
+          continue;
+        }
+        const relativeChunkPath = nodePath.relative(
+          nodePath.dirname(chunkPath),
+          otherChunkPath,
+        );
+        const chunkModules: CompressedModuleFactories = require(
+          nodePath.resolve(__dirname, relativeChunkPath),
+        );
+        installCompressedModuleFactories(chunkModules, 0, moduleFactories);
       }
 
       if (params.runtimeModuleIds.length > 0) {

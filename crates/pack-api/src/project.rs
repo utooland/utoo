@@ -53,6 +53,7 @@ use turbopack_core::{
     },
     compile_time_info::CompileTimeInfo,
     issue::{CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, StyledString},
+    module::Modules,
     module_graph::{
         GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
         chunk_group_info::{ChunkGroupEntry, EntryHeuristics},
@@ -1369,10 +1370,32 @@ impl Project {
         let mode = self.mode();
         let config = self.config();
         let server_root = self.server_dist_root().owned().await?;
+        let server_config = config.server().await?;
+        let uses_named_server_entries = server_config
+            .entry
+            .as_ref()
+            .is_some_and(|entry| entry.has_explicit_name())
+            || server_config
+                .entries
+                .as_ref()
+                .is_some_and(|entries| !entries.is_empty());
+        // The legacy scalar server entry historically used the top-level output filename.
+        // Apply the server-specific template only for the named multi-entry API.
+        let filename_override = uses_named_server_entries
+            .then(|| {
+                server_config
+                    .output
+                    .as_ref()
+                    .and_then(|output| output.filename.clone())
+            })
+            .flatten();
 
         Ok(get_library_chunking_context(
             LibraryChunkingContextOptions {
                 name: Vc::cell(Some(rcstr!("index"))),
+                preserve_entry_name: true,
+                shared_chunks: true,
+                filename_override,
                 mode,
                 root_path: server_root.clone(),
                 output_root: server_root,
@@ -1403,15 +1426,10 @@ impl Project {
     #[turbo_tasks::function]
     pub(super) async fn server_fn_module_graph(
         self: Vc<Self>,
-        evaluatable_assets: Vc<EvaluatableAssets>,
+        modules: Vc<Modules>,
     ) -> Result<Vc<ModuleGraph>> {
         let is_production = self.mode().await?.is_production();
-        let entries = evaluatable_assets
-            .await?
-            .iter()
-            .copied()
-            .map(ResolvedVc::upcast)
-            .collect();
+        let entries = modules.await?.iter().copied().collect();
         Ok(ModuleGraph::from_graphs(
             vec![SingleModuleGraph::new_with_entries(
                 GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry {

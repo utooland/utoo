@@ -1,0 +1,106 @@
+{
+  "entrypoints": {
+    "app": {
+      "name": "app",
+      "chunks": [
+        "app.js",
+        "input_app_ts_da11aa35.js"
+      ],
+      "assets": [
+        {
+          "name": "app.js"
+        },
+        {
+          "name": "input_app_ts_da11aa35.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "app.js",
+      "size": 44021,
+      "hash": "",
+      "files": [
+        "app.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "input_app_ts_da11aa35.js",
+      "size": 337,
+      "hash": "",
+      "files": [
+        "input_app_ts_da11aa35.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "app.js",
+      "info": {},
+      "size": 44021,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "app.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "app.js.map",
+      "info": {},
+      "size": 77664,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "app.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "input_app_ts_da11aa35.js",
+      "info": {},
+      "size": 337,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "input_app_ts_da11aa35.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "input_app_ts_da11aa35.js.map",
+      "info": {},
+      "size": 302,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "input_app_ts_da11aa35.js.map"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/multi_server_entries/input/app.ts",
+      "id": "basic/multi_server_entries/input/app.ts",
+      "chunks": [
+        "input_app_ts_da11aa35.js",
+        "app.js"
+      ],
+      "size": 23
+    }
+  ]
+}

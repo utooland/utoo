@@ -6,7 +6,7 @@ use pack_core::client::context::{
 use pack_core::config::Platform;
 use pack_core::server_reference::server_reference_module::ServerReferenceModule;
 use pack_core::server_reference::server_reference_transition::ServerReferenceTransition;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use pack_core::server::contexts::{
     get_server_module_options_context, get_server_resolve_options_context,
@@ -23,13 +23,14 @@ use turbopack_core::output::OutputAssetsWithReferenced;
 use turbopack_core::resolve::origin::ResolveOrigin;
 use turbopack_core::{
     chunk::{
-        ChunkingContext, EvaluatableAsset, EvaluatableAssets, availability_info::AvailabilityInfo,
+        ChunkableModule, ChunkingContext, EvaluatableAsset, EvaluatableAssets,
+        availability_info::AvailabilityInfo,
     },
     context::AssetContext,
     ident::{AssetIdent, Layer},
     module::{Module, Modules},
     module_graph::{
-        GraphEntries, ModuleGraph,
+        GraphEntries, GraphTraversalAction, ModuleGraph,
         chunk_group_info::{ChunkGroup, ChunkGroupEntry, EntryHeuristics},
     },
     output::OutputAssets,
@@ -496,7 +497,12 @@ impl Endpoint for AppEndpoint {
 
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
-            let server_output = if server_config.function.is_some() || server_config.entry.is_some()
+            let server_output = if server_config.function.is_some()
+                || server_config.entry.is_some()
+                || server_config
+                    .entries
+                    .as_ref()
+                    .is_some_and(|entries| !entries.is_empty())
             {
                 Some(
                     self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries),
@@ -607,25 +613,43 @@ impl AppEndpoint {
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         let server_modules: Vec<_> = pairs.into_iter().map(|(_, m)| m).collect();
 
-        // Build server module graph via project.module_graph_for_modules()
-        // which is a separate turbo_tasks function (avoids deadlock)
-        let server_chunking_context = project.server_fn_chunking_context();
-
-        let mut evaluatable_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> = server_modules
+        let server_function_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> = server_modules
             .iter()
             .filter_map(|m| ResolvedVc::try_sidecast::<Box<dyn EvaluatableAsset>>(*m))
             .collect();
 
         let server_config = project.config().server().await?;
-        if let Some(entry_import) = &server_config.entry {
-            let relative_import =
-                convert_to_project_relative(entry_import, &project.project_path().await?.path)?;
-            let entry_request = Request::relative(
-                relative_import.into(),
-                Default::default(),
-                Default::default(),
-                false,
+        let mut entry_specs = Vec::new();
+        let has_additional_entries = server_config
+            .entries
+            .as_ref()
+            .is_some_and(|entries| !entries.is_empty());
+        if let Some(entry) = &server_config.entry {
+            entry_specs.push((
+                entry.name(),
+                Some(entry.import().clone()),
+                true,
+                entry.has_explicit_name() || has_additional_entries,
+            ));
+        } else if !server_function_assets.is_empty() {
+            entry_specs.push((rcstr!("index"), None, true, false));
+        }
+        if let Some(entries) = &server_config.entries {
+            entry_specs.extend(
+                entries
+                    .iter()
+                    .map(|entry| (entry.name.clone(), Some(entry.import.clone()), false, true)),
             );
+        }
+
+        let mut entry_names = turbo_tasks::FxIndexSet::default();
+        for (name, _, _, _) in &entry_specs {
+            if !entry_names.insert(name.clone()) {
+                bail!("duplicate server entry name `{name}`");
+            }
+        }
+
+        let server_asset_context = if entry_specs.iter().any(|(_, import, _, _)| import.is_some()) {
             let server_layer =
                 Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"));
             let server_compile_time_info = project.server_compile_time_info();
@@ -643,69 +667,176 @@ impl AppEndpoint {
                 project.execution_context(),
                 project.pack_path().owned().await?,
             );
-            let server_asset_context: Vc<Box<dyn AssetContext>> =
-                Vc::upcast(ModuleAssetContext::new(
-                    TransitionOptions::default().cell(),
-                    server_compile_time_info,
-                    server_module_options_context,
-                    server_resolve_options_context,
-                    server_layer,
-                ));
+            Some(Vc::upcast(ModuleAssetContext::new(
+                TransitionOptions::default().cell(),
+                server_compile_time_info,
+                server_module_options_context,
+                server_resolve_options_context,
+                server_layer,
+            )))
+        } else {
+            None
+        };
 
-            let origin = PlainResolveOrigin::new(
-                server_asset_context,
-                project.project_path().await?.join("_")?,
-            )
-            .await?;
-            let resolve_options = origin.resolve_options();
-            let asset_context = origin.asset_context();
-            let origin_path = origin.origin_path();
-            let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
-            let modules = asset_context
-                .resolve_asset(origin_path, entry_request, resolve_options, ty)
-                .await?
-                .primary_modules()
+        let project_path = project.project_path().owned().await?;
+        let mut build_entries = Vec::new();
+        for (name, entry_import, include_server_functions, preserve_entry_name) in entry_specs {
+            let mut evaluatable_assets = if include_server_functions {
+                server_function_assets.clone()
+            } else {
+                Vec::new()
+            };
+
+            if let Some(entry_import) = entry_import {
+                let relative_import =
+                    convert_to_project_relative(&entry_import, &project_path.path)?;
+                let entry_request = Request::relative(
+                    relative_import.into(),
+                    Default::default(),
+                    Default::default(),
+                    false,
+                );
+                let origin = PlainResolveOrigin::new(
+                    server_asset_context.expect("server asset context is created for imports"),
+                    project_path.join("_")?,
+                )
                 .await?;
-            for &module in &*modules {
-                if let Some(entry) = ResolvedVc::try_downcast::<Box<dyn EvaluatableAsset>>(module) {
-                    evaluatable_assets.push(entry);
+                let resolve_options = origin.resolve_options();
+                let asset_context = origin.asset_context();
+                let origin_path = origin.origin_path();
+                let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
+                let modules = asset_context
+                    .resolve_asset(origin_path, entry_request, resolve_options, ty)
+                    .await?
+                    .primary_modules()
+                    .await?;
+                for &module in &*modules {
+                    if let Some(entry) =
+                        ResolvedVc::try_downcast::<Box<dyn EvaluatableAsset>>(module)
+                    {
+                        evaluatable_assets.push(entry);
+                    }
                 }
             }
+
+            if evaluatable_assets.is_empty() {
+                bail!("server entry `{name}` did not resolve to an evaluatable module");
+            }
+            build_entries.push((name, evaluatable_assets, preserve_entry_name));
         }
 
-        if evaluatable_assets.is_empty() {
+        if build_entries.is_empty() {
             return Ok(OutputAssets::empty());
         }
 
-        let server_module_graph =
-            project.server_fn_module_graph(Vc::cell(evaluatable_assets.clone()));
-
-        let all_evaluatables: Vec<_> = evaluatable_assets
+        // Build one graph for all server entries so shared modules can be identified across
+        // independently emitted entry chunk groups.
+        let entry_modules = build_entries
             .iter()
-            .map(|e| ResolvedVc::upcast(*e))
-            .collect();
+            .map(|(_, assets, _)| {
+                assets
+                    .iter()
+                    .map(|entry| ResolvedVc::upcast(*entry))
+                    .collect::<Vec<ResolvedVc<Box<dyn Module>>>>()
+            })
+            .collect::<Vec<_>>();
+        let all_entry_modules = entry_modules.iter().flatten().copied().collect::<Vec<_>>();
+        let initial_server_module_graph =
+            project.server_fn_module_graph(Vc::cell(all_entry_modules.clone()));
+        let initial_module_graph = initial_server_module_graph.await?;
 
-        let chunk_name = server_config
-            .output
-            .as_ref()
-            .and_then(|o| o.filename.as_ref())
-            .map(|s| s.as_str())
-            .unwrap_or("index.js");
-        let chunk_query = "?name=index";
+        let mut module_usage = FxHashMap::default();
+        for modules in &entry_modules {
+            initial_module_graph.traverse_nodes_dfs(
+                modules.iter().copied(),
+                &mut module_usage,
+                |module, usage| {
+                    *usage.entry(module).or_insert(0usize) += 1;
+                    Ok(GraphTraversalAction::Continue)
+                },
+                |_, _| Ok(()),
+            )?;
+        }
 
-        let ident = AssetIdent::from_path(project.project_path().await?.join(chunk_name)?)
-            .with_query(chunk_query.into())
-            .into_vc();
-        let chunk_group_result = server_chunking_context
-            .evaluated_chunk_group(
-                ident,
-                ChunkGroup::Entry(all_evaluatables),
-                server_module_graph,
-                OutputAssets::empty(),
-                AvailabilityInfo::root(),
-            )
+        let entry_module_set = all_entry_modules.iter().copied().collect::<FxHashSet<_>>();
+        let shared_modules = module_usage
+            .into_iter()
+            .filter_map(|(module, usage)| {
+                (usage > 1 && !entry_module_set.contains(&module))
+                    .then(|| ResolvedVc::try_sidecast::<Box<dyn ChunkableModule>>(module))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+
+        // Shared modules are graph roots too, allowing their chunk group to be emitted first and
+        // marked available while each entry chunk is constructed.
+        let server_module_graph = if shared_modules.is_empty() {
+            initial_server_module_graph
+        } else {
+            let mut graph_entries = all_entry_modules;
+            graph_entries.extend(
+                shared_modules
+                    .iter()
+                    .map(|module| ResolvedVc::upcast(*module)),
+            );
+            project.server_fn_module_graph(Vc::cell(graph_entries))
+        };
+        let server_chunking_context = project.server_fn_chunking_context();
+
+        let (shared_assets, entry_availability) = if shared_modules.is_empty() {
+            (OutputAssets::empty(), AvailabilityInfo::root())
+        } else {
+            let shared_ident = AssetIdent::from_path(project_path.join("server-shared.js")?)
+                .with_query("?name=server-shared".into())
+                .into_vc();
+            let shared_group = server_chunking_context
+                .chunk_group(
+                    shared_ident,
+                    ChunkGroup::Entry(
+                        shared_modules
+                            .iter()
+                            .map(|module| ResolvedVc::upcast(*module))
+                            .collect(),
+                    ),
+                    server_module_graph,
+                    AvailabilityInfo::root(),
+                )
+                .await?;
+            (*shared_group.assets, shared_group.availability_info)
+        };
+
+        let output_assets = build_entries
+            .iter()
+            .map(|(name, evaluatable_assets, preserve_entry_name)| {
+                let project_path = project_path.clone();
+                async move {
+                    let modules = evaluatable_assets
+                        .iter()
+                        .map(|entry| ResolvedVc::upcast(*entry))
+                        .collect();
+                    let chunk_query = if *preserve_entry_name {
+                        format!("?name={name}&preserveEntryName=1")
+                    } else {
+                        format!("?name={name}")
+                    };
+                    let ident = AssetIdent::from_path(project_path.join(&format!("{name}.js"))?)
+                        .with_query(chunk_query.into())
+                        .into_vc();
+                    let chunk_group_result = server_chunking_context
+                        .evaluated_chunk_group(
+                            ident,
+                            ChunkGroup::Entry(modules),
+                            server_module_graph,
+                            shared_assets,
+                            entry_availability,
+                        )
+                        .await?;
+                    Ok(*chunk_group_result.assets)
+                }
+            })
+            .try_join()
             .await?;
 
-        Ok(*chunk_group_result.assets)
+        Ok(OutputAssets::concat(output_assets))
     }
 }

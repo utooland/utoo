@@ -1,0 +1,231 @@
+{
+  "entrypoints": {
+    "detail-server": {
+      "name": "detail-server",
+      "chunks": [
+        "./detail-server.95fc87ab.js",
+        "server-shared.d39ed76b.js"
+      ],
+      "assets": [
+        {
+          "name": "./detail-server.95fc87ab.js"
+        },
+        {
+          "name": "server-shared.d39ed76b.js"
+        }
+      ]
+    },
+    "index-server": {
+      "name": "index-server",
+      "chunks": [
+        "./index-server.a6c5891b.js",
+        "server-shared.d39ed76b.js"
+      ],
+      "assets": [
+        {
+          "name": "./index-server.a6c5891b.js"
+        },
+        {
+          "name": "server-shared.d39ed76b.js"
+        }
+      ]
+    },
+    "server": {
+      "name": "server",
+      "chunks": [
+        "./server.7c75d587.js",
+        "server-shared.d39ed76b.js"
+      ],
+      "assets": [
+        {
+          "name": "./server.7c75d587.js"
+        },
+        {
+          "name": "server-shared.d39ed76b.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./detail-server.95fc87ab.js",
+      "size": 27230,
+      "hash": "",
+      "files": [
+        "./detail-server.95fc87ab.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./index-server.a6c5891b.js",
+      "size": 27223,
+      "hash": "",
+      "files": [
+        "./index-server.a6c5891b.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./server-shared.d39ed76b.js",
+      "size": 297,
+      "hash": "",
+      "files": [
+        "./server-shared.d39ed76b.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "./server.7c75d587.js",
+      "size": 27184,
+      "hash": "",
+      "files": [
+        "./server.7c75d587.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "detail-server.95fc87ab.js",
+      "info": {},
+      "size": 27230,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "detail-server.95fc87ab.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "detail-server.95fc87ab.js.map",
+      "info": {},
+      "size": 46819,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "detail-server.95fc87ab.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "index-server.a6c5891b.js",
+      "info": {},
+      "size": 27223,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "index-server.a6c5891b.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "index-server.a6c5891b.js.map",
+      "info": {},
+      "size": 46817,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "index-server.a6c5891b.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "server-shared.d39ed76b.js",
+      "info": {},
+      "size": 297,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server-shared.d39ed76b.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "server-shared.d39ed76b.js.map",
+      "info": {},
+      "size": 316,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server-shared.d39ed76b.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "server.7c75d587.js",
+      "info": {},
+      "size": 27184,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server.7c75d587.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "server.7c75d587.js.map",
+      "info": {},
+      "size": 46808,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server.7c75d587.js.map"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/multi_server_entries/input/detail.server.ts",
+      "id": "basic/multi_server_entries/input/detail.server.ts",
+      "chunks": [
+        "./detail-server.95fc87ab.js"
+      ],
+      "size": 79
+    },
+    {
+      "name": "basic/multi_server_entries/input/index.server.ts",
+      "id": "basic/multi_server_entries/input/index.server.ts",
+      "chunks": [
+        "./index-server.a6c5891b.js"
+      ],
+      "size": 78
+    },
+    {
+      "name": "basic/multi_server_entries/input/server.ts",
+      "id": "basic/multi_server_entries/input/server.ts",
+      "chunks": [
+        "./server.7c75d587.js"
+      ],
+      "size": 75
+    },
+    {
+      "name": "basic/multi_server_entries/input/shared.ts",
+      "id": "basic/multi_server_entries/input/shared.ts",
+      "chunks": [
+        "./server-shared.d39ed76b.js"
+      ],
+      "size": 43
+    }
+  ]
+}

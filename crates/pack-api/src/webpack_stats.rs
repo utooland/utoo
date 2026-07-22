@@ -1,5 +1,5 @@
 use anyhow::Result;
-use pack_core::library::ecmascript::EcmascriptLibraryEvaluateChunk;
+use pack_core::library::ecmascript::{EcmascriptLibraryChunk, EcmascriptLibraryEvaluateChunk};
 use qstring::QString;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -139,6 +139,26 @@ pub async fn get_asset_intermediate_info(
     }
 
     if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBuildNodeChunk>(asset) {
+        let chunk_path_full = chunk.path().await?;
+        let chunk_ident = dist_root
+            .await?
+            .get_relative_path_to(&chunk_path_full)
+            .unwrap_or_else(|| chunk_path_full.path.clone());
+
+        local_chunks.push(WebpackStatsChunk {
+            size: asset_len,
+            files: vec![chunk_ident.clone()],
+            id: chunk_ident.clone(),
+            ..Default::default()
+        });
+
+        let chunk_items = chunk.chunk().chunk_items().await?;
+        for item in chunk_items.iter() {
+            local_chunk_items.push((*item, chunk_ident.clone()));
+        }
+    }
+
+    if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptLibraryChunk>(asset) {
         let chunk_path_full = chunk.path().await?;
         let chunk_ident = dist_root
             .await?
