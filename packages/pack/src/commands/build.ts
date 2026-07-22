@@ -9,7 +9,11 @@ import { projectFactory } from "../core/project";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
-import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
+import {
+  isPersistentCachingEnabled,
+  isTruthyEnv,
+  normalizeTurbopackMemoryEviction,
+} from "../utils/env";
 import { findRootDir } from "../utils/findRoot";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
@@ -48,7 +52,9 @@ async function buildInternal(
 
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
-  const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const persistentCaching = isPersistentCachingEnabled(
+    bundleOptions.config.persistentCaching,
+  );
   const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
     bundleOptions.config.turbopackMemoryEviction,
   ) as MemoryEvictionMode;
