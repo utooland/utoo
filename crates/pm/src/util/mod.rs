@@ -34,6 +34,7 @@ pub mod manifest_store;
 pub mod npmrc;
 pub mod package_cache;
 pub mod platform_const;
+pub mod process_lock;
 pub mod proxy_env;
 pub mod registry;
 pub mod retry;

@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
 
 use super::downloader::is_git_url;
+use super::process_lock::{lock_exclusive_sync, sibling_lock_path};
 
 /// How a cached package's real contents are laid out under its cache dir.
 /// Derived from the resolved tarball URL so callers never pass a bare bool.
@@ -80,10 +81,24 @@ mod hardlink_clone {
     }
 
     fn copy_file_sync(src: &Path, dst: &Path) -> io::Result<()> {
-        fs::copy(src, dst)?;
+        let mut src_file = fs::File::open(src)?;
+        #[cfg(unix)]
+        let src_perms = fs::metadata(src)?.permissions();
+
+        // `dst` may already be a hardlink to `src`. Unlink it before copy,
+        // then create exclusively so a racing writer cannot reintroduce it.
+        match fs::remove_file(dst) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let mut dst_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(dst)?;
+        io::copy(&mut src_file, &mut dst_file)?;
         #[cfg(unix)]
         {
-            let src_perms = fs::metadata(src)?.permissions();
             fs::set_permissions(dst, src_perms)?;
         }
         Ok(())
@@ -281,6 +296,9 @@ fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout, policy: ClonePolicy) 
 /// valid directory was reused. Stateless — callers (the install scheduler) own
 /// dedup and counting.
 pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
+    let lock_path = sibling_lock_path(req.target, ".clone.lock")?;
+    let _lock = lock_exclusive_sync(&lock_path)?;
+
     if req.target.try_exists()? {
         if validate_name_version_sync(req.target, req.name, req.version) {
             return Ok(false);
@@ -518,6 +536,30 @@ mod tests {
                 .await?;
             assert_eq!(content, "content3");
 
+            Ok(())
+        }
+
+        #[cfg(target_os = "linux")]
+        #[tokio::test]
+        async fn copy_fallback_does_not_truncate_hardlinked_source() -> Result<()> {
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("src");
+            let dst_dir = temp.path().join("dst");
+            fs::create_dir_all(&src_dir).await?;
+            fs::create_dir_all(&dst_dir).await?;
+            fs::write(src_dir.join("package.json"), b"cache contents").await?;
+            fs::hard_link(src_dir.join("package.json"), dst_dir.join("package.json")).await?;
+
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
+
+            assert_eq!(
+                fs::read(src_dir.join("package.json")).await?,
+                b"cache contents"
+            );
+            assert_eq!(
+                fs::read(dst_dir.join("package.json")).await?,
+                b"cache contents"
+            );
             Ok(())
         }
 
