@@ -111,6 +111,15 @@ export type TurbopackRuleConfigCollection =
 
 export interface ModuleOptions {
   rules?: Record<string, TurbopackRuleConfigCollection>;
+  /**
+   * Controls fully dynamic CommonJS `require(expr)` calls.
+   *
+   * - `error` (default): emit Turbopack's existing MODULE_NOT_FOUND runtime error.
+   * - `runtime-external`: resolve only requests declared as CommonJS externals at runtime.
+   *
+   * `runtime-external` is only supported for Node.js targets.
+   */
+  dynamicRequire?: "error" | "runtime-external";
 }
 
 /**

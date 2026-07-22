@@ -1,0 +1,31 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "DynamicExternalRequire"
+        }
+      }
+    ],
+    "target": "node",
+    "module": {
+      "dynamicRequire": "runtime-external"
+    },
+    "externals": {
+      "node:path": "commonjs node:path",
+      "path-alias": {
+        "root": "node:path",
+        "type": "commonjs"
+      },
+      "__proto__": "commonjs node:path",
+      "global-only": "GlobalOnly"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "Production"
+}

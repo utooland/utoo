@@ -676,6 +676,14 @@
         }
       }
     },
+    "SchemaDynamicRequireMode": {
+      "description": "Handling mode for fully dynamic CommonJS `require(expr)` calls.",
+      "type": "string",
+      "enum": [
+        "error",
+        "runtime-external"
+      ]
+    },
     "SchemaEmotionConfig": {
       "type": "object",
       "properties": {
@@ -1194,6 +1202,17 @@
       "description": "Module configuration",
       "type": "object",
       "properties": {
+        "dynamicRequire": {
+          "description": "Fully dynamic CommonJS require handling mode",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaDynamicRequireMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "rules": {
           "description": "Module rules configuration",
           "type": [

@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use either::Either;
@@ -26,7 +26,7 @@ use turbopack_core::{
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{
-    OptionTreeShaking, TreeShakingMode,
+    OptionTreeShaking, RuntimeExternalRequireMap, TreeShakingMode,
     transform::{
         OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
     },
@@ -1055,7 +1055,19 @@ pub struct ExperimentalConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ModuleConfig {
     #[bincode(with = "turbo_bincode::indexmap")]
+    #[serde(default)]
     pub rules: FxIndexMap<RcStr, RuleConfigCollection>,
+    #[serde(default)]
+    pub dynamic_require: DynamicRequireMode,
+}
+
+#[turbo_tasks::value(shared)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, OperationValue)]
+#[serde(rename_all = "kebab-case")]
+pub enum DynamicRequireMode {
+    #[default]
+    Error,
+    RuntimeExternal,
 }
 
 #[turbo_tasks::value]
@@ -1228,6 +1240,48 @@ pub struct ExternalsConfig(
 pub enum Platform {
     Web,
     Node,
+}
+
+/// Returns the exact CommonJS external mapping used by runtime-external
+/// dynamic requires, or `None` when the feature is disabled.
+pub async fn get_runtime_external_require_map(
+    config: Vc<Config>,
+) -> Result<Option<ResolvedVc<RuntimeExternalRequireMap>>> {
+    let config_ref = config.await?;
+    let dynamic_require = config_ref
+        .module
+        .as_ref()
+        .map_or(DynamicRequireMode::Error, |module| module.dynamic_require);
+
+    if dynamic_require == DynamicRequireMode::Error {
+        return Ok(None);
+    }
+
+    if !matches!(&*config.platform().await?, Platform::Node) {
+        bail!("module.dynamicRequire=runtime-external is only supported for Node.js targets");
+    }
+
+    let mut map = FxIndexMap::default();
+    for (request, external) in config_ref.externals.iter().flatten() {
+        let runtime_request = match external {
+            ExternalConfig::Basic(value) => {
+                value.as_str().strip_prefix("commonjs ").map(RcStr::from)
+            }
+            ExternalConfig::Advanced(value)
+                if matches!(&value.r#type, Some(ExternalType::CommonJs)) =>
+            {
+                Some(value.root.clone())
+            }
+            ExternalConfig::Umd(value) => Some(value.commonjs.clone()),
+            _ => None,
+        };
+
+        if let Some(runtime_request) = runtime_request {
+            map.insert(request.clone(), runtime_request);
+        }
+    }
+
+    Ok(Some(RuntimeExternalRequireMap(map).resolved_cell()))
 }
 
 fn turbopack_config_documentation_link() -> RcStr {
@@ -2026,6 +2080,19 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dynamic_require_mode_deserialization() {
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "entry": [{ "import": "./index.js" }],
+            "module": { "dynamicRequire": "runtime-external" }
+        }))
+        .unwrap();
+
+        let module = config.module.unwrap();
+        assert_eq!(module.dynamic_require, DynamicRequireMode::RuntimeExternal);
+        assert!(module.rules.is_empty());
+    }
 
     #[test]
     fn test_externals_deserialization() {

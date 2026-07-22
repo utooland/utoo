@@ -45,7 +45,7 @@ use crate::{
     },
     config::{
         Config, OptionCompressType, ProviderConfig, default_max_chunk_count_per_group,
-        default_max_merge_chunk_size, default_min_chunk_size,
+        default_max_merge_chunk_size, default_min_chunk_size, get_runtime_external_require_map,
     },
     embed_js::embed_file_path,
     import_map::get_postcss_package_mapping,
@@ -210,6 +210,7 @@ pub async fn get_client_module_options_context(
     pack_path: FileSystemPath,
 ) -> Result<Vc<ModuleOptionsContext>> {
     let mode_ref = mode.await?;
+    let runtime_external_require_map = get_runtime_external_require_map(config).await?;
 
     // resolve context
     let resolve_options_context = get_client_resolve_options_context(
@@ -409,6 +410,7 @@ pub async fn get_client_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             ignore_dynamic_requests: true,
+            runtime_external_require_map,
             ..Default::default()
         },
         css: CssOptionsContext {

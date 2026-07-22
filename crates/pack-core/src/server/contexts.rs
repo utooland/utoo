@@ -29,7 +29,7 @@ use turbopack_nodejs::NodeJsChunkingContext;
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
-    config::{Config, OptionCompressType, ProviderConfig},
+    config::{Config, OptionCompressType, ProviderConfig, get_runtime_external_require_map},
     import_map::get_postcss_package_mapping,
     mode::Mode,
     server::{
@@ -122,6 +122,7 @@ pub async fn get_server_module_options_context(
     config: Vc<Config>,
 ) -> Result<Vc<ModuleOptionsContext>> {
     let mode_ref = mode.await?;
+    let runtime_external_require_map = get_runtime_external_require_map(config).await?;
 
     let tsconfig = get_typescript_transform_options(project_path.clone())
         .to_resolved()
@@ -252,6 +253,7 @@ pub async fn get_server_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             ignore_dynamic_requests: true,
+            runtime_external_require_map,
             ..Default::default()
         },
         css: CssOptionsContext {

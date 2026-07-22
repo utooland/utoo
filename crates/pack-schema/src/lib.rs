@@ -881,11 +881,25 @@ pub struct SchemaExternalUmd {
 
 /// Module configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SchemaModuleConfig {
     /// Module rules configuration — keyed by glob pattern (e.g. "*.svg")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Module rules configuration")]
     pub rules: Option<HashMap<String, SchemaModuleRule>>,
+
+    /// Handling mode for fully dynamic CommonJS `require(expr)` calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(description = "Fully dynamic CommonJS require handling mode")]
+    pub dynamic_require: Option<SchemaDynamicRequireMode>,
+}
+
+/// Handling mode for fully dynamic CommonJS `require(expr)` calls.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SchemaDynamicRequireMode {
+    Error,
+    RuntimeExternal,
 }
 
 /// Module rule configuration
@@ -1281,6 +1295,8 @@ mod tests {
         assert!(schema_str.contains("crossOriginLoading"));
         assert!(schema_str.contains("cssFilename"));
         assert!(schema_str.contains("assetModuleFilename"));
+        assert!(schema_str.contains("dynamicRequire"));
+        assert!(schema_str.contains("runtime-external"));
     }
 
     #[test]
