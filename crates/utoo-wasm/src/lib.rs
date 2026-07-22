@@ -27,6 +27,7 @@ pub(crate) mod pack;
 mod deps;
 pub(crate) mod errors;
 mod fs;
+mod operations;
 #[cfg(feature = "utoopack")]
 mod opfs_offload;
 mod pm;

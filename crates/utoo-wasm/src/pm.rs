@@ -10,13 +10,13 @@
 use anyhow::{anyhow, Result};
 use opfs_project::archive::PackFile;
 use parking_lot::RwLock;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 use wasm_bindgen::JsCast;
 
 use crate::tokio_runtime::{runtime, TOKIO_RUNTIME};
 
 /// Global OpfsProject instance, initialised the first time `Project::init` is called.
-pub(crate) static OPFS_PROJECT: RwLock<Option<opfs_project::OpfsProject>> = RwLock::new(None);
+pub(crate) static OPFS_PROJECT: RwLock<Option<Arc<opfs_project::OpfsProject>>> = RwLock::new(None);
 
 /// Get a reference to the global OpfsProject for reading.
 ///
@@ -25,15 +25,6 @@ pub(crate) fn with_project<R>(f: impl FnOnce(&opfs_project::OpfsProject) -> R) -
     let guard = OPFS_PROJECT.read();
     let project = guard
         .as_ref()
-        .expect("OpfsProject not initialised — call Project.init() first");
-    f(project)
-}
-
-/// Get a mutable reference to the global OpfsProject.
-pub(crate) fn with_project_mut<R>(f: impl FnOnce(&mut opfs_project::OpfsProject) -> R) -> R {
-    let mut guard = OPFS_PROJECT.write();
-    let project = guard
-        .as_mut()
         .expect("OpfsProject not initialised — call Project.init() first");
     f(project)
 }
@@ -104,9 +95,10 @@ pub async fn install(
         omit: vec![],
     };
 
-    let guard = OPFS_PROJECT.read();
-    let project = guard
+    let project = OPFS_PROJECT
+        .read()
         .as_ref()
+        .cloned()
         .ok_or_else(|| anyhow!("OpfsProject not initialised"))?;
 
     project
