@@ -7,9 +7,10 @@ mod util;
 use anyhow::{Context, Result};
 use dunce::canonicalize;
 use pack_api::{
+    endpoint::get_written_endpoint_with_issues_operation,
     entrypoint::{
         EntrypointsWithIssues, all_output_assets_operation,
-        get_all_written_entrypoints_with_issues_operation,
+        get_all_written_entrypoints_with_issues_operation, get_entrypoints_with_issues_operation,
     },
     project::{ProjectContainer, ProjectOptions, WatchOptions},
 };
@@ -30,7 +31,7 @@ use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storag
 use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, FileSystemPath};
 use turbopack_core::{
     asset::Asset,
-    issue::{CollectibleIssuesExt, IssueFilter},
+    issue::{CollectibleIssuesExt, IssueFilter, IssueSeverity},
     output::{OutputAsset, OutputAssetsReference},
 };
 use turbopack_test_utils::snapshot::{UPDATE, diff, matches_expected, snapshot_issues};
@@ -152,9 +153,41 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let project_options = project_options_from_resource(&resource)?;
+        let (project_options, write_endpoints_individually) =
+            project_options_from_resource(&resource)?;
         let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
         ProjectContainer::initialize(container_op, project_options).await?;
+
+        if write_endpoints_individually {
+            let project_container = container_op.resolve().strongly_consistent().await?;
+            let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
+                get_entrypoints_with_issues_operation(project_container),
+                |value| &value.effects,
+            )
+            .await?;
+
+            for endpoint in entrypoints_with_issues
+                .entrypoints
+                .apps
+                .iter()
+                .chain(&entrypoints_with_issues.entrypoints.libraries)
+            {
+                let written_endpoint = get_written_endpoint_with_issues_operation(*endpoint)
+                    .read_strongly_consistent()
+                    .await?;
+                let error_count = written_endpoint
+                    .issues
+                    .iter()
+                    .filter(|issue| issue.severity <= IssueSeverity::Error)
+                    .count();
+                anyhow::ensure!(
+                    error_count == 0,
+                    "writing an endpoint to disk produced {error_count} error issue(s)"
+                );
+            }
+
+            return Ok(());
+        }
 
         #[turbo_tasks::function(operation, root)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
@@ -203,7 +236,7 @@ async fn run(resource: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
+fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, bool)> {
     let test_path = canonicalize(resource)?;
     assert!(test_path.exists(), "{} does not exist", resource.display());
     assert!(
@@ -233,21 +266,38 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
     };
 
     // Parse config content and determine if it's in development or production mode
-    let (mut user_config, runtime_type_override): (serde_json::Value, Option<String>) =
-        if config_content.trim().is_empty() {
-            (serde_json::from_str(&default_config())?, None)
-        } else {
-            let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
-            let runtime_type_from_root = raw_root
-                .get("runtimeType")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let user_cfg = raw_root
-                .get("config")
-                .cloned()
-                .expect("config.json must contain a top-level `config` object");
-            (user_cfg, runtime_type_from_root)
-        };
+    let (mut user_config, runtime_type_override, watch_enabled, write_endpoints_individually): (
+        serde_json::Value,
+        Option<String>,
+        bool,
+        bool,
+    ) = if config_content.trim().is_empty() {
+        (serde_json::from_str(&default_config())?, None, false, false)
+    } else {
+        let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
+        let runtime_type_from_root = raw_root
+            .get("runtimeType")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let watch_enabled = raw_root
+            .get("watch")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let write_endpoints_individually = raw_root
+            .get("writeEndpointsIndividually")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let user_cfg = raw_root
+            .get("config")
+            .cloned()
+            .expect("config.json must contain a top-level `config` object");
+        (
+            user_cfg,
+            runtime_type_from_root,
+            watch_enabled,
+            write_endpoints_individually,
+        )
+    };
 
     // Ensure default output configuration is present
     if user_config.get("output").is_none() {
@@ -298,7 +348,7 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
     // Convert the merged inner bundler config back to string for ProjectOptions
     let final_config_content = serde_json::to_string_pretty(&user_config)?;
 
-    Ok(ProjectOptions {
+    let project_options = ProjectOptions {
         root_path: Path::new(&*REPO_ROOT)
             .join("crates/pack-tests/tests/snapshot")
             .to_string_lossy()
@@ -318,7 +368,10 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
             ("TURBOPACK".into(), "1".into()),
         ],
 
-        watch: WatchOptions::default(),
+        watch: WatchOptions {
+            enable: watch_enabled,
+            ..Default::default()
+        },
         dev: !is_production,
         build_id: "test".into(),
         pack_path: Path::new(&*REPO_ROOT)
@@ -326,7 +379,9 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
             .to_string_lossy()
             .to_string()
             .into(),
-    })
+    };
+
+    Ok((project_options, write_endpoints_individually))
 }
 
 #[turbo_tasks::function(operation, root)]

@@ -6,7 +6,7 @@ use swc_core::ecma::utils::private_ident;
 use swc_core::ecma::visit::{VisitMut, VisitMutWith};
 use turbo_tasks::ResolvedVc;
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect, RuleCondition};
-use turbopack_core::reference_type::{ReferenceTypeCondition, UrlReferenceSubType};
+use turbopack_core::reference_type::ReferenceTypeCondition;
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform, TransformContext};
 
 const DEFAULT_COMPONENT_NAME: &str = "Component$$";
@@ -18,7 +18,7 @@ pub fn get_default_export_namer_rule() -> ModuleRule {
 
     let condition = RuleCondition::all(vec![
         RuleCondition::not(RuleCondition::ReferenceType(ReferenceTypeCondition::Url(
-            Some(UrlReferenceSubType::Undefined),
+            None,
         ))),
         RuleCondition::any(vec![
             RuleCondition::ResourcePathEndsWith(".jsx".to_string()),
