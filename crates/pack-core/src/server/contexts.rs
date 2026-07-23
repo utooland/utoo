@@ -101,21 +101,25 @@ pub async fn get_server_compile_time_info(
         ..Default::default()
     };
 
-    // AMD's `define` is not available in Node.js unless user code explicitly binds it. Marking
-    // the free variable's type as undefined lets Turbopack eliminate AMD-first UMD branches before
-    // resolving their dependency arrays.
-    let typeof_define = vec![
-        DefinableNameSegment::Name(rcstr!("define")),
-        DefinableNameSegment::TypeOf,
-    ];
+    // AMD's `define` is not available in Node.js unless it is explicitly provided. Marking the
+    // free variable's type as undefined lets Turbopack eliminate AMD-first UMD branches before
+    // resolving their dependency arrays. `free_vars` contains entries from both `define` and
+    // `provider`, so checking it prevents this fallback from overriding either configuration.
     let mut server_defines = defines(define_env).owned().await?;
-    server_defines
-        .entry(typeof_define.clone())
-        .or_insert(rcstr!("undefined").into());
     let mut server_free_vars = free_vars(define_env, provider_config).owned().await?;
-    server_free_vars
-        .entry(typeof_define)
-        .or_insert(rcstr!("undefined").into());
+    let define = vec![DefinableNameSegment::Name(rcstr!("define"))];
+    if !server_free_vars.contains_key(&define) {
+        let typeof_define = vec![
+            DefinableNameSegment::Name(rcstr!("define")),
+            DefinableNameSegment::TypeOf,
+        ];
+        server_defines
+            .entry(typeof_define.clone())
+            .or_insert(rcstr!("undefined").into());
+        server_free_vars
+            .entry(typeof_define)
+            .or_insert(rcstr!("undefined").into());
+    }
 
     CompileTimeInfo::builder(
         Environment::new(ExecutionEnvironment::NodeJsLambda(
