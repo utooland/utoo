@@ -1,21 +1,6 @@
 #!/usr/bin/env node
 "use strict";
-// utx → `utoo x <args>`. Runs the sibling utoo binary (the native binary after
-// install) when present, else resolves `utoo` from PATH. Node shebang lets npm
-// generate a working .cmd/.ps1 shim on Windows; postinstall additionally drops
-// a utx.cmd into the prefix on the happy path.
 
-const fs = require("fs");
-const path = require("path");
-const { spawnSync } = require("child_process");
+const { main } = require("./launcher.js");
 
-const sibling = process.platform === "win32" ? "utoo.exe" : "utoo";
-const siblingPath = path.join(__dirname, sibling);
-const cmd = fs.existsSync(siblingPath) ? siblingPath : "utoo";
-
-const r = spawnSync(cmd, ["x", ...process.argv.slice(2)], { stdio: "inherit" });
-if (r.error) {
-  console.error(`utx: ${r.error.message}`);
-  process.exit(1);
-}
-process.exit(r.status === null ? 1 : r.status);
+main(["x", ...process.argv.slice(2)]);

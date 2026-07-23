@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_inline_type_import/input/runtime.ts"],"sourcesContent":["export type RuntimeType = string;\n\nexport const runtimeValue = 'mixed value and type import';\n"],"names":["runtimeValue"],"mappings":"AAEO,MAAMA,eAAe"}},
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_inline_type_import/input/index.ts"],"sourcesContent":["import { type MyType, type TypeMetadata as Metadata } from './types';\nimport { runtimeValue, type RuntimeType } from './runtime';\n\nconst value: MyType = 'inline type import';\nconst metadata: Metadata = { source: '.d.ts' };\nconst runtime: RuntimeType = runtimeValue;\n\nconsole.log(value, metadata.source, runtime);\n"],"names":["value","metadata","source","runtime","console","log"],"mappings":"AACA;;AAEA,MAAMA,QAAgB;AACtB,MAAMC,WAAqB;IAAEC,QAAQ;AAAQ;AAC7C,MAAMC,UAAuB,mDAAY;AAEzCC,QAAQC,GAAG,CAACL,OAAOC,SAASC,MAAM,EAAEC"}}]
+}

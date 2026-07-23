@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_inline_type_export/input/runtime.ts"],"sourcesContent":["export type RuntimeType = string;\n\nexport const runtimeValue = 'mixed value and type export';\n"],"names":["runtimeValue"],"mappings":"AAEO,MAAMA,eAAe"}},
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_inline_type_export/input/index.ts"],"sourcesContent":["export { type MyType, type TypeMetadata as Metadata } from './types';\nexport { runtimeValue, type RuntimeType } from './runtime';\n"],"names":[],"mappings":"AACA"}}]
+}

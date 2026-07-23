@@ -91,9 +91,14 @@ pub struct NapiWatchOptions {
     /// docker).
     pub poll_interval_ms: Option<f64>,
 
-    /// Paths to ignore when watching for file changes.
-    /// By default, ignores: node_modules
+    /// Paths to ignore when watching for file changes. `!node_modules/<regex>` exempts matching
+    /// dependency package names. By default, ignores: node_modules.
     pub ignored: Option<Vec<String>>,
+
+    /// Package name regular expressions for dependencies inside node_modules that should still be
+    /// watched when node_modules is ignored. Patterns are matched against package names such as
+    /// `rc-util` or `@rc-component/trigger`.
+    pub node_modules_regexes: Option<Vec<String>>,
 }
 
 #[napi(object)]
@@ -201,17 +206,54 @@ impl MemoryEvictionMode {
 
 impl From<NapiWatchOptions> for WatchOptions {
     fn from(val: NapiWatchOptions) -> Self {
+        let mut ignored = val
+            .ignored
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .unwrap_or_else(pack_api::project::default_ignored_paths);
+        ignored.extend(
+            val.node_modules_regexes
+                .unwrap_or_default()
+                .into_iter()
+                .map(|pattern| format!("!node_modules/{pattern}").into()),
+        );
+
         WatchOptions {
             enable: val.enable,
             poll_interval: val
                 .poll_interval_ms
                 .filter(|interval| !interval.is_nan() && interval.is_finite() && *interval > 0.0)
                 .map(|interval| Duration::from_secs_f64(interval / 1000.0)),
-            ignored: val
-                .ignored
-                .map(|v| v.into_iter().map(|s| s.into()).collect())
-                .unwrap_or_else(pack_api::project::default_ignored_paths),
+            ignored,
         }
+    }
+}
+
+#[cfg(test)]
+mod watch_options_tests {
+    use super::{NapiWatchOptions, WatchOptions};
+
+    #[test]
+    fn converts_node_modules_regexes_and_keeps_default_ignored_paths() {
+        let options = WatchOptions::from(NapiWatchOptions {
+            enable: true,
+            poll_interval_ms: None,
+            ignored: None,
+            node_modules_regexes: Some(vec![
+                "rc-.*".into(),
+                ".*cssinjs.*".into(),
+                "@rc-component/.*".into(),
+            ]),
+        });
+
+        assert_eq!(
+            options.ignored,
+            vec![
+                "node_modules",
+                "!node_modules/rc-.*",
+                "!node_modules/.*cssinjs.*",
+                "!node_modules/@rc-component/.*",
+            ]
+        );
     }
 }
 

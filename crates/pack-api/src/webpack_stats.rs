@@ -12,7 +12,8 @@ use turbopack_browser::ecmascript::{
 use turbopack_core::{
     asset::Asset,
     chunk::{Chunk, ChunkItem, ChunkableModule},
-    output::{OutputAsset, OutputAssets, OutputAssetsReference},
+    output::{OutputAsset, OutputAssets},
+    reference::all_assets_from_entries,
 };
 use turbopack_css::chunk::CssChunk;
 use turbopack_nodejs::{EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk};
@@ -356,44 +357,15 @@ pub async fn generate_webpack_stats(
         FxIndexMap::default();
     let mut entrypoints: FxIndexMap<RcStr, WebpackStatsEntrypoint> = FxIndexMap::default();
 
-    let entry_assets_read = entry_assets.await?;
-    let entry_assets_list = entry_assets_read.iter().copied().collect::<Vec<_>>();
-
-    // Collect all assets including referenced assets (async chunks) in parallel
-    let asset_children = {
-        let mut asset_children =
-            FxIndexMap::with_capacity_and_hasher(entry_assets_list.len(), Default::default());
-        let mut visited =
-            FxHashSet::with_capacity_and_hasher(entry_assets_list.len(), Default::default());
-        let mut queue = entry_assets_list.clone();
-        while !queue.is_empty() {
-            let current_batch = std::mem::take(&mut queue);
-            let next_batches = current_batch
-                .into_iter()
-                .filter(|&asset| visited.insert(asset))
-                .map(|asset| async move {
-                    let references = asset.references().all_assets();
-                    let references_read = references.await?;
-                    Ok::<_, anyhow::Error>((asset, references, references_read))
-                })
-                .collect::<Vec<_>>();
-
-            let results = futures::future::try_join_all(next_batches).await?;
-            for (asset, references, references_read) in results {
-                asset_children.insert(*asset, references);
-                queue.extend(references_read.iter().copied());
-            }
-        }
-        asset_children
-    };
+    // Reuse Turbopack's graph traversal so shared async chunk graphs are expanded once.
+    let all_assets = all_assets_from_entries(entry_assets).await?;
 
     // Iterate over all collected assets in parallel using cached sub-tasks
-    let asset_results = asset_children
-        .keys()
+    let asset_results = all_assets
+        .iter()
         .copied()
-        .map(|asset: Vc<Box<dyn OutputAsset>>| async move {
-            let asset_resolved = asset.to_resolved().await?;
-            let info = get_asset_intermediate_info(*asset_resolved, dist_root).await?;
+        .map(|asset| async move {
+            let info = get_asset_intermediate_info(*asset, dist_root).await?;
             Ok::<_, anyhow::Error>(info)
         })
         .try_join()

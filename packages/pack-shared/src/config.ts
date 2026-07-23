@@ -262,6 +262,8 @@ export interface ConfigComplete {
           keepFnames?: boolean;
         };
     minify?: boolean;
+    /** Extract legal comments to `[file].LICENSE.txt` when minifying library output. */
+    extractComments?: boolean;
     treeShaking?: boolean;
     splitChunks?: Record<
       "js" | "css",
@@ -417,8 +419,22 @@ export interface BundleOptions {
    * Whether to watch the filesystem for file changes.
    */
   watch?: {
-    enable: boolean;
+    enable?: boolean;
     pollIntervalMs?: number;
+    /**
+     * Paths to ignore when watching. Defaults to `node_modules`.
+     * `!node_modules/<regex>` exempts matching dependency package names.
+     */
+    ignored?: string[];
+    /**
+     * Package name regular expressions for dependencies inside node_modules that should still be
+     * watched when node_modules is ignored. Patterns are matched against package names such as
+     * `rc-util` or `@rc-component/trigger`.
+     *
+     * @example
+     * `["rc-.*", ".*cssinjs.*", "@rc-component/.*"]`
+     */
+    nodeModulesRegexes?: string[];
   };
 
   /**

@@ -385,6 +385,16 @@ pub async fn update_package_binary(dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether this package will be mutated by [`update_package_binary`] for the
+/// current registry configuration.
+///
+/// Package cache entries are materialized with hardlinks on Linux. Any package
+/// that the binary-mirror pass might rewrite must therefore be cloned as a
+/// private copy before that pass runs.
+pub(crate) fn requires_private_copy(name: &str) -> bool {
+    !should_skip_binary_mirror() && CONFIG.mirrors.china.packages.contains_key(name)
+}
+
 /// The registries that support semver resolution are cnpm-compatible registry
 /// proxies. They use the bundled npmmirror configuration for binary downloads,
 /// even when their own hostname is not under `npmmirror.com` (for example the

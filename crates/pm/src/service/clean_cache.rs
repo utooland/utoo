@@ -20,6 +20,9 @@ async fn collect_matching_versions(
 ) -> Result<()> {
     let mut version_entries = fs::read_dir(path).await?;
     while let Some(version_entry) = version_entries.next_entry().await? {
+        if !version_entry.file_type().await?.is_dir() {
+            continue;
+        }
         let version = version_entry.file_name();
         let version_str = version.to_string_lossy();
         if matches_pattern(&version_str, version_pattern) {
@@ -168,6 +171,19 @@ mod tests {
             .await?;
 
         assert_eq!(to_delete.len(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_collect_matching_versions_ignores_lock_files() -> Result<()> {
+        let temp_dir = setup_test_dir().await?;
+        fs::write(temp_dir.path().join(".1.0.0.lock"), b"").await?;
+        let mut to_delete = Vec::new();
+
+        collect_matching_versions(temp_dir.path(), "test-pkg".to_string(), "*", &mut to_delete)
+            .await?;
+
+        assert_eq!(to_delete.len(), 4);
         Ok(())
     }
 }

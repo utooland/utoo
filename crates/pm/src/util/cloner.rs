@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
 
 use super::downloader::is_git_url;
+use super::process_lock::{lock_exclusive_sync, sibling_lock_path};
 
 /// How a cached package's real contents are laid out under its cache dir.
 /// Derived from the resolved tarball URL so callers never pass a bare bool.
@@ -44,12 +45,24 @@ pub struct PackageClone<'a> {
     pub tarball_url: &'a str,
     pub cache: &'a Path,
     pub target: &'a Path,
+    pub policy: ClonePolicy,
+}
+
+/// Whether a package target may share cached files or must own private copies.
+///
+/// Packages mutated by a later install phase must be private: writing a
+/// hardlinked target would otherwise corrupt sibling targets and the cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClonePolicy {
+    Shared,
+    Private,
 }
 
 /// Hardlink-first directory clone with a copy fallback. Used directly on
 /// Linux/Windows, and on macOS as the fallback when `clonefile` can't run
 /// (non-APFS volume or cross-device).
 mod hardlink_clone {
+    use super::ClonePolicy;
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::{fs, io};
@@ -68,10 +81,24 @@ mod hardlink_clone {
     }
 
     fn copy_file_sync(src: &Path, dst: &Path) -> io::Result<()> {
-        fs::copy(src, dst)?;
+        let mut src_file = fs::File::open(src)?;
+        #[cfg(unix)]
+        let src_perms = fs::metadata(src)?.permissions();
+
+        // `dst` may already be a hardlink to `src`. Unlink it before copy,
+        // then create exclusively so a racing writer cannot reintroduce it.
+        match fs::remove_file(dst) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let mut dst_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(dst)?;
+        io::copy(&mut src_file, &mut dst_file)?;
         #[cfg(unix)]
         {
-            let src_perms = fs::metadata(src)?.permissions();
             fs::set_permissions(dst, src_perms)?;
         }
         Ok(())
@@ -106,7 +133,7 @@ mod hardlink_clone {
 
     /// Clone directory using sync I/O. Uses hardlink when possible, falls back
     /// to copy.
-    pub fn clone_dir_sync(src: &Path, dst: &Path) -> Result<()> {
+    pub fn clone_dir_sync(src: &Path, dst: &Path, policy: ClonePolicy) -> Result<()> {
         let err_msg = format!("Failed to clone {} to {}", src.display(), dst.display());
 
         if !fs::metadata(src)?.is_dir() {
@@ -117,7 +144,7 @@ mod hardlink_clone {
             .with_context(|| err_msg);
         }
 
-        let mut force_copy = has_install_script_sync(src);
+        let mut copy_files = matches!(policy, ClonePolicy::Private) || has_install_script_sync(src);
 
         let mut files = Vec::new();
         let mut dirs = Vec::new();
@@ -135,7 +162,7 @@ mod hardlink_clone {
 
         let mut warned_per_file = false;
         for entry in &files {
-            if force_copy {
+            if copy_files {
                 copy_file_sync(&entry.src, &entry.dst)?;
             } else if let Err(e) = fs::hard_link(&entry.src, &entry.dst) {
                 if e.kind() == io::ErrorKind::CrossesDevices {
@@ -145,7 +172,7 @@ mod hardlink_clone {
                         dst.display(),
                         e
                     );
-                    force_copy = true;
+                    copy_files = true;
                 } else if !warned_per_file {
                     tracing::warn!(
                         "hardlink failed for {} -> {}: {}; falling back to copy (further per-file failures suppressed)",
@@ -166,10 +193,10 @@ mod hardlink_clone {
     /// the scheduler), so this wrapper is test-only. The tests that use it are
     /// macOS-excluded, so gate it the same way to avoid a dead-code warning.
     #[cfg(all(test, not(target_os = "macos")))]
-    pub async fn clone_dir(src: &Path, dst: &Path) -> Result<()> {
+    pub async fn clone_dir(src: &Path, dst: &Path, policy: ClonePolicy) -> Result<()> {
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
-        tokio::task::spawn_blocking(move || clone_dir_sync(&src, &dst)).await?
+        tokio::task::spawn_blocking(move || clone_dir_sync(&src, &dst, policy)).await?
     }
 }
 
@@ -201,7 +228,10 @@ fn find_real_src_sync(src: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
+fn clone_dir_native_sync(real_src: &Path, dst: &Path, policy: ClonePolicy) -> Result<()> {
+    if matches!(policy, ClonePolicy::Private) {
+        return hardlink_clone::clone_dir_sync(real_src, dst, ClonePolicy::Private);
+    }
     let src_c = CString::new(real_src.as_os_str().as_bytes())?;
     let dst_c = CString::new(dst.as_os_str().as_bytes())?;
 
@@ -216,7 +246,7 @@ fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
             // worked around by mutating the destination.
             match err.raw_os_error() {
                 Some(libc::ENOTSUP) | Some(libc::EXDEV) => {
-                    hardlink_clone::clone_dir_sync(real_src, dst)
+                    hardlink_clone::clone_dir_sync(real_src, dst, ClonePolicy::Shared)
                 }
                 _ => Err(anyhow::anyhow!(
                     "clonefile {} -> {}: {}",
@@ -230,12 +260,12 @@ fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn clone_dir_native_sync(real_src: &Path, dst: &Path) -> Result<()> {
-    hardlink_clone::clone_dir_sync(real_src, dst)
+fn clone_dir_native_sync(real_src: &Path, dst: &Path, policy: ClonePolicy) -> Result<()> {
+    hardlink_clone::clone_dir_sync(real_src, dst, policy)
         .with_context(|| format!("clone_dir {} -> {}", real_src.display(), dst.display()))
 }
 
-fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
+fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout, policy: ClonePolicy) -> Result<()> {
     let real_src = match layout {
         CacheLayout::Wrapped => find_real_src_sync(src)
             .ok_or_else(|| anyhow::anyhow!("Cannot find valid source directory in {src:?}"))?,
@@ -252,7 +282,7 @@ fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    clone_dir_native_sync(&real_src, dst)?;
+    clone_dir_native_sync(&real_src, dst, policy)?;
     Ok(())
 }
 
@@ -266,6 +296,9 @@ fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout) -> Result<()> {
 /// valid directory was reused. Stateless — callers (the install scheduler) own
 /// dedup and counting.
 pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
+    let lock_path = sibling_lock_path(req.target, ".clone.lock")?;
+    let _lock = lock_exclusive_sync(&lock_path)?;
+
     if req.target.try_exists()? {
         if validate_name_version_sync(req.target, req.name, req.version) {
             return Ok(false);
@@ -282,6 +315,7 @@ pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
         req.cache,
         req.target,
         CacheLayout::from_tarball_url(req.tarball_url),
+        req.policy,
     )?;
     Ok(true)
 }
@@ -343,11 +377,41 @@ mod tests {
             tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
             cache: &cache_dir,
             target: &dst_dir,
+            policy: ClonePolicy::Shared,
         })?;
 
         assert!(dst_dir.join("package.json").exists());
         let content = std::fs::read_to_string(dst_dir.join("package.json"))?;
         assert!(content.contains("lodash"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_clone_package_sync_private_mode_isolates_mutation() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache_dir = temp.path().join("cache/canvas/2.11.2");
+        let src_dir = cache_dir.join("package");
+        let dst_dir = temp.path().join("node_modules/canvas");
+        let original = create_package_json("canvas", "2.11.2");
+
+        std::fs::create_dir_all(&src_dir)?;
+        std::fs::write(src_dir.join("package.json"), &original)?;
+
+        clone_package_sync(&PackageClone {
+            name: "canvas",
+            version: "2.11.2",
+            tarball_url: "https://registry.npmjs.org/canvas/-/canvas-2.11.2.tgz",
+            cache: &cache_dir,
+            target: &dst_dir,
+            policy: ClonePolicy::Private,
+        })?;
+
+        std::fs::write(dst_dir.join("package.json"), "{\"patched\":true}")?;
+        assert_eq!(
+            std::fs::read_to_string(src_dir.join("package.json"))?,
+            original,
+            "a binary-mirror mutation must not leak back into the package cache"
+        );
         Ok(())
     }
 
@@ -452,7 +516,7 @@ mod tests {
             .await?;
 
             // Perform clone operation
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             // Verify clone result
             assert!(validate_directory(&src_dir, &dst_dir).await?);
@@ -475,6 +539,30 @@ mod tests {
             Ok(())
         }
 
+        #[cfg(target_os = "linux")]
+        #[tokio::test]
+        async fn copy_fallback_does_not_truncate_hardlinked_source() -> Result<()> {
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("src");
+            let dst_dir = temp.path().join("dst");
+            fs::create_dir_all(&src_dir).await?;
+            fs::create_dir_all(&dst_dir).await?;
+            fs::write(src_dir.join("package.json"), b"cache contents").await?;
+            fs::hard_link(src_dir.join("package.json"), dst_dir.join("package.json")).await?;
+
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
+
+            assert_eq!(
+                fs::read(src_dir.join("package.json")).await?,
+                b"cache contents"
+            );
+            assert_eq!(
+                fs::read(dst_dir.join("package.json")).await?,
+                b"cache contents"
+            );
+            Ok(())
+        }
+
         #[tokio::test]
         async fn test_clone_dir_nested() -> Result<()> {
             let temp = TempDir::new()?;
@@ -494,7 +582,7 @@ mod tests {
             .await?;
 
             // Perform clone operation
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             // Verify clone result
             assert!(validate_directory(&src_dir, &dst_dir).await?);
@@ -517,7 +605,7 @@ mod tests {
             let dst_dir = temp.path().join("dst");
 
             // Test case when source directory doesn't exist
-            let result = hardlink_clone::clone_dir(&src_dir, &dst_dir).await;
+            let result = hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await;
             assert!(result.is_err());
             assert_eq!(
                 result
@@ -530,8 +618,12 @@ mod tests {
 
             // Test case when source path is a file instead of a directory
             create_test_file(temp.path(), "not_a_dir", b"content").await?;
-            let result =
-                hardlink_clone::clone_dir(temp.path().join("not_a_dir").as_ref(), &dst_dir).await;
+            let result = hardlink_clone::clone_dir(
+                temp.path().join("not_a_dir").as_ref(),
+                &dst_dir,
+                ClonePolicy::Shared,
+            )
+            .await;
             assert!(result.is_err());
 
             Ok(())
@@ -559,7 +651,7 @@ mod tests {
             assert_eq!(src_metadata.permissions().mode() & 0o777, 0o755);
 
             // Use clone_dir to trigger fast_copy_file path (no _hasInstallScript flag)
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             // Verify destination file has same permissions
             let dst_file = dst_dir.join("executable.sh");
@@ -595,7 +687,7 @@ mod tests {
             assert_eq!(src_metadata.permissions().mode() & 0o777, 0o444);
 
             // Use clone_dir to trigger fast_copy_file path
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             // Verify destination file has same permissions
             let dst_file = dst_dir.join("readonly.txt");
@@ -641,7 +733,7 @@ mod tests {
             fs::set_permissions(&data_path, perms).await?;
 
             // Clone directory
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             // Verify script.sh has executable permissions
             let dst_script = dst_dir.join("bin/script.sh");
@@ -689,7 +781,7 @@ mod tests {
             fs::create_dir_all(&dst_dir).await?;
             fs::write(dst_dir.join("file_a.txt"), b"stale").await?;
 
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             assert_eq!(
                 fs::read_to_string(dst_dir.join("file_a.txt")).await?,
@@ -737,13 +829,37 @@ mod tests {
             fs::write(src_dir.join("index.js"), b"module.exports = {}").await?;
             fs::write(cache_version.join("_hasInstallScript"), b"").await?;
 
-            hardlink_clone::clone_dir(&src_dir, &dst_dir).await?;
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Shared).await?;
 
             let src_ino = fs::metadata(src_dir.join("index.js")).await?.ino();
             let dst_ino = fs::metadata(dst_dir.join("index.js")).await?.ino();
             assert_ne!(
                 src_ino, dst_ino,
                 "install-script packages must be copied, not hardlinked"
+            );
+            Ok(())
+        }
+
+        /// Binary-mirror processing mutates package files after cloning, so it
+        /// must be able to request the same private-copy behavior as install
+        /// scripts without adding a cache marker.
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn test_clone_dir_private_mode() -> Result<()> {
+            let temp = TempDir::new()?;
+            let src_dir = temp.path().join("cache/package");
+            let dst_dir = temp.path().join("node_modules/package");
+
+            fs::create_dir_all(&src_dir).await?;
+            fs::write(src_dir.join("package.json"), b"{}\n").await?;
+
+            hardlink_clone::clone_dir(&src_dir, &dst_dir, ClonePolicy::Private).await?;
+
+            let src_ino = fs::metadata(src_dir.join("package.json")).await?.ino();
+            let dst_ino = fs::metadata(dst_dir.join("package.json")).await?.ino();
+            assert_ne!(
+                src_ino, dst_ino,
+                "explicitly mutable packages must be copied, not hardlinked"
             );
             Ok(())
         }

@@ -19,7 +19,11 @@ import { BundleOptions } from "../config/types";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
-import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
+import {
+  isPersistentCachingEnabled,
+  isTruthyEnv,
+  normalizeTurbopackMemoryEviction,
+} from "../utils/env";
 import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
@@ -65,6 +69,7 @@ export interface WSLike {
 export interface HotReloaderInterface {
   turbopackProject?: Project;
   serverStats: WebpackStats | null;
+  getClientPaths(): string[];
   setHmrServerError(error: Error | null): void;
   clearHmrServerError(): void;
   start(): Promise<void>;
@@ -165,7 +170,9 @@ export async function createHotReloader(
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
-  const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const persistentCaching = isPersistentCachingEnabled(
+    bundleOptions.config.persistentCaching,
+  );
   const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
     bundleOptions.config.turbopackMemoryEviction,
   ) as MemoryEvictionMode;
@@ -197,6 +204,7 @@ export async function createHotReloader(
       {
         processEnv: bundleOptions.processEnv ?? {},
         watch: {
+          ...bundleOptions.watch,
           enable: true,
         },
         dev: true,
@@ -211,7 +219,7 @@ export async function createHotReloader(
             minify: false,
             moduleIds: "named",
           },
-          persistentCaching: bundleOptions?.config?.persistentCaching ?? true,
+          persistentCaching,
           pluginRuntimeStrategy:
             bundleOptions?.config?.pluginRuntimeStrategy ??
             (useWorkerThreads() ? "workerThreads" : "childProcesses"),
@@ -565,6 +573,16 @@ export async function createHotReloader(
     turbopackProject: project,
     serverStats: null,
 
+    getClientPaths() {
+      return [
+        ...new Set(
+          [...writtenEndpointPaths.values()].flatMap(
+            (endpoint) => endpoint.clientPaths,
+          ),
+        ),
+      ];
+    },
+
     onHMR(req, socket: Socket, head, onUpgrade) {
       wsServer.handleUpgrade(req, socket, head, (client) => {
         onUpgrade?.(client);
@@ -772,9 +790,7 @@ export async function createHotReloader(
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
       closePromise ??= (
-        bundleOptions.config.persistentCaching
-          ? project.shutdown()
-          : project.onExit()
+        persistentCaching ? project.shutdown() : project.onExit()
       )
         .catch((err) => {
           console.error(err);
@@ -805,6 +821,7 @@ export async function createHotReloader(
       switch (updateMessage.updateType) {
         case "start": {
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });
+          console.log("Compiling...");
           break;
         }
         case "end": {

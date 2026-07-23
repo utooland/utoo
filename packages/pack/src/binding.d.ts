@@ -62,10 +62,16 @@ export interface NapiWatchOptions {
    */
   pollIntervalMs?: number
   /**
-   * Paths to ignore when watching for file changes.
-   * By default, ignores: node_modules
+   * Paths to ignore when watching for file changes. `!node_modules/<regex>` exempts matching
+   * dependency package names. By default, ignores: node_modules.
    */
   ignored?: Array<string>
+  /**
+   * Package name regular expressions for dependencies inside node_modules that should still be
+   * watched when node_modules is ignored. Patterns are matched against package names such as
+   * `rc-util` or `@rc-component/trigger`.
+   */
+  nodeModulesRegexes?: Array<string>
 }
 export interface NapiProjectOptions {
   /**

@@ -99,6 +99,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn extract_comments(mut self, extract_comments: bool) -> Self {
+        self.chunking_context.extract_comments = extract_comments;
+        self
+    }
+
     pub fn source_map_source_type(mut self, source_map_source_type: SourceMapSourceType) -> Self {
         self.chunking_context.source_map_source_type = source_map_source_type;
         self
@@ -201,6 +206,8 @@ pub struct LibraryChunkingContext {
     runtime_type: RuntimeType,
     /// Whether to minify resulting chunks
     minify_type: MinifyType,
+    /// Whether to extract legal comments from minified library chunks.
+    extract_comments: bool,
     /// Whether to generate source maps
     source_maps_type: SourceMapsType,
     /// Whether to use manifest chunks for lazy compilation
@@ -250,6 +257,7 @@ impl LibraryChunkingContext {
                 environment,
                 runtime_type,
                 minify_type: MinifyType::NoMinify,
+                extract_comments: false,
                 source_maps_type: SourceMapsType::Full,
                 module_id_strategy: None,
                 export_usage: None,
@@ -287,6 +295,11 @@ impl LibraryChunkingContext {
     /// Returns the minify type.
     pub fn minify_type(&self) -> MinifyType {
         self.minify_type
+    }
+
+    /// Returns whether legal comments should be extracted from minified chunks.
+    pub fn extract_comments(&self) -> bool {
+        self.extract_comments
     }
 
     /// Returns whether this library targets Node.js.
@@ -340,7 +353,10 @@ impl LibraryChunkingContext {
         self: Vc<Self>,
         ecmascript_chunk: Vc<EcmascriptChunk>,
     ) -> Result<Vc<RcStr>> {
-        let minify_type = self.minify_type().await?;
+        let (minify_type, extract_comments) = {
+            let this = self.await?;
+            (this.minify_type(), this.extract_comments())
+        };
         let chunk_items = ecmascript_chunk
             .chunk_content()
             .await?
@@ -349,6 +365,7 @@ impl LibraryChunkingContext {
 
         let mut hasher = Xxh3Hash64Hasher::new();
         hasher.write_ref(&minify_type);
+        hasher.write_value(extract_comments);
         hasher.write_value(chunk_items.len());
 
         for item in &chunk_items {

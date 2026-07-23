@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
-use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_fs::{File, FileContent, FileSystemPath};
 use turbopack::{
     evaluate_context::{config_tracing_module_context, node_evaluate_asset_context},
     module_options::{
@@ -15,21 +15,23 @@ use turbopack::{
 };
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
+    asset::AssetContent,
     chunk::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
-    file_source::FileSource,
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
     resolve::options::{ImportMap, ImportMapping},
+    virtual_source::VirtualSource,
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{
     TypeofWindow, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
 };
+use turbopack_ecmascript_runtime::chunk_update_listeners_global_name;
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransform, PostCssTransformOptions},
@@ -59,6 +61,7 @@ use crate::{
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
+            type_only_import::get_type_only_import_rule,
             webpack_public_path::get_webpack_public_path_transform_rule,
         },
         webpack_rules::{WebpackLoaderBuiltinCondition, webpack_loader_options},
@@ -160,15 +163,34 @@ pub async fn get_client_runtime_entries(
 
     if is_development && watch && hot {
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-        let hmr_bootstrap_path = rcstr!("hmr/bootstrap-messageport.ts");
+        let (hmr_bootstrap_path, hmr_client_path) = (
+            rcstr!("hmr/bootstrap-messageport.ts"),
+            "./client-messageport",
+        );
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        let hmr_bootstrap_path = rcstr!("hmr/bootstrap.ts");
+        let (hmr_bootstrap_path, hmr_client_path) = (rcstr!("hmr/bootstrap.ts"), "./client");
+
+        let chunk_loading_global = config
+            .client_chunk_loading_global(project_root.clone())
+            .await?;
+        let chunk_update_listeners_global = chunk_update_listeners_global_name(
+            chunk_loading_global
+                .as_ref()
+                .map_or("TURBOPACK", RcStr::as_str),
+        );
+        let hmr_bootstrap = format!(
+            "import {{ initHMR }} from {hmr_client_path:?};\n\ninitHMR({});\n",
+            serde_json::to_string(&chunk_update_listeners_global)?,
+        );
 
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
-                FileSource::new(embed_file_path(hmr_bootstrap_path).owned().await?)
-                    .to_resolved()
-                    .await?,
+                VirtualSource::new(
+                    embed_file_path(hmr_bootstrap_path).owned().await?,
+                    AssetContent::file(FileContent::Content(File::from(hmr_bootstrap)).cell()),
+                )
+                .to_resolved()
+                .await?,
             ))
             .resolved_cell(),
         );
@@ -307,6 +329,9 @@ pub async fn get_client_module_options_context(
         get_client_transforms_rules(config, false, inline_postcss_transform).await?;
     let mut foreign_client_rules =
         get_client_transforms_rules(config, true, inline_foreign_postcss_transform).await?;
+
+    client_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
+    foreign_client_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(

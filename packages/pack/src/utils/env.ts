@@ -2,6 +2,15 @@ export function isTruthyEnv(value: string | undefined): boolean {
   return value === "1" || value === "true";
 }
 
+export function isPersistentCachingEnabled(
+  configuredValue: boolean | undefined,
+): boolean {
+  return (
+    !isTruthyEnv(process.env.DISABLE_PERSISTENT_CACHE?.toLowerCase()) &&
+    (configuredValue ?? true)
+  );
+}
+
 export function normalizeTurbopackMemoryEviction(
   value: boolean | "full" | undefined,
 ): "off" | "full" {

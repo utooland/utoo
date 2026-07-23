@@ -578,6 +578,60 @@ else
   echo -e "${YELLOW}SKIP: cross-device cache case (non-Linux or no /dev/shm)${NC}"
 fi
 
+# Case 8.8: install-script packages must be private copies on Linux. The
+# registry cache is normally hardlinked into node_modules, but lifecycle
+# scripts can mutate package files during `utoo rebuild`; sharing those files
+# would corrupt the cache and sibling package instances. `deasync` has an
+# install script but is deliberately not a binary-mirror package, so this
+# isolates the `hasInstallScript` clone policy from mirror rewriting.
+echo -e "${YELLOW}Case 8.8: install-script package uses copy, not hardlink${NC}"
+if [ "$(uname -s)" = "Linux" ]; then
+  SCRIPT_COPY_ROOT="$(mktemp -d)"
+  SCRIPT_COPY_PROJECT="$SCRIPT_COPY_ROOT/project"
+  SCRIPT_COPY_CACHE="$SCRIPT_COPY_ROOT/cache"
+  script_copy_cleanup() { rm -rf "$SCRIPT_COPY_ROOT" 2>/dev/null || true; }
+
+  mkdir -p "$SCRIPT_COPY_PROJECT"
+  printf '%s\n' '{"name":"install-script-copy-e2e","version":"1.0.0","private":true,"dependencies":{"deasync":"0.1.30"}}' \
+    > "$SCRIPT_COPY_PROJECT/package.json"
+  (cd "$SCRIPT_COPY_PROJECT" && UTOO_CACHE_DIR="$SCRIPT_COPY_CACHE" utoo install --ignore-scripts) \
+    || { echo -e "${RED}FAIL: install-script copy fixture install failed${NC}"; script_copy_cleanup; exit 1; }
+
+  node -e '
+const lock = require(process.argv[1]);
+const pkg = lock.packages["node_modules/deasync"];
+if (!pkg || pkg.hasInstallScript !== true) {
+  console.error("expected deasync lock entry with hasInstallScript=true", pkg);
+  process.exit(1);
+}
+' "$SCRIPT_COPY_PROJECT/package-lock.json" \
+    || { echo -e "${RED}FAIL: deasync lock entry lost hasInstallScript${NC}"; script_copy_cleanup; exit 1; }
+
+  SCRIPT_COPY_SOURCE="$SCRIPT_COPY_CACHE/deasync/0.1.30/package/package.json"
+  SCRIPT_COPY_TARGET="$SCRIPT_COPY_PROJECT/node_modules/deasync/package.json"
+  [ -f "$SCRIPT_COPY_SOURCE" ] && [ -f "$SCRIPT_COPY_TARGET" ] \
+    || { echo -e "${RED}FAIL: deasync source or target package.json missing${NC}"; script_copy_cleanup; exit 1; }
+
+  source_inode=$(stat -c '%i' "$SCRIPT_COPY_SOURCE")
+  target_inode=$(stat -c '%i' "$SCRIPT_COPY_TARGET")
+  if [ "$source_inode" = "$target_inode" ]; then
+    echo -e "${RED}FAIL: install-script package was hardlinked (inode $source_inode)${NC}"
+    script_copy_cleanup
+    exit 1
+  fi
+
+  printf '%s\n' '__utoo_install_script_copy_e2e__' > "$SCRIPT_COPY_TARGET"
+  if grep -q '__utoo_install_script_copy_e2e__' "$SCRIPT_COPY_SOURCE"; then
+    echo -e "${RED}FAIL: target mutation leaked into the package cache${NC}"
+    script_copy_cleanup
+    exit 1
+  fi
+  script_copy_cleanup
+  echo -e "${GREEN}PASS: install-script package is copied and cache-isolated${NC}"
+else
+  echo -e "${YELLOW}SKIP: install-script hardlink assertion is Linux-only${NC}"
+fi
+
 # Case 9: reinstall ant-design by npmjs.org
 echo -e "${YELLOW}Case 9: reinstall ant-design${NC} by npmjs.org"
 cd e2e/pm/ant-design/ant-design
@@ -861,67 +915,82 @@ REPO_ROOT=$(cd "$(dirname "$0")/.."; pwd)
 
 pushd "$PACK_DIR"
 
-# Build a utoo npm package using the vendor templates
-mkdir -p pkg/bin
-# Use the actual built binary from the e2e environment
+# Build a platform package containing the actual native binary.
+PLATFORM_OS=$(node -p 'process.platform')
+PLATFORM_ARCH=$(node -p 'process.arch')
+PLATFORM_NAME="utoo-$PLATFORM_OS-$PLATFORM_ARCH"
+mkdir -p platform/bin
 UTOO_BIN=$(which utoo)
-cp "$UTOO_BIN" pkg/bin/utoo
-chmod +x pkg/bin/utoo
+cp "$UTOO_BIN" platform/bin/utoo
+chmod +x platform/bin/utoo
+cat > platform/package.json << PKGJSON
+{
+  "name": "@utoo/$PLATFORM_NAME",
+  "version": "0.0.0-e2e-test",
+  "os": ["$PLATFORM_OS"],
+  "cpu": ["$PLATFORM_ARCH"]
+}
+PKGJSON
+pushd platform
+PLATFORM_TARBALL="$PACK_DIR/platform/$(npm pack --silent)"
+popd
 
-# Create package.json
-cat > pkg/package.json << 'PKGJSON'
+# Build the immutable main package from the real launcher templates. The local
+# file dependency keeps this test offline while exercising npm's optional
+# dependency installation and bin-shim generation.
+mkdir -p pkg/bin
+cp "$REPO_ROOT/vendor/templates/launcher.utoo.js.template" pkg/bin/launcher.js
+cp "$REPO_ROOT/vendor/templates/utoo.utoo.js.template" pkg/bin/utoo.js
+cp "$REPO_ROOT/vendor/templates/utx.utoo.js.template" pkg/bin/utx.js
+chmod +x pkg/bin/utoo.js pkg/bin/utx.js
+cat > pkg/package.json << PKGJSON
 {
   "name": "utoo",
   "version": "0.0.0-e2e-test",
-  "bin": { "utoo": "bin/utoo", "ut": "bin/utoo" },
-  "scripts": { "postinstall": "echo postinstall-ok" }
+  "bin": {
+    "utoo": "bin/utoo.js",
+    "ut": "bin/utoo.js",
+    "utx": "bin/utx.js"
+  },
+  "optionalDependencies": {
+    "@utoo/$PLATFORM_NAME": "file:$PLATFORM_TARBALL"
+  }
 }
 PKGJSON
 
-# Pack it
-cd pkg
-npm pack 2>&1
-TARBALL=$(ls utoo-*.tgz)
+pushd pkg
+TARBALL="$PACK_DIR/pkg/$(npm pack --silent)"
+popd
 echo "Packed: $TARBALL"
 
-# Install globally to a temp prefix
-npm install -g "$TARBALL" --prefix="$INSTALL_PREFIX" 2>&1
+# Install globally with lifecycle scripts disabled. The command must still work.
+npm install -g "$TARBALL" --prefix="$INSTALL_PREFIX" --ignore-scripts 2>&1
 echo "Installed to: $INSTALL_PREFIX"
 
-# Verify the binary works
-INSTALLED_UTOO="$INSTALL_PREFIX/bin/utoo"
-if [ ! -f "$INSTALLED_UTOO" ]; then
-    # Try lib path on some systems
-    INSTALLED_UTOO="$INSTALL_PREFIX/lib/node_modules/utoo/bin/utoo"
-fi
-
-if [ ! -f "$INSTALLED_UTOO" ]; then
-    echo -e "${RED}FAIL: utoo binary not found after npm install -g${NC}"
+# Verify npm generated the public launcher and installed the native artifact.
+SYMLINK_UTOO="$INSTALL_PREFIX/bin/utoo"
+if [ ! -L "$SYMLINK_UTOO" ] && [ ! -f "$SYMLINK_UTOO" ]; then
+    echo -e "${RED}FAIL: utoo launcher not found after npm install -g${NC}"
     ls -R "$INSTALL_PREFIX" 2>/dev/null | head -20
     exit 1
 fi
-
-# Verify it's not a placeholder
-if head -1 "$INSTALLED_UTOO" | grep -q "placeholder"; then
-    echo -e "${RED}FAIL: installed binary is still a placeholder${NC}"
+[ -n "$(find "$INSTALL_PREFIX" -path "*/@utoo/$PLATFORM_NAME/bin/utoo" -type f -print -quit)" ] \
+    || { echo -e "${RED}FAIL: optional native artifact not installed${NC}"; exit 1; }
+if node -e 'const p=require(process.argv[1]); process.exit(p.scripts ? 1 : 0)' \
+    "$INSTALL_PREFIX/lib/node_modules/utoo/package.json"; then
+    :
+else
+    echo -e "${RED}FAIL: installed main package contains lifecycle scripts${NC}"
     exit 1
 fi
 
-"$INSTALLED_UTOO" --version
+"$SYMLINK_UTOO" --version
 echo -e "${GREEN}PASS: npm pack + install -g works correctly${NC}"
 
-# Regression: a global install run THROUGH the npm-style bin symlink must resolve
-# the prefix to $INSTALL_PREFIX, NOT to utoo's own package dir. current_exe()
-# resolves the symlink to <prefix>/lib/node_modules/utoo/bin/utoo, so a naive
-# parent-dir inference would drop bins into utoo's package bin / node_modules
-# instead of <prefix>/bin and <prefix>/lib/node_modules.
+# Regression: the native executable now lives in a nested optional package. The
+# launcher must propagate the public managed-package root so global operations
+# still infer $INSTALL_PREFIX rather than the platform package's node_modules.
 echo -e "${YELLOW}  Subtest: global install resolves npm-style prefix${NC}"
-SYMLINK_UTOO="$INSTALL_PREFIX/bin/utoo"
-if [ ! -L "$SYMLINK_UTOO" ] && [ ! -f "$SYMLINK_UTOO" ]; then
-    echo -e "${RED}FAIL: expected npm bin entry at $SYMLINK_UTOO${NC}"
-    exit 1
-fi
-
 "$SYMLINK_UTOO" install -g cowsay --registry=https://registry.npmjs.org \
     || { echo -e "${RED}FAIL: global install cowsay via npm-installed utoo${NC}"; exit 1; }
 
