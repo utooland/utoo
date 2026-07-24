@@ -50,6 +50,24 @@ async function readRuntimeState(page: Page) {
   }));
 }
 
+async function waitForPageReload(
+  page: Page,
+  previous: Awaited<ReturnType<typeof readRuntimeState>>,
+) {
+  await expect
+    .poll(() =>
+      readRuntimeState(page).then(
+        (state) =>
+          typeof state.pageToken === "string" &&
+          state.pageToken !== previous.pageToken,
+      ),
+    )
+    .toBe(true);
+  const current = await readRuntimeState(page);
+  expect(current.timeOrigin).not.toBe(previous.timeOrigin);
+  return current;
+}
+
 function frameAction(frame: string) {
   try {
     return JSON.parse(frame).action as string | undefined;
@@ -190,11 +208,16 @@ test("closes the first dynamic-load subscription race", async ({ page }) => {
 
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        (globalThis as any).__hmrSubscriptionVersions.every(
-          (version: unknown) => typeof version === "string",
-        ),
-      ),
+      page.evaluate(() => {
+        const paths = (globalThis as any).__hmrSubscriptionPaths as string[];
+        const versions = (globalThis as any)
+          .__hmrSubscriptionVersions as unknown[];
+        return paths.every(
+          (path, index) =>
+            !/(?:^|\/)src_[ab]_[^/]+\.js$/.test(path) ||
+            typeof versions[index] === "string",
+        );
+      }),
     )
     .toBe(true);
   await mutateAndWaitForBuild(page, () => writeShared("shared-race-v2"));
@@ -272,6 +295,10 @@ test("revalidates after HTTP members load before exposing a dynamic import", asy
 test("resubscribes dynamic imports after the HMR socket reconnects", async ({
   page,
 }) => {
+  const sentFrames: string[] = [];
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => sentFrames.push(String(payload)));
+  });
   await page.addInitScript(() => {
     const NativeWebSocket = WebSocket;
     const sockets: WebSocket[] = [];
@@ -286,6 +313,7 @@ test("resubscribes dynamic imports after the HMR socket reconnects", async ({
   });
 
   await page.goto("/");
+  const initial = await readRuntimeState(page);
   await expect
     .poll(() => pageReadySockets.get(page)?.size ?? 0)
     .toBeGreaterThan(0);
@@ -294,6 +322,7 @@ test("resubscribes dynamic imports after the HMR socket reconnects", async ({
     sockets.at(-1)?.close();
   });
   await expect.poll(() => pageReadySockets.get(page)?.size ?? 0).toBe(0);
+  const sentFrameStart = sentFrames.length;
 
   // These subscriptions are created while sendMessage has no open socket.
   // Reconnect must cause the HMR client to replay them.
@@ -308,9 +337,93 @@ test("resubscribes dynamic imports after the HMR socket reconnects", async ({
       ),
     )
     .toBeGreaterThanOrEqual(2);
+
+  const dynamicSubscriptions = sentFrames
+    .slice(sentFrameStart)
+    .flatMap((frame) => {
+      try {
+        return [JSON.parse(frame)];
+      } catch {
+        return [];
+      }
+    })
+    .filter(
+      (message) =>
+        message.type === "turbopack-subscribe" &&
+        /(?:^|\/)src_[ab]_[^/]+\.js$/.test(message.path),
+    );
+  expect(dynamicSubscriptions).toHaveLength(4);
+  expect(
+    dynamicSubscriptions.every(
+      (message) =>
+        typeof message.version === "string" &&
+        typeof message.validation === "string",
+    ),
+  ).toBe(true);
+  const updated = await readRuntimeState(page);
+  expect(updated.pageToken).toBe(initial.pageToken);
+  expect(updated.timeOrigin).toBe(initial.timeOrigin);
 });
 
-test("applies a shared update once across two dynamic lists", async ({
+test("hot updates a single active dynamic list without reloading", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const NativeWebSocket = WebSocket;
+    const sockets: WebSocket[] = [];
+    (globalThis as any).__packHmrSockets = sockets;
+    (globalThis as any).WebSocket = new Proxy(NativeWebSocket, {
+      construct(Target, args) {
+        const socket = new Target(...(args as [string, string | string[]]));
+        sockets.push(socket);
+        return socket;
+      },
+    });
+  });
+  await page.goto("/");
+  await mutateAndWaitForBuild(page, () =>
+    fs.writeFileSync(
+      indexPath,
+      indexBaseline.replace(
+        '[import("./a.js"), import("./b.js")]',
+        '[import("./a.js")]',
+      ),
+    ),
+  );
+  await expect
+    .poll(() => readRuntimeState(page).then((state) => state.entryEvaluations))
+    .toBeGreaterThanOrEqual(2);
+
+  await page.locator("#load").click();
+  await expect(page.locator("#a")).toHaveText("a:shared-v1");
+  await expect(page.locator("#b")).toHaveText("pending");
+  const initial = await readRuntimeState(page);
+
+  await mutateAndWaitForBuild(page, () => writeShared("shared-single-v2"));
+
+  await expect(page.locator("#a")).toHaveText("a:shared-single-v2");
+  await expect(page.locator("#b")).toHaveText("pending");
+  await expect(page.locator("#error")).toBeEmpty();
+  const updated = await readRuntimeState(page);
+  expect(updated.evaluations).toBe(2);
+  expect(updated.pageToken).toBe(initial.pageToken);
+  expect(updated.timeOrigin).toBe(initial.timeOrigin);
+
+  // The manifest version intentionally stays fixed for this thin integration.
+  // A reconnect after an update validates against that original baseline and
+  // reloads safely instead of accepting a potentially incomplete replay.
+  await page.evaluate(() => {
+    const sockets = (globalThis as any).__packHmrSockets as WebSocket[];
+    sockets.at(-1)?.close();
+  });
+  await waitForPageReload(page, updated);
+  await page.locator("#load").click();
+  await expect(page.locator("#a")).toHaveText("a:shared-single-v2");
+  await expect(page.locator("#b")).toHaveText("pending");
+  await expect(page.locator("#error")).toBeEmpty();
+});
+
+test("reloads safely for an update shared by two dynamic lists", async ({
   page,
 }) => {
   const frames = pageFrames.get(page)!;
@@ -331,31 +444,24 @@ test("applies a shared update once across two dynamic lists", async ({
 
   await mutateAndWaitForBuild(page, () => writeShared("shared-dedupe-v2"));
 
+  await waitForPageReload(page, initial);
+  await page.locator("#load").click();
   await expect(page.locator("#a")).toHaveText("a:shared-dedupe-v2");
   await expect(page.locator("#b")).toHaveText("b:shared-dedupe-v2");
+  await expect(page.locator("#error")).toBeEmpty();
   const updated = await readRuntimeState(page);
-  expect(updated.evaluations).toBe(2);
-  expect(updated.pageToken).toBe(initial.pageToken);
-  expect(updated.timeOrigin).toBe(initial.timeOrigin);
+  expect(updated.evaluations).toBe(1);
+  expect(updated.pageToken).not.toBe(initial.pageToken);
+  expect(updated.timeOrigin).not.toBe(initial.timeOrigin);
 
   const resourcePaths = new Set<string>();
   for (const update of getTurbopackUpdates(frames.slice(frameStart))) {
     if (update.type === "partial") resourcePaths.add(update.resource.path);
   }
   expect(resourcePaths.size).toBeGreaterThanOrEqual(2);
-  expect(
-    getTurbopackEnvelopes(frames.slice(frameStart)).some((updates) => {
-      const paths = new Set(
-        updates
-          .filter((update) => update.type === "partial")
-          .map((update) => update.resource.path),
-      );
-      return paths.size >= 2;
-    }),
-  ).toBe(true);
 });
 
-test("swaps an older shared stylesheet when a new dynamic list joins", async ({
+test("reloads safely when a stylesheet is shared by dynamic lists", async ({
   page,
 }) => {
   await page.goto("/");
@@ -364,25 +470,12 @@ test("swaps an older shared stylesheet when a new dynamic list joins", async ({
   await expect(page.locator("#b")).toHaveText("b:shared-v1");
   const initial = await readRuntimeState(page);
 
-  await mutateAndWaitForBuild(page, () =>
-    fs.writeFileSync(
-      indexPath,
-      indexBaseline.replace(
-        '[import("./a.js"), import("./b.js")]',
-        '[Promise.resolve(), import("./b.js")]',
-      ),
-    ),
-  );
   await mutateAndWaitForBuild(page, () => writeSharedCss("shared-css-swap-v2"));
-  await mutateAndWaitForBuild(page, () =>
-    fs.writeFileSync(indexPath, indexBaseline),
-  );
-  await expect
-    .poll(() => readRuntimeState(page).then((state) => state.entryEvaluations))
-    .toBeGreaterThanOrEqual(3);
 
+  await waitForPageReload(page, initial);
   await page.locator("#load").click();
   await expect(page.locator("#a")).toHaveText("a:shared-v1");
+  await expect(page.locator("#b")).toHaveText("b:shared-v1");
   await expect(page.locator("#error")).toBeEmpty();
   await expect
     .poll(() =>
@@ -396,94 +489,53 @@ test("swaps an older shared stylesheet when a new dynamic list joins", async ({
         ),
     )
     .toBe(1);
-
-  const updated = await readRuntimeState(page);
-  expect(updated.pageToken).toBe(initial.pageToken);
-  expect(updated.timeOrigin).toBe(initial.timeOrigin);
+  await expect
+    .poll(() =>
+      page
+        .locator("#a")
+        .evaluate((element) =>
+          getComputedStyle(element).getPropertyValue("--pack-hmr-shared"),
+        ),
+    )
+    .toContain("shared-css-swap-v2");
 });
 
-test("cancels an obsolete CSS reload without stalling later HMR", async ({
+test("continues updating after a conservative stylesheet reload", async ({
   page,
 }) => {
-  const frames = pageFrames.get(page)!;
   await page.goto("/");
   await page.locator("#load").click();
   await expect(page.locator("#a")).toHaveText("a:shared-v1");
   await expect(page.locator("#b")).toHaveText("b:shared-v1");
+  const initial = await readRuntimeState(page);
 
-  let releaseCss!: () => void;
-  const cssReleased = new Promise<void>((resolve) => {
-    releaseCss = resolve;
-  });
-  let capturedCssReloads = 0;
-  await page.route(/\.css(?:\?.*)?$/, async (route) => {
-    if (capturedCssReloads > 0) {
-      await route.continue();
-      return;
-    }
-    capturedCssReloads += 1;
-    await cssReleased;
-    await route.continue();
-  });
-
-  try {
-    await mutateAndWaitForBuild(page, () =>
-      writeSharedCss("shared-css-reload-v2"),
-    );
-    await expect.poll(() => capturedCssReloads).toBe(1);
-
-    const frameStart = frames.length;
-    await mutateAndWaitForBuild(page, () =>
-      fs.writeFileSync(
-        indexPath,
-        indexBaseline.replace(
-          '[import("./a.js"), import("./b.js")]',
-          "[Promise.resolve(), Promise.resolve()]",
+  await mutateAndWaitForBuild(page, () =>
+    writeSharedCss("shared-css-reload-v2"),
+  );
+  const afterCssReload = await waitForPageReload(page, initial);
+  await page.locator("#load").click();
+  await expect
+    .poll(() =>
+      page
+        .locator("#a")
+        .evaluate((element) =>
+          getComputedStyle(element).getPropertyValue("--pack-hmr-shared"),
         ),
-      ),
-    );
-    await expect
-      .poll(
-        () =>
-          getTurbopackUpdates(frames.slice(frameStart)).filter(
-            (update) => update.type === "notFound",
-          ).length,
-      )
-      .toBeGreaterThanOrEqual(2);
+    )
+    .toContain("shared-css-reload-v2");
 
-    releaseCss();
-    await mutateAndWaitForBuild(page, () =>
-      fs.writeFileSync(indexPath, indexBaseline),
-    );
-    await expect
-      .poll(() =>
-        readRuntimeState(page).then((state) => state.entryEvaluations),
-      )
-      .toBeGreaterThanOrEqual(3);
-
-    await page.locator("#a").evaluate((element) => {
-      element.textContent = "pending";
-    });
-    await page.locator("#b").evaluate((element) => {
-      element.textContent = "pending";
-    });
-    await page.locator("#load").click();
-    await expect(page.locator("#a")).toHaveText("a:shared-v1");
-    await expect(page.locator("#b")).toHaveText("b:shared-v1");
-    await expect(page.locator("#error")).toBeEmpty();
-  } finally {
-    releaseCss();
-  }
+  await mutateAndWaitForBuild(page, () => writeShared("shared-after-css-v2"));
+  await waitForPageReload(page, afterCssReload);
+  await page.locator("#load").click();
+  await expect(page.locator("#a")).toHaveText("a:shared-after-css-v2");
+  await expect(page.locator("#b")).toHaveText("b:shared-after-css-v2");
+  await expect(page.locator("#error")).toBeEmpty();
 });
 
-test("disposes and restores missing dynamic lists without reloading", async ({
+test("reloads when an active dynamic list disappears and restores it", async ({
   page,
 }) => {
   const receivedFrames = pageFrames.get(page)!;
-  const sentFrames: string[] = [];
-  page.on("websocket", (socket) => {
-    socket.on("framesent", ({ payload }) => sentFrames.push(String(payload)));
-  });
 
   await page.goto("/");
   await page.locator("#load").click();
@@ -510,57 +562,26 @@ test("disposes and restores missing dynamic lists without reloading", async ({
       ),
     )
     .toBeTruthy();
-  await expect
-    .poll(() => readRuntimeState(page).then((state) => state.entryEvaluations))
-    .toBe(2);
+  const afterRemovalReload = await waitForPageReload(page, initial);
+  await expect(page.locator("#a")).toHaveText("pending");
+  await expect(page.locator("#b")).toHaveText("pending");
 
   await mutateAndWaitForBuild(page, () =>
     fs.writeFileSync(indexPath, indexBaseline),
   );
   await expect
     .poll(() => readRuntimeState(page).then((state) => state.entryEvaluations))
-    .toBe(3);
+    .toBeGreaterThanOrEqual(2);
 
-  await page.locator("#a").evaluate((element) => {
-    element.textContent = "disposed";
-  });
   await page.locator("#load").click();
   await expect(page.locator("#a")).toHaveText("a:shared-v1");
   await expect(page.locator("#b")).toHaveText("b:shared-v1");
   await expect(page.locator("#error")).toBeEmpty();
 
   const restored = await readRuntimeState(page);
-  // Both old dynamic lists disappeared during re-chunking, so the shared
-  // module is released only after its final owner is gone and runs once more
-  // when the restored lists load.
-  expect(restored.evaluations).toBe(2);
-  expect(restored.pageToken).toBe(initial.pageToken);
-  expect(restored.timeOrigin).toBe(initial.timeOrigin);
-
-  const aSubscriptions = sentFrames
-    .map((frame) => {
-      try {
-        return JSON.parse(frame);
-      } catch {
-        return null;
-      }
-    })
-    .filter(
-      (message) =>
-        message?.type === "turbopack-subscribe" &&
-        /(?:^|\/)src_a_[^/]+\.js$/.test(message.path),
-    );
-  expect(aSubscriptions).toHaveLength(4);
-  expect(
-    aSubscriptions.filter((message) => message.validation === undefined),
-  ).toHaveLength(2);
-  expect(
-    new Set(
-      aSubscriptions
-        .map((message) => message.validation)
-        .filter((validation) => validation !== undefined),
-    ).size,
-  ).toBe(2);
+  expect(restored.evaluations).toBe(1);
+  expect(restored.pageToken).toBe(afterRemovalReload.pageToken);
+  expect(restored.timeOrigin).toBe(afterRemovalReload.timeOrigin);
 });
 
 test("rejects a dynamic bootstrap that disappears before its baseline", async ({
@@ -569,9 +590,11 @@ test("rejects a dynamic bootstrap that disappears before its baseline", async ({
   await page.addInitScript(() => {
     const originalSend = WebSocket.prototype.send;
     const delayedFrames: Array<{ socket: WebSocket; data: any }> = [];
-    let delaySubscriptions = true;
+    let delaySubscriptions =
+      sessionStorage.getItem("pack-hmr-disable-bootstrap-delay") !== "1";
     (globalThis as any).__delayedDynamicSubscriptions = [];
     (globalThis as any).__flushDynamicSubscriptions = () => {
+      sessionStorage.setItem("pack-hmr-disable-bootstrap-delay", "1");
       delaySubscriptions = false;
       for (const { socket, data } of delayedFrames.splice(0)) {
         originalSend.call(socket, data);
@@ -618,9 +641,8 @@ test("rejects a dynamic bootstrap that disappears before its baseline", async ({
   );
   await page.evaluate(() => (globalThis as any).__flushDynamicSubscriptions());
 
-  await expect(page.locator("#error")).toContainText(
-    "disappeared while loading",
-  );
+  const afterBootstrapReload = await waitForPageReload(page, initial);
+  await expect(page.locator("#error")).toBeEmpty();
   await expect(page.locator("#a")).toHaveText("pending");
   await expect(page.locator("#b")).toHaveText("pending");
   expect((await readRuntimeState(page)).evaluations).toBeUndefined();
@@ -630,10 +652,7 @@ test("rejects a dynamic bootstrap that disappears before its baseline", async ({
   );
   await expect
     .poll(() => readRuntimeState(page).then((state) => state.entryEvaluations))
-    .toBeGreaterThanOrEqual(3);
-  await page.locator("#error").evaluate((element) => {
-    element.textContent = "";
-  });
+    .toBeGreaterThanOrEqual(2);
   await page.locator("#load").click();
   await expect(page.locator("#a")).toHaveText("a:shared-v1");
   await expect(page.locator("#b")).toHaveText("b:shared-v1");
@@ -641,6 +660,6 @@ test("rejects a dynamic bootstrap that disappears before its baseline", async ({
 
   const restored = await readRuntimeState(page);
   expect(restored.evaluations).toBe(1);
-  expect(restored.pageToken).toBe(initial.pageToken);
-  expect(restored.timeOrigin).toBe(initial.timeOrigin);
+  expect(restored.pageToken).toBe(afterBootstrapReload.pageToken);
+  expect(restored.timeOrigin).toBe(afterBootstrapReload.timeOrigin);
 });

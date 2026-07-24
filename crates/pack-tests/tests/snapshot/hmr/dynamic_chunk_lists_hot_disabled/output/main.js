@@ -1641,12 +1641,8 @@ function getRefreshBoundaryExports(exports) {
 /**
  * Map from a chunk path to the chunk lists it belongs to.
  */ const chunkChunkListsMap = new Map();
-const dynamicChunkListLoadStates = new Map();
-const pendingHmrTasks = [];
-const chunkListGenerations = new Map();
-let nextChunkListGeneration = 1;
-let activeHmrTask;
-const dynamicMemberChunkUrlOwners = new Map();
+/** Dynamic lists use a stricter, reload-on-ambiguity update policy. */ const dynamicChunkLists = new Set();
+/** Dynamic manifests which have not finished their subscribe/load/revalidate handshake. */ const loadingDynamicChunkLists = new Set();
 /**
  * Gets or instantiates a runtime module.
  */ // @ts-ignore
@@ -1796,259 +1792,48 @@ const DUMMY_REFRESH_CONTEXT = {
         disposedModules
     };
 }
-const PARALLEL_UPDATE_CONFLICT = Symbol('parallel update conflict');
-function mergeParallelChunkUpdate(updateA, updateB) {
-    if (updateA.type === updateB.type) {
-        return updateA;
+function applyUpdate(update) {
+    switch(update.type){
+        case 'ChunkListUpdate':
+            applyChunkListUpdate(update);
+            break;
+        default:
+            invariant(update, (update)=>`Unknown update type: ${update.type}`);
     }
-    if (updateA.type === 'total' || updateB.type === 'total') {
-        return {
-            type: 'total'
-        };
-    }
-    if (updateA.type === 'added' && updateB.type === 'deleted' || updateA.type === 'deleted' && updateB.type === 'added') {
-        return null;
-    }
-    return PARALLEL_UPDATE_CONFLICT;
 }
-function mergeParallelEcmascriptChunkUpdate(updateA, updateB) {
-    if (updateA.type === 'added' && updateB.type === 'added') {
-        return {
-            type: 'added',
-            modules: [
-                ...new Set([
-                    ...updateA.modules ?? [],
-                    ...updateB.modules ?? []
-                ])
-            ]
-        };
-    }
-    if (updateA.type === 'deleted' && updateB.type === 'deleted') {
-        return {
-            type: 'deleted',
-            modules: [
-                ...new Set([
-                    ...updateA.modules ?? [],
-                    ...updateB.modules ?? []
-                ])
-            ]
-        };
-    }
-    if (updateA.type === 'partial' && updateB.type === 'partial') {
-        const added = new Set([
-            ...updateA.added ?? [],
-            ...updateB.added ?? []
-        ]);
-        const deleted = new Set([
-            ...updateA.deleted ?? [],
-            ...updateB.deleted ?? []
-        ]);
-        for (const moduleId of added){
-            if (deleted.has(moduleId)) {
-                added.delete(moduleId);
-                deleted.delete(moduleId);
-            }
-        }
-        return {
-            type: 'partial',
-            added: [
-                ...added
-            ],
-            deleted: [
-                ...deleted
-            ]
-        };
-    }
-    if (updateA.type === 'added' && updateB.type === 'deleted' || updateA.type === 'deleted' && updateB.type === 'added') {
-        const addedUpdate = updateA.type === 'added' ? updateA : updateB;
-        const deletedUpdate = updateA.type === 'deleted' ? updateA : updateB;
-        const added = new Set(addedUpdate.modules ?? []);
-        const deleted = new Set(deletedUpdate.modules ?? []);
-        for (const moduleId of added){
-            if (deleted.has(moduleId)) {
-                added.delete(moduleId);
-                deleted.delete(moduleId);
-            }
-        }
-        return {
-            type: 'partial',
-            added: [
-                ...added
-            ],
-            deleted: [
-                ...deleted
-            ]
-        };
-    }
-    if (updateA.type === 'partial') {
-        if ((updateA.added?.length ?? 0) === 0 && (updateA.deleted?.length ?? 0) === 0) {
-            return updateB;
-        }
-        return PARALLEL_UPDATE_CONFLICT;
-    }
-    if (updateB.type === 'partial') {
-        if ((updateB.added?.length ?? 0) === 0 && (updateB.deleted?.length ?? 0) === 0) {
-            return updateA;
-        }
-        return PARALLEL_UPDATE_CONFLICT;
-    }
-    return PARALLEL_UPDATE_CONFLICT;
-}
-function moduleEntriesEqual(entryA, entryB) {
-    // The same module can be emitted into multiple chunks. Its source URL is
-    // chunk-relative, so it is allowed to differ even when the executable entry
-    // is identical. Treat only code and source map differences as conflicts.
-    return entryA.code === entryB.code && entryA.map === entryB.map;
-}
-function applyChunkListUpdates(updates) {
-    const resourceOperations = [];
-    const ownershipTransitions = new Map();
-    const chunks = new Map();
-    const ecmascriptChunks = new Map();
-    const entries = {};
-    const explicitlyModifiedModules = new Set();
-    let hasConflict = false;
-    for (const { chunkListPath, update } of updates){
-        if (update.chunks) {
-            for (const [chunkPath, chunkUpdate] of Object.entries(update.chunks)){
-                if (chunkUpdate.type === 'added' || chunkUpdate.type === 'deleted') {
-                    if (!applyChunkListMembershipDelta(chunkListPath, chunkPath, chunkUpdate.type, ownershipTransitions)) {
-                        hasConflict = true;
-                    }
-                }
-                if (!chunks.has(chunkPath)) {
-                    chunks.set(chunkPath, chunkUpdate);
-                } else {
-                    const previous = chunks.get(chunkPath);
-                    if (previous === null) {
-                        chunks.set(chunkPath, chunkUpdate);
-                    } else {
-                        const merged = mergeParallelChunkUpdate(previous, chunkUpdate);
-                        if (merged === PARALLEL_UPDATE_CONFLICT) {
-                            hasConflict = true;
-                        } else {
-                            chunks.set(chunkPath, merged);
-                        }
-                    }
-                }
-            }
-        }
-        for (const merged of update.merged ?? []){
-            if (merged.type !== 'EcmascriptMergedUpdate') {
-                invariant(merged, (merged)=>`Unknown merged type: ${merged.type}`);
-            }
-            const addedInThisUpdate = new Set();
-            for (const [chunkPath, chunkUpdate] of Object.entries(merged.chunks ?? {})){
-                if (chunkUpdate.type === 'added') {
-                    for (const moduleId of chunkUpdate.modules ?? []){
-                        addedInThisUpdate.add(moduleId);
-                    }
-                    if (!applyChunkListMembershipDelta(chunkListPath, chunkPath, 'added', ownershipTransitions)) {
-                        hasConflict = true;
-                    }
-                } else if (chunkUpdate.type === 'deleted') {
-                    if (!applyChunkListMembershipDelta(chunkListPath, chunkPath, 'deleted', ownershipTransitions)) {
-                        hasConflict = true;
-                    }
-                } else {
-                    for (const moduleId of chunkUpdate.added ?? []){
-                        addedInThisUpdate.add(moduleId);
-                    }
-                }
-                const previous = ecmascriptChunks.get(chunkPath);
-                if (!previous) {
-                    ecmascriptChunks.set(chunkPath, chunkUpdate);
-                } else {
-                    const combined = mergeParallelEcmascriptChunkUpdate(previous, chunkUpdate);
-                    if (combined === PARALLEL_UPDATE_CONFLICT) {
-                        hasConflict = true;
-                    } else {
-                        ecmascriptChunks.set(chunkPath, combined);
-                    }
-                }
-            }
-            for (const [moduleId, entry] of Object.entries(merged.entries ?? {})){
-                const previous = entries[moduleId];
-                if (previous) {
-                    if (!moduleEntriesEqual(previous, entry)) {
-                        hasConflict = true;
-                    }
-                } else {
-                    entries[moduleId] = entry;
-                }
-                if (!addedInThisUpdate.has(moduleId)) {
-                    explicitlyModifiedModules.add(moduleId);
-                }
+function applyChunkListUpdate(update) {
+    if (update.merged != null) {
+        for (const merged of update.merged){
+            switch(merged.type){
+                case 'EcmascriptMergedUpdate':
+                    applyEcmascriptMergedUpdate(merged);
+                    break;
+                default:
+                    invariant(merged, (merged)=>`Unknown merged type: ${merged.type}`);
             }
         }
     }
-    if (hasConflict) {
-        DEV_BACKEND.restart();
-        return resourceOperations;
-    }
-    const filteredEcmascriptChunks = {};
-    for (const [chunkPath, chunkUpdate] of ecmascriptChunks){
-        const transition = ownershipTransitions.get(chunkPath);
-        if (chunkUpdate.type === 'added' && transition && transition.before > 0) {
-            for (const moduleId of chunkUpdate.modules ?? []){
-                if (!explicitlyModifiedModules.has(moduleId)) {
-                    delete entries[moduleId];
-                }
+    if (update.chunks != null) {
+        for (const [chunkPath, chunkUpdate] of Object.entries(update.chunks)){
+            const chunkUrl = getChunkRelativeUrl(chunkPath);
+            switch(chunkUpdate.type){
+                case 'added':
+                    BACKEND.loadChunkCached(SourceType.Update, chunkUrl);
+                    break;
+                case 'total':
+                    DEV_BACKEND.reloadChunk?.(chunkUrl);
+                    break;
+                case 'deleted':
+                    DEV_BACKEND.unloadChunk?.(chunkUrl);
+                    break;
+                case 'partial':
+                    invariant(chunkUpdate.instruction, (instruction)=>`Unknown partial instruction: ${JSON.stringify(instruction)}.`);
+                    break;
+                default:
+                    invariant(chunkUpdate, (chunkUpdate)=>`Unknown chunk update type: ${chunkUpdate.type}`);
             }
-            continue;
-        }
-        if (chunkUpdate.type === 'deleted' && transition && transition.after > 0) {
-            continue;
-        }
-        filteredEcmascriptChunks[chunkPath] = chunkUpdate;
-    }
-    if (Object.keys(entries).length > 0 || Object.keys(filteredEcmascriptChunks).length > 0) {
-        applyEcmascriptMergedUpdate({
-            type: 'EcmascriptMergedUpdate',
-            entries,
-            chunks: filteredEcmascriptChunks
-        });
-    }
-    for (const [chunkPath, chunkUpdate] of chunks){
-        if (chunkUpdate === null) {
-            continue;
-        }
-        const transition = ownershipTransitions.get(chunkPath);
-        const ownerCount = chunkChunkListsMap.get(chunkPath)?.size ?? 0;
-        const chunkUrl = getChunkRelativeUrl(chunkPath);
-        switch(chunkUpdate.type){
-            case 'added':
-                if (!transition || transition.before === 0 && transition.after > 0) {
-                    resourceOperations.push({
-                        chunkPath,
-                        promise: BACKEND.loadChunkCached(SourceType.Update, chunkUrl)
-                    });
-                }
-                break;
-            case 'total':
-                if (ownerCount > 0) {
-                    const promise = DEV_BACKEND.reloadChunk?.(chunkUrl);
-                    if (promise) {
-                        resourceOperations.push({
-                            chunkPath,
-                            promise
-                        });
-                    }
-                }
-                break;
-            case 'deleted':
-                if (!transition || transition.before > 0 && transition.after === 0) {
-                    disposeChunk(chunkPath);
-                }
-                break;
-            case 'partial':
-                invariant(chunkUpdate.instruction, (instruction)=>`Unknown partial instruction: ${JSON.stringify(instruction)}.`);
-                break;
-            default:
-                invariant(chunkUpdate, (chunkUpdate)=>`Unknown chunk update type: ${chunkUpdate.type}`);
         }
     }
-    return resourceOperations;
 }
 function applyEcmascriptMergedUpdate(update) {
     // Browser-specific chunk management phase
@@ -2068,196 +1853,27 @@ function applyEcmascriptMergedUpdate(update) {
         autoAcceptRootModules: false
     });
 }
-function getCurrentTaskPaths(task) {
-    return task.chunkLists.filter(({ path, generation })=>chunkListGenerations.get(path) === generation).map(({ path })=>path);
-}
-function isHmrTaskBlocked(task) {
-    return task.chunkLists.some(({ path, generation })=>{
-        if (chunkListGenerations.get(path) !== generation) return false;
-        const state = dynamicChunkListLoadStates.get(path);
-        return state?.generation === generation && state.loading;
-    });
-}
-function runHmrTask(task) {
-    activeHmrTask = task;
-    void (async ()=>{
-        let resourceOperations = [];
-        try {
-            const currentPaths = new Set(getCurrentTaskPaths(task));
-            if (currentPaths.size > 0) {
-                resourceOperations = task.apply(currentPaths);
-                const results = await Promise.allSettled(resourceOperations.map(({ promise })=>promise));
-                const failedIndex = results.findIndex((result, index)=>result.status === 'rejected' && chunkChunkListsMap.has(resourceOperations[index].chunkPath));
-                if (failedIndex !== -1) {
-                    throw results[failedIndex].reason;
-                }
-            }
-            task.resolve();
-        } catch (cause) {
-            // A terminal update invalidates the generation immediately. Any member
-            // request it cancelled belongs to that old generation and must not turn
-            // a valid replacement subscription into a page reload.
-            if (getCurrentTaskPaths(task).length === 0) {
-                task.resolve();
-            } else {
-                task.reject(cause);
-            }
-        } finally{
-            for (const { chunkPath } of resourceOperations){
-                if (!chunkChunkListsMap.has(chunkPath)) {
-                    disposeChunk(chunkPath);
-                }
-            }
-            if (activeHmrTask === task) {
-                activeHmrTask = undefined;
-            }
-            flushPendingHmrTasks();
-        }
-    })();
-}
-function scheduleHmrTask(chunkListPaths, apply) {
-    const chunkLists = [
-        ...new Set(chunkListPaths)
-    ].flatMap((path)=>{
-        const generation = chunkListGenerations.get(path);
-        return generation === undefined ? [] : [
-            {
-                path,
-                generation
-            }
-        ];
-    });
-    if (chunkLists.length === 0) {
-        return Promise.resolve();
-    }
-    let resolve;
-    let reject;
-    const completion = new Promise((innerResolve, innerReject)=>{
-        resolve = innerResolve;
-        reject = innerReject;
-    });
-    const task = {
-        chunkLists,
-        apply,
-        resolve,
-        reject
-    };
-    for (const { path, generation } of chunkLists){
-        const state = dynamicChunkListLoadStates.get(path);
-        if (state?.generation === generation && state.bootstrapping && !state.terminated) {
-            state.pendingTasks.add(completion);
-            void completion.then(()=>state.pendingTasks.delete(completion), ()=>state.pendingTasks.delete(completion));
-        }
-    }
-    if (activeHmrTask || pendingHmrTasks.length > 0 || isHmrTaskBlocked(task)) {
-        pendingHmrTasks.push(task);
-        flushPendingHmrTasks();
-    } else {
-        runHmrTask(task);
-    }
-    return completion;
-}
-function flushPendingHmrTasks() {
-    if (activeHmrTask) return;
-    while(pendingHmrTasks.length > 0){
-        const task = pendingHmrTasks[0];
-        if (getCurrentTaskPaths(task).length === 0) {
-            pendingHmrTasks.shift();
-            task.resolve();
-            continue;
-        }
-        if (isHmrTaskBlocked(task)) {
-            return;
-        }
-        pendingHmrTasks.shift();
-        runHmrTask(task);
-        return;
-    }
-}
-function handleApplyBatch(updates) {
-    const relevantUpdates = updates.map((update)=>({
-            chunkListPath: update.resource.path,
-            update: update.instruction
-        })).filter(({ chunkListPath })=>chunkListChunksMap.has(chunkListPath));
-    const chunkListPaths = [
-        ...new Set(relevantUpdates.map(({ chunkListPath })=>chunkListPath))
-    ];
-    if (chunkListPaths.length === 0) {
-        return {
-            handledPaths: []
-        };
-    }
-    const bootstrappingPaths = chunkListPaths.filter((chunkListPath)=>{
-        const state = dynamicChunkListLoadStates.get(chunkListPath);
-        return state?.bootstrapping && !state.terminated;
-    });
-    if (bootstrappingPaths.length > 0) {
-        for (const chunkListPath of bootstrappingPaths){
-            const state = dynamicChunkListLoadStates.get(chunkListPath);
-            terminateDynamicChunkListLoad(chunkListPath, state, new Error(`Dynamic chunk list ${chunkListPath} changed while its members were loading.`));
-        }
-        DEV_BACKEND.restart();
-        flushPendingHmrTasks();
-        return {
-            handledPaths: chunkListPaths
-        };
-    }
-    const completion = scheduleHmrTask(chunkListPaths, (currentPaths)=>{
-        const chunkListUpdates = relevantUpdates.filter(({ chunkListPath })=>currentPaths.has(chunkListPath)).map(({ chunkListPath, update })=>{
-            if (update.type !== 'ChunkListUpdate') {
-                invariant(update, (update)=>`Unknown update type: ${update.type}`);
-            }
-            return {
-                chunkListPath,
-                update
-            };
-        });
-        return chunkListUpdates.length > 0 ? applyChunkListUpdates(chunkListUpdates) : [];
-    });
-    return {
-        handledPaths: chunkListPaths,
-        completion
-    };
-}
 function handleApply(chunkListPath, update) {
-    const loadState = dynamicChunkListLoadStates.get(chunkListPath);
-    if (update.type === 'partial' && loadState?.bootstrapping && !loadState.terminated) {
-        terminateDynamicChunkListLoad(chunkListPath, loadState, new Error(`Dynamic chunk list ${chunkListPath} changed while its members were loading.`));
-        DEV_BACKEND.restart();
-        flushPendingHmrTasks();
-        return Promise.resolve();
-    }
-    if (update.type === 'notFound' || update.type === 'restart') {
-        if (loadState && !loadState.terminated) {
-            const error = new Error(update.type === 'notFound' ? `Dynamic chunk list ${chunkListPath} disappeared while loading.` : `Dynamic chunk list ${chunkListPath} must restart while loading.`);
-            terminateDynamicChunkListLoad(chunkListPath, loadState, error);
-        }
-        if (update.type === 'restart') {
-            chunkListGenerations.delete(chunkListPath);
-            dynamicChunkListLoadStates.delete(chunkListPath);
-        }
-        handleApplyImmediately(chunkListPath, update);
-        flushPendingHmrTasks();
-        return Promise.resolve();
-    }
-    return scheduleHmrTask([
-        chunkListPath
-    ], (currentPaths)=>currentPaths.has(chunkListPath) ? handleApplyImmediately(chunkListPath, update) : []);
-}
-function handleApplyImmediately(chunkListPath, update) {
     switch(update.type){
         case 'partial':
             {
                 // This indicates that the update is can be applied to the current state of the application.
-                if (update.instruction.type !== 'ChunkListUpdate') {
-                    invariant(update.instruction, (instruction)=>`Unknown update type: ${instruction.type}`);
-                }
-                return applyChunkListUpdates([
-                    {
-                        chunkListPath,
-                        update: update.instruction
+                if (dynamicChunkLists.has(chunkListPath)) {
+                    if (loadingDynamicChunkLists.has(chunkListPath)) {
+                        throw new Error(`Dynamic chunk list ${chunkListPath} changed while it was loading.`);
                     }
-                ]);
+                    if (update.instruction.type === 'ChunkListUpdate' && update.instruction.chunks != null) {
+                        throw new Error(`Dynamic chunk list ${chunkListPath} changed structure.`);
+                    }
+                    const hasSharedChunk = [
+                        ...chunkListChunksMap.get(chunkListPath) ?? []
+                    ].some((chunkPath)=>(chunkChunkListsMap.get(chunkPath)?.size ?? 0) > 1);
+                    if (hasSharedChunk) {
+                        throw new Error(`Dynamic chunk list ${chunkListPath} shares chunks with another active list.`);
+                    }
+                }
+                applyUpdate(update.instruction);
+                break;
             }
         case 'restart':
             {
@@ -2265,7 +1881,7 @@ function handleApplyImmediately(chunkListPath, update) {
                 // current state of the application, and that the application must be
                 // restarted.
                 DEV_BACKEND.restart();
-                return [];
+                break;
             }
         case 'notFound':
             {
@@ -2273,76 +1889,15 @@ function handleApplyImmediately(chunkListPath, update) {
                 // or the page itself was deleted.
                 // If it is a dynamic import, we simply discard all modules that the chunk has exclusive access to.
                 // If it is a runtime chunk list, we restart the application.
-                if (runtimeChunkLists.has(chunkListPath)) {
+                if (runtimeChunkLists.has(chunkListPath) || dynamicChunkLists.has(chunkListPath)) {
                     DEV_BACKEND.restart();
                 } else {
                     disposeChunkList(chunkListPath);
                 }
-                return [];
+                break;
             }
         default:
             throw new Error(`Unknown update type: ${update.type}`);
-    }
-}
-function applyChunkListMembershipDelta(chunkListPath, chunkPath, type, transitions) {
-    let transition = transitions.get(chunkPath);
-    if (!transition) {
-        const ownerCount = chunkChunkListsMap.get(chunkPath)?.size ?? 0;
-        transition = {
-            before: ownerCount,
-            after: ownerCount
-        };
-        transitions.set(chunkPath, transition);
-    }
-    const changed = type === 'added' ? addChunkToChunkList(chunkListPath, chunkPath) : removeChunkFromChunkList(chunkListPath, chunkPath);
-    transition.after = chunkChunkListsMap.get(chunkPath)?.size ?? 0;
-    return changed;
-}
-function addChunkToChunkList(chunkListPath, chunkPath) {
-    let chunkPaths = chunkListChunksMap.get(chunkListPath);
-    if (!chunkPaths) {
-        chunkPaths = new Set();
-        chunkListChunksMap.set(chunkListPath, chunkPaths);
-    }
-    if (chunkPaths.has(chunkPath)) {
-        return false;
-    }
-    chunkPaths.add(chunkPath);
-    let chunkLists = chunkChunkListsMap.get(chunkPath);
-    if (!chunkLists) {
-        chunkLists = new Set();
-        chunkChunkListsMap.set(chunkPath, chunkLists);
-    }
-    chunkLists.add(chunkListPath);
-    return true;
-}
-function removeChunkFromChunkList(chunkListPath, chunkPath) {
-    const chunkPaths = chunkListChunksMap.get(chunkListPath);
-    const chunkLists = chunkChunkListsMap.get(chunkPath);
-    if (!chunkPaths?.has(chunkPath) || !chunkLists?.has(chunkListPath)) {
-        return false;
-    }
-    chunkPaths.delete(chunkPath);
-    chunkLists.delete(chunkListPath);
-    if (chunkLists.size === 0) {
-        chunkChunkListsMap.delete(chunkPath);
-    }
-    return true;
-}
-function setChunkListChunks(chunkListPath, nextChunkPaths) {
-    const previousChunkPaths = new Set(chunkListChunksMap.get(chunkListPath) ?? []);
-    if (!chunkListChunksMap.has(chunkListPath)) {
-        chunkListChunksMap.set(chunkListPath, new Set());
-    }
-    for (const chunkPath of previousChunkPaths){
-        if (!nextChunkPaths.has(chunkPath) && removeChunkFromChunkList(chunkListPath, chunkPath) && !chunkChunkListsMap.has(chunkPath)) {
-            disposeChunk(chunkPath);
-        }
-    }
-    for (const chunkPath of nextChunkPaths){
-        if (!previousChunkPaths.has(chunkPath)) {
-            addChunkToChunkList(chunkListPath, chunkPath);
-        }
     }
 }
 /**
@@ -2363,82 +1918,6 @@ function setChunkListChunks(chunkListPath, nextChunkPaths) {
     }
     return noRemainingChunks;
 }
-function terminateDynamicChunkListLoad(chunkListPath, state, error) {
-    if (state.terminated) return;
-    state.loading = false;
-    state.bootstrapping = false;
-    state.terminated = true;
-    state.rejectSubscribed?.(error);
-    DEV_BACKEND.rejectChunk?.(chunkListPath, error);
-    for (const [chunkPath, chunkUrl] of state.memberChunkUrls){
-        releaseDynamicMemberChunkUrlOwner(chunkListPath, state.generation, chunkPath, chunkUrl);
-    }
-}
-function addDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkUrl) {
-    let owners = dynamicMemberChunkUrlOwners.get(chunkUrl);
-    if (!owners) {
-        owners = new Map();
-        dynamicMemberChunkUrlOwners.set(chunkUrl, owners);
-    }
-    owners.set(chunkListPath, generation);
-}
-function releaseDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkPath, chunkUrl) {
-    const owners = dynamicMemberChunkUrlOwners.get(chunkUrl);
-    if (owners?.get(chunkListPath) !== generation) return;
-    owners.delete(chunkListPath);
-    if (owners.size > 0) return;
-    dynamicMemberChunkUrlOwners.delete(chunkUrl);
-    if (isJs(chunkUrl)) {
-        // Executed factories are already tracked by logical chunk ownership. The
-        // exact URL is removed so a cancelled in-flight script cannot satisfy a
-        // later request for the same logical chunk.
-        DEV_BACKEND.unloadChunkExact?.(chunkUrl);
-    } else {
-        const hasOtherChunkListOwner = [
-            ...chunkChunkListsMap.get(chunkPath) ?? []
-        ].some((owner)=>owner !== chunkListPath);
-        if (hasOtherChunkListOwner) return;
-        DEV_BACKEND.unloadChunkExact?.(chunkUrl);
-    }
-    if (!chunkChunkListsMap.has(chunkPath)) {
-        disposeChunk(chunkPath);
-    }
-}
-function completeDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkUrl) {
-    const owners = dynamicMemberChunkUrlOwners.get(chunkUrl);
-    if (owners?.get(chunkListPath) !== generation) return;
-    owners.delete(chunkListPath);
-    if (owners.size === 0) {
-        dynamicMemberChunkUrlOwners.delete(chunkUrl);
-    }
-}
-function loadVersionedDynamicMemberChunk(chunkListPath, chunkData, versionToken) {
-    const chunkPath = getChunkPath(chunkData);
-    const chunkUrl = getVersionedChunkUrl(chunkPath, versionToken);
-    if (isCss(chunkUrl) && DEV_BACKEND.loadChunkReplacing) {
-        // A previous owner may have loaded an older content-version URL for the
-        // same stylesheet. Swap it only after the new CSS has loaded so dynamic
-        // lists never accumulate duplicate cascade entries.
-        return DEV_BACKEND.loadChunkReplacing(chunkUrl);
-    }
-    return loadVersionedInitialChunk(chunkListPath, chunkData, versionToken);
-}
-function getVersionedChunkUrl(chunkPath, versionToken) {
-    const chunkUrl = getChunkRelativeUrl(chunkPath);
-    const separator = chunkUrl.includes('?') ? '&' : '?';
-    return `${chunkUrl}${separator}hmr=${encodeURIComponent(versionToken)}`;
-}
-function isVersionedDynamicMemberChunkUrl(chunkUrl) {
-    return /(?:[?&])hmr=/.test(chunkUrl);
-}
-/**
- * Dynamic chunk-list manifests have already done their own availability
- * calculation. Load the exact member URL for this manifest generation so an
- * older in-flight request cannot be reused by a replacement generation.
- */ function loadVersionedInitialChunk(chunkPath, chunkData, versionToken) {
-    const memberChunkPath = getChunkPath(chunkData);
-    return loadChunkByUrlInternal(SourceType.Runtime, chunkPath, getVersionedChunkUrl(memberChunkPath, versionToken));
-}
 /**
  * Disposes of a chunk list and its corresponding exclusive chunks.
  */ function disposeChunkList(chunkListPath) {
@@ -2446,17 +1925,15 @@ function isVersionedDynamicMemberChunkUrl(chunkUrl) {
     if (chunkPaths == null) {
         return false;
     }
-    for (const chunkPath of [
-        ...chunkPaths
-    ]){
-        if (removeChunkFromChunkList(chunkListPath, chunkPath) && !chunkChunkListsMap.has(chunkPath)) {
+    chunkListChunksMap.delete(chunkListPath);
+    for (const chunkPath of chunkPaths){
+        const chunkChunkLists = chunkChunkListsMap.get(chunkPath);
+        chunkChunkLists.delete(chunkListPath);
+        if (chunkChunkLists.size === 0) {
+            chunkChunkListsMap.delete(chunkPath);
             disposeChunk(chunkPath);
         }
     }
-    chunkListChunksMap.delete(chunkListPath);
-    chunkListGenerations.delete(chunkListPath);
-    dynamicChunkListLoadStates.delete(chunkListPath);
-    runtimeChunkLists.delete(chunkListPath);
     // We must also dispose of the chunk list's chunk itself to ensure it may
     // be reloaded properly in the future.
     const chunkListUrl = getChunkRelativeUrl(chunkListPath);
@@ -2476,7 +1953,7 @@ function isVersionedDynamicMemberChunkUrl(chunkUrl) {
     if (chunkModules == null) {
         return false;
     }
-    chunkModulesMap.delete(chunkPath);
+    chunkModules.delete(chunkPath);
     for (const moduleId of chunkModules){
         const moduleChunks = moduleChunksMap.get(moduleId);
         moduleChunks.delete(chunkPath);
@@ -2522,7 +1999,7 @@ function getDevChunkFromRegistration(chunk) {
     if (typeof chunk === 'string') {
         if (typeof document !== 'undefined') {
             const src = document.currentScript?.getAttribute('src');
-            if (src && getPathFromScript({
+            if (src && /[?&]hmr=/.test(src) && getPathFromScript({
                 src
             }) === chunk) {
                 return {
@@ -2530,177 +2007,102 @@ function getDevChunkFromRegistration(chunk) {
                 };
             }
         }
-        if (typeof TURBOPACK_NEXT_CHUNK_URLS !== 'undefined' && TURBOPACK_NEXT_CHUNK_URLS.length > 0) {
-            return {
-                src: TURBOPACK_NEXT_CHUNK_URLS.pop()
-            };
-        }
     }
     return getChunkFromRegistration(chunk);
 }
 function registerChunk(registration) {
     const chunk = getDevChunkFromRegistration(registration[0]);
-    const chunkPath = getPathFromScript(chunk);
-    const chunkUrl = getUrlFromScript(chunk);
-    const canonicalChunkUrl = getChunkRelativeUrl(chunkPath);
     let runtimeParams;
     // When bootstrapping we are passed a single runtimeParams object so we can distinguish purely based on length
     if (registration.length === 2) {
         runtimeParams = registration[1];
     } else {
+        let chunkPath = getPathFromScript(chunk);
         runtimeParams = undefined;
-        if (chunkUrl !== canonicalChunkUrl && isVersionedDynamicMemberChunkUrl(chunkUrl) && !dynamicMemberChunkUrlOwners.has(chunkUrl)) {
-            // Registration can race with cancellation even after its script element
-            // was removed. Only a live owner may install this content-versioned
-            // chunk; a later owner of the same URL is safe because its content is
-            // identical.
-            DEV_BACKEND.unloadChunkExact?.(chunkUrl);
-            return;
-        }
         installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories, (id)=>addModuleToChunk(id, chunkPath));
     }
-    if (runtimeParams === undefined && chunkUrl !== canonicalChunkUrl && DEV_BACKEND.resolveChunk) {
-        // Versioned development chunks have their own resolver. Resolving the
-        // canonical path here could let an older generation wake a newer load.
-        DEV_BACKEND.resolveChunk(chunkUrl);
-        return;
-    }
-    const result = BACKEND.registerChunk(chunk, runtimeParams);
-    if (chunkUrl !== canonicalChunkUrl) {
-        DEV_BACKEND.resolveChunk?.(chunkUrl);
-    }
-    return result;
+    return BACKEND.registerChunk(chunk, runtimeParams);
+}
+function getVersionedChunkUrl(chunkPath, versionToken) {
+    const chunkUrl = getChunkRelativeUrl(chunkPath);
+    const separator = chunkUrl.includes('?') ? '&' : '?';
+    return `${chunkUrl}${separator}hmr=${encodeURIComponent(versionToken)}`;
+}
+function loadVersionedInitialChunk(chunkListPath, chunkData, versionToken) {
+    return loadChunkByUrlInternal(SourceType.Runtime, chunkListPath, getVersionedChunkUrl(getChunkPath(chunkData), versionToken));
 }
 /**
  * Subscribes to chunk list updates from the update server and applies them.
  */ function registerChunkList(chunkList) {
     const chunkListScript = getDevChunkFromRegistration(chunkList.script);
     const chunkListPath = getPathFromScript(chunkListScript);
-    const generation = nextChunkListGeneration++;
-    chunkListGenerations.set(chunkListPath, generation);
+    // Adding chunks to chunk lists and vice versa.
     const chunkPaths = new Set(chunkList.chunks.map(getChunkPath));
-    setChunkListChunks(chunkListPath, chunkPaths);
+    chunkListChunksMap.set(chunkListPath, chunkPaths);
+    for (const chunkPath of chunkPaths){
+        let chunkChunkLists = chunkChunkListsMap.get(chunkPath);
+        if (!chunkChunkLists) {
+            chunkChunkLists = new Set([
+                chunkListPath
+            ]);
+            chunkChunkListsMap.set(chunkPath, chunkChunkLists);
+        } else {
+            chunkChunkLists.add(chunkListPath);
+        }
+    }
     if (chunkList.source === 'entry') {
-        // Entry chunks have already loaded their member chunks while bootstrapping.
-        // The "chunk" registration completes the backend's initial load.
+        // Entry lists keep the legacy loading and update behavior.
         BACKEND.registerChunk(chunkListPath);
-        markChunkListAsRuntime(chunkListPath);
         CHUNK_UPDATE_LISTENERS.push([
             chunkListPath,
-            handleApply.bind(null, chunkListPath),
-            {
-                batch: handleApplyBatch,
-                expectedVersion: chunkList.version
-            }
+            handleApply.bind(null, chunkListPath)
         ]);
+        markChunkListAsRuntime(chunkListPath);
         return;
     }
+    dynamicChunkLists.add(chunkListPath);
     if (typeof document === 'undefined') {
-        // Workers currently have no HMR transport/provider. Keep the dynamic
-        // chunk-list as a lightweight bootstrap, but load its members directly
-        // instead of waiting forever for an onSubscribed acknowledgement.
-        void Promise.all(chunkList.chunks.map((chunkData)=>loadInitialChunk(chunkListPath, chunkData))).then(()=>BACKEND.registerChunk(chunkListPath), (cause)=>{
-            const error = cause instanceof Error ? cause : new Error(`Failed to load a worker dynamic chunk group: ${String(cause)}`);
-            DEV_BACKEND.rejectChunk?.(chunkListPath, error);
-        });
+        // Workers do not have the browser HMR transport. Load the manifest members
+        // directly so the dynamic import cannot wait for a subscription forever.
+        void Promise.all(chunkList.chunks.map((chunkData)=>loadInitialChunk(chunkListPath, chunkData))).then(()=>BACKEND.registerChunk(chunkListPath), ()=>DEV_BACKEND.restart());
         return;
     }
-    // A dynamic chunk list is the bootstrap for its group. Establish the server
-    // baseline before fetching content, then hold updates while content loads.
-    // This closes the HTTP/WebSocket race where stale content could otherwise be
-    // fetched immediately before a newer subscription baseline was created.
-    const loadState = {
-        generation,
-        loading: true,
-        bootstrapping: true,
-        terminated: false,
-        pendingTasks: new Set(),
-        memberChunkUrls: new Map()
-    };
-    for (const chunkData of chunkList.chunks){
-        const chunkPath = getChunkPath(chunkData);
-        const chunkVersion = chunkList.chunkVersions[chunkPath];
-        if (chunkVersion === undefined) {
-            throw new Error(`Missing version for dynamic member chunk ${chunkPath}`);
-        }
-        const chunkUrl = getVersionedChunkUrl(chunkPath, chunkVersion);
-        loadState.memberChunkUrls.set(chunkPath, chunkUrl);
-        addDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkUrl);
-    }
-    dynamicChunkListLoadStates.set(chunkListPath, loadState);
+    loadingDynamicChunkLists.add(chunkListPath);
     let resolveSubscribed;
     let revalidateSubscription;
-    const subscribed = new Promise((resolve, reject)=>{
+    const subscribed = new Promise((resolve)=>{
         resolveSubscribed = resolve;
-        loadState.rejectSubscribed = reject;
     });
     CHUNK_UPDATE_LISTENERS.push([
         chunkListPath,
         handleApply.bind(null, chunkListPath),
         {
-            batch: handleApplyBatch,
+            conservative: true,
+            expectedVersion: chunkList.version,
             onSubscribed: (revalidate)=>{
                 revalidateSubscription = revalidate;
                 resolveSubscribed();
-            },
-            expectedVersion: chunkList.version
+            }
         }
     ]);
     void (async ()=>{
         try {
             await subscribed;
-            if (loadState.terminated || dynamicChunkListLoadStates.get(chunkListPath) !== loadState || chunkListGenerations.get(chunkListPath) !== generation) {
-                return;
-            }
-            const memberResults = await Promise.allSettled(chunkList.chunks.map((chunkData)=>loadVersionedDynamicMemberChunk(chunkListPath, chunkData, chunkList.chunkVersions[getChunkPath(chunkData)])));
-            if (loadState.terminated || dynamicChunkListLoadStates.get(chunkListPath) !== loadState || chunkListGenerations.get(chunkListPath) !== generation) {
-                for (const chunkPath of chunkPaths){
-                    if (!chunkChunkListsMap.has(chunkPath)) {
-                        disposeChunk(chunkPath);
-                    }
+            await Promise.all(chunkList.chunks.map((chunkData)=>{
+                const chunkPath = getChunkPath(chunkData);
+                const chunkVersion = chunkList.chunkVersions[chunkPath];
+                if (chunkVersion === undefined) {
+                    throw new Error(`Missing version for dynamic member chunk ${chunkPath}`);
                 }
-                return;
-            }
-            const failedMember = memberResults.find((result)=>result.status === 'rejected');
-            if (failedMember) {
-                throw failedMember.reason;
-            }
-            // The member URLs are served from the live output directory rather than
-            // a historical snapshot. Validate the manifest version again after all
-            // HTTP responses have completed, closing the subscription/HTTP race.
+                return loadVersionedInitialChunk(chunkListPath, chunkData, chunkVersion);
+            }));
+            // Member URLs are served from the live output directory. Verify that
+            // the manifest did not change while those HTTP responses were loading.
             await revalidateSubscription();
-            if (loadState.terminated || dynamicChunkListLoadStates.get(chunkListPath) !== loadState || chunkListGenerations.get(chunkListPath) !== generation) {
-                return;
-            }
-            for (const chunkUrl of loadState.memberChunkUrls.values()){
-                completeDynamicMemberChunkUrlOwner(chunkListPath, generation, chunkUrl);
-            }
-            loadState.loading = false;
-            flushPendingHmrTasks();
-            while(loadState.pendingTasks.size > 0){
-                await Promise.all([
-                    ...loadState.pendingTasks
-                ]);
-            }
-            if (loadState.terminated || dynamicChunkListLoadStates.get(chunkListPath) !== loadState || chunkListGenerations.get(chunkListPath) !== generation) {
-                for (const chunkPath of chunkPaths){
-                    if (!chunkChunkListsMap.has(chunkPath)) {
-                        disposeChunk(chunkPath);
-                    }
-                }
-                return;
-            }
-            // Resolving the bootstrap schedules the import continuation as a
-            // microtask. Every queued update and resource load has completed first,
-            // so user code cannot observe factories from an older manifest.
-            loadState.bootstrapping = false;
+            loadingDynamicChunkLists.delete(chunkListPath);
             BACKEND.registerChunk(chunkListPath);
-        } catch (cause) {
-            if (loadState.terminated || dynamicChunkListLoadStates.get(chunkListPath) !== loadState || chunkListGenerations.get(chunkListPath) !== generation) {
-                return;
-            }
-            const error = cause instanceof Error ? cause : new Error(`Failed to load a dynamic chunk group: ${String(cause)}`);
-            terminateDynamicChunkListLoad(chunkListPath, loadState, error);
+        } catch  {
+            loadingDynamicChunkLists.delete(chunkListPath);
             DEV_BACKEND.restart();
         }
     })();
@@ -2729,6 +2131,10 @@ let BACKEND;
             let chunkUrl = getUrlFromScript(chunkPath);
             const resolver = getOrCreateResolver(chunkUrl);
             resolver.resolve();
+            const exactChunkUrl = getUrlFromScript(chunk);
+            if (exactChunkUrl !== chunkUrl && /[?&]hmr=/.test(exactChunkUrl)) {
+                getOrCreateResolver(exactChunkUrl).resolve();
+            }
             if (params == null) {
                 return;
             }
@@ -2959,47 +2365,31 @@ let BACKEND;
 /// <reference path="../../../shared/require-type.d.ts" />
 let DEV_BACKEND;
 (()=>{
-    const pendingChunkReloads = new Map();
-    const replacingCssLoads = new Map();
     DEV_BACKEND = {
-        loadChunkReplacing (chunkUrl) {
-            if (!isCss(chunkUrl)) {
-                return Promise.reject(new Error(`Only CSS chunks can be replaced while loading: ${chunkUrl}`));
-            }
-            const existingLoad = replacingCssLoads.get(chunkUrl);
-            if (existingLoad) return existingLoad;
-            const baseChunkUrl = chunkUrl.split('?')[0];
-            const decodedBaseChunkUrl = decodeURI(baseChunkUrl);
-            const cacheBusterSeparator = chunkUrl.includes('?') ? '&' : '?';
-            const decodedChunkUrl = decodeURI(chunkUrl);
-            const exactLinks = document.querySelectorAll(`link[rel=stylesheet][href="${chunkUrl}"],link[rel=stylesheet][href^="${chunkUrl}${cacheBusterSeparator}"],link[rel=stylesheet][href="${decodedChunkUrl}"],link[rel=stylesheet][href^="${decodedChunkUrl}${cacheBusterSeparator}"]`);
-            const baseLinks = document.querySelectorAll(`link[rel=stylesheet][href="${baseChunkUrl}"],link[rel=stylesheet][href^="${baseChunkUrl}?"],link[rel=stylesheet][href="${decodedBaseChunkUrl}"],link[rel=stylesheet][href^="${decodedBaseChunkUrl}?"]`);
-            const load = exactLinks.length > 0 ? resolveChunkResolver(chunkUrl) : baseLinks.length === 0 ? BACKEND.loadChunkCached(SourceType.Runtime, chunkUrl) : DEV_BACKEND.reloadChunk(chunkUrl).then(()=>resolveChunkResolver(chunkUrl));
-            replacingCssLoads.set(chunkUrl, load);
-            void load.then(()=>{
-                if (replacingCssLoads.get(chunkUrl) === load) {
-                    replacingCssLoads.delete(chunkUrl);
-                }
-            }, ()=>{
-                if (replacingCssLoads.get(chunkUrl) === load) {
-                    replacingCssLoads.delete(chunkUrl);
-                }
-            });
-            return load;
-        },
         unloadChunk (chunkUrl) {
-            unloadChunk(chunkUrl, false);
-        },
-        unloadChunkExact (chunkUrl) {
-            unloadChunk(chunkUrl, true);
-        },
-        rejectChunk (chunkPath, error) {
-            const chunkUrl = getUrlFromScript(chunkPath);
-            const resolver = chunkResolvers.get(chunkUrl);
-            if (resolver) rejectResolver(chunkUrl, resolver, error);
-        },
-        resolveChunk (chunkUrl) {
-            resolveChunkResolver(chunkUrl);
+            deleteResolver(chunkUrl);
+            // Strip query string so we match links regardless of cache-busting
+            // params (e.g. ?ts=) that may differ between HMR updates.
+            const baseChunkUrl = chunkUrl.split('?')[0];
+            // TODO(PACK-2140): remove this once all filenames are guaranteed to be escaped.
+            const decodedBaseChunkUrl = decodeURI(baseChunkUrl);
+            if (isCss(chunkUrl)) {
+                const links = document.querySelectorAll(`link[href="${baseChunkUrl}"],link[href^="${baseChunkUrl}?"],link[href="${decodedBaseChunkUrl}"],link[href^="${decodedBaseChunkUrl}?"]`);
+                for (const link of Array.from(links)){
+                    link.remove();
+                }
+            } else if (isJs(chunkUrl)) {
+                // Unloading a JS chunk would have no effect, as it lives in the JS
+                // runtime once evaluated.
+                // However, we still want to remove the script tag from the DOM to keep
+                // the HTML somewhat consistent from the user's perspective.
+                const scripts = document.querySelectorAll(`script[src="${baseChunkUrl}"],script[src^="${baseChunkUrl}?"],script[src="${decodedBaseChunkUrl}"],script[src^="${decodedBaseChunkUrl}?"]`);
+                for (const script of Array.from(scripts)){
+                    script.remove();
+                }
+            } else {
+                throw new Error(`can't infer type of chunk from URL ${chunkUrl}`);
+            }
         },
         reloadChunk (chunkUrl) {
             return new Promise((resolve, reject)=>{
@@ -3016,43 +2406,9 @@ let DEV_BACKEND;
                     reject(new Error(`No link element found for chunk ${chunkUrl}`));
                     return;
                 }
-                const currentReloads = pendingChunkReloads.get(baseChunkUrl);
-                if (currentReloads) {
-                    const suffix = chunkUrl.includes('?') ? '&' : '?';
-                    for (const reload of [
-                        ...currentReloads
-                    ]){
-                        const href = reload.link.getAttribute('href');
-                        if (href !== chunkUrl && !href?.startsWith(`${chunkUrl}${suffix}`)) {
-                            reload.reject(new Error(`CSS chunk ${chunkUrl} superseded an in-flight reload.`));
-                        }
-                    }
-                }
                 const link = document.createElement('link');
                 link.rel = 'stylesheet';
                 link.crossOrigin = CROSS_ORIGIN;
-                let pendingReloads = pendingChunkReloads.get(baseChunkUrl);
-                if (!pendingReloads) {
-                    pendingReloads = new Set();
-                    pendingChunkReloads.set(baseChunkUrl, pendingReloads);
-                }
-                const cleanup = ()=>{
-                    pendingReloads.delete(pendingReload);
-                    if (pendingReloads.size === 0) {
-                        pendingChunkReloads.delete(baseChunkUrl);
-                    }
-                };
-                const pendingReload = {
-                    link,
-                    reject: (error)=>{
-                        cleanup();
-                        link.onload = null;
-                        link.onerror = null;
-                        link.remove();
-                        reject(error);
-                    }
-                };
-                pendingReloads.add(pendingReload);
                 if (navigator.userAgent.includes('Firefox') || navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Chromium')) {
                     // Firefox won't reload CSS files that were previously loaded on the
                     // current page: https://bugzilla.mozilla.org/show_bug.cgi?id=1037506
@@ -3073,10 +2429,9 @@ let DEV_BACKEND;
                     link.href = chunkUrl;
                 }
                 link.onerror = ()=>{
-                    pendingReload.reject(new Error(`Failed to reload CSS chunk ${chunkUrl}`));
+                    reject();
                 };
                 link.onload = ()=>{
-                    cleanup();
                     // First load the new CSS, then remove the old ones. This prevents visible
                     // flickering that would happen in-between removing the previous CSS and
                     // loading the new one.
@@ -3092,87 +2447,8 @@ let DEV_BACKEND;
         },
         restart: ()=>self.location.reload()
     };
-    function rejectResolver(chunkUrl, resolver, error) {
-        if (chunkResolvers.get(chunkUrl) === resolver) {
-            chunkResolvers.delete(chunkUrl);
-        }
-        resolver.reject(error);
-    }
-    function resolveChunkResolver(chunkUrl) {
-        let resolver = chunkResolvers.get(chunkUrl);
-        if (!resolver) {
-            let resolve;
-            let reject;
-            const promise = new Promise((innerResolve, innerReject)=>{
-                resolve = innerResolve;
-                reject = innerReject;
-            });
-            resolver = {
-                resolved: false,
-                loadingStarted: false,
-                retryAttempts: 0,
-                promise,
-                resolve: ()=>{
-                    resolver.resolved = true;
-                    resolve();
-                },
-                reject: reject
-            };
-            chunkResolvers.set(chunkUrl, resolver);
-        }
-        resolver.resolve();
-        return resolver.promise;
-    }
-    function unloadChunk(chunkUrl, exact) {
-        deleteResolvers(chunkUrl, exact);
-        const baseChunkUrl = chunkUrl.split('?')[0];
-        const reloads = pendingChunkReloads.get(baseChunkUrl);
-        if (reloads) {
-            for (const reload of [
-                ...reloads
-            ]){
-                const href = reload.link.getAttribute('href');
-                const suffix = chunkUrl.includes('?') ? '&' : '?';
-                if (!exact || href === chunkUrl || href?.startsWith(`${chunkUrl}${suffix}`)) {
-                    reload.reject(new Error(`Chunk ${chunkUrl} was unloaded while reloading.`));
-                }
-            }
-        }
-        // TODO(PACK-2140): remove this once all filenames are guaranteed to be escaped.
-        const decodedChunkUrl = decodeURI(exact ? chunkUrl : baseChunkUrl);
-        const path = exact ? chunkUrl : baseChunkUrl;
-        const suffix = exact ? path.includes('?') ? '&' : '?' : '?';
-        if (isCss(chunkUrl)) {
-            const links = document.querySelectorAll(`link[href="${path}"],link[href^="${path}${suffix}"],link[href="${decodedChunkUrl}"],link[href^="${decodedChunkUrl}${suffix}"]`);
-            for (const link of Array.from(links)){
-                link.remove();
-            }
-        } else if (isJs(chunkUrl)) {
-            // Unloading a JS chunk would have no effect once it has executed, but
-            // removing the exact stale registration keeps the DOM and resolver cache
-            // bounded without touching a newer generation of the same chunk path.
-            const scripts = document.querySelectorAll(`script[src="${path}"],script[src^="${path}${suffix}"],script[src="${decodedChunkUrl}"],script[src^="${decodedChunkUrl}${suffix}"]`);
-            for (const script of Array.from(scripts)){
-                script.remove();
-            }
-        } else {
-            throw new Error(`can't infer type of chunk from URL ${chunkUrl}`);
-        }
-    }
-    function deleteResolvers(chunkUrl, exact) {
-        const baseChunkUrl = chunkUrl.split('?')[0];
-        for (const [resolverUrl, resolver] of [
-            ...chunkResolvers
-        ]){
-            if (exact ? resolverUrl !== chunkUrl : resolverUrl.split('?')[0] !== baseChunkUrl) {
-                continue;
-            }
-            if (resolver.resolved) {
-                chunkResolvers.delete(resolverUrl);
-            } else {
-                rejectResolver(resolverUrl, resolver, new Error(`Chunk ${resolverUrl} was unloaded while loading.`));
-            }
-        }
+    function deleteResolver(chunkUrl) {
+        chunkResolvers.delete(chunkUrl);
     }
 })();
 function _eval({ code, url, map }) {

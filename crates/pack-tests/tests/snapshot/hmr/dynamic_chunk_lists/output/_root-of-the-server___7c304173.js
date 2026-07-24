@@ -709,34 +709,27 @@ __turbopack_context__.s([
 ]);
 const TURBOPACK_CHUNK_UPDATE_LISTENERS_GLOBAL = 'TURBOPACK_CHUNK_UPDATE_LISTENERS';
 function connect({ addMessageListener, sendMessage, onUpdateError = console.error, chunkUpdateListenersGlobal }) {
-    const reportUpdateError = (e)=>{
-        console.warn('[Fast Refresh] performing full reload\n\n' + "Fast Refresh will perform a full reload when you edit a file that's imported by modules outside of the React rendering tree.\n" + 'You might have a file which exports a React component but also exports a value that is imported by a non-React component file.\n' + 'Consider migrating the non-React component export to a separate file and importing it into both files.\n\n' + 'It is also possible the parent component of the component you edited is a class component, which disables Fast Refresh.\n' + 'Fast Refresh requires at least one parent function component in your React tree.');
-        onUpdateError(e);
-        location.reload();
-    };
     addMessageListener((msg)=>{
-        try {
-            switch(msg.type){
-                case 'turbopack-connected':
-                    handleSocketConnected(sendMessage);
-                    break;
-                default:
-                    {
-                        const completions = [];
-                        if (Array.isArray(msg.data)) {
-                            for(let i = 0; i < msg.data.length; i++){
-                                completions.push(handleSocketMessage(msg.data[i]));
-                            }
-                        } else {
-                            completions.push(handleSocketMessage(msg.data));
+        switch(msg.type){
+            case 'turbopack-connected':
+                handleSocketConnected(sendMessage);
+                break;
+            default:
+                try {
+                    if (Array.isArray(msg.data)) {
+                        for(let i = 0; i < msg.data.length; i++){
+                            handleSocketMessage(msg.data[i]);
                         }
-                        completions.push(applyAggregatedUpdates());
-                        void Promise.all(completions).catch(reportUpdateError);
-                        break;
+                    } else {
+                        handleSocketMessage(msg.data);
                     }
-            }
-        } catch (e) {
-            reportUpdateError(e);
+                    applyAggregatedUpdates();
+                } catch (e) {
+                    console.warn('[Fast Refresh] performing full reload\n\n' + "Fast Refresh will perform a full reload when you edit a file that's imported by modules outside of the React rendering tree.\n" + 'You might have a file which exports a React component but also exports a value that is imported by a non-React component file.\n' + 'Consider migrating the non-React component export to a separate file and importing it into both files.\n\n' + 'It is also possible the parent component of the component you edited is a class component, which disables Fast Refresh.\n' + 'Fast Refresh requires at least one parent function component in your React tree.');
+                    onUpdateError(e);
+                    location.reload();
+                }
+                break;
         }
     });
     const global = globalThis;
@@ -746,12 +739,12 @@ function connect({ addMessageListener, sendMessage, onUpdateError = console.erro
     }
     global[chunkUpdateListenersGlobal] = {
         push: ([chunkPath, callback, options])=>{
-            subscribeToChunkUpdate(chunkPath, sendMessage, callback, options?.batch, options?.onSubscribed, options?.expectedVersion);
+            subscribeToChunkUpdate(chunkPath, sendMessage, callback, options?.conservative, options?.onSubscribed, options?.expectedVersion);
         }
     };
     if (Array.isArray(queued)) {
         for (const [chunkPath, callback, options] of queued){
-            subscribeToChunkUpdate(chunkPath, sendMessage, callback, options?.batch, options?.onSubscribed, options?.expectedVersion);
+            subscribeToChunkUpdate(chunkPath, sendMessage, callback, options?.conservative, options?.onSubscribed, options?.expectedVersion);
         }
     }
 }
@@ -764,6 +757,9 @@ function resourceKey(resource) {
         path: resource.path,
         headers: resource.headers || null
     });
+}
+function createValidationToken() {
+    return `${Date.now()}:${Math.random()}`;
 }
 function subscribeToUpdates(sendMessage, resource, expectedVersion, validation) {
     sendJSON(sendMessage, {
@@ -782,6 +778,9 @@ function subscribeToUpdates(sendMessage, resource, expectedVersion, validation) 
 function handleSocketConnected(sendMessage) {
     for (const [key, callbackSet] of updateCallbackSets){
         callbackSet.subscribed = false;
+        if (callbackSet.validationToken !== undefined) {
+            callbackSet.validationToken = createValidationToken();
+        }
         callbackSet.unsubscribe = subscribeToUpdates(sendMessage, JSON.parse(key), callbackSet.expectedVersion, callbackSet.validationToken);
     }
 }
@@ -797,57 +796,19 @@ function aggregateUpdates(msg) {
     }
 }
 function applyAggregatedUpdates() {
-    if (chunkListsWithPendingUpdates.size === 0) return Promise.resolve();
-    hooks.beforeRefresh();
+    if (chunkListsWithPendingUpdates.size === 0) return;
     const updates = [
         ...chunkListsWithPendingUpdates.values()
     ];
     chunkListsWithPendingUpdates.clear();
-    const { handledCallbacks, completions } = triggerUpdateBatch(updates);
+    if (updates.length > 1 && updates.some((update)=>updateCallbackSets.get(resourceKey(update.resource))?.conservative)) {
+        throw new Error('Multiple dynamic HMR lists changed in one build; reloading conservatively.');
+    }
+    hooks.beforeRefresh();
     for (const msg of updates){
-        completions.push(...triggerUpdate(msg, handledCallbacks.get(msg.resource.path)));
+        triggerUpdate(msg);
     }
-    return Promise.all(completions).then(()=>finalizeUpdate());
-}
-function triggerUpdateBatch(updates) {
-    const callbacks = new Map();
-    for (const update of updates){
-        const callbackSet = updateCallbackSets.get(resourceKey(update.resource));
-        if (callbackSet) {
-            for (const [callback, updateCallbacks] of callbackSet.batchCallbacks){
-                let registeredCallbacks = callbacks.get(callback);
-                if (!registeredCallbacks) {
-                    registeredCallbacks = new Set();
-                    callbacks.set(callback, registeredCallbacks);
-                }
-                for (const updateCallback of updateCallbacks){
-                    registeredCallbacks.add(updateCallback);
-                }
-            }
-        }
-    }
-    const handledCallbacks = new Map();
-    const completions = [];
-    for (const [callback, updateCallbacks] of callbacks){
-        const result = callback(updates);
-        if (result.completion) {
-            completions.push(result.completion);
-        }
-        for (const path of result.handledPaths){
-            let callbacksForPath = handledCallbacks.get(path);
-            if (!callbacksForPath) {
-                callbacksForPath = new Set();
-                handledCallbacks.set(path, callbacksForPath);
-            }
-            for (const updateCallback of updateCallbacks){
-                callbacksForPath.add(updateCallback);
-            }
-        }
-    }
-    return {
-        handledCallbacks,
-        completions
-    };
+    finalizeUpdate();
 }
 function mergeChunkListUpdates(updateA, updateB) {
     let chunks;
@@ -1139,15 +1100,12 @@ function setHooks(newHooks) {
 function handleSocketMessage(msg) {
     const callbackSet = updateCallbackSets.get(resourceKey(msg.resource));
     if (!callbackSet || callbackSet.validationToken !== msg.validation) {
-        // An unsubscribe cannot retract frames which were already queued on the
-        // transport. Ignore frames from an older subscription generation.
-        return Promise.resolve();
+        // Frames already queued by an old subscription can arrive after an
+        // unsubscribe. Only the active validation generation may update state.
+        return;
     }
     sortIssues(msg.issues);
     const hasCriticalIssues = handleIssues(msg);
-    // A real issues message is the server's baseline acknowledgement. Updates
-    // received before that acknowledgement cannot safely be applied to dynamic
-    // chunks which may still be loading from HTTP.
     if (!hasCriticalIssues && msg.type === 'issues') {
         markUpdateSubscriptionReady(msg.resource);
     } else if (msg.type !== 'issues') {
@@ -1155,26 +1113,23 @@ function handleSocketMessage(msg) {
     }
     switch(msg.type){
         case 'issues':
-            // issues are already handled
-            return Promise.resolve();
+            break;
         case 'partial':
             // aggregate updates
             aggregateUpdates(msg);
-            return Promise.resolve();
+            break;
         default:
             // run single update
             const runHooks = chunkListsWithPendingUpdates.size === 0;
             if (runHooks) hooks.beforeRefresh();
-            return Promise.all(triggerUpdate(msg)).then(()=>{
-                if (runHooks) finalizeUpdate();
-            });
+            triggerUpdate(msg);
+            if (runHooks) finalizeUpdate();
+            break;
     }
 }
 function markUpdateSubscriptionReady(resource) {
     const callbackSet = updateCallbackSets.get(resourceKey(resource));
-    if (!callbackSet || callbackSet.subscribed) {
-        return;
-    }
+    if (!callbackSet || callbackSet.subscribed) return;
     callbackSet.subscribed = true;
     callbackSet.validation?.resolve();
     callbackSet.validation = undefined;
@@ -1200,27 +1155,25 @@ function finalizeUpdate() {
         globalThis.__NEXT_HMR_CB = null;
     }
 }
-function subscribeToChunkUpdate(chunkListPath, sendMessage, callback, batchCallback, onSubscribed, expectedVersion) {
+function subscribeToChunkUpdate(chunkListPath, sendMessage, callback, conservative, onSubscribed, expectedVersion) {
     return subscribeToUpdate({
         path: chunkListPath
-    }, sendMessage, callback, batchCallback, onSubscribed, expectedVersion);
+    }, sendMessage, callback, conservative, onSubscribed, expectedVersion);
 }
-function subscribeToUpdate(resource, sendMessage, callback, batchCallback, onSubscribed, expectedVersion) {
+function subscribeToUpdate(resource, sendMessage, callback, conservative, onSubscribed, expectedVersion) {
     const key = resourceKey(resource);
     let callbackSet;
     const existingCallbackSet = updateCallbackSets.get(key);
     if (!existingCallbackSet) {
         let callbackSetRef;
         const revalidate = ()=>{
-            if (callbackSetRef.validation) {
-                return callbackSetRef.validation.promise;
-            }
+            if (callbackSetRef.validation) return callbackSetRef.validation.promise;
             if (updateCallbackSets.get(key) !== callbackSetRef) {
                 return Promise.reject(new Error(`Cannot validate an inactive HMR subscription for ${resource.path}.`));
             }
             callbackSetRef.unsubscribe();
             callbackSetRef.subscribed = false;
-            callbackSetRef.validationToken = `${Date.now()}:${Math.random()}`;
+            callbackSetRef.validationToken = createValidationToken();
             let resolve;
             let reject;
             const promise = new Promise((innerResolve, innerReject)=>{
@@ -1235,43 +1188,30 @@ function subscribeToUpdate(resource, sendMessage, callback, batchCallback, onSub
             callbackSetRef.unsubscribe = subscribeToUpdates(sendMessage, resource, expectedVersion, callbackSetRef.validationToken);
             return promise;
         };
+        const validationToken = onSubscribed ? createValidationToken() : undefined;
         callbackSet = {
             callbacks: new Set([
                 callback
             ]),
-            batchCallbacks: new Map(batchCallback ? [
-                [
-                    batchCallback,
-                    new Set([
-                        callback
-                    ])
-                ]
-            ] : []),
+            conservative: Boolean(conservative),
             onSubscribedCallbacks: new Set(onSubscribed ? [
                 onSubscribed
             ] : []),
             subscribed: false,
             expectedVersion,
+            validationToken,
             revalidate,
-            unsubscribe: subscribeToUpdates(sendMessage, resource, expectedVersion)
+            unsubscribe: subscribeToUpdates(sendMessage, resource, expectedVersion, validationToken)
         };
         callbackSetRef = callbackSet;
         updateCallbackSets.set(key, callbackSet);
     } else {
         if (existingCallbackSet.expectedVersion !== expectedVersion) {
-            // Two manifests for the same stable chunk-list path cannot safely share
-            // a version baseline. Reload rather than acknowledging stale content.
             location.reload();
+            return ()=>{};
         }
         existingCallbackSet.callbacks.add(callback);
-        if (batchCallback) {
-            let callbacks = existingCallbackSet.batchCallbacks.get(batchCallback);
-            if (!callbacks) {
-                callbacks = new Set();
-                existingCallbackSet.batchCallbacks.set(batchCallback, callbacks);
-            }
-            callbacks.add(callback);
-        }
+        existingCallbackSet.conservative ||= Boolean(conservative);
         if (onSubscribed) {
             if (existingCallbackSet.subscribed) {
                 onSubscribed(existingCallbackSet.revalidate);
@@ -1283,16 +1223,7 @@ function subscribeToUpdate(resource, sendMessage, callback, batchCallback, onSub
     }
     return ()=>{
         callbackSet.callbacks.delete(callback);
-        if (batchCallback) {
-            const callbacks = callbackSet.batchCallbacks.get(batchCallback);
-            callbacks?.delete(callback);
-            if (callbacks?.size === 0) {
-                callbackSet.batchCallbacks.delete(batchCallback);
-            }
-        }
-        if (onSubscribed) {
-            callbackSet.onSubscribedCallbacks.delete(onSubscribed);
-        }
+        if (onSubscribed) callbackSet.onSubscribedCallbacks.delete(onSubscribed);
         if (callbackSet.callbacks.size === 0) {
             callbackSet.unsubscribe();
             updateCallbackSets.delete(key);
@@ -1302,20 +1233,14 @@ function subscribeToUpdate(resource, sendMessage, callback, batchCallback, onSub
         }
     };
 }
-function triggerUpdate(msg, skippedCallbacks) {
+function triggerUpdate(msg) {
     const key = resourceKey(msg.resource);
     const callbackSet = updateCallbackSets.get(key);
     if (!callbackSet) {
-        return [];
+        return;
     }
-    const completions = [];
     for (const callback of callbackSet.callbacks){
-        if (!skippedCallbacks?.has(callback)) {
-            const completion = callback(msg);
-            if (completion) {
-                completions.push(completion);
-            }
-        }
+        callback(msg);
     }
     if (msg.type === 'notFound') {
         // This indicates that the resource which we subscribed to either does not exist or
@@ -1326,7 +1251,6 @@ function triggerUpdate(msg, skippedCallbacks) {
         // dropped the update stream before sending the "notFound" message.
         updateCallbackSets.delete(key);
     }
-    return completions;
 }
 }),
 ]);
