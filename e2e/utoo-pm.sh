@@ -185,31 +185,38 @@ echo -e "${GREEN}PASS: antd-test deps tree successful${NC}"
 cd ../../..
 
 
-# Case 7: test global install
-echo -e "${YELLOW}Case 7: cowsay global install/uninstall${NC}"
+# Case 7: test npm-style isolated global installs
+echo -e "${YELLOW}Case 7: isolated global install layout${NC}"
 
-# Test global install. The tool is installed as a *dependency* of a synthetic
-# root (never a root project), so it runs the install lifecycle but never
-# prepare/prepublish, and its devDependencies are not installed.
-utoo install -g cowsay || { echo -e "${RED}FAIL: global install cowsay failed${NC}"; exit 1; }
-if ! which cowsay >/dev/null 2>&1; then
-    echo -e "${RED}FAIL: cowsay not found in PATH after global install${NC}"
+global_prefix=$(mktemp -d)
+utoo install -g --prefix "$global_prefix" cowsay || { echo -e "${RED}FAIL: global install cowsay failed${NC}"; exit 1; }
+cowsay_root="$global_prefix/lib/node_modules/cowsay"
+if [ ! -x "$global_prefix/bin/cowsay" ]; then
+    echo -e "${RED}FAIL: cowsay global bin was not linked${NC}"
+    exit 1
+fi
+if [ ! -d "$cowsay_root/node_modules/yargs" ]; then
+    echo -e "${RED}FAIL: cowsay dependencies were not installed under cowsay/node_modules${NC}"
+    exit 1
+fi
+if [ -d "$global_prefix/lib/node_modules/yargs" ]; then
+    echo -e "${RED}FAIL: cowsay dependency yargs was hoisted beside global tools${NC}"
     exit 1
 fi
 echo -e "${GREEN}PASS: cowsay global install successful${NC}"
 
-# Coexistence: a second global install must reify ADDITIVELY into the shared
-# global node_modules — installing semver must not prune cowsay.
-utoo install -g semver || { echo -e "${RED}FAIL: global install semver failed${NC}"; exit 1; }
-if ! which semver >/dev/null 2>&1; then
-    echo -e "${RED}FAIL: semver not found in PATH after global install${NC}"
+# A second top-level tool shares only the prefix, never the dependency tree.
+utoo install -g --prefix "$global_prefix" semver || { echo -e "${RED}FAIL: global install semver failed${NC}"; exit 1; }
+if [ ! -x "$global_prefix/bin/semver" ]; then
+    echo -e "${RED}FAIL: semver global bin was not linked${NC}"
     exit 1
 fi
-if ! which cowsay >/dev/null 2>&1; then
+if [ ! -x "$global_prefix/bin/cowsay" ]; then
     echo -e "${RED}FAIL: cowsay pruned by second global install (coexistence broken)${NC}"
     exit 1
 fi
-echo -e "${GREEN}PASS: global installs coexist (additive reify)${NC}"
+echo -e "${GREEN}PASS: global installs coexist with isolated dependency trees${NC}"
+rm -rf "$global_prefix"
 
 
 # Case 8: git dependency install
