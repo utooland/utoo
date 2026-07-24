@@ -1038,6 +1038,10 @@ let BACKEND;
             let chunkUrl = getUrlFromScript(chunkPath);
             const resolver = getOrCreateResolver(chunkUrl);
             resolver.resolve();
+            const exactChunkUrl = getUrlFromScript(chunk);
+            if (exactChunkUrl !== chunkUrl && /[?&]hmr=/.test(exactChunkUrl)) {
+                getOrCreateResolver(exactChunkUrl).resolve();
+            }
             if (params == null) {
                 return;
             }
