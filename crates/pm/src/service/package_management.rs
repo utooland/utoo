@@ -17,7 +17,14 @@ impl PackageManagementService {
 
     /// Install a package to the utoo cache directory using utoo's own installation logic.
     /// Delegates to `InstallService::install_global_package` with a per-tool prefix
-    /// (`~/.utoo/utx/<name>/<version>`), so the tool is installed as a dependency.
+    /// (`~/.utoo/utx/<name>/<version>`), producing the same npm-style isolated
+    /// prefix layout as a persistent global install:
+    ///
+    /// ```text
+    /// <cache-prefix>/
+    /// ├── bin/<command>
+    /// └── lib/node_modules/<name>/node_modules/<dependency>
+    /// ```
     ///
     /// The prefix uses the same `<name>/<version>` two-segment layout as the
     /// package store (`~/.cache/nm`): a scoped name nests naturally
