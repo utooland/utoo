@@ -14,14 +14,14 @@ use turbopack_core::{
     ident::AssetIdent,
     module::{Module, ModuleSideEffects},
     module_graph::ModuleGraph,
-    output::{OutputAssetsReference, OutputAssetsWithReferenced},
+    output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
     reference::ModuleReferences,
     reference_type::{CssReferenceSubType, ReferenceType},
     source::{OptionSource, Source},
 };
 use turbopack_css::{
     CssModule, CssModuleType, LightningCssFeatureFlags,
-    chunk::{CssChunk, CssChunkItem, CssChunkType, CssImport},
+    chunk::{CssChunk, CssChunkItem, CssChunkType, CssImport, source_map::CssChunkSourceMapAsset},
 };
 use turbopack_ecmascript::{
     EcmascriptInputTransforms,
@@ -202,6 +202,17 @@ impl EcmascriptChunkPlaceable for InlineCssContentModule {
             anyhow::bail!("inline CSS chunk content was not found");
         };
         let css = file.content().to_str()?;
+        let source_map_path = CssChunkSourceMapAsset::new(*css_chunk.to_resolved().await?)
+            .path()
+            .await?;
+        let source_map_reference = format!(
+            "/*# sourceMappingURL={}*/",
+            urlencoding::encode(source_map_path.file_name())
+        );
+        // The synthetic CSS chunk is consumed as an ECMAScript string rather than emitted as a
+        // standalone stylesheet. Its external source map would have no valid CSS asset to point
+        // at and can collide when multiple inline styles share an output filename.
+        let css = css.strip_suffix(&source_map_reference).unwrap_or(&css);
         let code = format!("{TURBOPACK_EXPORT_VALUE}({});\n", StringifyJs(&css));
 
         Ok(EcmascriptChunkItemContent {
@@ -217,9 +228,12 @@ impl EcmascriptChunkPlaceable for InlineCssContentModule {
         chunking_context: Vc<Box<dyn ChunkingContext>>,
         module_graph: Vc<ModuleGraph>,
     ) -> Result<Vc<OutputAssetsWithReferenced>> {
-        Ok(OutputAssetsReference::references(
-            self.css_chunk(module_graph, chunking_context),
-        ))
+        let css_chunk = self.css_chunk(module_graph, chunking_context).await?;
+        let mut references = OutputAssetsWithReferenced::from_assets(OutputAssets::empty());
+        for item in &css_chunk.content.await?.chunk_items {
+            references = references.concatenate(item.references());
+        }
+        Ok(references)
     }
 }
 

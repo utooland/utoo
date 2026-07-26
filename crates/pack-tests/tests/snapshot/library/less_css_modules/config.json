@@ -12,6 +12,9 @@
     "optimization": {
       "minify": false
     },
+    "output": {
+      "cssFilename": "index.css"
+    },
     "styles": {
       "inlineCss": {}
     },
