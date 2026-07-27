@@ -246,28 +246,22 @@ impl ScriptService {
                     // stdout (see the SIGPIPE handling above), so a plain
                     // `println!`/`eprintln!` here would panic on `BrokenPipe`
                     // rather than letting the install bail cleanly.
-                    use std::io::Write as _;
-                    if !output.stdout.is_empty() {
-                        if crate::util::invocation::json() {
-                            let _ = writeln!(
-                                std::io::stderr(),
-                                "{}",
-                                String::from_utf8_lossy(&output.stdout)
-                            );
-                        } else {
+                    if !crate::util::invocation::json() {
+                        use std::io::Write as _;
+                        if !output.stdout.is_empty() {
                             let _ = writeln!(
                                 std::io::stdout(),
                                 "{}",
                                 String::from_utf8_lossy(&output.stdout)
                             );
                         }
-                    }
-                    if !output.stderr.is_empty() {
-                        let _ = writeln!(
-                            std::io::stderr(),
-                            "{}",
-                            String::from_utf8_lossy(&output.stderr)
-                        );
+                        if !output.stderr.is_empty() {
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "{}",
+                                String::from_utf8_lossy(&output.stderr)
+                            );
+                        }
                     }
 
                     anyhow::bail!(

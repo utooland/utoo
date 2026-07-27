@@ -137,11 +137,16 @@ async fn async_main() -> Result<()> {
         quiet: cli.quiet,
         no_color: cli.no_color,
     });
-    if cli.json
-        && let Some(command) = &cli.command
-        && !command.supports_json()
-    {
-        return Err(error::CliError::usage("--json is not supported by this command yet").into());
+    if cli.json {
+        let unsupported_command = cli
+            .command
+            .as_ref()
+            .is_some_and(|command| !command.supports_json());
+        if cli.script_name.is_some() || unsupported_command {
+            return Err(
+                error::CliError::usage("--json is not supported by this command yet").into(),
+            );
+        }
     }
 
     // Check for version flag
@@ -328,9 +333,6 @@ async fn async_main() -> Result<()> {
         }
         Some(Commands::Config { command }) => {
             cmd::config::run(command).await?;
-        }
-        Some(Commands::Skill { command }) => {
-            cmd::skill::run(command).await?;
         }
         None => match cli.script_name {
             // A bare `utoo <name>`: custom command from config, else script

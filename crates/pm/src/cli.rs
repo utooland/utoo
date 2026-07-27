@@ -14,9 +14,9 @@ use crate::constants::cmd::{
     LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME, LOGOUT_ABOUT, LOGOUT_ALIAS,
     LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
     PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
-    RUN_ABOUT, RUN_ALIAS, RUN_NAME, SKILL_ABOUT, SKILL_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
-    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
-    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
+    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
+    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
+    WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::util::cli_enum::PublishAccess;
@@ -122,29 +122,6 @@ pub enum ConfigCommands {
     List {
         #[arg(long)]
         global: bool,
-    },
-}
-
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum SkillTarget {
-    All,
-    Claude,
-    Codex,
-    Cursor,
-}
-
-#[derive(Subcommand)]
-pub enum SkillCommands {
-    #[command(about = "Install or update the official utoo Agent Skill")]
-    Setup {
-        /// Agent environment to install into
-        #[arg(long, value_enum, default_value_t = SkillTarget::All)]
-        target: SkillTarget,
-
-        /// Skip confirmation
-        #[arg(long, short)]
-        yes: bool,
     },
 }
 
@@ -318,12 +295,6 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Option<clap_complete::Shell>,
     },
-
-    #[command(name = SKILL_NAME, about = SKILL_ABOUT)]
-    Skill {
-        #[command(subcommand)]
-        command: SkillCommands,
-    },
 }
 
 impl Commands {
@@ -337,7 +308,6 @@ impl Commands {
                 | Self::Publish { .. }
                 | Self::Whoami
                 | Self::Config { .. }
-                | Self::Skill { .. }
         )
     }
 }
