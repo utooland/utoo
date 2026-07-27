@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::service::dependency_graph::{LockGraphService, build_dep_tree};
 use crate::util::format_print::print_dep_tree;
+use crate::util::presenter::emit;
 
 /// List dependency information, similar to npm list
 pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
@@ -39,7 +40,7 @@ fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Re
             .filter_map(|node| dependency_node(node, graph))
             .collect(),
     };
-    crate::util::presenter::emit("list", &output, || {
+    emit("list", &output, || {
         print_dep_tree(&tree, graph, "", true, &[package_name]);
         Ok(())
     })

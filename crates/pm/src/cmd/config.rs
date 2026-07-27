@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::cli::ConfigCommands;
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
+use crate::util::presenter::emit;
 
 /// Entry point for the `config` subcommand.
 pub async fn run(command: ConfigCommands) -> Result<()> {
@@ -43,7 +44,7 @@ pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -
         value: &value,
         scope: label,
     };
-    crate::util::presenter::emit("config set", &output, || {
+    emit("config set", &output, || {
         println!("Successfully set {key} ({label})");
         Ok(())
     })
@@ -96,7 +97,7 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
         values,
         arrays,
     };
-    crate::util::presenter::emit("config list", &output, || {
+    emit("config list", &output, || {
         println!("Configuration file: {}", config_path.display());
         println!();
         for (key, value) in config.list()? {
@@ -111,7 +112,7 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
 
 fn emit_config_get(key: &str, value: &str, source: &str) -> Result<()> {
     let output = ConfigGetOutput { key, value, source };
-    crate::util::presenter::emit("config get", &output, || {
+    emit("config get", &output, || {
         println!("{value}");
         Ok(())
     })

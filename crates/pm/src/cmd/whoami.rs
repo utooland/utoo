@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::service::auth;
+use crate::util::presenter::emit;
 use crate::util::user_config::get_registry;
 
 pub async fn whoami() -> Result<()> {
@@ -14,7 +15,7 @@ pub async fn whoami() -> Result<()> {
         registry: &registry,
         authenticated: true,
     };
-    crate::util::presenter::emit("whoami", &output, || {
+    emit("whoami", &output, || {
         println!("{username}");
         Ok(())
     })

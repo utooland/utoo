@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::model::RunMode;
 use crate::service::pm_pack as pack_service;
 use crate::util::format_print::print_pack_details;
+use crate::util::presenter::emit;
 
 pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
     let package_root = if let Some(p) = path {
@@ -44,7 +45,7 @@ pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
         dry_run: mode == RunMode::DryRun,
         tarball: tarball_path.as_ref().map(|path| path.display().to_string()),
     };
-    crate::util::presenter::emit("pack", &output, || {
+    emit("pack", &output, || {
         let mut stdout = io::stdout().lock();
         print_pack_details(&mut stdout, &result, None)?;
         match &tarball_path {

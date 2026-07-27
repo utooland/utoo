@@ -6,6 +6,7 @@ use utoo_ruborist::util::parse_package_spec;
 
 use crate::service::auth;
 use crate::util::format_print::print_package_info;
+use crate::util::presenter::emit;
 use crate::util::user_config::get_registry;
 
 /// View package information from registry, similar to npm view
@@ -66,7 +67,7 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
         dist_tags: &full_manifest.dist_tags,
         dist: &version_manifest.core.dist,
     };
-    crate::util::presenter::emit("view", &output, || {
+    emit("view", &output, || {
         print_package_info(&full_manifest, &version_manifest)
     })
 }

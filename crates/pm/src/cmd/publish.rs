@@ -13,6 +13,7 @@ use crate::model::package::{PackageInfo, PublishMeta};
 use crate::service::publish::{self as publish_service, PublishOptions};
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 use crate::util::cli_enum::PublishAccess;
+use crate::util::presenter::emit;
 use crate::util::user_config::{get_or_load_package_json, get_registry};
 
 /// Publish one or more packages.
@@ -39,7 +40,7 @@ pub async fn publish(
         dry_run: mode == RunMode::DryRun,
         packages,
     };
-    crate::util::presenter::emit("publish", &output, || {
+    emit("publish", &output, || {
         let mut stdout = io::stdout().lock();
         for package in &output.packages {
             if output.dry_run {
