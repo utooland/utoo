@@ -10,6 +10,7 @@ use crate::helper::workspace::init_project_root;
 use crate::service::install::InstallService;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy};
 use crate::util::format_print::pluralized_package_count;
+use crate::util::install_progress::downloaded_bytes;
 use crate::util::logger::log_time_end;
 use crate::util::presenter::emit;
 use crate::util::user_config::{
@@ -163,7 +164,7 @@ fn emit_install_result(
         operation,
         packages,
         global,
-        downloaded_bytes: crate::util::install_progress::downloaded_bytes(),
+        downloaded_bytes: downloaded_bytes(),
     };
     emit(command, &output, || Ok(()))
 }

@@ -40,6 +40,7 @@ use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::cli_enum::PublishAccess;
 use crate::util::format_print::print_pack_details;
 use crate::util::integrity::compute_shasum;
+use crate::util::invocation;
 
 /// Options for publishing a package, resolved by the cmd layer.
 pub struct PublishOptions<'a> {
@@ -66,7 +67,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::PrepublishOnly,
-        if crate::util::invocation::json() {
+        if invocation::json() {
             ScriptOutput::Silent
         } else {
             ScriptOutput::Verbose
@@ -81,7 +82,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     let tarball_data = &pack_result.tarball_data;
     let shasum = compute_shasum(tarball_data);
 
-    if !crate::util::invocation::json() {
+    if !invocation::json() {
         print_pack_details(&mut std::io::stdout().lock(), &pack_result, Some(&shasum))?;
     }
 
@@ -163,7 +164,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::Publish,
-        if crate::util::invocation::json() {
+        if invocation::json() {
             ScriptOutput::Silent
         } else {
             ScriptOutput::Verbose
@@ -174,7 +175,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishResult> {
     ScriptService::execute_script(
         opts.package_info,
         LifecycleHook::Postpublish,
-        if crate::util::invocation::json() {
+        if invocation::json() {
             ScriptOutput::Silent
         } else {
             ScriptOutput::Verbose
@@ -220,10 +221,7 @@ async fn send_with_web_auth_retry(
         anyhow::bail!("Authentication failed. Check your credentials or run `utoo login`.\n{body}");
     };
 
-    ensure_web_auth_allowed(
-        crate::util::invocation::json(),
-        crate::util::invocation::interactive(),
-    )?;
+    ensure_web_auth_allowed(invocation::json(), invocation::interactive())?;
 
     tracing::info!("Authenticate your account at:\n{auth_url}");
     if let Err(e) = open::that(auth_url) {
@@ -275,6 +273,7 @@ fn build_publish_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::classify;
 
     #[test]
     fn web_auth_requires_an_interactive_human_invocation() {
@@ -282,7 +281,7 @@ mod tests {
 
         for (json, interactive) in [(true, true), (true, false), (false, false)] {
             let error = ensure_web_auth_allowed(json, interactive).unwrap_err();
-            assert_eq!(crate::error::classify(&error), ErrorKind::Auth);
+            assert_eq!(classify(&error), ErrorKind::Auth);
         }
     }
 }

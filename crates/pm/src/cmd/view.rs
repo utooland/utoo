@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use anyhow::{Context as _, Result, anyhow};
 use serde::Serialize;
-use utoo_ruborist::manifest::VersionManifest;
+use utoo_ruborist::manifest::{Dist, VersionManifest};
 use utoo_ruborist::service::{MetadataFormat, fetch_full_manifest_fresh};
 use utoo_ruborist::util::parse_package_spec;
 
@@ -84,9 +86,9 @@ struct ViewOutput<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     homepage: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dependencies: Option<&'a std::collections::HashMap<String, String>>,
-    dist_tags: &'a std::collections::HashMap<String, String>,
-    dist: &'a utoo_ruborist::manifest::Dist,
+    dependencies: Option<&'a HashMap<String, String>>,
+    dist_tags: &'a HashMap<String, String>,
+    dist: &'a Dist,
 }
 
 #[cfg(test)]

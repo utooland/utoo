@@ -1,6 +1,7 @@
 use std::process;
 
 use anyhow::{Context, Result};
+use clap::error::ErrorKind as ClapErrorKind;
 use clap::{CommandFactory, Parser};
 
 use crate::cli::{Cli, Commands, detect_shell_from_env};
@@ -11,10 +12,15 @@ use crate::cmd::run::{run, run_fallback};
 use crate::cmd::update::update;
 use crate::cmd::view::view;
 use crate::constants::{APP_NAME, APP_VERSION};
+use crate::error::{CliError, classify};
 use crate::helper::auto_update::init_auto_update;
+use crate::service::config::ConfigService;
 use crate::service::script::{MissingScript, ScriptExit};
 use crate::service::workspace::WorkspaceFilter;
 use crate::util::cli_enum::{ConfigScope, ScriptPolicy};
+use crate::util::config_file::Config;
+use crate::util::format_print::format_resolve_chain;
+use crate::util::invocation::{self, Invocation};
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use crate::util::user_config::{
     init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit,
@@ -52,18 +58,18 @@ fn main() {
         // 128+N. Other failures use the stable error-category exit codes.
         let exit_code = e
             .downcast_ref::<ScriptExit>()
-            .map_or_else(|| error::classify(&e).exit_code() as i32, |s| s.code);
-        let chain = util::format_print::format_resolve_chain(&e);
-        if util::invocation::json() {
-            let cli_error = e.downcast_ref::<error::CliError>();
+            .map_or_else(|| classify(&e).exit_code() as i32, |s| s.code);
+        let chain = format_resolve_chain(&e);
+        if invocation::json() {
+            let cli_error = e.downcast_ref::<CliError>();
             let mut payload = serde_json::json!({
                 "error": {
-                    "category": error::classify(&e),
+                    "category": classify(&e),
                     "code": exit_code,
                     "message": cli_error.map_or_else(|| format!("{e:#}"), |e| e.message().to_string()),
                 }
             });
-            if let Some(suggestion) = cli_error.and_then(error::CliError::suggestion) {
+            if let Some(suggestion) = cli_error.and_then(CliError::suggestion) {
                 payload["error"]["suggestion"] = suggestion.into();
             }
             if let Some(chain) = &chain {
@@ -80,8 +86,8 @@ fn main() {
         } else {
             eprintln!("error: {e:#}");
         }
-        if !util::invocation::json()
-            && !util::invocation::quiet()
+        if !invocation::json()
+            && !invocation::quiet()
             && let Some(log_path) = get_log_file_path()
         {
             eprintln!("Full logs saved to: {}", log_path.display());
@@ -93,7 +99,7 @@ fn main() {
 async fn async_main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    util::invocation::configure_color(
+    invocation::configure_color(
         args.iter()
             .any(|arg| matches!(arg.as_str(), "--json" | "--no-color"))
             || std::env::var_os("NO_COLOR").is_some(),
@@ -101,8 +107,8 @@ async fn async_main() -> Result<()> {
 
     // Check for help flag
     if args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
-        let config = crate::util::config_file::Config::load(ConfigScope::Local).await?;
-        let config_service = crate::service::config::ConfigService::new(config);
+        let config = Config::load(ConfigScope::Local).await?;
+        let config_service = ConfigService::new(config);
         config_service.print_help()?;
         return Ok(());
     }
@@ -114,7 +120,7 @@ async fn async_main() -> Result<()> {
             if args.iter().any(|arg| arg == "--json")
                 && !matches!(
                     error.kind(),
-                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                    ClapErrorKind::DisplayHelp | ClapErrorKind::DisplayVersion
                 )
             {
                 eprintln!(
@@ -132,7 +138,7 @@ async fn async_main() -> Result<()> {
             error.exit();
         }
     };
-    util::invocation::init(util::invocation::Invocation {
+    invocation::init(Invocation {
         json: cli.json,
         quiet: cli.quiet,
         no_color: cli.no_color,
@@ -143,9 +149,7 @@ async fn async_main() -> Result<()> {
             .as_ref()
             .is_some_and(|command| !command.supports_json());
         if cli.script_name.is_some() || unsupported_command {
-            return Err(
-                error::CliError::usage("--json is not supported by this command yet").into(),
-            );
+            return Err(CliError::usage("--json is not supported by this command yet").into());
         }
     }
 

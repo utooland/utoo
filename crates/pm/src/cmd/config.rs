@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow};
 use serde::Serialize;
 
 use crate::cli::ConfigCommands;
+use crate::error::CliError;
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
 use crate::util::presenter::emit;
@@ -67,9 +68,7 @@ pub async fn handle_config_get(
         match config.get(&key)? {
             Some(value) => emit_config_get(&key, &value, scope_label(scope))?,
             None => {
-                return Err(
-                    crate::error::CliError::not_found(format!("Key '{key}' not found")).into(),
-                );
+                return Err(CliError::not_found(format!("Key '{key}' not found")).into());
             }
         }
     }

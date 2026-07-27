@@ -2,6 +2,8 @@ use colored::Colorize;
 use std::ffi::OsStr;
 use std::sync::Once;
 
+use crate::util::invocation;
+
 const PROXY_ENV_VARS: [&str; 6] = [
     "http_proxy",
     "https_proxy",
@@ -24,7 +26,7 @@ where
 }
 
 pub fn print_proxy_env_hint_once() {
-    if crate::util::invocation::json() || crate::util::invocation::quiet() {
+    if invocation::json() || invocation::quiet() {
         return;
     }
 

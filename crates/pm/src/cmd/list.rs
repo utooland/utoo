@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
 
-use crate::service::dependency_graph::{LockGraphService, build_dep_tree};
+use crate::service::dependency_graph::{DepTreeNode, LockGraphService, build_dep_tree};
 use crate::util::format_print::print_dep_tree;
 use crate::util::presenter::emit;
 
@@ -46,10 +46,7 @@ fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Re
     })
 }
 
-fn dependency_node(
-    node: &crate::service::dependency_graph::DepTreeNode,
-    graph: &LockGraphService,
-) -> Option<DependencyNode> {
+fn dependency_node(node: &DepTreeNode, graph: &LockGraphService) -> Option<DependencyNode> {
     if node.index == NodeIndex::end() {
         return None;
     }

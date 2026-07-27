@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::util::format_print::{HeartbeatScript, print_script_heartbeat};
 use crate::util::install_progress;
+use crate::util::invocation;
 
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -169,7 +170,7 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
 /// degrade just as quietly. Plain `println!` would instead panic with
 /// "failed printing to stdout: Broken pipe" at the finish line.
 fn println_lossy(args: std::fmt::Arguments<'_>) {
-    if crate::util::invocation::json() || crate::util::invocation::quiet() {
+    if invocation::json() || invocation::quiet() {
         return;
     }
     use std::io::Write;
@@ -358,7 +359,7 @@ fn stop_render_task() {
 }
 
 pub fn start_progress_bar() {
-    if !*IS_TTY || crate::util::invocation::json() || crate::util::invocation::quiet() {
+    if !*IS_TTY || invocation::json() || invocation::quiet() {
         return;
     }
     install_progress::reset_phase_state();

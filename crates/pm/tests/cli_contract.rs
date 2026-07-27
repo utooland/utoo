@@ -1,5 +1,7 @@
-use serde_json::Value;
+use std::fs;
 use std::process::Command;
+
+use serde_json::Value;
 use tempfile::tempdir;
 
 fn utoo() -> Command {
@@ -11,12 +13,12 @@ fn utoo() -> Command {
 #[test]
 fn pack_json_is_one_clean_document() {
     let project = tempdir().unwrap();
-    std::fs::write(
+    fs::write(
         project.path().join("package.json"),
         r#"{"name":"fixture","version":"1.0.0","files":["index.js"]}"#,
     )
     .unwrap();
-    std::fs::write(project.path().join("index.js"), "export default 1;\n").unwrap();
+    fs::write(project.path().join("index.js"), "export default 1;\n").unwrap();
 
     let output = utoo()
         .current_dir(project.path())
@@ -46,13 +48,13 @@ fn pack_json_is_one_clean_document() {
 #[test]
 fn pack_json_lifecycle_failure_is_one_clean_error_document() {
     let project = tempdir().unwrap();
-    std::fs::write(
+    fs::write(
         project.path().join("package.json"),
         r#"{"name":"fixture","version":"1.0.0","scripts":{"prepack":"node lifecycle-failure.js"},"files":["index.js"]}"#,
     )
     .unwrap();
-    std::fs::write(project.path().join("index.js"), "export default 1;\n").unwrap();
-    std::fs::write(
+    fs::write(project.path().join("index.js"), "export default 1;\n").unwrap();
+    fs::write(
         project.path().join("lifecycle-failure.js"),
         r#"process.stdout.write("LIFECYCLE_STDOUT_MARKER\n");
 process.stderr.write("LIFECYCLE_STDERR_MARKER\n");
@@ -99,7 +101,7 @@ fn json_error_is_structured_and_uses_stable_exit_code() {
 #[test]
 fn list_json_emits_a_document_for_a_disconnected_package() {
     let project = tempdir().unwrap();
-    std::fs::write(
+    fs::write(
         project.path().join("package-lock.json"),
         r#"{
   "name": "fixture",
@@ -141,12 +143,12 @@ fn unsupported_json_command_fails_instead_of_printing_human_output() {
 #[test]
 fn bare_script_json_is_rejected_before_the_script_runs() {
     let project = tempdir().unwrap();
-    std::fs::write(
+    fs::write(
         project.path().join("package.json"),
         r#"{"name":"fixture","version":"1.0.0","scripts":{"build":"node build.js"}}"#,
     )
     .unwrap();
-    std::fs::write(
+    fs::write(
         project.path().join("build.js"),
         r#"process.stdout.write("BARE_SCRIPT_OUTPUT_MARKER\n");"#,
     )
@@ -198,7 +200,7 @@ fn init_does_not_prompt_without_a_tty() {
 #[test]
 fn no_color_disables_ansi_sequences() {
     let project = tempdir().unwrap();
-    std::fs::write(
+    fs::write(
         project.path().join("package.json"),
         r#"{"name":"fixture","version":"1.0.0"}"#,
     )
@@ -216,7 +218,7 @@ fn no_color_disables_ansi_sequences() {
 #[test]
 fn precondition_errors_have_their_own_exit_code() {
     let project = tempdir().unwrap();
-    std::fs::write(project.path().join("package.json"), "{}").unwrap();
+    fs::write(project.path().join("package.json"), "{}").unwrap();
     let output = utoo()
         .current_dir(project.path())
         .args(["init", "--yes"])

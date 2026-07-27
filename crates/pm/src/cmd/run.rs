@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 
+use crate::error::CliError;
 use crate::helper::fuzzy_select;
 use crate::helper::workspace::update_cwd_to_project;
 use crate::service::config::ConfigService;
@@ -8,6 +9,7 @@ use crate::service::script::{MissingScript, ScriptService};
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
+use crate::util::invocation;
 
 pub async fn run(
     script_name: Option<&str>,
@@ -21,12 +23,12 @@ pub async fn run(
     let (script_name, filter) = if let Some(name) = script_name {
         (name.to_string(), filter)
     } else {
-        if !crate::util::invocation::interactive() {
-            return Err(crate::error::CliError::usage(
-                "a script name is required in non-interactive mode",
-            )
-            .with_suggestion("run `utoo run <script>`")
-            .into());
+        if !invocation::interactive() {
+            return Err(
+                CliError::usage("a script name is required in non-interactive mode")
+                    .with_suggestion("run `utoo run <script>`")
+                    .into(),
+            );
         }
         let single_ws = match &filter {
             WorkspaceFilter::Selected(ws) if ws.len() == 1 => Some(ws[0].as_str()),

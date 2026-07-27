@@ -4,7 +4,9 @@ use anyhow::{Result, bail};
 use dialoguer::Input;
 use serde::Serialize;
 
+use crate::error::CliError;
 use crate::helper::git;
+use crate::util::invocation;
 
 /// Initialize a new package.json file in the given directory (or current directory).
 ///
@@ -21,8 +23,8 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
         bail!("package.json already exists in {}", cwd.display());
     }
 
-    if !yes && !crate::util::invocation::interactive() {
-        return Err(crate::error::CliError::usage(
+    if !yes && !invocation::interactive() {
+        return Err(CliError::usage(
             "refusing to prompt for package metadata in non-interactive mode",
         )
         .with_suggestion("re-run with `utoo init --yes`")

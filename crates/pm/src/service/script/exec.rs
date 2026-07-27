@@ -16,6 +16,7 @@ use crate::fs;
 use crate::model::package::{LifecycleHook, PackageInfo};
 use crate::service::binary::get_envs;
 use crate::util::format_print::announce_script;
+use crate::util::invocation;
 use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_install_scope;
 
@@ -246,7 +247,7 @@ impl ScriptService {
                     // stdout (see the SIGPIPE handling above), so a plain
                     // `println!`/`eprintln!` here would panic on `BrokenPipe`
                     // rather than letting the install bail cleanly.
-                    if !crate::util::invocation::json() {
+                    if !invocation::json() {
                         use std::io::Write as _;
                         if !output.stdout.is_empty() {
                             let _ = writeln!(

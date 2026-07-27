@@ -1,5 +1,6 @@
 //! Process-wide CLI presentation and interactivity policy.
 
+use std::env;
 use std::io::{self, IsTerminal};
 use std::sync::OnceLock;
 
@@ -18,7 +19,7 @@ pub fn init(options: Invocation) {
 }
 
 pub fn configure_color(no_color: bool) {
-    if no_color || std::env::var_os("NO_COLOR").is_some() {
+    if no_color || env::var_os("NO_COLOR").is_some() {
         colored::control::set_override(false);
     }
 }
