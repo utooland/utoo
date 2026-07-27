@@ -13,7 +13,6 @@ pub enum ErrorKind {
     Auth,
     NotFound,
     RateLimited,
-    Cancelled,
     Precondition,
     Local,
 }
@@ -26,7 +25,6 @@ impl ErrorKind {
             Self::Auth => 3,
             Self::NotFound => 4,
             Self::RateLimited => 5,
-            Self::Cancelled => 6,
             Self::Precondition => 7,
             Self::Local => 11,
         }
@@ -38,7 +36,6 @@ pub struct CliError {
     kind: ErrorKind,
     message: String,
     suggestion: Option<String>,
-    source: Option<Box<dyn Error + Send + Sync>>,
 }
 
 impl CliError {
@@ -47,7 +44,6 @@ impl CliError {
             kind,
             message: message.into(),
             suggestion: None,
-            source: None,
         }
     }
 
@@ -61,11 +57,6 @@ impl CliError {
 
     pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
         self.suggestion = Some(suggestion.into());
-        self
-    }
-
-    pub fn with_source(mut self, source: impl Error + Send + Sync + 'static) -> Self {
-        self.source = Some(Box::new(source));
         self
     }
 
@@ -92,11 +83,7 @@ impl fmt::Display for CliError {
     }
 }
 
-impl Error for CliError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.source.as_deref().map(|source| source as _)
-    }
-}
+impl Error for CliError {}
 
 pub fn classify(error: &anyhow::Error) -> ErrorKind {
     if let Some(error) = error.downcast_ref::<CliError>() {

@@ -42,7 +42,6 @@ pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -
         key: &key,
         value: &value,
         scope: label,
-        changed: true,
     };
     crate::util::presenter::emit("config set", &output, || {
         println!("Successfully set {key} ({label})");
@@ -130,7 +129,6 @@ struct ConfigSetOutput<'a> {
     key: &'a str,
     value: &'a str,
     scope: &'a str,
-    changed: bool,
 }
 
 #[derive(Serialize)]

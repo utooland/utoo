@@ -30,10 +30,6 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
 /// Display dependency information for a specific package
 fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Result<()> {
     let node_paths = graph.find_paths_to_root(package_name)?;
-    if node_paths.is_empty() {
-        tracing::debug!("No paths to root found");
-        return Ok(());
-    }
     let tree = build_dep_tree(&node_paths);
     let output = ListOutput {
         package: package_name,

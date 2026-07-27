@@ -12,6 +12,7 @@
 //!
 //! 3. If the registry responds **401** and the body contains `authUrl` +
 //!    `doneUrl` (indicating 2FA / OTP is required):
+//!    - Refuse the browser flow for JSON or non-interactive invocations.
 //!    - Print the `authUrl` and open it in the default browser.
 //!    - Poll `doneUrl` every few seconds (respecting `retry-after`) until the
 //!      user approves in the browser. The endpoint returns **202** while
@@ -26,6 +27,7 @@
 use anyhow::{Context, Result};
 use reqwest::RequestBuilder;
 
+use crate::error::{CliError, ErrorKind};
 use crate::model::RunMode;
 use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
@@ -218,6 +220,11 @@ async fn send_with_web_auth_retry(
         anyhow::bail!("Authentication failed. Check your credentials or run `utoo login`.\n{body}");
     };
 
+    ensure_web_auth_allowed(
+        crate::util::invocation::json(),
+        crate::util::invocation::interactive(),
+    )?;
+
     tracing::info!("Authenticate your account at:\n{auth_url}");
     if let Err(e) = open::that(auth_url) {
         tracing::warn!("Failed to open browser: {e}");
@@ -231,6 +238,18 @@ async fn send_with_web_auth_retry(
         .send()
         .await
         .context("Failed to send publish request (retry after web auth)")
+}
+
+fn ensure_web_auth_allowed(json: bool, interactive: bool) -> Result<()> {
+    if json || !interactive {
+        return Err(CliError::new(
+            ErrorKind::Auth,
+            "interactive authentication is required to publish",
+        )
+        .with_suggestion("re-run in an interactive terminal or provide `--otp`")
+        .into());
+    }
+    Ok(())
 }
 
 /// Build a PUT request to the registry, optionally including an OTP header.
@@ -251,4 +270,19 @@ fn build_publish_request(
         req = req.header("npm-otp", otp);
     }
     Ok(req)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_auth_requires_an_interactive_human_invocation() {
+        assert!(ensure_web_auth_allowed(false, true).is_ok());
+
+        for (json, interactive) in [(true, true), (true, false), (false, false)] {
+            let error = ensure_web_auth_allowed(json, interactive).unwrap_err();
+            assert_eq!(crate::error::classify(&error), ErrorKind::Auth);
+        }
+    }
 }

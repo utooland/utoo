@@ -97,6 +97,39 @@ fn json_error_is_structured_and_uses_stable_exit_code() {
 }
 
 #[test]
+fn list_json_emits_a_document_for_a_disconnected_package() {
+    let project = tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package-lock.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "fixture", "version": "1.0.0"},
+    "node_modules/orphan": {"name": "orphan", "version": "1.0.0"}
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "list", "orphan"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["command"], "list");
+    assert_eq!(value["package"], "orphan");
+    assert_eq!(value["dependencies"], serde_json::json!([]));
+}
+
+#[test]
 fn unsupported_json_command_fails_instead_of_printing_human_output() {
     let output = utoo().args(["--json", "ping"]).output().unwrap();
     assert_eq!(output.status.code(), Some(2));

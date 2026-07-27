@@ -160,7 +160,6 @@ fn emit_install_result(
 ) -> Result<()> {
     let output = InstallOutput {
         operation,
-        changed: true,
         packages,
         global,
         downloaded_bytes: crate::util::install_progress::downloaded_bytes(),
@@ -172,7 +171,6 @@ fn emit_install_result(
 #[serde(rename_all = "camelCase")]
 struct InstallOutput<'a> {
     operation: &'a str,
-    changed: bool,
     packages: &'a [String],
     global: bool,
     downloaded_bytes: u64,

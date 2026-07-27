@@ -49,7 +49,7 @@ fn main() {
         // A failed package script propagates its own exit status so
         // `utoo run <script>` mirrors the script: a non-zero `exit N` becomes
         // N, and a signal death (e.g. SIGPIPE from `script | head`) becomes
-        // 128+N. Any other error keeps the generic exit code 1.
+        // 128+N. Other failures use the stable error-category exit codes.
         let exit_code = e
             .downcast_ref::<ScriptExit>()
             .map_or_else(|| error::classify(&e).exit_code() as i32, |s| s.code);
