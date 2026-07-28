@@ -69,15 +69,18 @@ async fn script_concurrency_limit() -> usize {
 pub struct PackageService;
 
 impl PackageService {
-    pub async fn process_project_hooks(root_path: &Path) -> Result<()> {
+    pub async fn process_project_hooks(root_path: &Path, output: ScriptOutput) -> Result<()> {
         let package_info = PackageInfo::load(root_path).await?;
-        Self::run_install_lifecycle(&package_info, None).await
+        Self::run_install_lifecycle(&package_info, None, output).await
     }
 
     /// Walk workspaces in topological order so a downstream workspace can
     /// consume build artifacts produced by an upstream workspace's `prepare`
     /// (npm 7+ semantics, fixes #2833).
-    pub async fn process_workspace_install_hooks(root_path: &Path) -> Result<()> {
+    pub async fn process_workspace_install_hooks(
+        root_path: &Path,
+        output: ScriptOutput,
+    ) -> Result<()> {
         let layers = match WorkspaceService::resolve_layers(root_path, WorkspaceFilter::All).await?
         {
             ResolvedWorkspaces::Layers { layers, .. } => layers,
@@ -100,7 +103,7 @@ impl PackageService {
                 let package = by_name.remove(&name).with_context(|| {
                     format!("workspace {name} present in topology but missing from workspace map")
                 })?;
-                Self::run_install_lifecycle(&package, Some(&name)).await?;
+                Self::run_install_lifecycle(&package, Some(&name), output).await?;
             }
         }
 
@@ -129,20 +132,35 @@ impl PackageService {
     async fn run_install_lifecycle(
         package: &PackageInfo,
         workspace_label: Option<&str>,
+        output: ScriptOutput,
     ) -> Result<()> {
         for &event in NPM_INSTALL_EVENTS {
-            ScriptService::run_lifecycle(
-                package,
-                event,
-                &[],
-                LifecycleSink::Stream {
-                    workspace_label,
-                    timed: true,
-                },
-                MissingScript::Skip,
-            )
-            .await
-            .with_context(|| match workspace_label {
+            let result = match output {
+                ScriptOutput::Machine => {
+                    ScriptService::run_lifecycle(
+                        package,
+                        event,
+                        &[],
+                        LifecycleSink::Machine,
+                        MissingScript::Skip,
+                    )
+                    .await
+                }
+                ScriptOutput::Verbose | ScriptOutput::Silent => {
+                    ScriptService::run_lifecycle(
+                        package,
+                        event,
+                        &[],
+                        LifecycleSink::Stream {
+                            workspace_label,
+                            timed: true,
+                        },
+                        MissingScript::Skip,
+                    )
+                    .await
+                }
+            };
+            result.with_context(|| match workspace_label {
                 Some(label) => format!("Failed to execute {event} lifecycle for {label}"),
                 None => format!("Failed to execute project {event} lifecycle"),
             })?;
@@ -374,6 +392,7 @@ impl PackageService {
     pub async fn execute_queues_with_options(
         queues: ExecutionQueues,
         scripts: ScriptPolicy,
+        output: ScriptOutput,
     ) -> Result<()> {
         // The clone phase is over by the time scripts run, so stop the spinner's
         // network summary from carrying a frozen `↓ <total>` into this phase.
@@ -392,13 +411,15 @@ impl PackageService {
             }
 
             // Execute preinstall scripts in parallel
-            Self::execute_script_queue(&queues.preinstall, LifecycleHook::Preinstall).await?;
+            Self::execute_script_queue(&queues.preinstall, LifecycleHook::Preinstall, output)
+                .await?;
 
             Self::execute_binary_linking(&queues.bin_linking).await?;
 
-            Self::execute_script_queue(&queues.install, LifecycleHook::Install).await?;
+            Self::execute_script_queue(&queues.install, LifecycleHook::Install, output).await?;
 
-            Self::execute_script_queue(&queues.postinstall, LifecycleHook::Postinstall).await?;
+            Self::execute_script_queue(&queues.postinstall, LifecycleHook::Postinstall, output)
+                .await?;
 
             if total_scripts > 0 {
                 finish_progress_bar("scripts executed", Some(scripts_start.elapsed()));
@@ -412,6 +433,7 @@ impl PackageService {
     async fn execute_script_queue(
         queue: &[(Rc<PackageInfo>, bool)],
         hook: LifecycleHook,
+        output: ScriptOutput,
     ) -> Result<()> {
         let queue_start = std::time::Instant::now();
         tracing::debug!("Starting {} queue with {} scripts", hook, queue.len());
@@ -432,10 +454,15 @@ impl PackageService {
                         // `tap` feeds output lines to the long-run heartbeat.
                         let running = track_script(label);
                         let start = std::time::Instant::now();
+                        let script_output = if output == ScriptOutput::Machine {
+                            ScriptOutput::Machine
+                        } else {
+                            ScriptOutput::Silent
+                        };
                         let result = ScriptService::execute_script(
                             &package,
                             hook,
-                            ScriptOutput::Silent,
+                            script_output,
                             Some(running.sink()),
                         )
                         .await
@@ -609,7 +636,8 @@ mod tests {
         .unwrap();
 
         // Test process_project_hooks
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(result.is_ok(), "process_project_hooks should succeed");
     }
 
@@ -632,7 +660,8 @@ mod tests {
         .unwrap();
 
         // Test process_project_hooks - should succeed even without scripts
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "process_project_hooks should succeed even without scripts"
@@ -661,7 +690,8 @@ mod tests {
         .unwrap();
 
         // Test process_project_hooks with scoped package
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "process_project_hooks should work with scoped packages"
@@ -696,7 +726,8 @@ mod tests {
         .unwrap();
 
         // Test that all hooks are executed
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "All supported hooks should be executed successfully"
@@ -729,7 +760,7 @@ mod tests {
         .unwrap();
 
         // Test that scripts run in the correct directory (root_path)
-        let result = PackageService::process_project_hooks(&sub_dir).await;
+        let result = PackageService::process_project_hooks(&sub_dir, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "Scripts should run in the correct working directory based on root_path"
@@ -759,7 +790,8 @@ mod tests {
         .unwrap();
 
         // Test that npm_package_json environment variable points to the correct path
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "npm_package_json environment variable should point to the correct package.json path"
@@ -788,7 +820,8 @@ mod tests {
         .unwrap();
 
         // Test that script failure is properly handled
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(
             result.is_err(),
             "Script failure should be properly propagated"
@@ -811,7 +844,8 @@ mod tests {
         fs::write(project_path.join("package.json"), "invalid json content").unwrap();
 
         // Test that invalid package.json is properly handled
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(result.is_err(), "Invalid package.json should cause error");
     }
 
@@ -822,7 +856,8 @@ mod tests {
         let project_path = temp_dir.path();
 
         // Test that missing package.json is properly handled
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(result.is_err(), "Missing package.json should cause error");
     }
 
@@ -849,7 +884,8 @@ mod tests {
         .unwrap();
 
         // Test that only existing hooks are executed
-        let result = PackageService::process_project_hooks(project_path).await;
+        let result =
+            PackageService::process_project_hooks(project_path, ScriptOutput::Verbose).await;
         assert!(result.is_ok(), "Only existing hooks should be executed");
     }
 
@@ -893,13 +929,15 @@ mod tests {
         .unwrap();
 
         // Test that each project gets the correct environment variables
-        let result1 = PackageService::process_project_hooks(&project1_path).await;
+        let result1 =
+            PackageService::process_project_hooks(&project1_path, ScriptOutput::Verbose).await;
         assert!(
             result1.is_ok(),
             "Project1 hooks should succeed with correct environment"
         );
 
-        let result2 = PackageService::process_project_hooks(&project2_path).await;
+        let result2 =
+            PackageService::process_project_hooks(&project2_path, ScriptOutput::Verbose).await;
         assert!(
             result2.is_ok(),
             "Project2 hooks should succeed with correct environment"
@@ -943,7 +981,12 @@ mod tests {
         };
 
         // Should not panic or error, even though the bin file does not exist
-        let result = PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await;
+        let result = PackageService::execute_queues_with_options(
+            queues,
+            ScriptPolicy::Run,
+            ScriptOutput::Verbose,
+        )
+        .await;
         assert!(result.is_ok());
     }
 
@@ -1438,8 +1481,12 @@ mod tests {
         // Test with is_optional = true: should NOT return error
         let queue_optional: Vec<(Rc<PackageInfo>, bool)> =
             vec![(Rc::new(package_info.clone()), true)];
-        let result =
-            PackageService::execute_script_queue(&queue_optional, LifecycleHook::Postinstall).await;
+        let result = PackageService::execute_script_queue(
+            &queue_optional,
+            LifecycleHook::Postinstall,
+            ScriptOutput::Verbose,
+        )
+        .await;
         assert!(
             result.is_ok(),
             "Optional dependency script failure should be ignored"
@@ -1447,8 +1494,12 @@ mod tests {
 
         // Test with is_optional = false: should return error
         let queue_required: Vec<(Rc<PackageInfo>, bool)> = vec![(Rc::new(package_info), false)];
-        let result =
-            PackageService::execute_script_queue(&queue_required, LifecycleHook::Postinstall).await;
+        let result = PackageService::execute_script_queue(
+            &queue_required,
+            LifecycleHook::Postinstall,
+            ScriptOutput::Verbose,
+        )
+        .await;
         assert!(
             result.is_err(),
             "Required dependency script failure should return error"
@@ -1503,7 +1554,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = PackageService::process_workspace_install_hooks(root).await;
+        let result =
+            PackageService::process_workspace_install_hooks(root, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "workspace install hooks should run in topological order: {result:?}"
@@ -1526,7 +1578,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = PackageService::process_workspace_install_hooks(root).await;
+        let result =
+            PackageService::process_workspace_install_hooks(root, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "non-workspace project should succeed without running anything"
@@ -1560,7 +1613,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = PackageService::process_workspace_install_hooks(root).await;
+        let result =
+            PackageService::process_workspace_install_hooks(root, ScriptOutput::Verbose).await;
         assert!(
             result.is_err(),
             "a failing workspace prepare must surface as an error"
@@ -1605,7 +1659,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = PackageService::process_workspace_install_hooks(root).await;
+        let result =
+            PackageService::process_workspace_install_hooks(root, ScriptOutput::Verbose).await;
         assert!(
             result.is_ok(),
             "anonymous workspaces should not fail load: {result:?}"

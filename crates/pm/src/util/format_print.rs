@@ -90,24 +90,29 @@ pub fn print_pack_details(
 /// Kept separate from `ResolveError::Display` because tree-drawing with box
 /// characters is a CLI presentation concern.
 pub fn format_resolve_chain(err: &anyhow::Error) -> Option<String> {
-    let chain = err
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<ResolveError<RegistryError>>())
-        .and_then(|re| match re {
-            ResolveError::WithChain { chain, .. } => Some(chain),
-            _ => None,
-        })?;
+    let chain = resolve_chain(err)?;
 
     let mut out = String::from("required by:");
     for (i, (name, version)) in chain.iter().enumerate() {
         if i == 0 {
-            let _ = write!(out, "\n  {name}@{version}");
+            write!(out, "\n  {name}@{version}")
+                .expect("writing a dependency chain to String cannot fail");
         } else {
             let indent = "    ".repeat(i - 1);
-            let _ = write!(out, "\n  {indent}└── {name}@{version}");
+            write!(out, "\n  {indent}└── {name}@{version}")
+                .expect("writing a dependency chain to String cannot fail");
         }
     }
     Some(out)
+}
+
+pub fn resolve_chain(err: &anyhow::Error) -> Option<&[(String, String)]> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<ResolveError<RegistryError>>())
+        .and_then(|re| match re {
+            ResolveError::WithChain { chain, .. } => Some(chain.as_slice()),
+            _ => None,
+        })
 }
 
 /// `"3 packages installed"` / `"1 package uninstalled"` — the count line

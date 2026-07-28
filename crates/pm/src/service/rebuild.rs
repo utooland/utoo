@@ -1,4 +1,5 @@
 use crate::service::package::PackageService;
+use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;
 use std::path::Path;
@@ -17,6 +18,7 @@ impl RebuildService {
         package_lock: &PackageLock,
         root_path: &Path,
         scripts: ScriptPolicy,
+        output: ScriptOutput,
     ) -> Result<()> {
         // Collect packages based on scripts parameter
         let packages =
@@ -25,7 +27,7 @@ impl RebuildService {
         if !packages.is_empty() {
             let execution_queues =
                 PackageService::create_execution_queues_with_options(packages, scripts)?;
-            PackageService::execute_queues_with_options(execution_queues, scripts).await?;
+            PackageService::execute_queues_with_options(execution_queues, scripts, output).await?;
         }
 
         // bins_only mode does not execute project or workspace hooks
@@ -33,12 +35,12 @@ impl RebuildService {
             // Run workspace `prepare`/`postinstall`/etc. in topological order
             // before the root project's hooks, since the root may import
             // build artifacts produced by a workspace's `prepare`.
-            PackageService::process_workspace_install_hooks(root_path).await?;
+            PackageService::process_workspace_install_hooks(root_path, output).await?;
             // npm builds link/workspace packages separately: `prepare` runs
             // before their bins are linked. This also covers bin targets that
             // are created by the workspace's prepare script.
             PackageService::link_workspace_bins(root_path).await?;
-            PackageService::process_project_hooks(root_path).await?;
+            PackageService::process_project_hooks(root_path, output).await?;
         } else {
             // With scripts disabled, still link workspace bins that already
             // exist on disk.
@@ -175,8 +177,13 @@ mod tests {
         );
 
         // Test rebuild with empty package lock
-        let result =
-            RebuildService::rebuild(&package_lock, temp_dir.path(), ScriptPolicy::Run).await;
+        let result = RebuildService::rebuild(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Run,
+            ScriptOutput::Verbose,
+        )
+        .await;
         assert!(
             result.is_ok(),
             "Rebuild with empty package lock should succeed"
@@ -191,8 +198,13 @@ mod tests {
         let package_lock = create_test_package_lock();
 
         // Test rebuild without project package.json (should fail for project hooks)
-        let result =
-            RebuildService::rebuild(&package_lock, temp_dir.path(), ScriptPolicy::Run).await;
+        let result = RebuildService::rebuild(
+            &package_lock,
+            temp_dir.path(),
+            ScriptPolicy::Run,
+            ScriptOutput::Verbose,
+        )
+        .await;
         assert!(
             result.is_err(),
             "Rebuild without project package.json should fail"

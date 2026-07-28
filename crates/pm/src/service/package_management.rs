@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::install::InstallService;
+use super::script::ScriptOutput;
 use crate::helper::lock::resolve_package_spec;
 
 /// Package management service for handling package installation and caching
@@ -51,6 +52,7 @@ impl PackageManagementService {
         InstallService::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
+            ScriptOutput::Verbose,
         )
         .await?;
         tracing::debug!("Package {name} installed successfully");

@@ -2,8 +2,11 @@
 
 use std::borrow::Cow;
 use std::env;
+use std::io::{self, Write as _};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -16,7 +19,6 @@ use crate::fs;
 use crate::model::package::{LifecycleHook, PackageInfo};
 use crate::service::binary::get_envs;
 use crate::util::format_print::announce_script;
-use crate::util::invocation;
 use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_install_scope;
 
@@ -65,7 +67,6 @@ async fn build_script_command(
     // rather than see spurious `EPIPE` write errors that derail a `&&` chain.
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
         // SAFETY: the closure runs in the forked child before `exec` and only
         // calls `signal(2)`, which is async-signal-safe.
         unsafe {
@@ -237,31 +238,34 @@ impl ScriptService {
                 // `.output()`: each line feeds `sink` so the long-run heartbeat
                 // can show what a slow, silent script is doing, while the full
                 // text is still collected for the failure dump / debug log.
-                let output = Self::run_captured(cmd, sink.as_ref())
+                let captured = Self::run_captured(cmd, sink.as_ref())
                     .await
                     .context("Failed to execute script")?;
 
-                if !output.status.success() {
+                if !captured.status.success() {
                     // Relay the failed script's captured output. Ignore write
                     // errors: the parent keeps SIGPIPE ignored to survive a closed
                     // stdout (see the SIGPIPE handling above), so a plain
                     // `println!`/`eprintln!` here would panic on `BrokenPipe`
                     // rather than letting the install bail cleanly.
-                    if !invocation::json() {
-                        use std::io::Write as _;
-                        if !output.stdout.is_empty() {
-                            let _ = writeln!(
-                                std::io::stdout(),
+                    if output != ScriptOutput::Machine {
+                        if !captured.stdout.is_empty()
+                            && let Err(error) = writeln!(
+                                io::stdout(),
                                 "{}",
-                                String::from_utf8_lossy(&output.stdout)
-                            );
+                                String::from_utf8_lossy(&captured.stdout)
+                            )
+                        {
+                            tracing::debug!("failed to relay script stdout: {error}");
                         }
-                        if !output.stderr.is_empty() {
-                            let _ = writeln!(
-                                std::io::stderr(),
+                        if !captured.stderr.is_empty()
+                            && let Err(error) = writeln!(
+                                io::stderr(),
                                 "{}",
-                                String::from_utf8_lossy(&output.stderr)
-                            );
+                                String::from_utf8_lossy(&captured.stderr)
+                            )
+                        {
+                            tracing::debug!("failed to relay script stderr: {error}");
                         }
                     }
 
@@ -269,19 +273,19 @@ impl ScriptService {
                         "Script execution failed for {hook} in {}:\nCommand: {}\nExit code: {}",
                         package.path.display(),
                         script,
-                        output.status.code().unwrap_or(-1)
+                        captured.status.code().unwrap_or(-1)
                     );
                 }
 
                 // On success the output is otherwise discarded — keep it in the
                 // debug log file so `utoo-*.log` answers "what did that
                 // postinstall actually do?" after the fact.
-                if !output.stdout.is_empty() || !output.stderr.is_empty() {
+                if !captured.stdout.is_empty() || !captured.stderr.is_empty() {
                     tracing::debug!(
                         "{hook} output for {}:\n--- stdout ---\n{}--- stderr ---\n{}",
                         package.name,
-                        truncate_for_log(&output.stdout),
-                        truncate_for_log(&output.stderr),
+                        truncate_for_log(&captured.stdout),
+                        truncate_for_log(&captured.stderr),
                     );
                 }
             }

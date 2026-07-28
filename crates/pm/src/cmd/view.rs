@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context as _, Result, anyhow};
 use serde::Serialize;
@@ -65,8 +65,8 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
             .homepage
             .as_deref()
             .or(full_manifest.homepage.as_deref()),
-        dependencies: version_manifest.core.dependencies.as_ref(),
-        dist_tags: &full_manifest.dist_tags,
+        dependencies: version_manifest.core.dependencies.as_ref().map(sorted_map),
+        dist_tags: sorted_map(&full_manifest.dist_tags),
         dist: &version_manifest.core.dist,
     };
     emit("view", &output, || {
@@ -86,16 +86,45 @@ struct ViewOutput<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     homepage: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dependencies: Option<&'a HashMap<String, String>>,
-    dist_tags: &'a HashMap<String, String>,
+    dependencies: Option<BTreeMap<&'a str, &'a str>>,
+    dist_tags: BTreeMap<&'a str, &'a str>,
     dist: &'a Dist,
+}
+
+fn sorted_map(map: &HashMap<String, String>) -> BTreeMap<&str, &str> {
+    map.iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use mockito::Matcher;
 
     use super::*;
+
+    #[test]
+    fn json_maps_are_serialized_in_key_order() {
+        let first = HashMap::from([
+            ("zeta".to_string(), "1".to_string()),
+            ("alpha".to_string(), "2".to_string()),
+        ]);
+        let second = HashMap::from([
+            ("alpha".to_string(), "2".to_string()),
+            ("zeta".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(
+            serde_json::to_string(&sorted_map(&first)).unwrap(),
+            serde_json::to_string(&sorted_map(&second)).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&sorted_map(&first)).unwrap(),
+            r#"{"alpha":"2","zeta":"1"}"#
+        );
+    }
 
     /// E2E test: verify that calling view twice works correctly.
     /// Previously, the second call would fail with "304 Not Modified" error

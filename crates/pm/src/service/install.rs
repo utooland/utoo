@@ -17,6 +17,7 @@ use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
+use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
 use crate::util::cloner::ClonePolicy;
 use crate::util::install_progress;
@@ -264,6 +265,7 @@ impl InstallService {
         scripts: ScriptPolicy,
         save_type: SaveType,
         omit: &HashSet<OmitType>,
+        output: ScriptOutput,
     ) -> Result<()> {
         tracing::debug!(
             "update packages: {:?} {:?} {:?} {:?}",
@@ -298,7 +300,7 @@ impl InstallService {
             .await
             .context("Failed to build package-lock.json")?;
 
-        Self::install(scripts, &root_path, omit)
+        Self::install(scripts, &root_path, omit, output)
             .await
             .context("Failed to install packages")?;
 
@@ -309,6 +311,7 @@ impl InstallService {
         scripts: ScriptPolicy,
         root_path: &Path,
         omit: &HashSet<OmitType>,
+        output: ScriptOutput,
     ) -> Result<()> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
@@ -397,7 +400,7 @@ impl InstallService {
         let clone_elapsed = link_start.elapsed();
         finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
-        RebuildService::rebuild(&package_lock, root_path, scripts).await?;
+        RebuildService::rebuild(&package_lock, root_path, scripts, output).await?;
 
         print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
@@ -420,7 +423,11 @@ impl InstallService {
     /// packages cannot be hoisted beside other global tools. It participates in
     /// dependency lifecycle hooks (`preinstall`/`install`/`postinstall`) but not
     /// project-only hooks (`prepare`/`prepublish`) or root dev dependencies.
-    pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+    pub async fn install_global_package(
+        npm_spec: &str,
+        prefix: Option<&str>,
+        output: ScriptOutput,
+    ) -> Result<()> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
         let resolved = resolve_package_spec_details(npm_spec).await?;
@@ -521,7 +528,7 @@ impl InstallService {
         if !packages.is_empty() {
             let queues =
                 PackageService::create_execution_queues_with_options(packages, ScriptPolicy::Run)?;
-            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await?;
+            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run, output).await?;
         }
 
         // Link the tool's own bin into the global bin dir.

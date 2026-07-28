@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt;
 
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -29,6 +30,17 @@ impl ErrorKind {
             Self::Local => 11,
         }
     }
+
+    pub const fn from_http_status(status: u16) -> Self {
+        match status {
+            401 | 403 => Self::Auth,
+            404 => Self::NotFound,
+            409 => Self::Precondition,
+            429 => Self::RateLimited,
+            500..=599 => Self::Transient,
+            _ => Self::Local,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -36,6 +48,7 @@ pub struct CliError {
     kind: ErrorKind,
     message: String,
     suggestion: Option<String>,
+    details: Option<Value>,
 }
 
 impl CliError {
@@ -44,6 +57,7 @@ impl CliError {
             kind,
             message: message.into(),
             suggestion: None,
+            details: None,
         }
     }
 
@@ -60,6 +74,11 @@ impl CliError {
         self
     }
 
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
     pub const fn kind(&self) -> ErrorKind {
         self.kind
     }
@@ -70,6 +89,10 @@ impl CliError {
 
     pub fn suggestion(&self) -> Option<&str> {
         self.suggestion.as_deref()
+    }
+
+    pub const fn details(&self) -> Option<&Value> {
+        self.details.as_ref()
     }
 }
 
@@ -96,13 +119,7 @@ pub fn classify(error: &anyhow::Error) -> ErrorKind {
                 return ErrorKind::Transient;
             }
             if let Some(status) = error.status() {
-                return match status.as_u16() {
-                    401 | 403 => ErrorKind::Auth,
-                    404 => ErrorKind::NotFound,
-                    429 => ErrorKind::RateLimited,
-                    500..=599 => ErrorKind::Transient,
-                    _ => ErrorKind::Local,
-                };
+                return ErrorKind::from_http_status(status.as_u16());
             }
         }
     }

@@ -8,9 +8,11 @@ use serde::Serialize;
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
 use crate::service::install::InstallService;
+use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy};
-use crate::util::format_print::pluralized_package_count;
-use crate::util::install_progress::downloaded_bytes;
+use crate::util::format_print::{pluralized_package_count, print_migrate_result};
+use crate::util::install_progress::DownloadBaseline;
+use crate::util::invocation;
 use crate::util::logger::log_time_end;
 use crate::util::presenter::emit;
 use crate::util::user_config::{
@@ -72,6 +74,7 @@ pub struct InstallArgs {
 /// Folds `--production` and `--legacy-peer-deps` into the omit set, then
 /// installs either the given specs (globally or locally) or the whole project.
 pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()> {
+    let download_baseline = DownloadBaseline::capture();
     let requested = args.specs.clone();
     let global = args.global;
     // Build omit config: production = omit dev + optional
@@ -113,7 +116,13 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
     }
     let operation = if requested.is_empty() { "sync" } else { "add" };
-    emit_install_result("install", operation, &requested, global)
+    emit_install_result(
+        "install",
+        operation,
+        &requested,
+        global,
+        download_baseline.downloaded_bytes(),
+    )
 }
 
 /// Entry point for the `uninstall` command.
@@ -142,8 +151,15 @@ pub async fn uninstall(
 /// Install all dependencies of the project containing the current directory.
 /// Shared by bare `utoo` and `utoo install` without specs.
 pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
+    let download_baseline = DownloadBaseline::capture();
     install_cwd_inner(scripts).await?;
-    emit_install_result("install", "sync", &[], false)
+    emit_install_result(
+        "install",
+        "sync",
+        &[],
+        false,
+        download_baseline.downloaded_bytes(),
+    )
 }
 
 async fn install_cwd_inner(scripts: ScriptPolicy) -> Result<()> {
@@ -159,12 +175,13 @@ fn emit_install_result(
     operation: &str,
     packages: &[String],
     global: bool,
+    downloaded_bytes: u64,
 ) -> Result<()> {
     let output = InstallOutput {
         operation,
         packages,
         global,
-        downloaded_bytes: downloaded_bytes(),
+        downloaded_bytes,
     };
     emit(command, &output, || Ok(()))
 }
@@ -186,7 +203,10 @@ pub async fn migrate_from(from: Option<FromPm>) -> Result<()> {
     if from == Some(FromPm::Pnpm) {
         let cwd = std::env::current_dir()?;
         let root_path = init_project_root(&cwd).await?;
-        migrate_from_pnpm(&root_path).await?;
+        let result = migrate_from_pnpm(&root_path).await?;
+        if !invocation::json() {
+            print_migrate_result(&result)?;
+        }
     }
     Ok(())
 }
@@ -199,12 +219,21 @@ pub async fn update_packages(
     save_type: SaveType,
 ) -> Result<()> {
     let omit = get_omit();
-    InstallService::update_packages(action, specs, workspace, scripts, save_type, &omit).await
+    InstallService::update_packages(
+        action,
+        specs,
+        workspace,
+        scripts,
+        save_type,
+        &omit,
+        script_output(),
+    )
+    .await
 }
 
 pub async fn install(scripts: ScriptPolicy, root_path: &Path) -> Result<()> {
     let omit = get_omit();
-    InstallService::install(scripts, root_path, &omit).await
+    InstallService::install(scripts, root_path, &omit, script_output()).await
 }
 
 pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
@@ -217,7 +246,15 @@ pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Res
     let prefix = resolve_global_prefix(prefix).await;
 
     // Dispatch to service
-    InstallService::install_global_package(npm_spec, prefix.as_deref()).await
+    InstallService::install_global_package(npm_spec, prefix.as_deref(), script_output()).await
+}
+
+fn script_output() -> ScriptOutput {
+    if invocation::json() {
+        ScriptOutput::Machine
+    } else {
+        ScriptOutput::Verbose
+    }
 }
 
 #[cfg(test)]

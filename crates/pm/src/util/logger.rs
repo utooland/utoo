@@ -1,13 +1,13 @@
 use anyhow::Result;
 use std::env;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write as _};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::util::format_print::{HeartbeatScript, print_script_heartbeat};
 use crate::util::install_progress;
-use crate::util::invocation;
+use crate::util::invocation::{self, ColorPolicy};
 
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -41,20 +41,34 @@ pub static IS_TTY: Lazy<bool> = Lazy::new(|| std::io::stderr().is_terminal());
 /// a runtime one. They're pulled out as consts so `test_progress_templates_parse`
 /// can verify them in CI, turning a would-be runtime panic (rendering is gated
 /// behind a TTY, which CI isn't) into a test failure.
-const TEMPLATE_INIT: &str = "{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}";
-const TEMPLATE_RUNNING: &str = "{spinner:.blue} {prefix} {wide_msg}";
+const TEMPLATE_INIT_COLOR: &str = "{spinner:.blue} +{pos:.green} ~{len:.magenta} {wide_msg}";
+const TEMPLATE_INIT_PLAIN: &str = "{spinner} +{pos} ~{len} {wide_msg}";
+const TEMPLATE_RUNNING_COLOR: &str = "{spinner:.blue} {prefix} {wide_msg}";
+const TEMPLATE_RUNNING_PLAIN: &str = "{spinner} {prefix} {wide_msg}";
 const TEMPLATE_FINISH: &str = "✓ {wide_msg}";
 const TICK_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
 pub static PROGRESS_BAR: Lazy<ProgressBar> = Lazy::new(|| {
     let pb = ProgressBar::new(0).with_style(
-        ProgressStyle::with_template(TEMPLATE_INIT)
+        ProgressStyle::with_template(progress_template(TEMPLATE_INIT_COLOR, TEMPLATE_INIT_PLAIN))
             .unwrap()
             .tick_chars(TICK_CHARS),
     );
     pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     pb
 });
+
+fn progress_template(colored: &'static str, plain: &'static str) -> &'static str {
+    progress_template_for(invocation::color(), colored, plain)
+}
+
+fn progress_template_for(
+    color: ColorPolicy,
+    colored: &'static str,
+    plain: &'static str,
+) -> &'static str {
+    if color.ansi_enabled() { colored } else { plain }
+}
 
 /// Console writer for the tracing fmt layer that cooperates with the spinner.
 ///
@@ -82,8 +96,8 @@ impl Drop for ProgressConsoleWriter {
             return;
         }
         PROGRESS_BAR.suspend(|| {
-            use std::io::Write;
-            let _ = std::io::stderr().write_all(&self.0);
+            // Console output is best effort, especially after a broken pipe.
+            let _write_failed = io::stderr().write_all(&self.0).is_err();
         });
     }
 }
@@ -93,7 +107,11 @@ static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
 
 /// Initialize tracing subscriber with console and file output
 /// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
-pub fn init_tracing(verbose: bool, quiet: bool) -> Result<(PathBuf, WorkerGuard)> {
+pub fn init_tracing(
+    verbose: bool,
+    quiet: bool,
+    color: ColorPolicy,
+) -> Result<(PathBuf, WorkerGuard)> {
     // 1. Build environment filters
     // Note: Binary name is "utoo", so module paths start with "utoo::" not "utoo_pm::"
 
@@ -139,7 +157,7 @@ pub fn init_tracing(verbose: bool, quiet: bool) -> Result<(PathBuf, WorkerGuard)
                 .with_target(verbose) // Show module path only in verbose mode
                 .without_time() // No timestamp on console
                 .compact()
-                .with_ansi(is_tty) // Enable colors only when output is to terminal
+                .with_ansi(is_tty && color.ansi_enabled())
                 .with_filter(console_filter),
         )
         .with(
@@ -173,12 +191,15 @@ fn println_lossy(args: std::fmt::Arguments<'_>) {
     if invocation::json() || invocation::quiet() {
         return;
     }
-    use std::io::Write;
     // Lock once so the line and its newline are written under a single lock
     // (no interleaving with other writers), and stream `args` straight to the
     // writer instead of re-wrapping it in another format pass.
     let mut out = std::io::stdout().lock();
-    let _ = out.write_fmt(args).and_then(|_| out.write_all(b"\n"));
+    // Summary output intentionally degrades quietly after a broken pipe.
+    let _write_failed = out
+        .write_fmt(args)
+        .and_then(|_| out.write_all(b"\n"))
+        .is_err();
 }
 
 /// Finish the progress bar, optionally appending a dimmed `[2.6s]` suffix.
@@ -202,7 +223,9 @@ pub fn finish_progress_bar(msg: &str, elapsed: Option<Duration>) {
     PROGRESS_BAR.finish_with_message(full_msg);
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::hidden());
     // reset color
-    println_lossy(format_args!("\x1b[0m"));
+    if invocation::color().ansi_enabled() {
+        println_lossy(format_args!("\x1b[0m"));
+    }
 }
 
 /// Print the install counts line, e.g.
@@ -375,9 +398,12 @@ pub fn start_progress_bar() {
     // `{prefix}` is pinned just after the spinner so it stays in the eye's path
     // on a wide terminal; `{wide_msg}` (volatile activity) fills the rest.
     PROGRESS_BAR.set_style(
-        ProgressStyle::with_template(TEMPLATE_RUNNING)
-            .unwrap()
-            .tick_chars(TICK_CHARS),
+        ProgressStyle::with_template(progress_template(
+            TEMPLATE_RUNNING_COLOR,
+            TEMPLATE_RUNNING_PLAIN,
+        ))
+        .unwrap()
+        .tick_chars(TICK_CHARS),
     );
     PROGRESS_BAR.set_draw_target(indicatif::ProgressDrawTarget::stderr());
     PROGRESS_BAR.enable_steady_tick(Duration::from_millis(100));
@@ -401,7 +427,7 @@ static START_TIME: OnceCell<Instant> = OnceCell::new();
 
 /// Start the global timer for elapsed time logging.
 pub fn log_time() {
-    let _ = START_TIME.set(Instant::now());
+    START_TIME.get_or_init(Instant::now);
 }
 
 /// Format a Duration like `1.5s`, `2m5s`, `1h2m3s`.
@@ -479,10 +505,24 @@ mod tests {
         // The use sites `.unwrap()` these; rendering is TTY-gated so a malformed
         // template would only panic on a real terminal, never in CI. Parse them
         // here so a bad edit fails the test suite instead.
-        for template in [TEMPLATE_INIT, TEMPLATE_RUNNING, TEMPLATE_FINISH] {
+        for template in [
+            TEMPLATE_INIT_COLOR,
+            TEMPLATE_INIT_PLAIN,
+            TEMPLATE_RUNNING_COLOR,
+            TEMPLATE_RUNNING_PLAIN,
+            TEMPLATE_FINISH,
+        ] {
             ProgressStyle::with_template(template)
                 .unwrap_or_else(|e| panic!("malformed progress template {template:?}: {e}"));
         }
+        assert_eq!(
+            progress_template_for(
+                ColorPolicy::Never,
+                TEMPLATE_RUNNING_COLOR,
+                TEMPLATE_RUNNING_PLAIN,
+            ),
+            TEMPLATE_RUNNING_PLAIN
+        );
     }
 
     #[test]

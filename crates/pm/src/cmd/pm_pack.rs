@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use crate::model::RunMode;
 use crate::service::pm_pack as pack_service;
+use crate::service::script::ScriptOutput;
 use crate::util::format_print::print_pack_details;
+use crate::util::invocation;
 use crate::util::presenter::emit;
 
 pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
@@ -16,7 +18,12 @@ pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
         std::env::current_dir()?
     };
 
-    let result = pack_service::pack(&package_root).await?;
+    let output = if invocation::json() {
+        ScriptOutput::Machine
+    } else {
+        ScriptOutput::Verbose
+    };
+    let result = pack_service::pack(&package_root, output).await?;
 
     let tarball_path = match mode {
         RunMode::DryRun => None,

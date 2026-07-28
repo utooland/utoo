@@ -10,11 +10,14 @@ use utoo_ruborist::spec::Protocol;
 use crate::helper::workspace::{init_project_root, update_cwd_to_project};
 use crate::model::RunMode;
 use crate::model::package::{PackageInfo, PublishMeta};
-use crate::service::publish::{self as publish_service, PublishOptions};
+use crate::service::publish::{self as publish_service, PublishOptions, PublishOutcome, WebAuth};
+use crate::service::script::ScriptOutput;
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 use crate::util::cli_enum::PublishAccess;
+use crate::util::invocation;
 use crate::util::presenter::emit;
 use crate::util::user_config::{get_or_load_package_json, get_registry};
+use crate::{error::CliError, error::classify};
 
 /// Publish one or more packages.
 ///
@@ -33,8 +36,38 @@ pub async fn publish(
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let roots = resolve_publish_roots(&cwd, filter).await?;
     let mut packages = Vec::with_capacity(roots.len());
+    let script_output = if invocation::json() {
+        ScriptOutput::Machine
+    } else {
+        ScriptOutput::Verbose
+    };
+    let web_auth = if !invocation::json() && invocation::interactive() {
+        WebAuth::Allow
+    } else {
+        WebAuth::Deny
+    };
+    let options = PublishCommandOptions {
+        tag,
+        mode,
+        otp,
+        access,
+        provenance,
+        script_output,
+        web_auth,
+    };
     for root in roots {
-        packages.push(publish_one(&root, tag, mode, otp, access, provenance).await?);
+        match publish_one(&root, &options).await {
+            Ok(outcome) => {
+                packages.push(outcome.package);
+                if let Some(error) = outcome.lifecycle_error {
+                    return Err(partial_publish_error(error, mode, packages));
+                }
+            }
+            Err(error) if !packages.is_empty() => {
+                return Err(partial_publish_error(error, mode, packages));
+            }
+            Err(error) => return Err(error),
+        }
     }
     let output = PublishOutput {
         dry_run: mode == RunMode::DryRun,
@@ -97,12 +130,8 @@ async fn resolve_publish_roots(cwd: &Path, filter: WorkspaceFilter) -> Result<Ve
 /// Validate, pack, and publish a single package located at `package_root`.
 async fn publish_one(
     package_root: &Path,
-    tag: Option<&str>,
-    mode: RunMode,
-    otp: Option<&str>,
-    access: Option<PublishAccess>,
-    provenance: bool,
-) -> Result<PublishedPackage> {
+    options: &PublishCommandOptions<'_>,
+) -> Result<PublishOneOutcome> {
     // Run each publish from inside its own package directory, matching the
     // single-package flow (`update_cwd_to_project`). The filtered path anchors
     // resolution at the workspace root, so without this every member would
@@ -115,11 +144,11 @@ async fn publish_one(
     let meta = PublishMeta::from_package_json(&pkg);
     meta.validate()?;
 
-    let tag = meta.resolve_tag(tag)?;
-    let access = meta.resolve_access(access)?;
+    let tag = meta.resolve_tag(options.tag)?;
+    let access = meta.resolve_access(options.access)?;
     let access_name: &'static str = access.into();
     // CLI `--provenance` OR `publishConfig.provenance` OR `NPM_CONFIG_PROVENANCE`.
-    let provenance = meta.resolve_provenance(provenance);
+    let provenance = meta.resolve_provenance(options.provenance);
     let registry = meta
         .publish_config
         .registry
@@ -131,25 +160,51 @@ async fn publish_one(
         package_info: &package_info,
         registry: &registry,
         tag: &tag,
-        mode,
-        otp,
+        mode: options.mode,
+        otp: options.otp,
         access,
         provenance,
+        script_output: options.script_output,
+        web_auth: options.web_auth,
     })
     .await?;
+    let (result, lifecycle_error) = match result {
+        PublishOutcome::Completed(result) => (result, None),
+        PublishOutcome::Committed {
+            result,
+            lifecycle_error,
+        } => (result, Some(lifecycle_error)),
+    };
 
-    Ok(PublishedPackage {
-        name: result.pack.name,
-        version: result.pack.version,
-        registry: result.registry,
-        tag: result.tag,
-        access: access_name,
-        provenance,
-        files: result.pack.files.len(),
-        packed_size: result.pack.packed_size,
-        integrity: result.pack.integrity,
-        resolved_dependencies: resolved_protocol_deps(&pkg, &result.pack.manifest),
+    Ok(PublishOneOutcome {
+        package: PublishedPackage {
+            name: result.pack.name,
+            version: result.pack.version,
+            registry: result.registry,
+            tag: result.tag,
+            access: access_name,
+            provenance,
+            files: result.pack.files.len(),
+            packed_size: result.pack.packed_size,
+            integrity: result.pack.integrity,
+            resolved_dependencies: resolved_protocol_deps(&pkg, &result.pack.manifest),
+        },
+        lifecycle_error,
     })
+}
+
+fn partial_publish_error(
+    error: anyhow::Error,
+    mode: RunMode,
+    completed_packages: Vec<PublishedPackage>,
+) -> anyhow::Error {
+    let category = classify(&error);
+    CliError::new(category, format!("{error:#}"))
+        .with_details(serde_json::json!({
+            "dryRun": mode == RunMode::DryRun,
+            "completedPackages": completed_packages,
+        }))
+        .into()
 }
 
 /// Print dependencies whose `workspace:`/`catalog:` specifier was rewritten to a
@@ -254,6 +309,21 @@ struct PublishedPackage {
     integrity: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     resolved_dependencies: Vec<ResolvedDependency>,
+}
+
+struct PublishOneOutcome {
+    package: PublishedPackage,
+    lifecycle_error: Option<anyhow::Error>,
+}
+
+struct PublishCommandOptions<'a> {
+    tag: Option<&'a str>,
+    mode: RunMode,
+    otp: Option<&'a str>,
+    access: Option<PublishAccess>,
+    provenance: bool,
+    script_output: ScriptOutput,
+    web_auth: WebAuth,
 }
 
 #[derive(Serialize)]

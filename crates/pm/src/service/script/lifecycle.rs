@@ -24,6 +24,8 @@ pub enum ScriptOutput {
     Verbose,
     /// Capture and only print on failure (dependency lifecycle scripts).
     Silent,
+    /// Capture without writing to stdout/stderr (machine invocations).
+    Machine,
 }
 
 /// What to do when a workspace doesn't have the requested script.
@@ -54,6 +56,7 @@ pub enum LifecycleSink<'a> {
         header: &'a mut String,
         body: &'a mut Vec<u8>,
     },
+    Machine,
 }
 
 impl ScriptService {
@@ -118,13 +121,14 @@ impl ScriptService {
                     header,
                     body,
                 } => {
-                    let _ = writeln!(
+                    writeln!(
                         header,
                         "[{}] {} {}",
                         workspace_label,
                         content,
                         step_args.join(" ")
-                    );
+                    )
+                    .expect("writing a lifecycle header to String cannot fail");
                     let cap = Self::execute_custom_script_captured(
                         package,
                         step_name,
@@ -135,6 +139,21 @@ impl ScriptService {
                     append_captured(body, &cap.stdout, &cap.stderr);
                     if !cap.status.success() {
                         anyhow::bail!("Failed to execute {step_name}");
+                    }
+                }
+                LifecycleSink::Machine => {
+                    let cap = Self::execute_custom_script_captured(
+                        package,
+                        step_name,
+                        &content,
+                        step_args.to_vec(),
+                    )
+                    .await?;
+                    if !cap.status.success() {
+                        anyhow::bail!(
+                            "Failed to execute {step_name}: exit code {}",
+                            cap.status.code().unwrap_or(-1)
+                        );
                     }
                 }
             }

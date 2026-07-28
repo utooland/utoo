@@ -299,16 +299,30 @@ pub enum Commands {
 
 impl Commands {
     pub fn supports_json(&self) -> bool {
-        matches!(
-            self,
-            Self::Install(_)
-                | Self::List { .. }
-                | Self::View { .. }
-                | Self::Pack { .. }
-                | Self::Publish { .. }
-                | Self::Whoami
-                | Self::Config { .. }
-        )
+        self.json_name().is_some()
+    }
+
+    pub const fn json_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Install(_) => Some("install"),
+            Self::List { .. } => Some("list"),
+            Self::View { .. } => Some("view"),
+            Self::Pack { .. } => Some("pack"),
+            Self::Publish { .. } => Some("publish"),
+            Self::Whoami => Some("whoami"),
+            Self::Config { command } => Some(command.json_name()),
+            _ => None,
+        }
+    }
+}
+
+impl ConfigCommands {
+    const fn json_name(&self) -> &'static str {
+        match self {
+            Self::Set { .. } => "config set",
+            Self::Get { .. } => "config get",
+            Self::List { .. } => "config list",
+        }
     }
 }
 

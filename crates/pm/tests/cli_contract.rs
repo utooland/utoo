@@ -1,5 +1,9 @@
 use std::fs;
-use std::process::Command;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::path::Path;
+use std::process::{Command, Output};
+use std::thread;
 
 use serde_json::Value;
 use tempfile::tempdir;
@@ -8,6 +12,131 @@ fn utoo() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_utoo"));
     command.env("NO_UPDATE_NOTIFIER", "1");
     command
+}
+
+fn serve_publish_registry(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let status = status.to_string();
+    let body = body.to_string();
+    let handle = thread::spawn(move || {
+        for (response_status, response_body) in
+            [("404 Not Found", "{}"), (status.as_str(), body.as_str())]
+        {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 8192];
+            let header_end = loop {
+                let read = stream.read(&mut chunk).unwrap();
+                assert!(read > 0, "registry request ended before its headers");
+                request.extend_from_slice(&chunk[..read]);
+                if let Some(position) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    break position + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+            while request.len() < header_end + content_length {
+                let read = stream.read(&mut chunk).unwrap();
+                assert!(read > 0, "registry request body ended early");
+                request.extend_from_slice(&chunk[..read]);
+            }
+
+            write!(
+                stream,
+                "HTTP/1.1 {response_status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                response_body.len()
+            )
+            .unwrap();
+            stream.flush().unwrap();
+        }
+    });
+    (format!("http://{address}"), handle)
+}
+
+fn run_publish(project: &Path, registry: &str) -> Output {
+    let mut command = utoo();
+    command
+        .current_dir(project)
+        .env("HOME", project)
+        .env("USERPROFILE", project)
+        .env("NPM_TOKEN", "test-token")
+        .args(["--json", "--registry", registry, "publish"]);
+    for proxy in [
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+    ] {
+        command.env_remove(proxy);
+    }
+    command.output().unwrap()
+}
+
+fn write_lifecycle_project(project: &Path, exit_code: i32) {
+    fs::write(
+        project.join("package.json"),
+        r#"{"name":"fixture","version":"1.0.0","scripts":{"install":"node lifecycle.js"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("package-lock.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {"name": "fixture", "version": "1.0.0"}
+  }
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("lifecycle.js"),
+        format!(
+            r#"process.stdout.write("LIFECYCLE_STDOUT_MARKER\n");
+process.stderr.write("LIFECYCLE_STDERR_MARKER\n");
+process.exit({exit_code});
+"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn json_version_is_one_machine_document() {
+    let output = utoo().args(["--json", "--version"]).output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["command"], "version");
+    assert!(value["version"].is_string());
+}
+
+#[test]
+fn json_help_is_one_machine_document() {
+    let output = utoo().args(["--json", "view", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["command"], "help");
+    assert!(value["help"].as_str().unwrap().contains("Usage:"));
 }
 
 #[test]
@@ -43,6 +172,169 @@ fn pack_json_is_one_clean_document() {
     assert_eq!(value["command"], "pack");
     assert_eq!(value["name"], "fixture");
     assert_eq!(value["dryRun"], true);
+}
+
+#[test]
+fn install_json_lifecycle_success_is_one_clean_document() {
+    let project = tempdir().unwrap();
+    write_lifecycle_project(project.path(), 0);
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "install"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    assert!(!stdout.contains("LIFECYCLE_STDOUT_MARKER"));
+    assert!(!stdout.contains("LIFECYCLE_STDERR_MARKER"));
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["command"], "install");
+}
+
+#[test]
+fn install_json_lifecycle_failure_is_one_stable_error_document() {
+    let project = tempdir().unwrap();
+    write_lifecycle_project(project.path(), 42);
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "install"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(11),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1);
+    assert!(!stderr.contains("LIFECYCLE_STDOUT_MARKER"));
+    assert!(!stderr.contains("LIFECYCLE_STDERR_MARKER"));
+    let value: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["command"], "install");
+    assert_eq!(value["error"]["category"], "local");
+    assert_eq!(value["error"]["code"], 11);
+}
+
+#[test]
+fn install_json_migration_does_not_emit_a_human_summary() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"fixture","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    fs::write(project.path().join("pnpm-workspace.yaml"), "packages: []\n").unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "install", "--from", "pnpm", "--ignore-scripts"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    assert!(!stdout.contains("pnpm"));
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["command"], "install");
+}
+
+#[test]
+fn publish_json_reports_registry_commit_when_postpublish_fails() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "files": ["index.js"],
+  "scripts": {"postpublish": "node postpublish.js"}
+}"#,
+    )
+    .unwrap();
+    fs::write(project.path().join("index.js"), "export default 1;\n").unwrap();
+    fs::write(
+        project.path().join("postpublish.js"),
+        r#"process.stdout.write("POSTPUBLISH_STDOUT_MARKER\n");
+process.stderr.write("POSTPUBLISH_STDERR_MARKER\n");
+process.exit(42);
+"#,
+    )
+    .unwrap();
+    let (registry, server) = serve_publish_registry("201 Created", "{}");
+
+    let output = run_publish(project.path(), &registry);
+    server.join().unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(11),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1);
+    assert!(!stderr.contains("POSTPUBLISH_STDOUT_MARKER"));
+    assert!(!stderr.contains("POSTPUBLISH_STDERR_MARKER"));
+    let value: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(value["command"], "publish");
+    assert_eq!(value["error"]["category"], "local");
+    assert_eq!(value["error"]["code"], 11);
+    assert_eq!(
+        value["error"]["details"]["completedPackages"][0]["name"],
+        "fixture"
+    );
+    assert_eq!(
+        value["error"]["details"]["completedPackages"][0]["version"],
+        "1.0.0"
+    );
+}
+
+#[test]
+fn publish_json_classifies_forbidden_as_auth() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"fixture","version":"1.0.0","files":["index.js"]}"#,
+    )
+    .unwrap();
+    fs::write(project.path().join("index.js"), "export default 1;\n").unwrap();
+    let (registry, server) = serve_publish_registry("403 Forbidden", r#"{"error":"forbidden"}"#);
+
+    let output = run_publish(project.path(), &registry);
+    server.join().unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(value["error"]["category"], "auth");
+    assert_eq!(value["error"]["code"], 3);
 }
 
 #[test]
