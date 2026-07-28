@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::thread;
 
 use serde_json::Value;
@@ -487,6 +487,51 @@ fn init_does_not_prompt_without_a_tty() {
         String::from_utf8_lossy(&output.stderr).contains("refusing to prompt for package metadata")
     );
     assert!(!project.path().join("package.json").exists());
+}
+
+fn write_cache_entry(home: &Path) -> std::path::PathBuf {
+    let entry = home.join(".cache/nm/fixture/1.0.0");
+    fs::create_dir_all(&entry).unwrap();
+    entry
+}
+
+#[test]
+fn clean_does_not_prompt_without_a_tty() {
+    let home = tempdir().unwrap();
+    let entry = write_cache_entry(home.path());
+    let output = utoo()
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .arg("clean")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("utoo clean --yes"));
+    assert!(entry.exists());
+}
+
+#[test]
+fn clean_yes_deletes_without_a_prompt() {
+    let home = tempdir().unwrap();
+    let entry = write_cache_entry(home.path());
+    let output = utoo()
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .args(["clean", "--yes"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Confirm to delete"));
+    assert!(!entry.exists());
 }
 
 #[test]

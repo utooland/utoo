@@ -251,8 +251,8 @@ async fn async_main() -> Result<()> {
     init_auto_update().await;
 
     match cli.command {
-        Some(Commands::Clean { pattern }) => {
-            clean(&pattern).await?;
+        Some(Commands::Clean { pattern, yes }) => {
+            clean(&pattern, yes).await?;
             log_time_end(&format!("{pattern} cleaned"));
         }
         Some(Commands::Install(args)) => {

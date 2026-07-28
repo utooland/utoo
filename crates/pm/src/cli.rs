@@ -151,6 +151,10 @@ pub enum Commands {
     Clean {
         #[arg(default_value = "*")]
         pattern: String,
+
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 
     #[command(name = DEPS_NAME, alias = DEPS_ALIAS, about = DEPS_ABOUT)]
