@@ -1,6 +1,6 @@
 "use strict";
 
-const fs = require("fs");
+const fs = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 
@@ -45,28 +45,37 @@ function runNpm(command, args, options = {}) {
   });
 }
 
-function replaceDirectory(staged, target) {
+async function exists(target) {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function replaceDirectory(staged, target) {
   const backup = `${target}.utoo-backup-${process.pid}-${Date.now()}`;
   let backedUp = false;
   try {
-    if (fs.existsSync(target)) {
-      fs.renameSync(target, backup);
+    if (await exists(target)) {
+      await fs.rename(target, backup);
       backedUp = true;
     }
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.renameSync(staged, target);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.rename(staged, target);
     if (backedUp) {
       try {
-        fs.rmSync(backup, { recursive: true, force: true });
+        await fs.rm(backup, { recursive: true, force: true });
       } catch {
         // The replacement is already live. A scanner-held backup is harmless
         // and must not turn a successful repair into a launcher failure.
       }
     }
   } catch (error) {
-    if (!fs.existsSync(target) && backedUp && fs.existsSync(backup)) {
+    if (!(await exists(target)) && backedUp && (await exists(backup))) {
       try {
-        fs.renameSync(backup, target);
+        await fs.rename(backup, target);
       } catch {
         // Preserve the original error and the backup for manual recovery.
       }
@@ -87,10 +96,10 @@ async function selfHeal(options) {
   const packageSegments = packageName.split("/");
   const target = path.join(packageRoot, "node_modules", ...packageSegments);
   const targetBinary = path.join(target, executable);
-  if (fs.existsSync(targetBinary)) return targetBinary;
+  if (await exists(targetBinary)) return targetBinary;
 
-  const staging = fs.mkdtempSync(path.join(packageRoot, ".utoo-heal-"));
-  fs.writeFileSync(
+  const staging = await fs.mkdtemp(path.join(packageRoot, ".utoo-heal-"));
+  await fs.writeFile(
     path.join(staging, "package.json"),
     '{"private":true}\n',
   );
@@ -122,14 +131,14 @@ async function selfHeal(options) {
     });
     const staged = path.join(staging, "node_modules", ...packageSegments);
     const stagedBinary = path.join(staged, executable);
-    if (!fs.existsSync(stagedBinary)) {
+    if (!(await exists(stagedBinary))) {
       throw new Error(`npm installed ${packageName}, but ${executable} is missing`);
     }
 
     // Another lock-free repair may finish while npm is running. A complete
     // target wins; otherwise replace a stale/partial package transactionally.
-    if (!fs.existsSync(targetBinary)) replaceDirectory(staged, target);
-    if (!fs.existsSync(targetBinary)) {
+    if (!(await exists(targetBinary))) await replaceDirectory(staged, target);
+    if (!(await exists(targetBinary))) {
       throw new Error(`failed to publish repaired binary at ${targetBinary}`);
     }
     console.error(`utoo: repaired ${packageName}@${version}`);
@@ -144,7 +153,7 @@ async function selfHeal(options) {
     );
   } finally {
     try {
-      fs.rmSync(staging, { recursive: true, force: true });
+      await fs.rm(staging, { recursive: true, force: true });
     } catch {
       // Best effort: Windows scanners can briefly retain files after npm exits.
     }

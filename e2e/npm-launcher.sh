@@ -166,20 +166,22 @@ const fakeRoot = path.join(sandbox, "windows-platform");
 fs.mkdirSync(path.join(fakeRoot, "bin"), { recursive: true });
 fs.writeFileSync(path.join(fakeRoot, "package.json"), "{}");
 fs.writeFileSync(path.join(fakeRoot, "bin", "utoo.exe"), "PE fixture");
-const binary = launcher.findBinary(
-  windows,
-  "win32",
-  "arm64",
-  () => path.join(fakeRoot, "package.json"),
-);
-if (binary !== path.join(fakeRoot, "bin", "utoo.exe")) process.exit(13);
+(async () => {
+  const binary = await launcher.findBinary(
+    windows,
+    "win32",
+    "arm64",
+    () => path.join(fakeRoot, "package.json"),
+  );
+  if (binary !== path.join(fakeRoot, "bin", "utoo.exe")) process.exit(13);
 
-try {
-  launcher.resolveTarget("freebsd", "x64");
-  process.exit(14);
-} catch (error) {
-  if (!error.message.includes("unsupported platform: freebsd-x64")) process.exit(15);
-}
+  try {
+    launcher.resolveTarget("freebsd", "x64");
+    process.exit(14);
+  } catch (error) {
+    if (!error.message.includes("unsupported platform: freebsd-x64")) process.exit(15);
+  }
+})();
 NODE
 rc=$?
 [ "$rc" = "0" ] && ok "Windows ARM64 fallback and unsupported targets" \

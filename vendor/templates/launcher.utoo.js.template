@@ -1,6 +1,6 @@
 "use strict";
 
-const fs = require("fs");
+const fs = require("fs/promises");
 const path = require("path");
 const { spawn } = require("child_process");
 const { resolveRegistry } = require("./registry.js");
@@ -59,25 +59,25 @@ function resolveTarget(platform = process.platform, arch = process.arch) {
   return target;
 }
 
-function packageVersion(packageRoot = path.join(__dirname, "..")) {
+async function packageVersion(packageRoot = path.join(__dirname, "..")) {
   try {
     return JSON.parse(
-      fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+      await fs.readFile(path.join(packageRoot, "package.json"), "utf8"),
     ).version;
   } catch {
     return "unknown";
   }
 }
 
-function missingArtifactMessage(target, platform, arch) {
+function missingArtifactMessage(target, platform, arch, version) {
   return [
     `native binary for ${platform}-${arch} is missing`,
-    `expected optional package: ${target.packageName}@${packageVersion()}`,
+    `expected optional package: ${target.packageName}@${version}`,
     "reinstall utoo without omitting optional dependencies",
   ].join("\n");
 }
 
-function findBinary(
+async function findBinary(
   target,
   platform = process.platform,
   arch = process.arch,
@@ -91,19 +91,21 @@ function findBinary(
   }
 
   const binary = path.join(path.dirname(packageJson), target.executable);
-  if (!fs.existsSync(binary)) {
+  try {
+    await fs.access(binary);
+  } catch {
     return null;
   }
   return binary;
 }
 
-function spawnNative(binary, args, spawnImpl = spawn) {
+async function spawnNative(binary, args, spawnImpl = spawn) {
   const env = {
     ...process.env,
     // The native executable lives inside an optional dependency. Preserve the
     // main package root so utoo can infer npm-style global prefixes from the
     // public package rather than from the nested platform artifact.
-    UTOO_MANAGED_PACKAGE_ROOT: fs.realpathSync(path.join(__dirname, "..")),
+    UTOO_MANAGED_PACKAGE_ROOT: await fs.realpath(path.join(__dirname, "..")),
   };
   const child = spawnImpl(binary, args, { stdio: "inherit", env });
   const signalHandlers = new Map();
@@ -144,25 +146,26 @@ async function run(args, options = {}) {
   const platform = options.platform || process.platform;
   const arch = options.arch || process.arch;
   const target = resolveTarget(platform, arch);
-  let binary = findBinary(
+  const packageRoot = options.packageRoot || path.join(__dirname, "..");
+  const version = await packageVersion(packageRoot);
+  let binary = await findBinary(
     target,
     platform,
     arch,
     options.resolvePackage || require.resolve,
   );
   if (!binary) {
-    const packageRoot = options.packageRoot || path.join(__dirname, "..");
     try {
       binary = await (options.selfHealImpl || selfHeal)({
         ...target,
         packageRoot,
         platform,
         registry: resolveRegistry(args, options.env || process.env),
-        version: packageVersion(packageRoot),
+        version,
       });
     } catch (error) {
       throw new LauncherError(
-        missingArtifactMessage(target, platform, arch),
+        missingArtifactMessage(target, platform, arch, version),
         error,
       );
     }
@@ -173,7 +176,7 @@ async function run(args, options = {}) {
     throw new LauncherError(
       [
         `failed to start native binary: ${binary}`,
-        `platform package: ${target.packageName}@${packageVersion()}`,
+        `platform package: ${target.packageName}@${version}`,
         "reinstall utoo without omitting optional dependencies",
       ].join("\n"),
       error.cause || error,
