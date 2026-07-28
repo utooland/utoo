@@ -7,7 +7,7 @@ use clap::Args;
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
 use crate::service::install::InstallService;
-use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy};
+use crate::util::cli_enum::{OmitType, PackageAction, ReifyMode, SaveType, ScriptPolicy};
 use crate::util::format_print::pluralized_package_count;
 use crate::util::logger::log_time_end;
 use crate::util::user_config::{
@@ -169,8 +169,16 @@ pub async fn update_packages(
 }
 
 pub async fn install(scripts: ScriptPolicy, root_path: &Path) -> Result<()> {
+    install_with_mode(scripts, root_path, ReifyMode::Incremental).await
+}
+
+pub async fn install_with_mode(
+    scripts: ScriptPolicy,
+    root_path: &Path,
+    mode: ReifyMode,
+) -> Result<()> {
     let omit = get_omit();
-    InstallService::install(scripts, root_path, &omit).await
+    InstallService::install_with_mode(scripts, root_path, &omit, mode).await
 }
 
 pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {

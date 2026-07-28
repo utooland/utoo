@@ -6,6 +6,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::cmd::install::InstallArgs;
+use crate::cmd::update::UpdateArgs;
 use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_ALIAS,
     COMPLETIONS_LONG_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,
@@ -148,7 +149,7 @@ pub enum Commands {
     },
 
     #[command(name = UPDATE_NAME, alias = UPDATE_ALIAS, about = UPDATE_ABOUT)]
-    Update,
+    Update(UpdateArgs),
 
     #[command(name = LIST_NAME, alias = LIST_ALIAS, about = LIST_ABOUT)]
     List {
@@ -364,6 +365,24 @@ mod tests {
             result.is_ok(),
             "Should parse 'utoo install' as valid Install command"
         );
+    }
+
+    #[test]
+    fn test_update_force_flags() {
+        for flag in ["--force", "-f"] {
+            let cli = Cli::try_parse_from(["utoo", "update", flag])
+                .unwrap_or_else(|e| panic!("`utoo update {flag}` should parse, got: {e}"));
+            match cli.command {
+                Some(Commands::Update(args)) => assert!(args.force),
+                _ => panic!("expected Update subcommand"),
+            }
+        }
+
+        let cli = Cli::try_parse_from(["utoo", "update"]).unwrap();
+        match cli.command {
+            Some(Commands::Update(args)) => assert!(!args.force),
+            _ => panic!("expected Update subcommand"),
+        }
     }
 
     /// `utx --version` (= `utoo x --version`) must parse — the leading
