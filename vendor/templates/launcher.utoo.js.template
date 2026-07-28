@@ -3,6 +3,8 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { resolveRegistry } = require("./registry.js");
+const { selfHeal } = require("./self-heal.js");
 
 const TARGETS = Object.freeze({
   "darwin-x64": {
@@ -57,9 +59,11 @@ function resolveTarget(platform = process.platform, arch = process.arch) {
   return target;
 }
 
-function packageVersion() {
+function packageVersion(packageRoot = path.join(__dirname, "..")) {
   try {
-    return require("../package.json").version;
+    return JSON.parse(
+      fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
+    ).version;
   } catch {
     return "unknown";
   }
@@ -82,18 +86,13 @@ function findBinary(
   let packageJson;
   try {
     packageJson = resolvePackage(`${target.packageName}/package.json`);
-  } catch (error) {
-    throw new LauncherError(
-      missingArtifactMessage(target, platform, arch),
-      error,
-    );
+  } catch {
+    return null;
   }
 
   const binary = path.join(path.dirname(packageJson), target.executable);
   if (!fs.existsSync(binary)) {
-    throw new LauncherError(
-      `${missingArtifactMessage(target, platform, arch)}\nexpected file: ${binary}`,
-    );
+    return null;
   }
   return binary;
 }
@@ -145,12 +144,29 @@ async function run(args, options = {}) {
   const platform = options.platform || process.platform;
   const arch = options.arch || process.arch;
   const target = resolveTarget(platform, arch);
-  const binary = findBinary(
+  let binary = findBinary(
     target,
     platform,
     arch,
     options.resolvePackage || require.resolve,
   );
+  if (!binary) {
+    const packageRoot = options.packageRoot || path.join(__dirname, "..");
+    try {
+      binary = await (options.selfHealImpl || selfHeal)({
+        ...target,
+        packageRoot,
+        platform,
+        registry: resolveRegistry(args, options.env || process.env),
+        version: packageVersion(packageRoot),
+      });
+    } catch (error) {
+      throw new LauncherError(
+        missingArtifactMessage(target, platform, arch),
+        error,
+      );
+    }
+  }
   try {
     return await spawnNative(binary, args, options.spawnImpl || spawn);
   } catch (error) {

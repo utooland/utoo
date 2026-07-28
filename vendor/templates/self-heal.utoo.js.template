@@ -1,0 +1,159 @@
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { spawn } = require("child_process");
+
+function npmInvocation(args, platform = process.platform, env = process.env) {
+  if (platform !== "win32") return { command: "npm", args };
+  return {
+    command: env.ComSpec || "cmd.exe",
+    args: ["/d", "/s", "/c", "call", "npm.cmd", ...args],
+  };
+}
+
+function runNpm(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = (options.spawnImpl || spawn)(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("close", (status) => {
+      if (status === 0) {
+        resolve();
+        return;
+      }
+      const detail = (stderr || stdout).trim();
+      reject(
+        new Error(
+          `npm exited with status ${status}${detail ? `\n${detail}` : ""}`,
+        ),
+      );
+    });
+  });
+}
+
+function replaceDirectory(staged, target) {
+  const backup = `${target}.utoo-backup-${process.pid}-${Date.now()}`;
+  let backedUp = false;
+  try {
+    if (fs.existsSync(target)) {
+      fs.renameSync(target, backup);
+      backedUp = true;
+    }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.renameSync(staged, target);
+    if (backedUp) {
+      try {
+        fs.rmSync(backup, { recursive: true, force: true });
+      } catch {
+        // The replacement is already live. A scanner-held backup is harmless
+        // and must not turn a successful repair into a launcher failure.
+      }
+    }
+  } catch (error) {
+    if (!fs.existsSync(target) && backedUp && fs.existsSync(backup)) {
+      try {
+        fs.renameSync(backup, target);
+      } catch {
+        // Preserve the original error and the backup for manual recovery.
+      }
+    }
+    error.message += `\nbackup: ${backup}`;
+    throw error;
+  }
+}
+
+async function selfHeal(options) {
+  const {
+    executable,
+    packageName,
+    packageRoot,
+    registry,
+    version,
+  } = options;
+  const packageSegments = packageName.split("/");
+  const target = path.join(packageRoot, "node_modules", ...packageSegments);
+  const targetBinary = path.join(target, executable);
+  if (fs.existsSync(targetBinary)) return targetBinary;
+
+  const staging = fs.mkdtempSync(path.join(packageRoot, ".utoo-heal-"));
+  fs.writeFileSync(
+    path.join(staging, "package.json"),
+    '{"private":true}\n',
+  );
+  const args = [
+    "install",
+    "--loglevel=error",
+    "--no-audit",
+    "--no-fund",
+    "--progress=false",
+    "--prefer-offline",
+    "--ignore-scripts",
+    "--no-save",
+    "--package-lock=false",
+    `--prefix=${staging}`,
+    `--registry=${registry}`,
+    `${packageName}@${version}`,
+  ];
+  const env = { ...process.env, ...options.env };
+  delete env.npm_config_global;
+  delete env.NPM_CONFIG_GLOBAL;
+  const invocation = npmInvocation(args, options.platform, env);
+
+  console.error(`utoo: repairing ${packageName}@${version} with npm...`);
+  try {
+    await runNpm(invocation.command, invocation.args, {
+      cwd: staging,
+      env,
+      spawnImpl: options.spawnImpl,
+    });
+    const staged = path.join(staging, "node_modules", ...packageSegments);
+    const stagedBinary = path.join(staged, executable);
+    if (!fs.existsSync(stagedBinary)) {
+      throw new Error(`npm installed ${packageName}, but ${executable} is missing`);
+    }
+
+    // Another lock-free repair may finish while npm is running. A complete
+    // target wins; otherwise replace a stale/partial package transactionally.
+    if (!fs.existsSync(targetBinary)) replaceDirectory(staged, target);
+    if (!fs.existsSync(targetBinary)) {
+      throw new Error(`failed to publish repaired binary at ${targetBinary}`);
+    }
+    console.error(`utoo: repaired ${packageName}@${version}`);
+    return targetBinary;
+  } catch (error) {
+    const detail = error && error.message ? error.message : String(error);
+    throw new Error(
+      `failed to repair ${packageName}@${version}\n` +
+        `registry: ${registry}\n` +
+        `target: ${target}\n` +
+        `staging: ${staging}\n${detail}`,
+    );
+  } finally {
+    try {
+      fs.rmSync(staging, { recursive: true, force: true });
+    } catch {
+      // Best effort: Windows scanners can briefly retain files after npm exits.
+    }
+  }
+}
+
+module.exports = {
+  npmInvocation,
+  replaceDirectory,
+  runNpm,
+  selfHeal,
+};
