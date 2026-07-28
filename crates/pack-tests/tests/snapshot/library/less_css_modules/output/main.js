@@ -256,6 +256,7 @@ __turbopack_context__.s([
 }),
 56, ((__turbopack_context__) => {
 
+__turbopack_context__.i(23);
 __turbopack_context__.v({
   "widget-button": "index-less__-C211G__widget-button",
 });
