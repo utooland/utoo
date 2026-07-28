@@ -947,6 +947,8 @@ popd
 # dependency installation and bin-shim generation.
 mkdir -p pkg/bin
 cp "$REPO_ROOT/vendor/templates/launcher.utoo.js.template" pkg/bin/launcher.js
+cp "$REPO_ROOT/vendor/templates/registry.utoo.js.template" pkg/bin/registry.js
+cp "$REPO_ROOT/vendor/templates/self-heal.utoo.js.template" pkg/bin/self-heal.js
 cp "$REPO_ROOT/vendor/templates/utoo.utoo.js.template" pkg/bin/utoo.js
 cp "$REPO_ROOT/vendor/templates/utx.utoo.js.template" pkg/bin/utx.js
 chmod +x pkg/bin/utoo.js pkg/bin/utx.js
