@@ -316,6 +316,8 @@ try {
     # Build the main package from the real immutable launcher templates.
     $tplDir = Join-Path (Split-Path $PSScriptRoot -Parent) "vendor/templates"
     Copy-Item "$tplDir\launcher.utoo.js.template" "$packDir\pkg\bin\launcher.js"
+    Copy-Item "$tplDir\registry.utoo.js.template" "$packDir\pkg\bin\registry.js"
+    Copy-Item "$tplDir\self-heal.utoo.js.template" "$packDir\pkg\bin\self-heal.js"
     Copy-Item "$tplDir\utoo.utoo.js.template" "$packDir\pkg\bin\utoo.js"
     Copy-Item "$tplDir\utx.utoo.js.template" "$packDir\pkg\bin\utx.js"
     @{
@@ -426,6 +428,8 @@ try {
     (Get-Content "$tplDir\utoo.package.json.template" -Raw).Replace("{{version}}", "9.9.9-e2e") |
         Set-Content "$pkgDir\package.json"
     Copy-Item "$tplDir\launcher.utoo.js.template" "$pkgDir\bin\launcher.js"
+    Copy-Item "$tplDir\registry.utoo.js.template" "$pkgDir\bin\registry.js"
+    Copy-Item "$tplDir\self-heal.utoo.js.template" "$pkgDir\bin\self-heal.js"
     Copy-Item "$tplDir\utoo.utoo.js.template" "$pkgDir\bin\utoo.js"
     Copy-Item "$tplDir\utx.utoo.js.template" "$pkgDir\bin\utx.js"
 

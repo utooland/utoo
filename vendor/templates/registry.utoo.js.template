@@ -1,0 +1,48 @@
+"use strict";
+
+const DEFAULT_REGISTRY = "https://registry.npmmirror.com";
+
+function registryFromArgs(args) {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--") return;
+    if (arg === "--registry") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("-")) {
+        throw new Error("--registry requires a URL");
+      }
+      return value;
+    }
+    if (arg.startsWith("--registry=")) {
+      const value = arg.slice("--registry=".length);
+      if (!value) throw new Error("--registry requires a URL");
+      return value;
+    }
+  }
+}
+
+function normalizeRegistry(value) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`invalid registry URL: ${value}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`registry must use http or https: ${value}`);
+  }
+  return value.replace(/\/+$/, "");
+}
+
+function resolveRegistry(args, env = process.env) {
+  return normalizeRegistry(
+    registryFromArgs(args) || env.UTOO_REGISTRY || DEFAULT_REGISTRY,
+  );
+}
+
+module.exports = {
+  DEFAULT_REGISTRY,
+  normalizeRegistry,
+  registryFromArgs,
+  resolveRegistry,
+};

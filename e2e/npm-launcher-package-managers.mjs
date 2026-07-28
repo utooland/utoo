@@ -3,8 +3,11 @@ import {
   access,
   chmod,
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
+  readlink,
   readFile,
   rm,
   writeFile,
@@ -186,6 +189,14 @@ async function buildPackages() {
       join(mainDir, "bin", "launcher.js"),
     ),
     copyFile(
+      join(templates, "registry.utoo.js.template"),
+      join(mainDir, "bin", "registry.js"),
+    ),
+    copyFile(
+      join(templates, "self-heal.utoo.js.template"),
+      join(mainDir, "bin", "self-heal.js"),
+    ),
+    copyFile(
       join(templates, "utoo.utoo.js.template"),
       join(mainDir, "bin", "utoo.js"),
     ),
@@ -214,7 +225,11 @@ async function buildPackages() {
     },
   });
 
-  return pack(mainDir);
+  return {
+    mainTarball: await pack(mainDir),
+    platformDir,
+    selected,
+  };
 }
 
 async function installLocal(manager, mainTarball, project) {
@@ -281,8 +296,162 @@ async function localCommand(manager, project, name, args, options = {}) {
   return run(join(project, "node_modules", ".bin", `${name}${suffix}`), args, {
     cwd: project,
     capture: true,
+    env: options.env,
     status: options.status,
   });
+}
+
+async function binSnapshot(project) {
+  const binDir = join(project, "node_modules", ".bin");
+  const entries = (await readdir(binDir)).sort();
+  const snapshot = [];
+  for (const entry of entries) {
+    const entryPath = join(binDir, entry);
+    const stat = await lstat(entryPath);
+    if (stat.isSymbolicLink()) {
+      snapshot.push(
+        `${entry}:link:${(await readlink(entryPath)).replaceAll("\\", "/")}`,
+      );
+    } else {
+      const content = (await readFile(entryPath, "utf8"))
+        .split(project)
+        .join("<PROJECT>")
+        .replaceAll("\\", "/");
+      snapshot.push(`${entry}:file:${content}`);
+    }
+  }
+  return snapshot;
+}
+
+async function verifySelfHeal(
+  normalProject,
+  mainTarball,
+  platformDir,
+  selected,
+) {
+  const project = join(sandbox, "npm-self-heal");
+  await mkdir(project, { recursive: true });
+  await writeJson(join(project, "package.json"), {
+    name: "utoo-launcher-npm-self-heal-e2e",
+    private: true,
+  });
+  await run(
+    "npm",
+    [
+      "install",
+      "--ignore-scripts",
+      "--omit=optional",
+      "--no-audit",
+      "--no-fund",
+      fileSpec(mainTarball),
+    ],
+    { cwd: project },
+  );
+
+  const packageSegments = selected.packageName.split("/");
+  await Promise.all([
+    rm(join(project, "node_modules", ...packageSegments), {
+      recursive: true,
+      force: true,
+    }),
+    rm(join(project, "node_modules", "utoo", "node_modules", ...packageSegments), {
+      recursive: true,
+      force: true,
+    }),
+  ]);
+
+  const expectedBins = await binSnapshot(normalProject);
+  const binsBefore = await binSnapshot(project);
+  if (JSON.stringify(binsBefore) !== JSON.stringify(expectedBins)) {
+    throw new Error(
+      `self-heal bin shims differ before repair\nnormal=${JSON.stringify(expectedBins)}\nheal=${JSON.stringify(binsBefore)}`,
+    );
+  }
+
+  const fakeDir = join(sandbox, "fake-npm-bin");
+  const fakeScript = join(fakeDir, "fake-npm.js");
+  const fakeLog = join(fakeDir, "args.json");
+  await mkdir(fakeDir, { recursive: true });
+  await writeFile(
+    fakeScript,
+    [
+      '"use strict";',
+      'const fs = require("fs");',
+      'const path = require("path");',
+      "const args = process.argv.slice(2);",
+      'const prefixArg = args.find((arg) => arg.startsWith("--prefix="));',
+      "if (!prefixArg) process.exit(31);",
+      'fs.writeFileSync(process.env.FAKE_NPM_LOG, JSON.stringify(args));',
+      'const target = path.join(prefixArg.slice(9), "node_modules", ...process.env.FAKE_PACKAGE_NAME.split("/"));',
+      "fs.mkdirSync(path.dirname(target), { recursive: true });",
+      "fs.cpSync(process.env.FAKE_PLATFORM_DIR, target, { recursive: true });",
+      "",
+    ].join("\n"),
+  );
+  if (process.platform === "win32") {
+    await writeFile(
+      join(fakeDir, "npm.cmd"),
+      `@echo off\r\n"${process.execPath}" "${fakeScript}" %*\r\n`,
+    );
+  } else {
+    await writeFile(
+      join(fakeDir, "npm"),
+      `#!${process.execPath}\nrequire(${JSON.stringify(fakeScript)});\n`,
+    );
+    await chmod(join(fakeDir, "npm"), 0o755);
+  }
+
+  const env = {
+    ...process.env,
+    FAKE_NPM_LOG: fakeLog,
+    FAKE_PACKAGE_NAME: selected.packageName,
+    FAKE_PLATFORM_DIR: platformDir,
+    PATH: `${fakeDir}${delimiter}${process.env.PATH || ""}`,
+    UTOO_REGISTRY: "https://registry.example.test/",
+  };
+  const output = await localCommand(
+    "npm",
+    project,
+    "utoo",
+    ["--version"],
+    { env },
+  );
+  assertIncludes(
+    output,
+    process.platform === "win32" ? process.version : "ARGV[1]=--version",
+    "npm self-heal native execution",
+  );
+  assertIncludes(output, "utoo: repaired", "npm self-heal success");
+
+  const npmArgs = JSON.parse(await readFile(fakeLog, "utf8"));
+  if (!npmArgs.includes("--registry=https://registry.example.test")) {
+    throw new Error(`self-heal registry was not normalized: ${npmArgs.join(" ")}`);
+  }
+  const nestedBinary = join(
+    project,
+    "node_modules",
+    "utoo",
+    "node_modules",
+    ...packageSegments,
+    "bin",
+    selected.executable,
+  );
+  if (!(await exists(nestedBinary))) {
+    throw new Error(`self-heal binary missing: ${nestedBinary}`);
+  }
+
+  const binsAfter = await binSnapshot(project);
+  if (JSON.stringify(binsAfter) !== JSON.stringify(expectedBins)) {
+    throw new Error(
+      `self-heal bin shims differ after repair\nnormal=${JSON.stringify(expectedBins)}\nheal=${JSON.stringify(binsAfter)}`,
+    );
+  }
+  const second = await localCommand("npm", project, "utoo", ["--version"], {
+    env: { ...env, PATH: process.env.PATH || "" },
+  });
+  if (second.includes("utoo: repairing")) {
+    throw new Error("second self-heal invocation called npm again");
+  }
 }
 
 function assertIncludes(actual, expected, context) {
@@ -426,7 +595,7 @@ async function verifyGlobal(manager, mainTarball) {
 }
 
 try {
-  const mainTarball = await buildPackages();
+  const { mainTarball, platformDir, selected } = await buildPackages();
   for (const manager of managers) {
     const project = join(sandbox, `${manager}-local`);
     await mkdir(project, { recursive: true });
@@ -436,6 +605,9 @@ try {
     await installLocal(manager, mainTarball, project);
     await verifyCommands(manager, project);
     await verifyManifest(manager, project);
+    if (manager === "npm") {
+      await verifySelfHeal(project, mainTarball, platformDir, selected);
+    }
     await verifyGlobal(manager, mainTarball);
     process.stdout.write(`PASS ${manager}\n`);
   }
