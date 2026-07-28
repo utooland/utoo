@@ -89,6 +89,22 @@ impl From<bool> for RunMode {
     }
 }
 
+/// How a destructive command obtains user confirmation.
+///
+/// Constructed from the CLI flag and validated against terminal interactivity
+/// at the CLI boundary, so commands never receive a context-free boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationPolicy {
+    Prompt,
+    AssumeYes,
+}
+
+impl From<bool> for ConfirmationPolicy {
+    fn from(yes: bool) -> Self {
+        if yes { Self::AssumeYes } else { Self::Prompt }
+    }
+}
+
 /// Registry visibility for a published package (npm `--access`).
 ///
 /// Mirrors `npm publish --access <public|restricted>`. utoo historically only

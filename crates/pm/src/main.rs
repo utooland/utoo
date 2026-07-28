@@ -17,7 +17,7 @@ use crate::helper::auto_update::init_auto_update;
 use crate::service::config::ConfigService;
 use crate::service::script::{MissingScript, ScriptExit};
 use crate::service::workspace::WorkspaceFilter;
-use crate::util::cli_enum::{ConfigScope, ScriptPolicy};
+use crate::util::cli_enum::{ConfigScope, ConfirmationPolicy, ScriptPolicy};
 use crate::util::config_file::Config;
 use crate::util::format_print::{format_resolve_chain, resolve_chain};
 use crate::util::invocation::{self, ColorPolicy, Invocation, OutputFormat};
@@ -252,7 +252,18 @@ async fn async_main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Clean { pattern, yes }) => {
-            clean(&pattern, yes).await?;
+            let confirmation = match (ConfirmationPolicy::from(yes), invocation::interactive()) {
+                (ConfirmationPolicy::AssumeYes, _) => ConfirmationPolicy::AssumeYes,
+                (ConfirmationPolicy::Prompt, true) => ConfirmationPolicy::Prompt,
+                (ConfirmationPolicy::Prompt, false) => {
+                    return Err(CliError::usage(
+                        "refusing to prompt for cache deletion in non-interactive mode",
+                    )
+                    .with_suggestion("rerun with `utoo clean --yes`")
+                    .into());
+                }
+            };
+            clean(&pattern, confirmation).await?;
             log_time_end(&format!("{pattern} cleaned"));
         }
         Some(Commands::Install(args)) => {
