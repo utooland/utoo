@@ -489,6 +489,24 @@ fn init_does_not_prompt_without_a_tty() {
     assert!(!project.path().join("package.json").exists());
 }
 
+#[test]
+fn init_yes_uses_defaults_without_a_tty() {
+    let project = tempdir().unwrap();
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["init", "--yes"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(project.path().join("package.json").exists());
+}
+
 fn write_cache_entry(home: &Path) -> std::path::PathBuf {
     let entry = home.join(".cache/nm/fixture/1.0.0");
     fs::create_dir_all(&entry).unwrap();

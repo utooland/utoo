@@ -1,60 +1,14 @@
 //! Process-wide CLI presentation and interactivity policy.
 
-use std::env;
 use std::io::{self, IsTerminal};
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ColorPolicy {
-    #[default]
-    Auto,
-    Never,
-}
-
-impl ColorPolicy {
-    pub fn resolve(no_color: bool) -> Self {
-        if no_color || env::var_os("NO_COLOR").is_some() {
-            Self::Never
-        } else {
-            Self::Auto
-        }
-    }
-
-    pub const fn ansi_enabled(self) -> bool {
-        matches!(self, Self::Auto)
-    }
-
-    pub const fn clap_choice(self) -> clap::ColorChoice {
-        match self {
-            Self::Auto => clap::ColorChoice::Auto,
-            Self::Never => clap::ColorChoice::Never,
-        }
-    }
-
-    pub fn apply(self) {
-        if self == Self::Never {
-            colored::control::set_override(self.ansi_enabled());
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum OutputFormat {
-    #[default]
-    Human,
-    Json,
-}
-
-impl From<bool> for OutputFormat {
-    fn from(json: bool) -> Self {
-        if json { Self::Json } else { Self::Human }
-    }
-}
+use super::cli_enum::{ColorPolicy, ConsoleVerbosity, OutputFormat};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Invocation {
     pub output: OutputFormat,
-    pub quiet: bool,
+    pub verbosity: ConsoleVerbosity,
     pub color: ColorPolicy,
     pub command: Option<&'static str>,
 }
@@ -75,7 +29,9 @@ pub fn json() -> bool {
 }
 
 pub fn quiet() -> bool {
-    INVOCATION.get().is_some_and(|options| options.quiet)
+    INVOCATION
+        .get()
+        .is_some_and(|options| options.verbosity == ConsoleVerbosity::Quiet)
 }
 
 pub fn color() -> ColorPolicy {
@@ -90,18 +46,4 @@ pub fn command() -> Option<&'static str> {
 
 pub fn interactive() -> bool {
     io::stdin().is_terminal()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn explicit_no_color_disables_ansi() {
-        let no_color = true;
-        let policy = ColorPolicy::resolve(no_color);
-        assert_eq!(policy, ColorPolicy::Never);
-        assert!(!policy.ansi_enabled());
-        assert_eq!(policy.clap_choice(), clap::ColorChoice::Never);
-    }
 }

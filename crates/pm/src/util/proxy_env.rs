@@ -26,7 +26,7 @@ where
 }
 
 pub fn print_proxy_env_hint_once() {
-    if invocation::json() || invocation::quiet() {
+    if invocation::quiet() {
         return;
     }
 

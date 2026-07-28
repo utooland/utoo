@@ -4,15 +4,14 @@ use anyhow::{Result, bail};
 use dialoguer::Input;
 use serde::Serialize;
 
-use crate::error::CliError;
 use crate::helper::git;
-use crate::util::invocation;
+use crate::util::cli_enum::InitMode;
 
 /// Initialize a new package.json file in the given directory (or current directory).
 ///
-/// If `yes` is true, skip interactive prompts and use defaults.
+/// `mode` determines whether package metadata is prompted for or defaulted.
 /// If `cwd` is `None`, uses `std::env::current_dir()`.
-pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
+pub async fn init(mode: InitMode, cwd: Option<&Path>) -> Result<()> {
     let cwd = match cwd {
         Some(p) => p.to_path_buf(),
         None => std::env::current_dir()?,
@@ -23,19 +22,14 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
         bail!("package.json already exists in {}", cwd.display());
     }
 
-    if !yes && !invocation::interactive() {
-        return Err(CliError::usage(
-            "refusing to prompt for package metadata in non-interactive mode",
-        )
-        .with_suggestion("re-run with `utoo init --yes`")
-        .into());
-    }
-
     let cwd_clone = cwd.clone();
-    let pkg = if yes {
-        tokio::task::spawn_blocking(move || build_default_package(&cwd_clone)).await?
-    } else {
-        tokio::task::spawn_blocking(move || build_interactive_package(&cwd_clone)).await??
+    let pkg = match mode {
+        InitMode::Defaults => {
+            tokio::task::spawn_blocking(move || build_default_package(&cwd_clone)).await?
+        }
+        InitMode::Interactive => {
+            tokio::task::spawn_blocking(move || build_interactive_package(&cwd_clone)).await??
+        }
     };
 
     let content = serde_json::to_string_pretty(&pkg)? + "\n";
@@ -45,7 +39,7 @@ pub async fn init(yes: bool, cwd: Option<&Path>) -> Result<()> {
     println!("About to write to {}:\n", package_json_path.display());
     println!("{content}");
 
-    if !yes {
+    if mode.requires_interaction() {
         let confirmed = tokio::task::spawn_blocking(|| {
             let confirm: String = Input::new()
                 .with_prompt("Is this OK?")
@@ -215,7 +209,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("package.json"), "{}").unwrap();
 
-        let result = init(true, Some(dir.path())).await;
+        let result = init(InitMode::Defaults, Some(dir.path())).await;
         assert!(result.is_err());
         assert!(
             result
@@ -228,7 +222,7 @@ mod tests {
     #[tokio::test]
     async fn test_init_yes_creates_valid_package_json() {
         let dir = tempfile::tempdir().unwrap();
-        init(true, Some(dir.path())).await.unwrap();
+        init(InitMode::Defaults, Some(dir.path())).await.unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("package.json")).unwrap();
         let pkg: serde_json::Value = serde_json::from_str(&content).unwrap();

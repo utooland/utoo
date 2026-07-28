@@ -9,15 +9,13 @@ use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
 use crate::service::install::InstallService;
 use crate::service::script::ScriptOutput;
-use crate::util::cli_enum::{OmitType, PackageAction, SaveType, ScriptPolicy};
+use crate::util::cli_enum::{InstallScope, OmitType, PackageAction, SaveType, ScriptPolicy};
 use crate::util::format_print::{pluralized_package_count, print_migrate_result};
 use crate::util::install_progress::DownloadBaseline;
 use crate::util::invocation;
 use crate::util::logger::log_time_end;
 use crate::util::presenter::emit;
-use crate::util::user_config::{
-    InstallScope, get_omit, resolve_global_prefix, set_install_scope, set_omit,
-};
+use crate::util::user_config::{get_omit, resolve_global_prefix, set_install_scope, set_omit};
 
 /// Arguments for the `install` command, parsed by clap at the CLI boundary.
 #[derive(Args)]
@@ -76,7 +74,7 @@ pub struct InstallArgs {
 pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()> {
     let download_baseline = DownloadBaseline::capture();
     let requested = args.specs.clone();
-    let global = args.global;
+    let scope = InstallScope::from(args.global);
     // Build omit config: production = omit dev + optional
     let mut omit_set: HashSet<OmitType> = args.omit.into_iter().collect();
     if args.production {
@@ -89,13 +87,13 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
     }
     set_omit(omit_set);
 
-    if args.global {
-        set_install_scope(InstallScope::Global);
+    if scope == InstallScope::Global {
+        set_install_scope(scope);
     }
 
     if args.specs.is_empty() {
         install_cwd_inner(ScriptPolicy::from(args.ignore_scripts)).await?;
-    } else if args.global {
+    } else if scope == InstallScope::Global {
         // For global installs, process packages one by one
         for spec in args.specs.iter() {
             install_global_package(spec, args.prefix.as_deref()).await?;
@@ -120,7 +118,7 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         "install",
         operation,
         &requested,
-        global,
+        scope,
         download_baseline.downloaded_bytes(),
     )
 }
@@ -157,7 +155,7 @@ pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
         "install",
         "sync",
         &[],
-        false,
+        InstallScope::Local,
         download_baseline.downloaded_bytes(),
     )
 }
@@ -174,13 +172,13 @@ fn emit_install_result(
     command: &str,
     operation: &str,
     packages: &[String],
-    global: bool,
+    scope: InstallScope,
     downloaded_bytes: u64,
 ) -> Result<()> {
     let output = InstallOutput {
         operation,
         packages,
-        global,
+        global: scope.is_global(),
         downloaded_bytes,
     };
     emit(command, &output, || Ok(()))

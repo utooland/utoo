@@ -13,7 +13,7 @@ use crate::model::package::{PackageInfo, PublishMeta};
 use crate::service::publish::{self as publish_service, PublishOptions, PublishOutcome, WebAuth};
 use crate::service::script::ScriptOutput;
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
-use crate::util::cli_enum::PublishAccess;
+use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
 use crate::util::invocation;
 use crate::util::presenter::emit;
 use crate::util::user_config::{get_or_load_package_json, get_registry};
@@ -31,7 +31,7 @@ pub async fn publish(
     otp: Option<&str>,
     access: Option<PublishAccess>,
     filter: WorkspaceFilter,
-    provenance: bool,
+    provenance: ProvenancePolicy,
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let roots = resolve_publish_roots(&cwd, filter).await?;
@@ -183,7 +183,7 @@ async fn publish_one(
             registry: result.registry,
             tag: result.tag,
             access: access_name,
-            provenance,
+            provenance: provenance.is_enabled(),
             files: result.pack.files.len(),
             packed_size: result.pack.packed_size,
             integrity: result.pack.integrity,
@@ -321,7 +321,7 @@ struct PublishCommandOptions<'a> {
     mode: RunMode,
     otp: Option<&'a str>,
     access: Option<PublishAccess>,
-    provenance: bool,
+    provenance: ProvenancePolicy,
     script_output: ScriptOutput,
     web_auth: WebAuth,
 }

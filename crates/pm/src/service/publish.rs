@@ -37,7 +37,7 @@ use crate::service::oidc;
 use crate::service::pm_pack;
 use crate::service::provenance;
 use crate::service::script::{ScriptOutput, ScriptService};
-use crate::util::cli_enum::PublishAccess;
+use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
 use crate::util::format_print::print_pack_details;
 use crate::util::integrity::compute_shasum;
 
@@ -50,8 +50,8 @@ pub struct PublishOptions<'a> {
     pub otp: Option<&'a str>,
     /// Registry visibility (`public`/`restricted`) for the published package.
     pub access: PublishAccess,
-    /// Whether to generate and attach a signed provenance attestation.
-    pub provenance: bool,
+    /// Provenance generation policy resolved by the command layer.
+    pub provenance: ProvenancePolicy,
     pub script_output: ScriptOutput,
     pub web_auth: WebAuth,
 }
@@ -107,7 +107,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
 
     // Generate a signed provenance attestation when requested. Live publishes
     // only: dry-run returns above so it never writes to the public Rekor log.
-    let provenance_bundle = if opts.provenance {
+    let provenance_bundle = if opts.provenance.is_enabled() {
         Some(
             provenance::generate(&pack_result.name, &pack_result.version, tarball_data)
                 .await

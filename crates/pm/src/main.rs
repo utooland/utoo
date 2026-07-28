@@ -17,10 +17,13 @@ use crate::helper::auto_update::init_auto_update;
 use crate::service::config::ConfigService;
 use crate::service::script::{MissingScript, ScriptExit};
 use crate::service::workspace::WorkspaceFilter;
-use crate::util::cli_enum::{ConfigScope, ConfirmationPolicy, ScriptPolicy};
+use crate::util::cli_enum::{
+    ColorPolicy, ConfigScope, ConfirmationPolicy, ConsoleVerbosity, InitMode, OutputFormat,
+    ProvenancePolicy, ScriptPolicy,
+};
 use crate::util::config_file::Config;
 use crate::util::format_print::{format_resolve_chain, resolve_chain};
-use crate::util::invocation::{self, ColorPolicy, Invocation, OutputFormat};
+use crate::util::invocation::{self, Invocation};
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use crate::util::presenter;
 use crate::util::user_config::{
@@ -85,8 +88,7 @@ fn main() {
         } else {
             eprintln!("error: {e:#}");
         }
-        if !invocation::json()
-            && !invocation::quiet()
+        if !invocation::quiet()
             && let Some(log_path) = get_log_file_path()
         {
             eprintln!("Full logs saved to: {}", log_path.display());
@@ -98,7 +100,11 @@ fn main() {
 async fn async_main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let json_requested = args.iter().any(|arg| arg == "--json");
-    let color = ColorPolicy::resolve(json_requested || args.iter().any(|arg| arg == "--no-color"));
+    let color = ColorPolicy::from(
+        json_requested
+            || args.iter().any(|arg| arg == "--no-color")
+            || std::env::var_os("NO_COLOR").is_some(),
+    );
     color.apply();
 
     // Preserve the custom root help catalog for human invocations. JSON help is
@@ -154,8 +160,10 @@ async fn async_main() -> Result<()> {
             error.exit();
         }
     };
-    let color = ColorPolicy::resolve(cli.json || cli.no_color);
+    let color =
+        ColorPolicy::from(cli.json || cli.no_color || std::env::var_os("NO_COLOR").is_some());
     color.apply();
+    let verbosity = ConsoleVerbosity::from_flags(cli.verbose, cli.quiet || cli.json);
     let execute_version = matches!(
         &cli.command,
         Some(Commands::Execute { command, .. }) if matches!(command.as_str(), "--version" | "-v")
@@ -170,7 +178,7 @@ async fn async_main() -> Result<()> {
     };
     invocation::init(Invocation {
         output: OutputFormat::from(cli.json),
-        quiet: cli.quiet,
+        verbosity,
         color,
         command,
     });
@@ -217,12 +225,12 @@ async fn async_main() -> Result<()> {
     }
 
     // Initialize tracing (replaces set_verbose)
-    let (log_file, _guard) = init_tracing(cli.verbose, cli.quiet || cli.json, color)
-        .context("Failed to initialize logging")?;
+    let (log_file, _guard) =
+        init_tracing(verbosity, color).context("Failed to initialize logging")?;
 
     tracing::debug!(
         log_file = %log_file.display(),
-        verbose = cli.verbose,
+        ?verbosity,
         "Logger initialized"
     );
 
@@ -252,17 +260,14 @@ async fn async_main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Clean { pattern, yes }) => {
-            let confirmation = match (ConfirmationPolicy::from(yes), invocation::interactive()) {
-                (ConfirmationPolicy::AssumeYes, _) => ConfirmationPolicy::AssumeYes,
-                (ConfirmationPolicy::Prompt, true) => ConfirmationPolicy::Prompt,
-                (ConfirmationPolicy::Prompt, false) => {
-                    return Err(CliError::usage(
-                        "refusing to prompt for cache deletion in non-interactive mode",
-                    )
-                    .with_suggestion("rerun with `utoo clean --yes`")
-                    .into());
-                }
-            };
+            let confirmation = ConfirmationPolicy::from(yes);
+            if confirmation.requires_interaction() && !invocation::interactive() {
+                return Err(CliError::usage(
+                    "refusing to prompt for cache deletion in non-interactive mode",
+                )
+                .with_suggestion("rerun with `utoo clean --yes`")
+                .into());
+            }
             clean(&pattern, confirmation).await?;
             log_time_end(&format!("{pattern} cleaned"));
         }
@@ -322,7 +327,15 @@ async fn async_main() -> Result<()> {
             cmd::link::run(packages, prefix).await?;
         }
         Some(Commands::Init { yes }) => {
-            service::init::init(yes, None).await?;
+            let mode = InitMode::from(yes);
+            if mode.requires_interaction() && !invocation::interactive() {
+                return Err(CliError::usage(
+                    "refusing to prompt for package metadata in non-interactive mode",
+                )
+                .with_suggestion("re-run with `utoo init --yes`")
+                .into());
+            }
+            service::init::init(mode, None).await?;
             log_time_end("package.json created");
         }
         Some(Commands::Pack { path, dry_run }) => {
@@ -353,7 +366,7 @@ async fn async_main() -> Result<()> {
                 otp.as_deref(),
                 access,
                 filter,
-                provenance,
+                ProvenancePolicy::from(provenance),
             )
             .await?;
         }

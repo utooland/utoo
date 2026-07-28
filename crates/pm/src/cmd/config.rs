@@ -86,9 +86,9 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
         .list()?
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
-    let arrays: BTreeMap<&str, &Vec<String>> = config
+    let arrays: BTreeMap<&str, &[String]> = config
         .list_arrays()
-        .map(|(key, values)| (key.as_str(), values))
+        .map(|(key, values)| (key.as_str(), values.as_slice()))
         .collect();
     let output = ConfigListOutput {
         path: config_path.display().to_string(),
@@ -143,5 +143,5 @@ struct ConfigListOutput<'a> {
     path: String,
     scope: &'a str,
     values: BTreeMap<&'a str, &'a str>,
-    arrays: BTreeMap<&'a str, &'a Vec<String>>,
+    arrays: BTreeMap<&'a str, &'a [String]>,
 }

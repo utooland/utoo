@@ -5,9 +5,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::util::cli_enum::{ColorPolicy, ConsoleVerbosity};
 use crate::util::format_print::{HeartbeatScript, print_script_heartbeat};
 use crate::util::install_progress;
-use crate::util::invocation::{self, ColorPolicy};
+use crate::util::invocation;
 
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -108,26 +109,21 @@ static LOG_FILE_PATH: OnceCell<PathBuf> = OnceCell::new();
 /// Initialize tracing subscriber with console and file output
 /// Returns (log_path, guard) - the guard must be kept alive for the duration of the program
 pub fn init_tracing(
-    verbose: bool,
-    quiet: bool,
+    verbosity: ConsoleVerbosity,
     color: ColorPolicy,
 ) -> Result<(PathBuf, WorkerGuard)> {
     // 1. Build environment filters
     // Note: Binary name is "utoo", so module paths start with "utoo::" not "utoo_pm::"
 
-    // Console filter: verbose mode shows debug, otherwise show info+
-    let console_level = if quiet {
-        "off"
-    } else if verbose {
-        "debug"
-    } else {
-        "info"
+    let console_level = match verbosity {
+        ConsoleVerbosity::Quiet => "off",
+        ConsoleVerbosity::Normal => "info",
+        ConsoleVerbosity::Verbose => "debug",
     };
-    let console_filter = if quiet {
-        EnvFilter::new("off")
-    } else {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}")))
+    let console_filter = match verbosity {
+        ConsoleVerbosity::Quiet => EnvFilter::new("off"),
+        ConsoleVerbosity::Normal | ConsoleVerbosity::Verbose => EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(format!("utoo={console_level}"))),
     };
 
     // File filter: always capture debug+ for troubleshooting
@@ -154,7 +150,7 @@ pub fn init_tracing(
         .with(
             fmt::layer()
                 .with_writer(|| ProgressConsoleWriter(Vec::new()))
-                .with_target(verbose) // Show module path only in verbose mode
+                .with_target(verbosity == ConsoleVerbosity::Verbose)
                 .without_time() // No timestamp on console
                 .compact()
                 .with_ansi(is_tty && color.ansi_enabled())
@@ -188,7 +184,7 @@ pub fn get_log_file_path() -> Option<&'static PathBuf> {
 /// degrade just as quietly. Plain `println!` would instead panic with
 /// "failed printing to stdout: Broken pipe" at the finish line.
 fn println_lossy(args: std::fmt::Arguments<'_>) {
-    if invocation::json() || invocation::quiet() {
+    if invocation::quiet() {
         return;
     }
     // Lock once so the line and its newline are written under a single lock
@@ -382,7 +378,7 @@ fn stop_render_task() {
 }
 
 pub fn start_progress_bar() {
-    if !*IS_TTY || invocation::json() || invocation::quiet() {
+    if !*IS_TTY || invocation::quiet() {
         return;
     }
     install_progress::reset_phase_state();

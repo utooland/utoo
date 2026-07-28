@@ -50,7 +50,7 @@ const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours
 ///
 /// Either way this function returns quickly and never blocks the main command.
 pub async fn init_auto_update() {
-    if invocation::json() || invocation::quiet() {
+    if invocation::quiet() {
         return;
     }
 

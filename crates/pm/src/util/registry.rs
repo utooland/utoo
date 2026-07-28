@@ -78,7 +78,7 @@ pub async fn select_fastest_registry() -> String {
         }
     };
 
-    if !invocation::json() && !invocation::quiet() {
+    if !invocation::quiet() {
         eprintln!(
             "{} {} ({})",
             "Registry:".dimmed(),
