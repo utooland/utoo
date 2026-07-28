@@ -18,7 +18,7 @@ use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
 use crate::service::script::ScriptOutput;
-use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
+use crate::util::cli_enum::{OmitType, PackageAction, ReifyMode, SaveType};
 use crate::util::cloner::ClonePolicy;
 use crate::util::install_progress;
 use crate::util::json::load_package_lock_json_from_path;
@@ -99,12 +99,35 @@ async fn install_packages(
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    mode: ReifyMode,
 ) -> Result<()> {
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
-    reify_packages(groups, cwd, omit, scheduler).await
+    reify_packages(groups, cwd, omit, scheduler, mode).await
+}
+
+async fn prepare_reify_target(target: &Path, mode: ReifyMode) -> Result<()> {
+    if mode != ReifyMode::Force {
+        return Ok(());
+    }
+
+    let Ok(metadata) = fs::symlink_metadata(target).await else {
+        return Ok(());
+    };
+    let result = if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(target).await
+    } else {
+        fs::remove_dir_all(target).await
+    };
+    result.with_context(|| format!("Failed to force-replace {}", target.display()))
+}
+
+fn is_node_modules_path(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .any(|component| component.as_os_str() == "node_modules")
 }
 
 /// Clone/link every package in `groups` into `<cwd>/node_modules`, level by
@@ -115,6 +138,7 @@ async fn reify_packages(
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    mode: ReifyMode,
 ) -> Result<()> {
     log_progress("linking packages");
 
@@ -139,6 +163,13 @@ async fn reify_packages(
                 // name/version/resolved/target_path it actually needs, so
                 // skipped/linked entries never pay for a LockPackage copy.
                 if let Some(ref resolved) = package.resolved {
+                    if mode == ReifyMode::Force && !is_node_modules_path(path) {
+                        anyhow::bail!(
+                            "Refusing to force-replace path outside node_modules: {path}"
+                        );
+                    }
+                    let target_path = cwd.join(path);
+                    prepare_reify_target(&target_path, mode).await?;
                     // Lockfile stores `file:` URLs root-relative (npm format).
                     // Cloner only understands absolute URLs — re-absolutize
                     // here so the cloner/downloader stays unaware of project
@@ -182,7 +213,6 @@ async fn reify_packages(
                         .version
                         .clone()
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
-                    let target_path = cwd.join(path);
                     let scheduler = scheduler.clone();
                     // Packages with lifecycle scripts and packages patched by
                     // the binary-mirror pass are both mutated after cloning.
@@ -313,6 +343,16 @@ impl InstallService {
         omit: &HashSet<OmitType>,
         output: ScriptOutput,
     ) -> Result<()> {
+        Self::install_with_mode(scripts, root_path, omit, ReifyMode::Incremental, output).await
+    }
+
+    pub async fn install_with_mode(
+        scripts: ScriptPolicy,
+        root_path: &Path,
+        omit: &HashSet<OmitType>,
+        mode: ReifyMode,
+        output: ScriptOutput,
+    ) -> Result<()> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
         let lock_path = root_path.join("package-lock.json");
@@ -391,7 +431,7 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let install_result = install_packages(&groups, root_path, omit, &scheduler)
+        let install_result = install_packages(&groups, root_path, omit, &scheduler, mode)
             .await
             .context("Failed to install packages");
 
@@ -502,9 +542,15 @@ impl InstallService {
                 PROGRESS_BAR.set_length(lock.packages.len() as u64);
             }
             let link_start = Instant::now();
-            reify_packages(&groups, &root_path, &HashSet::new(), &scheduler)
-                .await
-                .context("Failed to install global package")?;
+            reify_packages(
+                &groups,
+                &root_path,
+                &HashSet::new(),
+                &scheduler,
+                ReifyMode::Incremental,
+            )
+            .await
+            .context("Failed to install global package")?;
             finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
             Ok(lock)
         }
@@ -599,6 +645,72 @@ mod tests {
         assert_eq!(queues.install.len(), 1);
         assert_eq!(queues.postinstall.len(), 1);
         assert!(queues.bin_linking.is_empty());
+    }
+
+    #[tokio::test]
+    async fn force_reify_removes_existing_package_target() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("node_modules").join("pkg");
+        fs::create_dir_all(&target).await.unwrap();
+        fs::write(
+            target.join("package.json"),
+            br#"{"name":"pkg","version":"1.0.0"}"#,
+        )
+        .await
+        .unwrap();
+        fs::write(target.join("locally-modified.js"), b"modified")
+            .await
+            .unwrap();
+
+        prepare_reify_target(&target, ReifyMode::Force)
+            .await
+            .unwrap();
+
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn force_reify_removes_link_without_touching_source() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("workspace");
+        let target = temp.path().join("node_modules").join("workspace");
+        fs::create_dir_all(&source).await.unwrap();
+        fs::create_dir_all(target.parent().unwrap()).await.unwrap();
+        std::os::unix::fs::symlink(&source, &target).unwrap();
+
+        prepare_reify_target(&target, ReifyMode::Force)
+            .await
+            .unwrap();
+
+        assert!(source.exists());
+        assert!(!target.exists());
+    }
+
+    #[tokio::test]
+    async fn incremental_reify_preserves_existing_package_target() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("node_modules").join("pkg");
+        fs::create_dir_all(&target).await.unwrap();
+        fs::write(target.join("locally-modified.js"), b"modified")
+            .await
+            .unwrap();
+
+        prepare_reify_target(&target, ReifyMode::Incremental)
+            .await
+            .unwrap();
+
+        assert!(target.join("locally-modified.js").exists());
+    }
+
+    #[test]
+    fn force_reify_is_limited_to_node_modules_paths() {
+        assert!(!is_node_modules_path(""));
+        assert!(!is_node_modules_path("packages/app"));
+        assert!(is_node_modules_path("node_modules/pkg"));
+        assert!(is_node_modules_path(
+            "node_modules/parent/node_modules/child"
+        ));
     }
 
     #[test]

@@ -55,6 +55,14 @@ pub enum ScriptPolicy {
     Ignore,
 }
 
+/// Whether existing package targets may be reused during dependency reification.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReifyMode {
+    #[default]
+    Incremental,
+    Force,
+}
+
 impl From<bool> for ScriptPolicy {
     fn from(ignore: bool) -> Self {
         if ignore { Self::Ignore } else { Self::Run }

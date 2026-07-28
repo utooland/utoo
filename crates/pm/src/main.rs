@@ -289,8 +289,8 @@ async fn async_main() -> Result<()> {
         Some(Commands::Deps { workspace_only }) => {
             cmd::deps::run(workspace_only).await?;
         }
-        Some(Commands::Update) => {
-            update(ScriptPolicy::Run).await?;
+        Some(Commands::Update(args)) => {
+            update(args, ScriptPolicy::Run).await?;
             log_time_end("All packages updated");
         }
         Some(Commands::List { package }) => {
