@@ -63,16 +63,14 @@ async fn glob_match(_glob: &OpfsGlob, pattern: &Path) -> Result<Vec<PathBuf>, an
                 current_path.clone()
             };
 
-            let guard = OPFS_PROJECT.read();
-            let read_result = if let Some(project) = guard.as_ref() {
+            let project = OPFS_PROJECT.read().as_ref().cloned();
+            let read_result = if let Some(project) = project {
                 project.read_dir(&dir_path).await
             } else {
                 tokio_fs_ext::read_dir(&dir_path)
                     .await
                     .and_then(|rd| rd.collect())
             };
-            drop(guard);
-
             match read_result {
                 Ok(entries) => {
                     for entry in entries {
@@ -107,9 +105,10 @@ pub struct Fs;
 impl Fs {
     #[wasm_bindgen]
     pub async fn read(path: &str) -> Result<js_sys::Uint8Array, JsError> {
-        let guard = OPFS_PROJECT.read();
-        let project = guard
+        let project = OPFS_PROJECT
+            .read()
             .as_ref()
+            .cloned()
             .ok_or_else(|| JsError::new("not initialised"))?;
         let bytes = project
             .read(path)
@@ -121,9 +120,10 @@ impl Fs {
 
     #[wasm_bindgen(js_name = readToString)]
     pub async fn read_to_string(path: &str) -> Result<String, JsError> {
-        let guard = OPFS_PROJECT.read();
-        let project = guard
+        let project = OPFS_PROJECT
+            .read()
             .as_ref()
+            .cloned()
             .ok_or_else(|| JsError::new("not initialised"))?;
         let buf = project
             .read(path)
@@ -154,9 +154,10 @@ impl Fs {
 
     #[wasm_bindgen(js_name = readDir)]
     pub async fn read_dir(path: &str) -> Result<Vec<DirEntry>, JsError> {
-        let guard = OPFS_PROJECT.read();
-        let project = guard
+        let project = OPFS_PROJECT
+            .read()
             .as_ref()
+            .cloned()
             .ok_or_else(|| JsError::new("not initialised"))?;
         let read_dir = project
             .read_dir(path)

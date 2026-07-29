@@ -24,7 +24,7 @@ This architecture ensures that `@utoo/web` delivers a responsive development exp
 
 ## Quick Start Guide
 
-Getting a project up and running involves four main steps. See `examples/utooweb-demo` or try [`utoo-repl`](https://utoo-repl.vercel.app).
+Getting a project up and running involves five main steps. See `examples/utooweb-demo` or try [`utoo-repl`](https://utoo-repl.vercel.app).
 
 ### 1. Instantiate the Project
 
@@ -117,6 +117,77 @@ After these steps, your project is fully initialized and ready for interaction.
 
 ---
 
+## Switching Projects During Install or Build
+
+`@utoo/web` currently uses one shared Worker/WASM runtime. If the user selects another project while dependency installation or a build is still running, await `dispose()` on the current project before constructing the next `Project`. Calls to the switch function should also be serialized so that rapid project selections cannot initialize two projects against the same runtime.
+
+```typescript
+import {
+  Project as UtooProject,
+  type ProjectOptions,
+} from "@utoo/web";
+
+let currentProject: UtooProject | undefined;
+let switchQueue: Promise<void> = Promise.resolve();
+
+function switchProject(options: ProjectOptions): Promise<UtooProject> {
+  const result = switchQueue.then(async () => {
+    const previous = currentProject;
+    currentProject = undefined;
+
+    // This also cancels install() or build() running on the old project.
+    await previous?.dispose();
+
+    const next = new UtooProject(options);
+    try {
+      await next.mount();
+      await next.installServiceWorker();
+      currentProject = next;
+      return next;
+    } catch (error) {
+      await next.dispose();
+      throw error;
+    }
+  });
+
+  // Keep later switches running even if this initialization fails.
+  switchQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+```
+
+An operation that was running on the old project rejects with an `AbortError`. Treat that error as the expected result of navigation, while continuing to surface other failures:
+
+```typescript
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function installDependencies(project: UtooProject, packageLock: string): void {
+  void project.install(packageLock).catch((error) => {
+    if (!isAbortError(error)) {
+      console.error("Dependency installation failed", error);
+    }
+  });
+}
+
+// This may still be running when a route or workspace selection changes.
+installDependencies(currentProject!, packageLock);
+
+// Always await the switch before starting work on the new project.
+const nextProject = await switchProject(nextProjectOptions);
+const nextPackageLock = await nextProject.deps();
+await nextProject.install(nextPackageLock);
+await nextProject.build();
+```
+
+Disposal first asks the Rust runtime to cancel active work and release its state. If cleanup does not finish within the internal timeout, `@utoo/web` terminates the old Worker so that project switching can continue. `dispose()` does not delete project files or the shared package store in OPFS.
+
+---
+
 ## API Reference
 
 ### `new UtooProject(options)`
@@ -134,6 +205,21 @@ Creates a new project instance.
   * `url` (string, required): The URL to the service worker script.
   * `scope` (string, required): The URL scope that the service worker will intercept requests for. This is the base path for your preview environment.
 * `loadersImportMap` (object, optional): A map for configuring Webpack loader imports. This is an optional advanced configuration. Typically, you can simply declare loader dependencies in `package.json` to install and use them. Configuring `loadersImportMap` allows you to provide pre-bundled, single files that adhere to the CommonJS specification (as a URL string or content string). This avoids file system I/O overhead caused by `require` operations during loader execution, thereby significantly improving build performance. The key is the loader's name, and the value is the URL or content string of the UMD/CommonJS module. Loaders will be executed in parallel in a web worker pool.
+
+#### `project.dispose()`
+
+Cancels active dependency installation or build work and releases the shared Worker/WASM runtime, HMR connections, and message ports. Pending `install()` and `build()` promises reject with an `AbortError`.
+
+A disposed instance cannot be reused. Dispose the current project before creating the next one:
+
+```typescript
+await currentProject.dispose();
+currentProject = new UtooProject(nextProjectOptions);
+await currentProject.install(nextPackageLock);
+await currentProject.build();
+```
+
+Calling `dispose()` more than once is safe. Always await it before creating the next project; constructing one while disposal is still in progress throws an error. Because `@utoo/web` currently uses one shared runtime, disposing one project also invalidates other `Project` proxies connected to that runtime. See [Switching Projects During Install or Build](#switching-projects-during-install-or-build) for a complete example and cancellation error handling.
 
 ### File System Methods
 
