@@ -13,7 +13,9 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
     let lock_file_path = cwd.join("package-lock.json");
     if !crate::fs::try_exists(&lock_file_path).await? {
         return Err(anyhow::anyhow!(
-            "package-lock.json not found in current directory"
+            "package-lock.json not found in the current directory. \
+             `utoo list` reads the dependency graph from the lockfile.\n\
+             Run `utoo install` to generate one, then re-run `utoo list`."
         ));
     }
 
@@ -89,9 +91,35 @@ mod tests {
     }
 
     #[test]
-    fn test_show_package_dependencies_not_found() {
+    fn test_show_package_dependencies_not_found_includes_package_name() {
         let graph = mock_graph();
         let result = show_package_dependencies(&graph, "not-exist");
         assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("not-exist"),
+            "error should mention the queried package name, got: {err}"
+        );
+        assert!(
+            err.contains("utoo deps"),
+            "error should suggest `utoo deps`, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_dependencies_lockfile_missing_error() {
+        // A temp dir with no package-lock.json should produce a helpful error.
+        let dir = tempfile::tempdir().unwrap();
+        let result = list_dependencies(dir.path(), "some-package").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("package-lock.json"),
+            "error should mention package-lock.json, got: {err}"
+        );
+        assert!(
+            err.contains("utoo install"),
+            "error should suggest `utoo install`, got: {err}"
+        );
     }
 }
