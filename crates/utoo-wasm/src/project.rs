@@ -5,10 +5,13 @@
 //! - `pack` module for build/dev operations
 //! - `pm` module for package manager operations (deps, install, gzip, md5)
 
+use std::sync::Arc;
+
 use parking_lot::RwLock;
 use wasm_bindgen::prelude::*;
 
 use crate::errors::to_js_error;
+use crate::operations;
 use crate::pm::{self, with_project, OPFS_PROJECT};
 use crate::tokio_runtime::init_tokio_runtime;
 
@@ -24,6 +27,8 @@ pub struct Project;
 impl Project {
     #[wasm_bindgen(js_name = init)]
     pub fn init(thread_url: String) {
+        operations::reset();
+
         let mut url_guard = GLOBAL_THREAD_URL.write();
         if url_guard.is_none() && !thread_url.is_empty() {
             *url_guard = Some(thread_url.clone());
@@ -38,7 +43,7 @@ impl Project {
         // Initialise the global OpfsProject if not already done
         let mut guard = OPFS_PROJECT.write();
         if guard.is_none() {
-            *guard = Some(opfs_project::OpfsProject::default());
+            *guard = Some(Arc::new(opfs_project::OpfsProject::default()));
         }
     }
 
@@ -82,9 +87,10 @@ impl Project {
         package_lock: String,
         max_concurrent_downloads: Option<usize>,
     ) -> Result<(), JsError> {
-        pm::install(&package_lock, max_concurrent_downloads)
-            .await
-            .map_err(to_js_error)
+        match operations::run_local(pm::install(&package_lock, max_concurrent_downloads)).await {
+            Ok(result) => result.map_err(to_js_error),
+            Err(_) => Err(JsError::new("AbortError: install was disposed")),
+        }
     }
 
     #[cfg(feature = "utoopack")]
@@ -98,6 +104,18 @@ impl Project {
     pub async fn build(options: JsValue) -> Result<(), JsValue> {
         let _ = options;
         unimplemented!()
+    }
+
+    /// Cancel active install/build work and release project-owned state.
+    #[wasm_bindgen]
+    pub async fn dispose() -> Result<(), JsError> {
+        operations::cancel_all().await;
+
+        #[cfg(feature = "utoopack")]
+        pack::dispose_pack_project().await;
+
+        OPFS_PROJECT.write().take();
+        Ok(())
     }
 
     /// Subscribe to entrypoints changes with HMR support.

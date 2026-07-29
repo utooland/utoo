@@ -24,7 +24,7 @@
 
 ## 快速上手指南
 
-启动项目主要涉及四个步骤。参考 `examples/utooweb-demo` 或在线体验 [`utoo-repl`](https://utoo-repl.vercel.app)。
+启动项目主要涉及五个步骤。参考 `examples/utooweb-demo` 或在线体验 [`utoo-repl`](https://utoo-repl.vercel.app)。
 
 ### 1. 实例化项目
 
@@ -117,6 +117,77 @@ await project.build({
 
 ---
 
+## 在安装或构建期间切换项目
+
+`@utoo/web` 当前使用单个共享的 Worker/WASM 运行时。如果用户在依赖安装或构建仍在执行时选择了另一个项目，必须先等待当前项目的 `dispose()` 完成，再创建下一个 `Project`。切换函数也应串行执行，避免用户连续快速选择项目时，让两个项目同时初始化到同一个运行时中。
+
+```typescript
+import {
+  Project as UtooProject,
+  type ProjectOptions,
+} from "@utoo/web";
+
+let currentProject: UtooProject | undefined;
+let switchQueue: Promise<void> = Promise.resolve();
+
+function switchProject(options: ProjectOptions): Promise<UtooProject> {
+  const result = switchQueue.then(async () => {
+    const previous = currentProject;
+    currentProject = undefined;
+
+    // 同时取消旧项目中正在执行的 install() 或 build()。
+    await previous?.dispose();
+
+    const next = new UtooProject(options);
+    try {
+      await next.mount();
+      await next.installServiceWorker();
+      currentProject = next;
+      return next;
+    } catch (error) {
+      await next.dispose();
+      throw error;
+    }
+  });
+
+  // 即使本次初始化失败，后续切换仍可继续执行。
+  switchQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+```
+
+旧项目中正在执行的操作会以 `AbortError` 结束。应用应把它视为项目切换时的预期结果，同时继续抛出其他错误：
+
+```typescript
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function installDependencies(project: UtooProject, packageLock: string): void {
+  void project.install(packageLock).catch((error) => {
+    if (!isAbortError(error)) {
+      console.error("Dependency installation failed", error);
+    }
+  });
+}
+
+// 路由或工作区发生切换时，该操作可能仍在执行。
+installDependencies(currentProject!, packageLock);
+
+// 对新项目执行操作前，必须等待切换完成。
+const nextProject = await switchProject(nextProjectOptions);
+const nextPackageLock = await nextProject.deps();
+await nextProject.install(nextPackageLock);
+await nextProject.build();
+```
+
+释放时会先请求 Rust 运行时取消活动操作并清理状态。如果清理未能在内部超时时间内完成，`@utoo/web` 会终止旧 Worker，确保项目切换可以继续。`dispose()` 不会删除 OPFS 中的项目文件或共享依赖存储。
+
+---
+
 ## API 参考
 
 ### `new UtooProject(options)`
@@ -134,6 +205,21 @@ await project.build({
   * `url` (string, 必需): Service Worker 脚本的 URL。
   * `scope` (string, 必需): Service Worker 将拦截请求的 URL 范围。这是您预览环境的基路径。
 * `loadersImportMap`（对象，可选）：用于配置 webpack Loader 的导入映射。这是一个可选的高级配置。通常情况下，您只需在 `package.json` 中声明 loader 依赖并安装，即可让它工作。配置 `loadersImportMap` 允许您直接提供预构建好的、满足 CommonJS 规范的单一文件（作为 URL 字符串或内容字符串）。这样做可以避免 loader 执行过程中因 `require` 操作产生的文件系统 I/O 开销，从而显著提升构建性能。键是 loader 的名称，值是 UMD/CommonJS 模块的 URL 或内容字符串。loader 将在 Web Worker 池中并行执行。
+
+#### `project.dispose()`
+
+取消正在执行的依赖安装或构建任务，并释放共享的 Worker/WASM 运行时、HMR 连接和消息端口。尚未完成的 `install()`、`build()` Promise 会以 `AbortError` 拒绝。
+
+已释放的实例不能继续使用。请先释放当前项目，再创建下一个项目：
+
+```typescript
+await currentProject.dispose();
+currentProject = new UtooProject(nextProjectOptions);
+await currentProject.install(nextPackageLock);
+await currentProject.build();
+```
+
+重复调用 `dispose()` 是安全的。创建下一个项目前请始终等待它完成；如果释放仍在进行，构造新项目会抛出错误。由于 `@utoo/web` 当前使用单个共享运行时，释放一个项目也会使连接到该运行时的其他 `Project` 代理失效。完整的切换示例和取消错误处理参见[在安装或构建期间切换项目](#在安装或构建期间切换项目)。
 
 ### 文件系统方法
 
@@ -460,4 +546,3 @@ import "@utoo/web/esm/serviceWorker";
 
 * 由于当前 Rust 上默认的内存分配器 [`dlmalloc`](https://github.com/alexcrichton/dlmalloc-rs) 在多线程 `wasm` 上性能不够理想，我们将 [`mimalloc`](https://github.com/microsoft/mimalloc) 移植到了 wasm32-unknown-unknown 平台，以支持开启 CPU 核心数量的线程来运行构建。因此在浏览器环境和在操作系统环境，构建的性能差异十分微小。
 * turbopack 的部分高级功能如[`持久化缓存`](https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopackPersistentCaching)，目前也在计划之中，未来会在浏览器内直接支持。
-

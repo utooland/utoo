@@ -107,6 +107,10 @@ export class Project {
      */
     static deps(registry?: string | null, concurrency?: number | null): Promise<string>;
     /**
+     * Cancel active install/build work and release project-owned state.
+     */
+    static dispose(): Promise<void>;
+    /**
      * Subscribe to entrypoints changes with HMR support.
      * This will watch for file changes and automatically rebuild.
      * Returns a RootTask that must be held by JS to keep the subscription active.
@@ -221,6 +225,7 @@ export interface InitOutput {
     readonly project_build: (a: number) => any;
     readonly project_cwd: () => [number, number];
     readonly project_deps: (a: number, b: number, c: number) => any;
+    readonly project_dispose: () => any;
     readonly project_entrypointsSubscribe: (a: any, b: any) => any;
     readonly project_gzip: (a: any) => any;
     readonly project_hmrEvents: (a: number, b: number, c: any) => any;
