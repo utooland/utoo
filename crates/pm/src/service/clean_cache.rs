@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use utoo_ruborist::util::{PackageNameStr, parse_package_spec};
 
 use crate::fs;
-use crate::util::cache::matches_pattern;
+use crate::util::cache::{get_cache_dir, matches_pattern};
 
 /// A cache entry slated for deletion: (package name, version, on-disk path).
 pub type CacheEntry = (String, String, PathBuf);
@@ -42,9 +42,7 @@ async fn collect_matching_versions(
 /// Handles scoped (`@scope/name`) and regular packages; the result is sorted
 /// by package name and version number.
 pub async fn collect_cache_entries(pattern: &str) -> Result<Vec<CacheEntry>> {
-    let cache_dir = dirs::home_dir()
-        .map(|p| p.join(".cache").join("nm"))
-        .context("Failed to get cache directory")?;
+    let cache_dir = get_cache_dir();
 
     let (pkg_pattern, version_pattern) = parse_package_spec(pattern);
     let mut to_delete = Vec::new();

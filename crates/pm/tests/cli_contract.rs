@@ -14,15 +14,17 @@ fn utoo() -> Command {
     command
 }
 
-fn serve_publish_registry(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
+fn serve_publish_registry_responses(
+    responses: &[(&str, &str)],
+) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
-    let status = status.to_string();
-    let body = body.to_string();
+    let responses: Vec<_> = responses
+        .iter()
+        .map(|(status, body)| (status.to_string(), body.to_string()))
+        .collect();
     let handle = thread::spawn(move || {
-        for (response_status, response_body) in
-            [("404 Not Found", "{}"), (status.as_str(), body.as_str())]
-        {
+        for (response_status, response_body) in responses {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = Vec::new();
             let mut chunk = [0_u8; 8192];
@@ -61,14 +63,17 @@ fn serve_publish_registry(status: &str, body: &str) -> (String, thread::JoinHand
     (format!("http://{address}"), handle)
 }
 
-fn run_publish(project: &Path, registry: &str) -> Output {
+fn serve_publish_registry(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
+    serve_publish_registry_responses(&[("404 Not Found", "{}"), (status, body)])
+}
+
+fn publish_command(project: &Path, registry: &str) -> Command {
     let mut command = utoo();
     command
         .current_dir(project)
         .env("HOME", project)
         .env("USERPROFILE", project)
-        .env("NPM_TOKEN", "test-token")
-        .args(["--json", "--registry", registry, "publish"]);
+        .env("NPM_TOKEN", "test-token");
     for proxy in [
         "ALL_PROXY",
         "HTTPS_PROXY",
@@ -79,6 +84,13 @@ fn run_publish(project: &Path, registry: &str) -> Output {
     ] {
         command.env_remove(proxy);
     }
+    command.arg("--registry").arg(registry);
+    command
+}
+
+fn run_publish(project: &Path, registry: &str) -> Output {
+    let mut command = publish_command(project, registry);
+    command.args(["--json", "publish"]);
     command.output().unwrap()
 }
 
@@ -338,6 +350,44 @@ fn publish_json_classifies_forbidden_as_auth() {
 }
 
 #[test]
+fn publish_human_reports_completed_workspace_before_later_failure() {
+    let project = tempdir().unwrap();
+    fs::create_dir_all(project.path().join("A")).unwrap();
+    fs::create_dir_all(project.path().join("B")).unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["A","B"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("A/package.json"),
+        r#"{"name":"fixture-a","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("B/package.json"),
+        r#"{
+  "name": "fixture-b",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {"fixture-a": "workspace:*"}
+}"#,
+    )
+    .unwrap();
+    let (registry, server) = serve_publish_registry("201 Created", "{}");
+
+    let output = publish_command(project.path(), &registry)
+        .args(["--filter", "*", "publish"])
+        .output()
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("+ fixture-a@1.0.0"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("marked as private"));
+}
+
+#[test]
 fn pack_json_lifecycle_failure_is_one_clean_error_document() {
     let project = tempdir().unwrap();
     fs::write(
@@ -475,6 +525,19 @@ fn invalid_json_invocation_returns_a_json_usage_error() {
 }
 
 #[test]
+fn forwarded_json_after_delimiter_does_not_change_help_format() {
+    let output = utoo()
+        .args(["x", "--help", "--", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert!(serde_json::from_slice::<Value>(&output.stdout).is_err());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+}
+
+#[test]
 fn init_does_not_prompt_without_a_tty() {
     let project = tempdir().unwrap();
     let mut command = utoo();
@@ -507,8 +570,8 @@ fn init_yes_uses_defaults_without_a_tty() {
     assert!(project.path().join("package.json").exists());
 }
 
-fn write_cache_entry(home: &Path) -> std::path::PathBuf {
-    let entry = home.join(".cache/nm/fixture/1.0.0");
+fn write_cache_entry(cache_dir: &Path) -> std::path::PathBuf {
+    let entry = cache_dir.join("fixture/1.0.0");
     fs::create_dir_all(&entry).unwrap();
     entry
 }
@@ -516,10 +579,10 @@ fn write_cache_entry(home: &Path) -> std::path::PathBuf {
 #[test]
 fn clean_does_not_prompt_without_a_tty() {
     let home = tempdir().unwrap();
-    let entry = write_cache_entry(home.path());
+    let cache_dir = home.path().join("cache");
+    let entry = write_cache_entry(&cache_dir);
     let output = utoo()
-        .env("HOME", home.path())
-        .env("USERPROFILE", home.path())
+        .env("UTOO_CACHE_DIR", &cache_dir)
         .arg("clean")
         .stdin(Stdio::null())
         .output()
@@ -534,10 +597,10 @@ fn clean_does_not_prompt_without_a_tty() {
 #[test]
 fn clean_yes_deletes_without_a_prompt() {
     let home = tempdir().unwrap();
-    let entry = write_cache_entry(home.path());
+    let cache_dir = home.path().join("cache");
+    let entry = write_cache_entry(&cache_dir);
     let output = utoo()
-        .env("HOME", home.path())
-        .env("USERPROFILE", home.path())
+        .env("UTOO_CACHE_DIR", &cache_dir)
         .args(["clean", "--yes"])
         .stdin(Stdio::null())
         .output()

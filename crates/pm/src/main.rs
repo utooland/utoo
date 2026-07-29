@@ -99,11 +99,10 @@ fn main() {
 
 async fn async_main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let json_requested = args.iter().any(|arg| arg == "--json");
+    let json_requested = has_flag_before_delimiter(&args, "--json");
+    let no_color_requested = has_flag_before_delimiter(&args, "--no-color");
     let color = ColorPolicy::from(
-        json_requested
-            || args.iter().any(|arg| arg == "--no-color")
-            || std::env::var_os("NO_COLOR").is_some(),
+        json_requested || no_color_requested || std::env::var_os("NO_COLOR").is_some(),
     );
     color.apply();
 
@@ -403,4 +402,10 @@ async fn async_main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn has_flag_before_delimiter(args: &[String], flag: &str) -> bool {
+    args.iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == flag)
 }

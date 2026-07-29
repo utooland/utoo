@@ -58,6 +58,9 @@ pub async fn publish(
     for root in roots {
         match publish_one(&root, &options).await {
             Ok(outcome) => {
+                if !invocation::json() {
+                    print_publish_result(&outcome.package, mode)?;
+                }
                 packages.push(outcome.package);
                 if let Some(error) = outcome.lifecycle_error {
                     return Err(partial_publish_error(error, mode, packages));
@@ -73,30 +76,7 @@ pub async fn publish(
         dry_run: mode == RunMode::DryRun,
         packages,
     };
-    emit("publish", &output, || {
-        let mut stdout = io::stdout().lock();
-        for package in &output.packages {
-            if output.dry_run {
-                print_resolved_protocol_deps(&mut stdout, &package.resolved_dependencies)?;
-                writeln!(
-                    stdout,
-                    "{}",
-                    format!(
-                        "(dry run) Would publish {}@{} to {} with tag '{}'",
-                        package.name, package.version, package.registry, package.tag
-                    )
-                    .yellow()
-                )?;
-            } else {
-                writeln!(
-                    stdout,
-                    "{}",
-                    format!("+ {}@{}", package.name, package.version).green()
-                )?;
-            }
-        }
-        Ok(())
-    })
+    emit("publish", &output, || Ok(()))
 }
 
 /// Resolve the set of package directories to publish, preserving workspace
@@ -205,6 +185,30 @@ fn partial_publish_error(
             "completedPackages": completed_packages,
         }))
         .into()
+}
+
+fn print_publish_result(package: &PublishedPackage, mode: RunMode) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    match mode {
+        RunMode::DryRun => {
+            print_resolved_protocol_deps(&mut stdout, &package.resolved_dependencies)?;
+            writeln!(
+                stdout,
+                "{}",
+                format!(
+                    "(dry run) Would publish {}@{} to {} with tag '{}'",
+                    package.name, package.version, package.registry, package.tag
+                )
+                .yellow()
+            )
+        }
+        RunMode::Live => writeln!(
+            stdout,
+            "{}",
+            format!("+ {}@{}", package.name, package.version).green()
+        ),
+    }?;
+    stdout.flush()
 }
 
 /// Print dependencies whose `workspace:`/`catalog:` specifier was rewritten to a
