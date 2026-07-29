@@ -59,11 +59,12 @@ cat "$ENTRY_DIR/package.json" | \
 # copy README.md from repository root
 cp ../../README.md "$ENTRY_DIR/README.md"
 
-# Immutable runtime launchers. Package managers install the matching optional
-# platform artifact; these files only locate and spawn it. No lifecycle hook or
-# mutation of package-manager-owned directories is required.
+# Immutable runtime launchers. A missing optional platform artifact is repaired
+# into utoo's own nested node_modules directory on first invocation.
 mkdir -p "$ENTRY_DIR/bin"
 cp ../templates/launcher.utoo.js.template "$ENTRY_DIR/bin/launcher.js"
+cp ../templates/registry.utoo.js.template "$ENTRY_DIR/bin/registry.js"
+cp ../templates/self-heal.utoo.js.template "$ENTRY_DIR/bin/self-heal.js"
 cp ../templates/utoo.utoo.js.template "$ENTRY_DIR/bin/utoo.js"
 cp ../templates/utx.utoo.js.template "$ENTRY_DIR/bin/utx.js"
 chmod +x "$ENTRY_DIR/bin/utoo.js" "$ENTRY_DIR/bin/utx.js"

@@ -27,6 +27,7 @@
     "build-threadWorker": "node cli/umd.js -e ./src/workers/threadWorker.ts -o ./esm/threadWorkerInline.js -t webworker -np --base64-url",
     "build-loaderWorker": "node cli/umd.js -e ./src/webpackLoaders/worker.ts -o ./esm/loaderWorkerInline.js -t webworker --base64-url",
     "build-serviceWorker": "node cli/umd.js -e ./src/serviceWorker/index.ts -o ./esm/serviceWorkerBundle.js -t webworker -np",
+    "test": "vitest run tests",
     "clean": "rm -rf esm src/utoo",
     "prepublishOnly": "turbo run build --filter=@utoo/web"
   },

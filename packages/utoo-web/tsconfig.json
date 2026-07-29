@@ -21,5 +21,5 @@
       "@utoo/pack-shared": ["../pack-shared/src/index.ts"]
     }
   },
-  "exclude": ["./esm", "./dist", "./cli", "./tmp"]
+  "exclude": ["./esm", "./dist", "./cli", "./tmp", "./tests"]
 }
