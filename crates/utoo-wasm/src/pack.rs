@@ -31,6 +31,7 @@ use turbopack_core::{
 use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 
 use crate::fs::Fs;
+use crate::operations::OperationGuard;
 use crate::tokio_runtime::runtime;
 
 // https://github.com/dtolnay/inventory/blob/f1be63af0ab00ce41c39f1dd190a624de949c684/src/lib.rs#L105-L148
@@ -45,16 +46,14 @@ static GLOBAL_PACK_PROJECT: RwLock<Option<Arc<PackProject>>> = RwLock::new(None)
 /// This must be held by JS to keep the subscription active.
 #[wasm_bindgen]
 pub struct RootTask {
-    #[allow(dead_code)]
     turbo_tasks: UtooTurboTasks,
-    #[allow(dead_code)]
     task_id: TaskId,
 }
 
 impl Drop for RootTask {
     fn drop(&mut self) {
-        tracing::debug!("RootTask dropped, subscription will be stopped");
-        // TODO: dispose the root task
+        tracing::debug!("RootTask dropped, disposing subscription");
+        self.turbo_tasks.dispose_root_task(self.task_id);
     }
 }
 
@@ -65,6 +64,7 @@ pub struct PackProject {
 }
 
 /// Options for the build operation, exposed to JS with auto-generated typings.
+#[derive(Default)]
 #[wasm_bindgen]
 pub struct BuildOptions {
     /// Optional bundler config (the content of `utoopack.json`).
@@ -73,15 +73,6 @@ pub struct BuildOptions {
     /// When true, drops the existing global project and creates a fresh instance.
     #[wasm_bindgen]
     pub cleanup: bool,
-}
-
-impl Default for BuildOptions {
-    fn default() -> Self {
-        Self {
-            config: None,
-            cleanup: false,
-        }
-    }
 }
 
 #[wasm_bindgen]
@@ -128,6 +119,13 @@ pub fn create_turbo_tasks() -> Result<UtooTurboTasks> {
             noop_backing_storage(),
         ),
     ))
+}
+
+pub async fn dispose_pack_project() {
+    let project = GLOBAL_PACK_PROJECT.write().take();
+    if let Some(project) = project {
+        project.turbo_tasks.stop_and_wait().await;
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -270,8 +268,7 @@ pub async fn init_pack_project(config: Option<String>, dev: bool) -> Result<()> 
         }
     }
 
-    // Drop the old project
-    GLOBAL_PACK_PROJECT.write().take();
+    dispose_pack_project().await;
 
     let cwd = crate::pm::with_project(|p| p.cwd().to_string_lossy().to_string());
     let project_root = if cwd.starts_with('/') {
@@ -325,25 +322,26 @@ pub async fn init_pack_project(config: Option<String>, dev: bool) -> Result<()> 
 
     tracing::debug!("ProjectOptions: {:?}", options);
 
-    let pack_context = runtime()
-        .spawn(async move {
-            let turbo_tasks = create_turbo_tasks()?;
-            let container = turbo_tasks
-                .run(async move {
-                    let container_op =
-                        ProjectContainer::new_operation("utoopack-web".into(), options.dev);
-                    ProjectContainer::initialize(container_op, options).await?;
+    let init_task = runtime().spawn(async move {
+        let turbo_tasks = create_turbo_tasks()?;
+        let container = turbo_tasks
+            .run(async move {
+                let container_op =
+                    ProjectContainer::new_operation("utoopack-web".into(), options.dev);
+                ProjectContainer::initialize(container_op, options).await?;
 
-                    container_op.resolve().strongly_consistent().await
-                })
-                .await?;
-
-            Ok::<PackProject, anyhow::Error>(PackProject {
-                turbo_tasks,
-                container,
-                dev,
+                container_op.resolve().strongly_consistent().await
             })
+            .await?;
+
+        Ok::<PackProject, anyhow::Error>(PackProject {
+            turbo_tasks,
+            container,
+            dev,
         })
+    });
+    let _operation = OperationGuard::track_tokio(&init_task);
+    let pack_context = init_task
         .await
         .context("fail to initialize pack project")??;
 
@@ -356,8 +354,8 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
     use wasm_bindgen::JsError;
 
     if options.cleanup {
-        tracing::info!("cleanup: dropping existing pack project");
-        GLOBAL_PACK_PROJECT.write().take();
+        tracing::info!("cleanup: disposing existing pack project");
+        dispose_pack_project().await;
     }
 
     init_pack_project(options.config_string(), false)
@@ -370,42 +368,49 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
         .cloned()
         .ok_or_else(|| JsError::new("pack project not initialized"))?;
 
-    runtime()
-        .spawn(async move {
-            let start = Instant::now();
-            let turbo_tasks = pack_project.turbo_tasks.clone();
-            let container = pack_project.container;
-            let (entrypoints, issues) = turbo_tasks
-                .run(async move {
-                    let entrypoints_with_issues_op =
-                        get_all_written_entrypoints_with_issues_operation(container);
-                    let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
-                        entrypoints_with_issues_op,
-                        |v| &v.effects,
-                    )
+    let build_task = runtime().spawn(async move {
+        let start = Instant::now();
+        let turbo_tasks = pack_project.turbo_tasks.clone();
+        let container = pack_project.container;
+        let (entrypoints, issues) = turbo_tasks
+            .run(async move {
+                let entrypoints_with_issues_op =
+                    get_all_written_entrypoints_with_issues_operation(container);
+                let entrypoints_with_issues =
+                    read_strongly_consistent_and_apply_effects(entrypoints_with_issues_op, |v| {
+                        &v.effects
+                    })
                     .await?;
 
-                    let EntrypointsWithIssues {
-                        entrypoints,
-                        issues,
-                        effects: _,
-                    } = &*entrypoints_with_issues;
+                let EntrypointsWithIssues {
+                    entrypoints,
+                    issues,
+                    effects: _,
+                } = &*entrypoints_with_issues;
 
-                    Ok((entrypoints.clone(), issues.clone()))
-                })
-                .await?;
+                Ok((entrypoints.clone(), issues.clone()))
+            })
+            .await?;
 
-            tracing::info!("build finished in {:?}", start.elapsed());
+        tracing::info!("build finished in {:?}", start.elapsed());
 
-            let result = TurbopackResult {
-                issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
-            };
-            let json_str =
-                serde_json::to_string(&result).map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            Ok::<String, anyhow::Error>(json_str)
-        })
+        let result = TurbopackResult {
+            issues: issues.iter().map(|i| Issue::from(&**i)).collect(),
+        };
+        let json_str =
+            serde_json::to_string(&result).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        Ok::<String, anyhow::Error>(json_str)
+    });
+    let _operation = OperationGuard::track_tokio(&build_task);
+    build_task
         .await
-        .map_err(|e| JsError::new(&format!("Failed to spawn build task: {:?}", e)))?
+        .map_err(|error| {
+            if error.is_cancelled() {
+                JsError::new("AbortError: build was disposed")
+            } else {
+                JsError::new(&format!("Failed to run build task: {error:?}"))
+            }
+        })?
         .map_or_else(
             |e| Err(JsError::new(&PrettyPrintError(&e).to_string())),
             |json_str| {

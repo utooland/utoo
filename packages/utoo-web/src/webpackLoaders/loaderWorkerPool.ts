@@ -93,3 +93,17 @@ export const runLoaderWorkerPool = async (
     },
   );
 };
+
+export function disposeLoaderWorkerPool(): void {
+  for (const workers of Object.values(loaderWorkers)) {
+    for (const worker of workers.values()) {
+      worker.terminate();
+    }
+    workers.clear();
+  }
+
+  for (const entrypoint of Object.keys(loaderWorkers)) {
+    delete loaderWorkers[entrypoint];
+  }
+  nextWorkerId = 0;
+}

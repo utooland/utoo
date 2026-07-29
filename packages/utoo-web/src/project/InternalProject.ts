@@ -17,7 +17,10 @@ import initWasm, {
   Project as ProjectInternal,
   RootTask,
 } from "../utoo";
-import { runLoaderWorkerPool } from "../webpackLoaders/loaderWorkerPool";
+import {
+  disposeLoaderWorkerPool,
+  runLoaderWorkerPool,
+} from "../webpackLoaders/loaderWorkerPool";
 
 class InternalEndpoint implements ProjectEndpoint {
   wasmInit?: ReturnType<typeof initWasm>;
@@ -82,6 +85,22 @@ class InternalEndpoint implements ProjectEndpoint {
       buildOptions.config = options.config;
     }
     return await ProjectInternal.build(buildOptions);
+  }
+
+  async dispose() {
+    this.rootTask?.free();
+    this.rootTask = undefined;
+
+    for (const rootTask of this.hmrRootTasks.values()) {
+      rootTask.free();
+    }
+    this.hmrRootTasks.clear();
+
+    disposeLoaderWorkerPool();
+    this.loaderWorkerPoolInitialized = false;
+    this.options = undefined;
+
+    await ProjectInternal.dispose();
   }
 
   // @ts-expect-error - Comlink delivers (config, onUpdate) as separate args, not as options object
