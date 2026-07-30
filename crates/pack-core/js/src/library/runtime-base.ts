@@ -95,3 +95,38 @@ externalRequire.resolve = (
   return require.resolve(id, options);
 };
 contextPrototype.x = externalRequire;
+
+/**
+ * Adds Webpack-compatible ESM metadata to external values while preserving
+ * native ESM live bindings.
+ */
+function externalNamespace(mod: any) {
+  if (mod && mod.__esModule) return mod;
+
+  const ns = Object.create(null);
+  const isEsmNamespace = mod && toStringTag && mod[toStringTag] === "Module";
+
+  if (mod && (typeof mod === "object" || typeof mod === "function")) {
+    for (const key in mod) {
+      if (key === "__esModule" || (!isEsmNamespace && key === "default")) {
+        continue;
+      }
+
+      Object.defineProperty(ns, key, {
+        enumerable: true,
+        get: createGetter(mod, key),
+      });
+    }
+  }
+
+  if (!isEsmNamespace) {
+    Object.defineProperty(ns, "default", { enumerable: true, value: mod });
+  }
+  Object.defineProperty(ns, "__esModule", { value: true });
+  if (toStringTag) {
+    Object.defineProperty(ns, toStringTag, { value: "Module" });
+  }
+
+  return ns;
+}
+contextPrototype.N = externalNamespace;
