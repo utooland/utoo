@@ -777,6 +777,7 @@ mod tests {
                 path.display()
             )
         });
+        let committed = committed.replace("\r\n", "\n");
         assert_eq!(
             committed, generated,
             "CLI JSON Schema changed; run UPDATE=1 cargo test -p utoo-pm cli_output_schema"
