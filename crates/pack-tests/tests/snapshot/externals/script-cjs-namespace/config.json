@@ -1,0 +1,17 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.ts",
+                "name": "main"
+            }
+        ],
+        "externals": {
+            "jszip": {
+                "root": "JSZip",
+                "type": "script",
+                "script": "https://example.com/jszip.js"
+            }
+        }
+    }
+}

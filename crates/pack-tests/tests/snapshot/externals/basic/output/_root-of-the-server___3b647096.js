@@ -70,6 +70,10 @@ if (mod && mod.__esModule) {
     for (var key in mod) ns[key] = mod[key];
   }
   ns.default = mod;
+  Object.defineProperty(ns, '__esModule', { value: true });
+  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
+  }
   __turbopack_context__.n(ns);
 }
 __turbopack_async_result__();
@@ -104,6 +108,10 @@ if (mod && mod.__esModule) {
     for (var key in mod) ns[key] = mod[key];
   }
   ns.default = mod;
+  Object.defineProperty(ns, '__esModule', { value: true });
+  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
+  }
   __turbopack_context__.n(ns);
 }
 __turbopack_async_result__();
