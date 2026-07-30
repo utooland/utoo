@@ -93,14 +93,21 @@ pub async fn collect_cache_entries(pattern: &str) -> Result<Vec<CacheEntry>> {
 
 /// Delete the given cache entries from global storage. Failures are logged
 /// per entry and do not abort the remaining deletions.
-pub async fn delete_cache_entries(to_delete: Vec<CacheEntry>) {
+pub async fn delete_cache_entries(
+    to_delete: Vec<CacheEntry>,
+) -> (Vec<CacheEntry>, Vec<(CacheEntry, std::io::Error)>) {
+    let mut deleted = Vec::new();
+    let mut failed = Vec::new();
     for (pkg, version, path) in to_delete {
         if let Err(e) = fs::remove_dir_all(&path).await {
             tracing::error!("Failed to delete {pkg}@{version}: {e}");
+            failed.push(((pkg, version, path), e));
         } else {
             tracing::debug!("Deleted {pkg}@{version}");
+            deleted.push((pkg, version, path));
         }
     }
+    (deleted, failed)
 }
 
 #[cfg(test)]

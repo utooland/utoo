@@ -3,10 +3,12 @@
 use std::error::Error;
 use std::fmt;
 
+use schemars::JsonSchema;
 use serde::Serialize;
-use serde_json::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+use crate::model::cli_output::{ErrorDetails, PartialResult};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     Transient,
@@ -46,27 +48,36 @@ impl ErrorKind {
 #[derive(Debug)]
 pub struct CliError {
     kind: ErrorKind,
+    code: String,
     message: String,
     suggestion: Option<String>,
-    details: Option<Value>,
+    partial_result: Option<PartialResult>,
+    details: Option<ErrorDetails>,
 }
 
 impl CliError {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
             kind,
+            code: "operation_failed".to_string(),
             message: message.into(),
             suggestion: None,
+            partial_result: None,
             details: None,
         }
     }
 
     pub fn usage(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Usage, message)
+        Self::new(ErrorKind::Usage, message).with_code("invalid_arguments")
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::NotFound, message)
+        Self::new(ErrorKind::NotFound, message).with_code("not_found")
+    }
+
+    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = code.into();
+        self
     }
 
     pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
@@ -74,13 +85,22 @@ impl CliError {
         self
     }
 
-    pub fn with_details(mut self, details: Value) -> Self {
+    pub fn with_partial_result(mut self, partial_result: PartialResult) -> Self {
+        self.partial_result = Some(partial_result);
+        self
+    }
+
+    pub fn with_details(mut self, details: ErrorDetails) -> Self {
         self.details = Some(details);
         self
     }
 
     pub const fn kind(&self) -> ErrorKind {
         self.kind
+    }
+
+    pub fn code(&self) -> &str {
+        &self.code
     }
 
     pub fn message(&self) -> &str {
@@ -91,7 +111,11 @@ impl CliError {
         self.suggestion.as_deref()
     }
 
-    pub const fn details(&self) -> Option<&Value> {
+    pub const fn partial_result(&self) -> Option<&PartialResult> {
+        self.partial_result.as_ref()
+    }
+
+    pub const fn details(&self) -> Option<&ErrorDetails> {
         self.details.as_ref()
     }
 }

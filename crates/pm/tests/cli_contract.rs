@@ -135,7 +135,8 @@ fn json_version_is_one_machine_document() {
     let value: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(value["schemaVersion"], 1);
     assert_eq!(value["command"], "version");
-    assert!(value["version"].is_string());
+    assert_eq!(value["ok"], true);
+    assert!(value["result"]["version"].is_string());
 }
 
 #[test]
@@ -148,7 +149,8 @@ fn json_help_is_one_machine_document() {
     let value: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(value["schemaVersion"], 1);
     assert_eq!(value["command"], "help");
-    assert!(value["help"].as_str().unwrap().contains("Usage:"));
+    assert_eq!(value["result"]["target"]["command"], "view");
+    assert!(value["result"]["text"].as_str().unwrap().contains("Usage:"));
 }
 
 #[test]
@@ -182,8 +184,9 @@ fn pack_json_is_one_clean_document() {
     let value: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(value["schemaVersion"], 1);
     assert_eq!(value["command"], "pack");
-    assert_eq!(value["name"], "fixture");
-    assert_eq!(value["dryRun"], true);
+    assert_eq!(value["result"]["name"], "fixture");
+    assert_eq!(value["result"]["dryRun"], true);
+    assert_eq!(value["result"]["tarballPath"], Value::Null);
 }
 
 #[test]
@@ -209,6 +212,8 @@ fn install_json_lifecycle_success_is_one_clean_document() {
     assert!(!stdout.contains("LIFECYCLE_STDERR_MARKER"));
     let value: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(value["command"], "install");
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["result"]["operation"], "install");
 }
 
 #[test]
@@ -231,13 +236,50 @@ fn install_json_lifecycle_failure_is_one_stable_error_document() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(stderr.lines().count(), 1);
-    assert!(!stderr.contains("LIFECYCLE_STDOUT_MARKER"));
-    assert!(!stderr.contains("LIFECYCLE_STDERR_MARKER"));
     let value: Value = serde_json::from_str(&stderr).unwrap();
     assert_eq!(value["schemaVersion"], 1);
     assert_eq!(value["command"], "install");
+    assert_eq!(value["ok"], false);
     assert_eq!(value["error"]["category"], "local");
-    assert_eq!(value["error"]["code"], 11);
+    assert_eq!(value["error"]["code"], "script_failed");
+    assert_eq!(value["error"]["exitCode"], 11);
+    let details = &value["error"]["details"];
+    assert_eq!(details["kind"], "lifecycle");
+    let execution = &details["executions"][0];
+    assert_eq!(execution["package"], "fixture");
+    assert_eq!(execution["event"], "install");
+    assert_eq!(execution["command"], "node lifecycle.js");
+    let canonical_project = fs::canonicalize(project.path()).unwrap();
+    assert_eq!(
+        execution["cwd"].as_str(),
+        Some(canonical_project.to_string_lossy().as_ref())
+    );
+    assert_eq!(execution["status"], "failed");
+    assert_eq!(execution["exitCode"], 42);
+    assert_eq!(execution["stdout"]["tail"], "LIFECYCLE_STDOUT_MARKER\n");
+    assert_eq!(execution["stderr"]["tail"], "LIFECYCLE_STDERR_MARKER\n");
+    assert_eq!(execution["stdout"]["bytes"], 24);
+    assert_eq!(execution["stderr"]["bytes"], 24);
+    assert_eq!(execution["stdout"]["truncated"], false);
+    assert_eq!(execution["stderr"]["truncated"], false);
+}
+
+#[test]
+fn install_human_lifecycle_failure_still_streams_script_output() {
+    let project = tempdir().unwrap();
+    write_lifecycle_project(project.path(), 42);
+
+    let output = utoo()
+        .current_dir(project.path())
+        .arg("install")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(42));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("LIFECYCLE_STDOUT_MARKER"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("LIFECYCLE_STDERR_MARKER"));
+    assert!(stderr.contains("Custom script execution failed with exit code: 42"));
 }
 
 #[test]
@@ -305,18 +347,26 @@ process.exit(42);
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(stderr.lines().count(), 1);
-    assert!(!stderr.contains("POSTPUBLISH_STDOUT_MARKER"));
-    assert!(!stderr.contains("POSTPUBLISH_STDERR_MARKER"));
     let value: Value = serde_json::from_str(&stderr).unwrap();
     assert_eq!(value["command"], "publish");
     assert_eq!(value["error"]["category"], "local");
-    assert_eq!(value["error"]["code"], 11);
+    assert_eq!(value["error"]["code"], "script_failed");
+    assert_eq!(value["error"]["exitCode"], 11);
+    let details = &value["error"]["details"];
+    assert_eq!(details["kind"], "lifecycle");
+    let execution = &details["executions"][0];
+    assert_eq!(execution["package"], "fixture");
+    assert_eq!(execution["event"], "postpublish");
+    assert_eq!(execution["command"], "node postpublish.js");
+    assert_eq!(execution["exitCode"], 42);
+    assert_eq!(execution["stdout"]["tail"], "POSTPUBLISH_STDOUT_MARKER\n");
+    assert_eq!(execution["stderr"]["tail"], "POSTPUBLISH_STDERR_MARKER\n");
     assert_eq!(
-        value["error"]["details"]["completedPackages"][0]["name"],
+        value["error"]["partialResult"]["packages"][0]["name"],
         "fixture"
     );
     assert_eq!(
-        value["error"]["details"]["completedPackages"][0]["version"],
+        value["error"]["partialResult"]["packages"][0]["version"],
         "1.0.0"
     );
 }
@@ -346,7 +396,8 @@ fn publish_json_classifies_forbidden_as_auth() {
     assert_eq!(stderr.lines().count(), 1);
     let value: Value = serde_json::from_str(&stderr).unwrap();
     assert_eq!(value["error"]["category"], "auth");
-    assert_eq!(value["error"]["code"], 3);
+    assert_eq!(value["error"]["code"], "registry_publish_failed");
+    assert_eq!(value["error"]["exitCode"], 3);
 }
 
 #[test]
@@ -415,11 +466,19 @@ process.exit(42);
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(stderr.lines().count(), 1);
-    assert!(!stderr.contains("LIFECYCLE_STDOUT_MARKER"));
-    assert!(!stderr.contains("LIFECYCLE_STDERR_MARKER"));
     let value: Value = serde_json::from_str(&stderr).unwrap();
     assert_eq!(value["error"]["category"], "local");
-    assert_eq!(value["error"]["code"], 11);
+    assert_eq!(value["error"]["code"], "script_failed");
+    assert_eq!(value["error"]["exitCode"], 11);
+    let details = &value["error"]["details"];
+    assert_eq!(details["kind"], "lifecycle");
+    let execution = &details["executions"][0];
+    assert_eq!(execution["package"], "fixture");
+    assert_eq!(execution["event"], "prepack");
+    assert_eq!(execution["command"], "node lifecycle-failure.js");
+    assert_eq!(execution["exitCode"], 42);
+    assert_eq!(execution["stdout"]["tail"], "LIFECYCLE_STDOUT_MARKER\n");
+    assert_eq!(execution["stderr"]["tail"], "LIFECYCLE_STDERR_MARKER\n");
 }
 
 #[test]
@@ -436,8 +495,11 @@ fn json_error_is_structured_and_uses_stable_exit_code() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(stderr.lines().count(), 1);
     let value: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(value["command"], "config");
+    assert_eq!(value["subcommand"], "get");
     assert_eq!(value["error"]["category"], "not_found");
-    assert_eq!(value["error"]["code"], 4);
+    assert_eq!(value["error"]["code"], "not_found");
+    assert_eq!(value["error"]["exitCode"], 4);
 }
 
 #[test]
@@ -469,21 +531,27 @@ fn list_json_emits_a_document_for_a_disconnected_package() {
     assert_eq!(stdout.lines().count(), 1);
     let value: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(value["command"], "list");
-    assert_eq!(value["package"], "orphan");
-    assert_eq!(value["dependencies"], serde_json::json!([]));
+    assert_eq!(value["result"]["package"], "orphan");
+    assert_eq!(value["result"]["paths"], serde_json::json!([]));
+    assert_eq!(value["result"]["truncated"], false);
 }
 
 #[test]
-fn unsupported_json_command_fails_instead_of_printing_human_output() {
-    let output = utoo().args(["--json", "ping"]).output().unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(value["error"]["category"], "usage");
+fn completions_json_is_a_machine_document() {
+    let output = utoo()
+        .args(["--json", "completions", "bash"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "completions");
+    assert_eq!(value["result"]["shell"], "bash");
+    assert!(value["result"]["script"].as_str().unwrap().contains("utoo"));
 }
 
 #[test]
-fn bare_script_json_is_rejected_before_the_script_runs() {
+fn bare_script_json_captures_the_script_result() {
     let project = tempdir().unwrap();
     fs::write(
         project.path().join("package.json"),
@@ -502,14 +570,18 @@ fn bare_script_json_is_rejected_before_the_script_runs() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert_eq!(stderr.lines().count(), 1);
-    assert!(!stderr.contains("BARE_SCRIPT_OUTPUT_MARKER"));
-    let value: Value = serde_json::from_str(&stderr).unwrap();
-    assert_eq!(value["error"]["category"], "usage");
-    assert_eq!(value["error"]["code"], 2);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["command"], "run");
+    assert_eq!(value["result"]["script"], "build");
+    assert_eq!(value["result"]["executions"][0]["event"], "build");
+    assert_eq!(
+        value["result"]["executions"][0]["stdout"]["tail"],
+        "BARE_SCRIPT_OUTPUT_MARKER\n"
+    );
 }
 
 #[test]
@@ -570,6 +642,97 @@ fn init_yes_uses_defaults_without_a_tty() {
     assert!(project.path().join("package.json").exists());
 }
 
+#[test]
+fn init_json_returns_the_created_manifest_identity() {
+    let project = tempdir().unwrap();
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "init", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "init");
+    assert_eq!(value["result"]["version"], "1.0.0");
+    assert_eq!(
+        value["result"]["path"],
+        fs::canonicalize(project.path().join("package.json"))
+            .unwrap()
+            .to_string_lossy()
+            .as_ref()
+    );
+}
+
+#[test]
+fn login_json_is_a_structured_interactive_error() {
+    let output = utoo().args(["--json", "login"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(value["command"], "login");
+    assert_eq!(value["error"]["code"], "interactive_required");
+    assert_eq!(value["error"]["exitCode"], 2);
+}
+
+#[test]
+fn config_json_uses_command_and_subcommand_fields() {
+    let project = tempdir().unwrap();
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "set", "fixture-key", "fixture-value"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "config");
+    assert_eq!(value["subcommand"], "set");
+    assert_eq!(value["result"]["values"]["fixture-key"], "fixture-value");
+    assert_eq!(value["result"]["scope"], "local");
+}
+
+#[cfg(unix)]
+#[test]
+fn execute_json_captures_child_output() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = tempdir().unwrap();
+    let bin_dir = project.path().join("node_modules/.bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let executable = bin_dir.join("fixture-tool");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf 'EXECUTE_STDOUT_MARKER\\n'\nprintf 'EXECUTE_STDERR_MARKER\\n' >&2\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "execute", "fixture-tool"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "execute");
+    assert_eq!(value["result"]["source"], "local");
+    assert_eq!(value["result"]["execution"]["status"], "succeeded");
+    assert_eq!(
+        value["result"]["execution"]["stdout"]["tail"],
+        "EXECUTE_STDOUT_MARKER\n"
+    );
+    assert_eq!(
+        value["result"]["execution"]["stderr"]["tail"],
+        "EXECUTE_STDERR_MARKER\n"
+    );
+}
+
 fn write_cache_entry(cache_dir: &Path) -> std::path::PathBuf {
     let entry = cache_dir.join("fixture/1.0.0");
     fs::create_dir_all(&entry).unwrap();
@@ -612,6 +775,28 @@ fn clean_yes_deletes_without_a_prompt() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(!String::from_utf8_lossy(&output.stdout).contains("Confirm to delete"));
+    assert!(!entry.exists());
+}
+
+#[test]
+fn clean_json_reports_deleted_entries() {
+    let home = tempdir().unwrap();
+    let cache_dir = home.path().join("cache");
+    let entry = write_cache_entry(&cache_dir);
+    let output = utoo()
+        .env("UTOO_CACHE_DIR", &cache_dir)
+        .args(["--json", "clean", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "clean");
+    assert_eq!(value["result"]["deleted"][0]["name"], "fixture");
+    assert_eq!(value["result"]["deleted"][0]["version"], "1.0.0");
+    assert_eq!(value["result"]["summary"]["matched"], 1);
+    assert_eq!(value["result"]["summary"]["deleted"], 1);
     assert!(!entry.exists());
 }
 

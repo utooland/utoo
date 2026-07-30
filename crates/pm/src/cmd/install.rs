@@ -1,12 +1,17 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use anyhow::Result;
 use clap::Args;
-use serde::Serialize;
+use utoo_ruborist::lock::PackageLock;
+use utoo_ruborist::spec::PackageSpec;
 
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
 use crate::helper::workspace::init_project_root;
+use crate::model::cli_output::{
+    DependencyOperation, DependencyScope, DependencySummary, InstallResult, PackageVersion,
+    UninstallResult,
+};
 use crate::service::install::InstallService;
 use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::{
@@ -15,6 +20,7 @@ use crate::util::cli_enum::{
 use crate::util::format_print::{pluralized_package_count, print_migrate_result};
 use crate::util::install_progress::DownloadBaseline;
 use crate::util::invocation;
+use crate::util::json::load_package_lock_json_from_path;
 use crate::util::logger::log_time_end;
 use crate::util::presenter::emit;
 use crate::util::user_config::{get_omit, resolve_global_prefix, set_install_scope, set_omit};
@@ -75,8 +81,19 @@ pub struct InstallArgs {
 /// installs either the given specs (globally or locally) or the whole project.
 pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()> {
     let download_baseline = DownloadBaseline::capture();
+    let machine = invocation::json();
     let requested = args.specs.clone();
     let scope = InstallScope::from(args.global);
+    let workspace = (scope == InstallScope::Local)
+        .then(|| args.workspace.clone())
+        .flatten();
+    let root_path = if machine && scope == InstallScope::Local {
+        let cwd = std::env::current_dir()?;
+        Some(init_project_root(&cwd).await?)
+    } else {
+        None
+    };
+    let before = load_lock_snapshot(root_path.as_deref()).await;
     // Build omit config: production = omit dev + optional
     let mut omit_set: HashSet<OmitType> = args.omit.into_iter().collect();
     if args.production {
@@ -115,14 +132,32 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         // Log install result with correct singular/plural form in one line
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
     }
-    let operation = if requested.is_empty() { "sync" } else { "add" };
-    emit_install_result(
-        "install",
-        operation,
-        &requested,
-        scope,
-        download_baseline.downloaded_bytes(),
-    )
+    if !machine {
+        return Ok(());
+    }
+    let after = load_lock_snapshot(root_path.as_deref()).await;
+    let resolved = if let Some(lock) = after.as_ref() {
+        direct_packages(lock, &requested)
+    } else {
+        global_packages(&requested, args.prefix.as_deref()).await
+    };
+    let output = InstallResult {
+        operation: if requested.is_empty() {
+            DependencyOperation::Install
+        } else {
+            DependencyOperation::Add
+        },
+        scope: dependency_scope(scope),
+        workspace,
+        requested,
+        resolved,
+        summary: dependency_summary(
+            before.as_ref(),
+            after.as_ref(),
+            download_baseline.downloaded_bytes(),
+        ),
+    };
+    emit("install", &output, || Ok(()))
 }
 
 /// Entry point for the `uninstall` command.
@@ -135,31 +170,76 @@ pub async fn uninstall(
         anyhow::bail!("Package specification is required for uninstall");
     }
 
+    let machine = invocation::json();
+    let root_path = if machine {
+        let cwd = std::env::current_dir()?;
+        Some(init_project_root(&cwd).await?)
+    } else {
+        None
+    };
+    let before = load_lock_snapshot(root_path.as_deref()).await;
+    let removed = before
+        .as_ref()
+        .map(|lock| direct_packages(lock, &specs))
+        .unwrap_or_default();
     let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
     update_packages(
         PackageAction::Remove,
         &spec_refs,
-        workspace,
+        workspace.clone(),
         scripts,
         SaveType::Prod,
     )
     .await?;
     log_time_end(&pluralized_package_count(specs.len(), "uninstalled"));
-    Ok(())
+    if !machine {
+        return Ok(());
+    }
+    let after = load_lock_snapshot(root_path.as_deref()).await;
+    let output = UninstallResult {
+        operation: DependencyOperation::Remove,
+        scope: DependencyScope::Local,
+        workspace,
+        requested: specs,
+        removed,
+        summary: dependency_summary(before.as_ref(), after.as_ref(), 0),
+    };
+    emit("uninstall", &output, || Ok(()))
 }
 
 /// Install all dependencies of the project containing the current directory.
 /// Shared by bare `utoo` and `utoo install` without specs.
 pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
     let download_baseline = DownloadBaseline::capture();
+    let machine = invocation::json();
+    let root_path = if machine {
+        let cwd = std::env::current_dir()?;
+        Some(init_project_root(&cwd).await?)
+    } else {
+        None
+    };
+    let before = load_lock_snapshot(root_path.as_deref()).await;
     install_cwd_inner(scripts).await?;
-    emit_install_result(
-        "install",
-        "sync",
-        &[],
-        InstallScope::Local,
-        download_baseline.downloaded_bytes(),
-    )
+    if !machine {
+        return Ok(());
+    }
+    let after = load_lock_snapshot(root_path.as_deref()).await;
+    let output = InstallResult {
+        operation: DependencyOperation::Install,
+        scope: DependencyScope::Local,
+        workspace: None,
+        requested: Vec::new(),
+        resolved: after
+            .as_ref()
+            .map(|lock| direct_packages(lock, &[]))
+            .unwrap_or_default(),
+        summary: dependency_summary(
+            before.as_ref(),
+            after.as_ref(),
+            download_baseline.downloaded_bytes(),
+        ),
+    };
+    emit("install", &output, || Ok(()))
 }
 
 async fn install_cwd_inner(scripts: ScriptPolicy) -> Result<()> {
@@ -170,29 +250,140 @@ async fn install_cwd_inner(scripts: ScriptPolicy) -> Result<()> {
     Ok(())
 }
 
-fn emit_install_result(
-    command: &str,
-    operation: &str,
-    packages: &[String],
-    scope: InstallScope,
-    downloaded_bytes: u64,
-) -> Result<()> {
-    let output = InstallOutput {
-        operation,
-        packages,
-        global: scope.is_global(),
-        downloaded_bytes,
-    };
-    emit(command, &output, || Ok(()))
+fn dependency_scope(scope: InstallScope) -> DependencyScope {
+    if scope.is_global() {
+        DependencyScope::Global
+    } else {
+        DependencyScope::Local
+    }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InstallOutput<'a> {
-    operation: &'a str,
-    packages: &'a [String],
-    global: bool,
+pub(super) async fn load_lock_snapshot(root_path: Option<&Path>) -> Option<PackageLock> {
+    let root_path = root_path?;
+    load_package_lock_json_from_path(root_path).await.ok()
+}
+
+fn package_snapshot(lock: &PackageLock) -> BTreeMap<&str, (&str, &str)> {
+    lock.packages
+        .iter()
+        .filter(|(path, _)| !path.is_empty())
+        .map(|(path, package)| {
+            (
+                path.as_str(),
+                (
+                    package.name.as_deref().unwrap_or("unknown"),
+                    package.version.as_deref().unwrap_or("unknown"),
+                ),
+            )
+        })
+        .collect()
+}
+
+pub(super) fn dependency_summary(
+    before: Option<&PackageLock>,
+    after: Option<&PackageLock>,
     downloaded_bytes: u64,
+) -> DependencySummary {
+    let before = before.map(package_snapshot).unwrap_or_default();
+    let after = after.map(package_snapshot).unwrap_or_default();
+    let added = after
+        .keys()
+        .filter(|path| !before.contains_key(**path))
+        .count() as u64;
+    let removed = before
+        .keys()
+        .filter(|path| !after.contains_key(**path))
+        .count() as u64;
+    let changed = after
+        .iter()
+        .filter(|(path, package)| before.get(**path).is_some_and(|old| old != *package))
+        .count() as u64;
+    let reused = after
+        .len()
+        .saturating_sub(added as usize + changed as usize) as u64;
+    DependencySummary {
+        added,
+        removed,
+        changed,
+        reused,
+        downloaded_bytes,
+    }
+}
+
+pub(super) fn direct_packages(lock: &PackageLock, requested: &[String]) -> Vec<PackageVersion> {
+    let requested_names: HashSet<String> = requested
+        .iter()
+        .filter_map(|spec| match PackageSpec::from(spec.as_str()) {
+            PackageSpec::Registry { name, .. } => Some(name),
+            _ => None,
+        })
+        .collect();
+    let direct_names: HashSet<&str> = lock
+        .packages
+        .get("")
+        .into_iter()
+        .flat_map(|root| {
+            [
+                root.dependencies.as_ref(),
+                root.dev_dependencies.as_ref(),
+                root.peer_dependencies.as_ref(),
+                root.optional_dependencies.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            .flat_map(|dependencies| dependencies.keys().map(String::as_str))
+        })
+        .collect();
+    let mut packages = lock
+        .packages
+        .iter()
+        .filter_map(|(path, package)| {
+            let name = package
+                .name
+                .as_deref()
+                .or_else(|| utoo_ruborist::lock::LockPackage::path_to_pkg_name(path))?;
+            let is_direct = direct_names.contains(name)
+                || (!requested_names.is_empty() && requested_names.contains(name));
+            if !is_direct || (!requested_names.is_empty() && !requested_names.contains(name)) {
+                return None;
+            }
+            Some(PackageVersion {
+                name: name.to_string(),
+                version: package
+                    .version
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
+            })
+        })
+        .collect::<Vec<_>>();
+    packages.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    packages.dedup_by(|a, b| a.name == b.name);
+    packages
+}
+
+async fn global_packages(requested: &[String], prefix: Option<&str>) -> Vec<PackageVersion> {
+    let prefix = resolve_global_prefix(prefix).await;
+    let Ok(root) = crate::helper::global_bin::get_global_package_dir(prefix.as_deref()) else {
+        return Vec::new();
+    };
+    let mut packages = Vec::new();
+    for spec in requested {
+        let PackageSpec::Registry { name, .. } = PackageSpec::from(spec.as_str()) else {
+            continue;
+        };
+        if let Ok(package) = crate::util::json::load_package_json::<
+            utoo_ruborist::manifest::PackageJson,
+        >(&root.join(&name))
+        .await
+        {
+            packages.push(PackageVersion {
+                name: package.name,
+                version: package.version,
+            });
+        }
+    }
+    packages.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    packages
 }
 
 /// Run the `--from <pm>` migration pre-step.

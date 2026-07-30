@@ -50,6 +50,7 @@ reqwest            = { version = "0.12", default-features = false, features = [
   "socks",
 ] }
 ring               = "0.17"
+schemars           = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
 serde_yaml         = { workspace = true }

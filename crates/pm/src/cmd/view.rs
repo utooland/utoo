@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context as _, Result, anyhow};
-use serde::Serialize;
-use utoo_ruborist::manifest::{Dist, VersionManifest};
+use utoo_ruborist::manifest::VersionManifest;
 use utoo_ruborist::service::{MetadataFormat, fetch_full_manifest_fresh};
 use utoo_ruborist::util::parse_package_spec;
 
+use crate::error::{CliError, classify};
+use crate::model::cli_output::ErrorDetails;
+use crate::model::cli_output::{ViewDist, ViewResult};
 use crate::service::auth;
 use crate::util::format_print::print_package_info;
+use crate::util::invocation;
 use crate::util::presenter::emit;
 use crate::util::user_config::get_registry;
 
@@ -29,14 +32,37 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
     // token_for_url applies the leak guard: a token only when registry_url is
     // the configured registry host.
     let token = auth::token_for_url(registry_url).await;
-    let (full_manifest, _etag) = fetch_full_manifest_fresh(
+    let registry_started = std::time::Instant::now();
+    let fetched = fetch_full_manifest_fresh(
         registry_url,
         name,
         MetadataFormat::Complete,
         token.as_deref(),
     )
     .await
-    .with_context(|| format!("Failed to fetch package info for {package_spec}"))?;
+    .with_context(|| format!("Failed to fetch package info for {package_spec}"));
+    let (full_manifest, _etag) = match fetched {
+        Ok(result) => result,
+        Err(error) => {
+            if !invocation::json() {
+                return Err(error);
+            }
+            let status = error.chain().find_map(|source| {
+                source
+                    .downcast_ref::<reqwest::Error>()
+                    .and_then(reqwest::Error::status)
+                    .map(|status| status.as_u16())
+            });
+            return Err(CliError::new(classify(&error), format!("{error:#}"))
+                .with_code("registry_request_failed")
+                .with_details(ErrorDetails::Registry {
+                    registry: registry_url.to_string(),
+                    status,
+                    duration_ms: registry_started.elapsed().as_millis() as u64,
+                })
+                .into());
+        }
+    };
 
     tracing::debug!("Fetched package info: {full_manifest:?}");
 
@@ -49,51 +75,47 @@ async fn view_with_registry(package_spec: &str, registry_url: &str) -> Result<()
         .get_full_version(&resolved_version)
         .ok_or_else(|| anyhow!("Version {} not found for {}", resolved_version, name))?;
 
-    let output = ViewOutput {
-        name: &version_manifest.core.name,
-        version: &version_manifest.core.version,
+    if !invocation::json() {
+        return print_package_info(&full_manifest, &version_manifest);
+    }
+    let output = ViewResult {
+        requested: package_spec.to_string(),
+        name: version_manifest.core.name.clone(),
+        version: version_manifest.core.version.clone(),
         description: version_manifest
             .description
-            .as_deref()
-            .or(full_manifest.description.as_deref()),
+            .clone()
+            .or_else(|| full_manifest.description.clone()),
         license: version_manifest
             .core
             .license
-            .as_deref()
-            .or(full_manifest.license.as_deref()),
+            .clone()
+            .or_else(|| full_manifest.license.clone()),
         homepage: version_manifest
             .homepage
-            .as_deref()
-            .or(full_manifest.homepage.as_deref()),
-        dependencies: version_manifest.core.dependencies.as_ref().map(sorted_map),
+            .clone()
+            .or_else(|| full_manifest.homepage.clone()),
+        dependencies: version_manifest
+            .core
+            .dependencies
+            .as_ref()
+            .map(sorted_map)
+            .unwrap_or_default(),
         dist_tags: sorted_map(&full_manifest.dist_tags),
-        dist: &version_manifest.core.dist,
+        dist: ViewDist {
+            tarball: version_manifest.core.dist.tarball.clone(),
+            shasum: version_manifest.core.dist.shasum.clone(),
+            integrity: version_manifest.core.dist.integrity.clone(),
+            file_count: version_manifest.core.dist.file_count.map(u64::from),
+            unpacked_size: version_manifest.core.dist.unpacked_size,
+        },
     };
-    emit("view", &output, || {
-        print_package_info(&full_manifest, &version_manifest)
-    })
+    emit("view", &output, || Ok(()))
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ViewOutput<'a> {
-    name: &'a str,
-    version: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    license: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    homepage: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dependencies: Option<BTreeMap<&'a str, &'a str>>,
-    dist_tags: BTreeMap<&'a str, &'a str>,
-    dist: &'a Dist,
-}
-
-fn sorted_map(map: &HashMap<String, String>) -> BTreeMap<&str, &str> {
+fn sorted_map(map: &HashMap<String, String>) -> BTreeMap<String, String> {
     map.iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
 }
 

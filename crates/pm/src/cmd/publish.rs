@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -9,9 +8,12 @@ use utoo_ruborist::spec::Protocol;
 
 use crate::helper::workspace::{init_project_root, update_cwd_to_project};
 use crate::model::RunMode;
+use crate::model::cli_output::{
+    PackFile, PartialResult, PublishPartialResult, PublishResult, PublishedPackage,
+};
 use crate::model::package::{PackageInfo, PublishMeta};
 use crate::service::publish::{self as publish_service, PublishOptions, PublishOutcome, WebAuth};
-use crate::service::script::ScriptOutput;
+use crate::service::script::{ScriptOutput, script_failure_details};
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
 use crate::util::invocation;
@@ -63,18 +65,22 @@ pub async fn publish(
                 }
                 packages.push(outcome.package);
                 if let Some(error) = outcome.lifecycle_error {
-                    return Err(partial_publish_error(error, mode, packages));
+                    return if invocation::json() {
+                        Err(partial_publish_error(error, packages))
+                    } else {
+                        Err(error)
+                    };
                 }
             }
-            Err(error) if !packages.is_empty() => {
-                return Err(partial_publish_error(error, mode, packages));
+            Err(error) if invocation::json() && !packages.is_empty() => {
+                return Err(partial_publish_error(error, packages));
             }
             Err(error) => return Err(error),
         }
     }
-    let output = PublishOutput {
+    let output = PublishResult {
         dry_run: mode == RunMode::DryRun,
-        packages,
+        packages: packages.into_iter().map(|package| package.output).collect(),
     };
     emit("publish", &output, || Ok(()))
 }
@@ -156,17 +162,29 @@ async fn publish_one(
         } => (result, Some(lifecycle_error)),
     };
 
+    let mut files = result
+        .pack
+        .files
+        .iter()
+        .map(|(path, size)| PackFile {
+            path: path.replace('\\', "/"),
+            size: *size,
+        })
+        .collect::<Vec<_>>();
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(PublishOneOutcome {
-        package: PublishedPackage {
-            name: result.pack.name,
-            version: result.pack.version,
-            registry: result.registry,
-            tag: result.tag,
-            access: access_name,
-            provenance: provenance.is_enabled(),
-            files: result.pack.files.len(),
-            packed_size: result.pack.packed_size,
-            integrity: result.pack.integrity,
+        package: PublishedPackageRecord {
+            output: crate::model::cli_output::PublishedPackage {
+                name: result.pack.name,
+                version: result.pack.version,
+                registry: result.registry,
+                tag: result.tag,
+                access: access_name.to_string(),
+                provenance: provenance.is_enabled(),
+                files,
+                packed_size: result.pack.packed_size,
+                integrity: result.pack.integrity,
+            },
             resolved_dependencies: resolved_protocol_deps(&pkg, &result.pack.manifest),
         },
         lifecycle_error,
@@ -175,19 +193,35 @@ async fn publish_one(
 
 fn partial_publish_error(
     error: anyhow::Error,
-    mode: RunMode,
-    completed_packages: Vec<PublishedPackage>,
+    completed_packages: Vec<PublishedPackageRecord>,
 ) -> anyhow::Error {
-    let category = classify(&error);
-    CliError::new(category, format!("{error:#}"))
-        .with_details(serde_json::json!({
-            "dryRun": mode == RunMode::DryRun,
-            "completedPackages": completed_packages,
-        }))
-        .into()
+    let details = script_failure_details(&error);
+    let completed_packages = completed_packages
+        .into_iter()
+        .map(|package| package.output)
+        .collect();
+    let mut cli_error = if let Some(source) = error.downcast_ref::<CliError>() {
+        let mut copied = CliError::new(source.kind(), source.message()).with_code(source.code());
+        if let Some(suggestion) = source.suggestion() {
+            copied = copied.with_suggestion(suggestion);
+        }
+        if let Some(details) = source.details() {
+            copied = copied.with_details(details.clone());
+        }
+        copied
+    } else {
+        CliError::new(classify(&error), format!("{error:#}"))
+    }
+    .with_partial_result(PartialResult::Publish(PublishPartialResult {
+        packages: completed_packages,
+    }));
+    if let Some(details) = details {
+        cli_error = cli_error.with_code("script_failed").with_details(details);
+    }
+    cli_error.into()
 }
 
-fn print_publish_result(package: &PublishedPackage, mode: RunMode) -> io::Result<()> {
+fn print_publish_result(package: &PublishedPackageRecord, mode: RunMode) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     match mode {
         RunMode::DryRun => {
@@ -197,7 +231,10 @@ fn print_publish_result(package: &PublishedPackage, mode: RunMode) -> io::Result
                 "{}",
                 format!(
                     "(dry run) Would publish {}@{} to {} with tag '{}'",
-                    package.name, package.version, package.registry, package.tag
+                    package.output.name,
+                    package.output.version,
+                    package.output.registry,
+                    package.output.tag
                 )
                 .yellow()
             )
@@ -205,7 +242,7 @@ fn print_publish_result(package: &PublishedPackage, mode: RunMode) -> io::Result
         RunMode::Live => writeln!(
             stdout,
             "{}",
-            format!("+ {}@{}", package.name, package.version).green()
+            format!("+ {}@{}", package.output.name, package.output.version).green()
         ),
     }?;
     stdout.flush()
@@ -292,31 +329,13 @@ fn resolved_protocol_deps(
     rewritten
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PublishOutput {
-    dry_run: bool,
-    packages: Vec<PublishedPackage>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PublishedPackage {
-    name: String,
-    version: String,
-    registry: String,
-    tag: String,
-    access: &'static str,
-    provenance: bool,
-    files: usize,
-    packed_size: u64,
-    integrity: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+struct PublishedPackageRecord {
+    output: PublishedPackage,
     resolved_dependencies: Vec<ResolvedDependency>,
 }
 
 struct PublishOneOutcome {
-    package: PublishedPackage,
+    package: PublishedPackageRecord,
     lifecycle_error: Option<anyhow::Error>,
 }
 
@@ -330,8 +349,6 @@ struct PublishCommandOptions<'a> {
     web_auth: WebAuth,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct ResolvedDependency {
     dependency_type: String,
     name: String,

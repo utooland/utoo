@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use serde::Serialize;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 use crate::model::RunMode;
+use crate::model::cli_output::{PackFile, PackResult as CliPackResult};
 use crate::service::pm_pack as pack_service;
 use crate::service::script::ScriptOutput;
 use crate::util::format_print::print_pack_details;
@@ -38,21 +38,7 @@ pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
         }
     };
 
-    let output = PackOutput {
-        name: &result.name,
-        version: &result.version,
-        files: result
-            .files
-            .iter()
-            .map(|(path, size)| PackFile { path, size: *size })
-            .collect(),
-        unpacked_size: result.unpacked_size,
-        packed_size: result.packed_size,
-        integrity: &result.integrity,
-        dry_run: mode == RunMode::DryRun,
-        tarball: tarball_path.as_ref().map(|path| path.display().to_string()),
-    };
-    emit("pack", &output, || {
+    if !invocation::json() {
         let mut stdout = io::stdout().lock();
         print_pack_details(&mut stdout, &result, None)?;
         match &tarball_path {
@@ -63,26 +49,38 @@ pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
             )?,
             Some(path) => writeln!(stdout, "{} {}", "Tarball:".dimmed(), path.display())?,
         }
-        Ok(())
-    })
-}
+        return Ok(());
+    }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PackOutput<'a> {
-    name: &'a str,
-    version: &'a str,
-    files: Vec<PackFile<'a>>,
-    unpacked_size: u64,
-    packed_size: u64,
-    integrity: &'a str,
-    dry_run: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tarball: Option<String>,
-}
-
-#[derive(Serialize)]
-struct PackFile<'a> {
-    path: &'a str,
-    size: u64,
+    let mut files = result
+        .files
+        .iter()
+        .map(|(path, size)| PackFile {
+            path: path.replace('\\', "/"),
+            size: *size,
+        })
+        .collect::<Vec<_>>();
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    let tarball_path = tarball_path
+        .map(|path| -> Result<String> {
+            let path = if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir()?.join(path)
+            };
+            Ok(path.to_string_lossy().into_owned())
+        })
+        .transpose()?;
+    let output = CliPackResult {
+        name: result.name.clone(),
+        version: result.version.clone(),
+        filename: result.tarball_filename(),
+        files,
+        unpacked_size: result.unpacked_size,
+        packed_size: result.packed_size,
+        integrity: result.integrity.clone(),
+        dry_run: mode == RunMode::DryRun,
+        tarball_path,
+    };
+    emit("pack", &output, || Ok(()))
 }

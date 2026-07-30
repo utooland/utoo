@@ -303,18 +303,33 @@ pub enum Commands {
 }
 
 impl Commands {
-    pub fn supports_json(&self) -> bool {
-        self.json_name().is_some()
+    pub const fn json_name(&self) -> &'static str {
+        match self {
+            Self::Install(_) => "install",
+            Self::Uninstall { .. } => "uninstall",
+            Self::Rebuild => "rebuild",
+            Self::Clean { .. } => "clean",
+            Self::Deps { .. } => "deps",
+            Self::Update(_) => "update",
+            Self::List { .. } => "list",
+            Self::Run { .. } => "run",
+            Self::Execute { .. } => "execute",
+            Self::View { .. } => "view",
+            Self::Link { .. } => "link",
+            Self::Pack { .. } => "pack",
+            Self::Publish { .. } => "publish",
+            Self::Ping { .. } => "ping",
+            Self::Login => "login",
+            Self::Whoami => "whoami",
+            Self::Logout => "logout",
+            Self::Config { .. } => "config",
+            Self::Init { .. } => "init",
+            Self::Completions { .. } => "completions",
+        }
     }
 
-    pub const fn json_name(&self) -> Option<&'static str> {
+    pub const fn json_subcommand(&self) -> Option<&'static str> {
         match self {
-            Self::Install(_) => Some("install"),
-            Self::List { .. } => Some("list"),
-            Self::View { .. } => Some("view"),
-            Self::Pack { .. } => Some("pack"),
-            Self::Publish { .. } => Some("publish"),
-            Self::Whoami => Some("whoami"),
             Self::Config { command } => Some(command.json_name()),
             _ => None,
         }
@@ -324,9 +339,9 @@ impl Commands {
 impl ConfigCommands {
     const fn json_name(&self) -> &'static str {
         match self {
-            Self::Set { .. } => "config set",
-            Self::Get { .. } => "config get",
-            Self::List { .. } => "config list",
+            Self::Set { .. } => "set",
+            Self::Get { .. } => "get",
+            Self::List { .. } => "list",
         }
     }
 }

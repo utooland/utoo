@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Result, anyhow};
-use serde::Serialize;
+use serde_json::Value;
 
 use crate::cli::ConfigCommands;
 use crate::error::CliError;
+use crate::model::cli_output::{ConfigGetResult, ConfigListResult, ConfigSetResult};
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
 use crate::util::presenter::emit;
@@ -40,12 +41,11 @@ pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -
     } else {
         "local"
     };
-    let output = ConfigSetOutput {
-        key: &key,
-        value: &value,
-        scope: label,
+    let output = ConfigSetResult {
+        values: BTreeMap::from([(key.clone(), Value::String(value.clone()))]),
+        scope: label.to_string(),
     };
-    emit("config set", &output, || {
+    emit("config", &output, || {
         println!("Successfully set {key} ({label})");
         Ok(())
     })
@@ -64,13 +64,28 @@ pub async fn handle_config_get(
     if let Some(value) = overrides.get(&key) {
         emit_config_get(&key, value, "override")?;
     } else {
-        let config = Config::load(scope).await?;
-        match config.get(&key)? {
-            Some(value) => emit_config_get(&key, &value, scope_label(scope))?,
-            None => {
-                return Err(CliError::not_found(format!("Key '{key}' not found")).into());
+        let resolved = match scope {
+            ConfigScope::Global => Config::load(ConfigScope::Global)
+                .await?
+                .get(&key)?
+                .map(|value| (value, "global")),
+            ConfigScope::Local => {
+                let (global, local) = Config::load_levels().await?;
+                match local
+                    .as_ref()
+                    .map(|config| config.get(&key))
+                    .transpose()?
+                    .flatten()
+                {
+                    Some(value) => Some((value, "local")),
+                    None => global.get(&key)?.map(|value| (value, "global")),
+                }
             }
-        }
+        };
+        match resolved {
+            Some((value, source)) => emit_config_get(&key, &value, source)?,
+            None => return Err(CliError::not_found(format!("Key '{key}' not found")).into()),
+        };
     }
     Ok(())
 }
@@ -82,21 +97,21 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
         ConfigScope::Local => config.get_local_config_path()?,
     };
 
-    let values: BTreeMap<&str, &str> = config
+    let mut values: BTreeMap<String, Value> = config
         .list()?
-        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
         .collect();
-    let arrays: BTreeMap<&str, &[String]> = config
-        .list_arrays()
-        .map(|(key, values)| (key.as_str(), values.as_slice()))
-        .collect();
-    let output = ConfigListOutput {
+    values.extend(
+        config
+            .list_arrays()
+            .map(|(key, values)| (key.clone(), serde_json::json!(values))),
+    );
+    let output = ConfigListResult {
         path: config_path.display().to_string(),
-        scope: scope_label(scope),
+        scope: scope_label(scope).to_string(),
         values,
-        arrays,
     };
-    emit("config list", &output, || {
+    emit("config", &output, || {
         println!("Configuration file: {}", config_path.display());
         println!();
         for (key, value) in config.list()? {
@@ -110,8 +125,11 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
 }
 
 fn emit_config_get(key: &str, value: &str, source: &str) -> Result<()> {
-    let output = ConfigGetOutput { key, value, source };
-    emit("config get", &output, || {
+    let output = ConfigGetResult {
+        values: BTreeMap::from([(key.to_string(), Value::String(value.to_string()))]),
+        source: source.to_string(),
+    };
+    emit("config", &output, || {
         println!("{value}");
         Ok(())
     })
@@ -122,26 +140,4 @@ fn scope_label(scope: ConfigScope) -> &'static str {
         ConfigScope::Global => "global",
         ConfigScope::Local => "local",
     }
-}
-
-#[derive(Serialize)]
-struct ConfigSetOutput<'a> {
-    key: &'a str,
-    value: &'a str,
-    scope: &'a str,
-}
-
-#[derive(Serialize)]
-struct ConfigGetOutput<'a> {
-    key: &'a str,
-    value: &'a str,
-    source: &'a str,
-}
-
-#[derive(Serialize)]
-struct ConfigListOutput<'a> {
-    path: String,
-    scope: &'a str,
-    values: BTreeMap<&'a str, &'a str>,
-    arrays: BTreeMap<&'a str, &'a [String]>,
 }

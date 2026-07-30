@@ -29,6 +29,7 @@ use reqwest::RequestBuilder;
 
 use crate::error::{CliError, ErrorKind};
 use crate::model::RunMode;
+use crate::model::cli_output::ErrorDetails;
 use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
 use crate::model::publish_payload::{PublishPayload, PublishPayloadInput};
@@ -144,15 +145,37 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
     let escaped_name = auth::escaped_package_name(&pack_result.name);
     let url = format!("{}/{}", opts.registry.trim_end_matches('/'), escaped_name);
 
+    let registry_started = std::time::Instant::now();
     let response =
-        send_with_web_auth_retry(&url, &token, &payload, opts.otp, opts.web_auth).await?;
+        match send_with_web_auth_retry(&url, &token, &payload, opts.otp, opts.web_auth).await {
+            Ok(response) => response,
+            Err(error) if error.downcast_ref::<CliError>().is_some() => return Err(error),
+            Err(error) => {
+                return Err(
+                    CliError::new(crate::error::classify(&error), format!("{error:#}"))
+                        .with_code("registry_request_failed")
+                        .with_details(ErrorDetails::Registry {
+                            registry: opts.registry.to_string(),
+                            status: None,
+                            duration_ms: registry_started.elapsed().as_millis() as u64,
+                        })
+                        .into(),
+                );
+            }
+        };
 
     let status = response.status().as_u16();
     if !matches!(status, 200 | 201) {
         let body = response.text().await.unwrap_or_default();
-        return Err(
-            publish_status_error(status, &body, &pack_result.name, &pack_result.version).into(),
-        );
+        return Err(publish_status_error(
+            status,
+            &body,
+            &pack_result.name,
+            &pack_result.version,
+            opts.registry,
+            registry_started.elapsed(),
+        )
+        .into());
     }
 
     let result = PublishResult {
@@ -187,7 +210,14 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
     }
 }
 
-fn publish_status_error(status: u16, body: &str, name: &str, version: &str) -> CliError {
+fn publish_status_error(
+    status: u16,
+    body: &str,
+    name: &str,
+    version: &str,
+    registry: &str,
+    duration: std::time::Duration,
+) -> CliError {
     let message = match status {
         401 => {
             format!("Authentication failed. Check your credentials or run `utoo login`.\n{body}")
@@ -197,6 +227,12 @@ fn publish_status_error(status: u16, body: &str, name: &str, version: &str) -> C
         _ => format!("Publish failed (HTTP {status}): {body}"),
     };
     CliError::new(ErrorKind::from_http_status(status), message)
+        .with_code("registry_publish_failed")
+        .with_details(ErrorDetails::Registry {
+            registry: registry.to_string(),
+            status: Some(status),
+            duration_ms: duration.as_millis() as u64,
+        })
 }
 
 /// Send a publish PUT request, handling web-based OTP approval if needed.
@@ -297,7 +333,14 @@ mod tests {
 
     #[test]
     fn forbidden_publish_is_an_auth_error() {
-        let error = anyhow::Error::from(publish_status_error(403, "forbidden", "fixture", "1.0.0"));
+        let error = anyhow::Error::from(publish_status_error(
+            403,
+            "forbidden",
+            "fixture",
+            "1.0.0",
+            "https://registry.example.test",
+            std::time::Duration::from_millis(1),
+        ));
         assert_eq!(classify(&error), ErrorKind::Auth);
         assert_eq!(classify(&error).exit_code(), 3);
     }

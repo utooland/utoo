@@ -1,11 +1,11 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use petgraph::graph::NodeIndex;
-use serde::Serialize;
 
-use crate::service::dependency_graph::{DepTreeNode, LockGraphService, build_dep_tree};
+use crate::model::cli_output::{ListPathNode, ListResult};
+use crate::service::dependency_graph::{LockGraphService, build_dep_tree};
 use crate::util::format_print::print_dep_tree;
+use crate::util::invocation;
 use crate::util::presenter::emit;
 
 /// List dependency information, similar to npm list
@@ -32,49 +32,35 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
 fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Result<()> {
     let node_paths = graph.find_paths_to_root(package_name)?;
     let tree = build_dep_tree(&node_paths);
-    let output = ListOutput {
-        package: package_name,
-        dependencies: tree
-            .children
-            .values()
-            .filter_map(|node| dependency_node(node, graph))
-            .collect(),
-    };
-    emit("list", &output, || {
+    if !invocation::json() {
         print_dep_tree(&tree, graph, "", true, &[package_name]);
-        Ok(())
-    })
-}
-
-fn dependency_node(node: &DepTreeNode, graph: &LockGraphService) -> Option<DependencyNode> {
-    if node.index == NodeIndex::end() {
-        return None;
+        return Ok(());
     }
-    let package = graph.get_graph().node_weight(node.index)?;
-    Some(DependencyNode {
-        name: package.name().to_string(),
-        version: package.version().to_string(),
-        path: package.path.clone(),
-        dependencies: node
-            .children
-            .values()
-            .filter_map(|child| dependency_node(child, graph))
-            .collect(),
-    })
-}
-
-#[derive(Serialize)]
-struct ListOutput<'a> {
-    package: &'a str,
-    dependencies: Vec<DependencyNode>,
-}
-
-#[derive(Serialize)]
-struct DependencyNode {
-    name: String,
-    version: String,
-    path: String,
-    dependencies: Vec<DependencyNode>,
+    let mut paths = node_paths
+        .iter()
+        .map(|path| {
+            path.iter()
+                .rev()
+                .filter_map(|index| graph.get_graph().node_weight(*index))
+                .map(|package| ListPathNode {
+                    name: package.name(),
+                    version: package.version(),
+                    path: package.path.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    paths.sort_unstable_by(|a, b| {
+        let a = a.iter().map(|node| node.path.as_str()).collect::<Vec<_>>();
+        let b = b.iter().map(|node| node.path.as_str()).collect::<Vec<_>>();
+        a.cmp(&b)
+    });
+    let output = ListResult {
+        package: package_name.to_string(),
+        truncated: paths.len() >= 1024,
+        paths,
+    };
+    emit("list", &output, || Ok(()))
 }
 
 #[cfg(test)]

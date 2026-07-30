@@ -32,7 +32,10 @@ impl PackageManagementService {
     /// (`@scope/pkg` → `@scope/pkg/<version>`) so no name escaping is needed.
     /// The directory is purely an internal addressing key — nothing parses it
     /// back (see `execute.rs`, which only searches under the returned path).
-    pub async fn install_package_to_cache(package_name: &str) -> Result<PathBuf> {
+    pub async fn install_package_to_cache(
+        package_name: &str,
+        output: ScriptOutput,
+    ) -> Result<PathBuf> {
         let (name, version, _) = resolve_package_spec(package_name).await?;
 
         let cache_dir = Self::get_utoo_cache_dir()?;
@@ -52,7 +55,7 @@ impl PackageManagementService {
         InstallService::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
-            ScriptOutput::Verbose,
+            output,
         )
         .await?;
         tracing::debug!("Package {name} installed successfully");

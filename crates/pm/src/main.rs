@@ -14,8 +14,12 @@ use crate::cmd::view::view;
 use crate::constants::{APP_NAME, APP_VERSION};
 use crate::error::{CliError, ErrorKind, classify};
 use crate::helper::auto_update::init_auto_update;
+use crate::model::cli_output::{
+    CompletionsResult, ErrorDetails, HelpResult, HelpTarget, InitResult, RequestedPackage,
+    RequiredBy, VersionResult,
+};
 use crate::service::config::ConfigService;
-use crate::service::script::{MissingScript, ScriptExit};
+use crate::service::script::{MissingScript, ScriptExit, script_failure_details};
 use crate::service::workspace::WorkspaceFilter;
 use crate::util::cli_enum::{
     ColorPolicy, ConfigScope, ConfirmationPolicy, ConsoleVerbosity, InitMode, OutputFormat,
@@ -42,6 +46,7 @@ mod service;
 mod util;
 
 fn main() {
+    invocation::start();
     crate::util::sysconf::init();
 
     let worker_threads = std::thread::available_parallelism()
@@ -69,15 +74,41 @@ fn main() {
         };
         if invocation::json() {
             let cli_error = e.downcast_ref::<CliError>();
-            let message = cli_error.map_or_else(|| format!("{e:#}"), |e| e.message().to_string());
+            let message = cli_error.map_or_else(|| e.to_string(), |e| e.message().to_string());
+            let causes = e
+                .chain()
+                .skip(1)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let script_details = script_failure_details(&e);
+            let dependency_details = dependency_failure_details(&e);
+            let code = cli_error.map_or_else(
+                || {
+                    if script_details.is_some() {
+                        "script_failed"
+                    } else if dependency_details.is_some() {
+                        "dependency_resolution_failed"
+                    } else {
+                        "operation_failed"
+                    }
+                },
+                CliError::code,
+            );
             let report = presenter::ErrorReport {
                 command: invocation::command(),
+                subcommand: invocation::subcommand(),
                 category,
-                code: exit_code,
+                code,
+                exit_code: category.exit_code(),
                 message: &message,
+                causes: &causes,
                 suggestion: cli_error.and_then(CliError::suggestion),
-                required_by: resolve_chain(&e),
-                details: cli_error.and_then(CliError::details),
+                partial_result: cli_error.and_then(CliError::partial_result),
+                details: cli_error
+                    .and_then(CliError::details)
+                    .or(script_details.as_ref())
+                    .or(dependency_details.as_ref()),
+                log_path: get_log_file_path().map(|path| path.to_string_lossy().into_owned()),
             };
             let result = presenter::write_error(&mut io::stderr().lock(), &report);
             if result.is_err() {
@@ -131,25 +162,44 @@ async fn async_main() -> Result<()> {
                         } else {
                             "help"
                         };
-                        let output = if command == "version" {
-                            serde_json::json!({ "version": APP_VERSION })
+                        if command == "version" {
+                            presenter::write(
+                                &mut io::stdout().lock(),
+                                command,
+                                None,
+                                &VersionResult {
+                                    version: APP_VERSION.to_string(),
+                                },
+                            )?;
                         } else {
-                            serde_json::json!({ "help": error.to_string().trim_end() })
-                        };
-                        presenter::write(&mut io::stdout().lock(), command, &output)?;
+                            presenter::write(
+                                &mut io::stdout().lock(),
+                                command,
+                                None,
+                                &HelpResult {
+                                    target: detect_help_target(&args),
+                                    text: error.to_string().trim_end().to_string(),
+                                },
+                            )?;
+                        }
                         return Ok(());
                     }
                     _ => {
+                        let causes = Vec::new();
                         presenter::write_error(
                             &mut io::stderr().lock(),
                             &presenter::ErrorReport {
-                                command: None,
+                                command: detect_command(&args),
+                                subcommand: detect_subcommand(&args),
                                 category: ErrorKind::Usage,
-                                code: 2,
+                                code: "invalid_arguments",
+                                exit_code: ErrorKind::Usage.exit_code(),
                                 message: error.to_string().trim(),
+                                causes: &causes,
                                 suggestion: None,
-                                required_by: None,
+                                partial_result: None,
                                 details: None,
+                                log_path: None,
                             },
                         )?;
                         process::exit(2);
@@ -172,34 +222,29 @@ async fn async_main() -> Result<()> {
     } else {
         cli.command
             .as_ref()
-            .and_then(Commands::json_name)
+            .map(Commands::json_name)
+            .or_else(|| cli.script_name.as_ref().map(|_| "run"))
             .or_else(|| (cli.command.is_none() && cli.script_name.is_none()).then_some("install"))
     };
+    let subcommand = cli.command.as_ref().and_then(Commands::json_subcommand);
     invocation::init(Invocation {
         output: OutputFormat::from(cli.json),
         verbosity,
         color,
         command,
+        subcommand,
     });
 
     // Handle version before the unsupported-command gate: `--json --version`
     // is itself a machine-readable command result.
     if cli.version || execute_version {
-        let output = serde_json::json!({ "version": APP_VERSION });
+        let output = VersionResult {
+            version: APP_VERSION.to_string(),
+        };
         return presenter::emit("version", &output, || {
             println!("{APP_VERSION}");
             Ok(())
         });
-    }
-
-    if cli.json {
-        let unsupported_command = cli
-            .command
-            .as_ref()
-            .is_some_and(|command| !command.supports_json());
-        if cli.script_name.is_some() || unsupported_command {
-            return Err(CliError::usage("--json is not supported by this command yet").into());
-        }
     }
 
     // Handle completions early to avoid unnecessary initialization (tracing, registry, auto-update)
@@ -207,11 +252,36 @@ async fn async_main() -> Result<()> {
         let shell = shell.or_else(detect_shell_from_env);
 
         let Some(shell) = shell else {
+            if invocation::json() {
+                return Err(CliError::usage(
+                    "could not detect shell; specify bash, zsh, fish, powershell, or elvish",
+                )
+                .into());
+            }
             eprintln!(
                 "Could not detect shell. Usage: utoo completions <bash|zsh|fish|powershell|elvish>"
             );
             process::exit(2);
         };
+
+        if invocation::json() {
+            let script = tokio::task::spawn_blocking(move || {
+                let mut output = Vec::new();
+                let mut cmd = Cli::command();
+                clap_complete::generate(shell, &mut cmd, APP_NAME, &mut output);
+                String::from_utf8(output).context("Generated completion script is not UTF-8")
+            })
+            .await
+            .context("Failed to generate shell completions")??;
+            return presenter::emit(
+                "completions",
+                &CompletionsResult {
+                    shell: shell.to_string(),
+                    script,
+                },
+                || Ok(()),
+            );
+        }
 
         tokio::task::spawn_blocking(move || {
             let mut cmd = Cli::command();
@@ -221,6 +291,15 @@ async fn async_main() -> Result<()> {
         .context("Failed to generate shell completions")?;
 
         return Ok(());
+    }
+
+    if cli.json && matches!(&cli.command, Some(Commands::Login)) {
+        return Err(
+            CliError::usage("login requires an interactive browser flow")
+                .with_code("interactive_required")
+                .with_suggestion("run without `--json`")
+                .into(),
+        );
     }
 
     // Initialize tracing (replaces set_verbose)
@@ -334,8 +413,27 @@ async fn async_main() -> Result<()> {
                 .with_suggestion("re-run with `utoo init --yes`")
                 .into());
             }
-            service::init::init(mode, None).await?;
+            let output = if invocation::json() {
+                service::init::InitOutput::Machine
+            } else {
+                service::init::InitOutput::Human
+            };
+            service::init::init(mode, output, None).await?;
             log_time_end("package.json created");
+            if invocation::json() {
+                let path = std::env::current_dir()?.join("package.json");
+                let package: serde_json::Value =
+                    serde_json::from_str(&crate::fs::read_to_string(&path).await?)?;
+                presenter::emit(
+                    "init",
+                    &InitResult {
+                        path: path.to_string_lossy().into_owned(),
+                        name: package["name"].as_str().unwrap_or_default().to_string(),
+                        version: package["version"].as_str().unwrap_or_default().to_string(),
+                    },
+                    || Ok(()),
+                )?;
+            }
         }
         Some(Commands::Pack { path, dry_run }) => {
             cmd::pm_pack::pack(path, dry_run.into()).await?;
@@ -408,4 +506,120 @@ fn has_flag_before_delimiter(args: &[String], flag: &str) -> bool {
     args.iter()
         .take_while(|arg| arg.as_str() != "--")
         .any(|arg| arg == flag)
+}
+
+fn detect_help_target(args: &[String]) -> Option<HelpTarget> {
+    let command = detect_command(args)?;
+    (command != "help" && command != "version").then(|| HelpTarget {
+        command: command.to_string(),
+        subcommand: detect_subcommand(args).map(str::to_string),
+    })
+}
+
+fn detect_command(args: &[String]) -> Option<&'static str> {
+    detect_command_token(args).map(|(command, _)| command)
+}
+
+fn detect_command_token(args: &[String]) -> Option<(&'static str, usize)> {
+    let mut index = 1;
+    while index < args.len() {
+        let value = args[index].as_str();
+        if value == "--" {
+            return None;
+        }
+        if matches!(
+            value,
+            "--registry"
+                | "--cache-dir"
+                | "--manifests-concurrency-limit"
+                | "--script-concurrency-limit"
+                | "--workspace"
+                | "--filter"
+        ) {
+            index += 2;
+            continue;
+        }
+        if value.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        let command = match value {
+            "i" | "add" | "install" => "install",
+            "un" | "uninstall" => "uninstall",
+            "rb" | "rebuild" => "rebuild",
+            "c" | "clean" => "clean",
+            "d" | "deps" => "deps",
+            "u" | "update" => "update",
+            "ls" | "list" => "list",
+            "r" | "run" => "run",
+            "x" | "execute" => "execute",
+            "v" | "view" | "info" | "show" => "view",
+            "ln" | "link" => "link",
+            "pk" | "pm-pack" => "pack",
+            "pub" | "publish" => "publish",
+            "pg" | "ping" => "ping",
+            "lg" | "login" => "login",
+            "who" | "whoami" => "whoami",
+            "lo" | "logout" => "logout",
+            "cfg" | "config" => "config",
+            "create" | "init" => "init",
+            "cmp" | "completions" => "completions",
+            _ => "run",
+        };
+        return Some((command, index));
+    }
+    None
+}
+
+fn detect_subcommand(args: &[String]) -> Option<&'static str> {
+    let (command, index) = detect_command_token(args)?;
+    if command != "config" {
+        return None;
+    }
+    let mut index = index + 1;
+    while index < args.len() {
+        let value = args[index].as_str();
+        if value == "--" {
+            return None;
+        }
+        if matches!(
+            value,
+            "--registry"
+                | "--cache-dir"
+                | "--manifests-concurrency-limit"
+                | "--script-concurrency-limit"
+        ) {
+            index += 2;
+            continue;
+        }
+        if value.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return match value {
+            "set" => Some("set"),
+            "get" => Some("get"),
+            "list" => Some("list"),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn dependency_failure_details(error: &anyhow::Error) -> Option<ErrorDetails> {
+    let chain = resolve_chain(error)?;
+    let (requested, required_by) = chain.split_last()?;
+    Some(ErrorDetails::Dependency {
+        package: RequestedPackage {
+            name: requested.0.clone(),
+            spec: requested.1.clone(),
+        },
+        required_by: required_by
+            .iter()
+            .map(|(name, version)| RequiredBy {
+                name: (!name.is_empty()).then(|| name.clone()),
+                version: (!version.is_empty()).then(|| version.clone()),
+            })
+            .collect(),
+    })
 }

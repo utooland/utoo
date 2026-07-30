@@ -1,10 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 
+use crate::error::{CliError, ErrorKind};
+use crate::model::cli_output::{
+    CapturedOutput, ErrorDetails, ExecutableSource, ExecuteResult, ExecutionStatus,
+    ProcessExecution,
+};
 use crate::service::package_management::PackageManagementService;
+use crate::service::script::ScriptOutput;
+use crate::util::invocation;
+use crate::util::presenter::emit;
 
 /// Execute a package binary
 pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
@@ -13,7 +22,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     // First, try to find the binary in local node_modules/.bin directories
     if let Some(binary_path) = find_binary(command).await? {
         tracing::debug!("Found binary at: {}", binary_path.display());
-        return execute_binary(&binary_path, args).await;
+        return execute_binary(command, &binary_path, args, ExecutableSource::Local).await;
     }
 
     // If not found locally, try to install the package to cache
@@ -25,8 +34,13 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     let package_name = command;
 
     // Install the package to cache
+    let output = if invocation::json() {
+        ScriptOutput::Machine
+    } else {
+        ScriptOutput::Verbose
+    };
     let package_cache_dir =
-        PackageManagementService::install_package_to_cache(package_name).await?;
+        PackageManagementService::install_package_to_cache(package_name, output).await?;
 
     // Try to find the binary in the cached package
     // utoo -x eslint --version
@@ -35,7 +49,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     match find_binary_in_cache(&package_cache_dir).await {
         Ok(Some(binary_path)) => {
             tracing::debug!("Found binary in cache at: {}", binary_path.display());
-            execute_binary(&binary_path, args).await
+            execute_binary(command, &binary_path, args, ExecutableSource::Cache).await
         }
         Ok(None) => {
             tracing::error!("No executable found in bin directory for package '{package_name}'");
@@ -52,39 +66,130 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
 }
 
 /// Execute the binary with given arguments
-async fn execute_binary(binary_path: &Path, args: Vec<String>) -> Result<()> {
+async fn execute_binary(
+    requested: &str,
+    binary_path: &Path,
+    args: Vec<String>,
+    source: ExecutableSource,
+) -> Result<()> {
     // On Windows, prefer .cmd shim if it exists, otherwise use sh to execute Unix shim
-    let mut cmd = {
+    let (mut cmd, command_prefix) = {
         #[cfg(windows)]
         {
             let cmd_path = binary_path.with_extension("cmd");
             if cmd_path.exists() {
-                Command::new(&cmd_path)
+                (
+                    Command::new(&cmd_path),
+                    vec![cmd_path.to_string_lossy().into_owned()],
+                )
             } else {
                 let mut c = Command::new("sh");
                 c.arg(binary_path);
-                c
+                (
+                    c,
+                    vec!["sh".to_string(), binary_path.to_string_lossy().into_owned()],
+                )
             }
         }
         #[cfg(not(windows))]
         {
-            Command::new(binary_path)
+            (
+                Command::new(binary_path),
+                vec![binary_path.to_string_lossy().into_owned()],
+            )
         }
     };
     cmd.args(&args);
 
-    cmd.stdin(Stdio::inherit());
-    cmd.stdout(Stdio::inherit());
-    cmd.stderr(Stdio::inherit());
-
-    let status = cmd.status()?;
-
-    if status.success() {
-        Ok(())
+    if invocation::json() {
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let cwd = std::env::current_dir()?;
+        let command = command_prefix
+            .into_iter()
+            .chain(args)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let started = Instant::now();
+        let output = match cmd.output() {
+            Ok(output) => output,
+            Err(error) => {
+                let execution = ProcessExecution {
+                    command,
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    status: ExecutionStatus::FailedToStart,
+                    exit_code: None,
+                    stdout: CapturedOutput::empty(),
+                    stderr: CapturedOutput::empty(),
+                    duration_ms: started.elapsed().as_millis() as u64,
+                };
+                return Err(CliError::new(
+                    ErrorKind::Local,
+                    format!("failed to start {requested}: {error}"),
+                )
+                .with_code("process_start_failed")
+                .with_details(ErrorDetails::Process { execution })
+                .into());
+            }
+        };
+        let status = if output.status.success() {
+            ExecutionStatus::Succeeded
+        } else {
+            ExecutionStatus::Failed
+        };
+        let execution = ProcessExecution {
+            command,
+            cwd: cwd.to_string_lossy().into_owned(),
+            status,
+            exit_code: Some(status_exit_code(&output.status) as u32),
+            stdout: CapturedOutput::from_bytes(&output.stdout),
+            stderr: CapturedOutput::from_bytes(&output.stderr),
+            duration_ms: started.elapsed().as_millis() as u64,
+        };
+        if !output.status.success() {
+            return Err(CliError::new(
+                ErrorKind::Local,
+                format!(
+                    "command failed with exit code {}",
+                    execution.exit_code.unwrap_or(1)
+                ),
+            )
+            .with_code("process_failed")
+            .with_details(ErrorDetails::Process { execution })
+            .into());
+        }
+        emit(
+            "execute",
+            &ExecuteResult {
+                requested: requested.to_string(),
+                source,
+                executable: binary_path.to_string_lossy().into_owned(),
+                execution,
+            },
+            || Ok(()),
+        )
     } else {
-        let exit_code = status.code().unwrap_or(-1);
-        Err(anyhow!("Command failed with exit code: {exit_code}"))
+        cmd.stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        let status = cmd.status()?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            let exit_code = status.code().unwrap_or(-1);
+            Err(anyhow!("Command failed with exit code: {exit_code}"))
+        }
     }
+}
+
+fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        return 128 + signal;
+    }
+    status.code().unwrap_or(1)
 }
 
 /// Find `command` in `node_modules/.bin`, searching up from the cwd — the

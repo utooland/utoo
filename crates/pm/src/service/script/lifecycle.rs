@@ -10,7 +10,9 @@ use anyhow::{Context, Result};
 use tokio::task::JoinSet;
 
 use super::ScriptService;
+use super::exec::{ScriptFailure, status_exit_code};
 use crate::helper::workspace::find_workspace_path;
+use crate::model::cli_output::{CapturedOutput, ExecutionStatus, LifecycleExecution};
 use crate::model::package::PackageInfo;
 use crate::util::format_print::{
     announce_script, print_hook_done, print_layer_separator, print_multi_workspace_header,
@@ -59,7 +61,119 @@ pub enum LifecycleSink<'a> {
     Machine,
 }
 
+pub struct MachineLifecycleOutcome {
+    pub executions: Vec<LifecycleExecution>,
+    pub skipped: bool,
+    pub failure: Option<String>,
+}
+
 impl ScriptService {
+    pub async fn run_lifecycle_machine(
+        package: &PackageInfo,
+        event: &str,
+        args: &[&str],
+        workspace: Option<&str>,
+        missing: MissingScript,
+    ) -> MachineLifecycleOutcome {
+        let pre_name = format!("pre{event}");
+        let post_name = format!("post{event}");
+        let main_script = package.scripts.get(event).cloned();
+        if missing == MissingScript::Fail && main_script.is_none() {
+            return MachineLifecycleOutcome {
+                executions: Vec::new(),
+                skipped: false,
+                failure: Some(format!("Script '{event}' not found in package.json")),
+            };
+        }
+        let steps: [(&str, Option<String>, &[&str]); 3] = [
+            (
+                pre_name.as_str(),
+                package.scripts.get(&pre_name).cloned(),
+                &[],
+            ),
+            (event, main_script, args),
+            (
+                post_name.as_str(),
+                package.scripts.get(&post_name).cloned(),
+                &[],
+            ),
+        ];
+        let mut executions = Vec::new();
+        for (step_name, script, step_args) in steps {
+            let Some(script) = script else { continue };
+            let command = if step_args.is_empty() {
+                script.clone()
+            } else {
+                format!("{script} {}", step_args.join(" "))
+            };
+            let started = Instant::now();
+            let captured = Self::execute_custom_script_captured(
+                package,
+                step_name,
+                &script,
+                step_args.to_vec(),
+            )
+            .await;
+            let duration_ms = started.elapsed().as_millis() as u64;
+            let execution = match captured {
+                Ok(output) => LifecycleExecution {
+                    package: (!package.name.is_empty()).then(|| package.name.clone()),
+                    workspace: workspace.map(str::to_string),
+                    event: step_name.to_string(),
+                    command,
+                    cwd: package.path.to_string_lossy().into_owned(),
+                    status: if output.status.success() {
+                        ExecutionStatus::Succeeded
+                    } else {
+                        ExecutionStatus::Failed
+                    },
+                    exit_code: Some(status_exit_code(&output.status) as u32),
+                    stdout: CapturedOutput::from_bytes(&output.stdout),
+                    stderr: CapturedOutput::from_bytes(&output.stderr),
+                    duration_ms,
+                },
+                Err(error) => {
+                    let execution = LifecycleExecution {
+                        package: (!package.name.is_empty()).then(|| package.name.clone()),
+                        workspace: workspace.map(str::to_string),
+                        event: step_name.to_string(),
+                        command,
+                        cwd: package.path.to_string_lossy().into_owned(),
+                        status: ExecutionStatus::FailedToStart,
+                        exit_code: None,
+                        stdout: CapturedOutput::empty(),
+                        stderr: CapturedOutput::empty(),
+                        duration_ms,
+                    };
+                    executions.push(execution);
+                    return MachineLifecycleOutcome {
+                        executions,
+                        skipped: false,
+                        failure: Some(format!("Failed to execute {step_name}: {error:#}")),
+                    };
+                }
+            };
+            let failed = !matches!(execution.status, ExecutionStatus::Succeeded);
+            let exit_code = execution.exit_code;
+            executions.push(execution);
+            if failed {
+                return MachineLifecycleOutcome {
+                    executions,
+                    skipped: false,
+                    failure: Some(format!(
+                        "Failed to execute {step_name}: exit code {}",
+                        exit_code.unwrap_or(1)
+                    )),
+                };
+            }
+        }
+        MachineLifecycleOutcome {
+            skipped: executions.is_empty(),
+            executions,
+            failure: None,
+        }
+    }
+
     /// Run the npm event chain `pre<event>` / `<event>` / `post<event>` on a
     /// single package, mirroring npm's lifecycle semantics (e.g. `install`
     /// event = preinstall + install + postinstall, each independent).
@@ -142,18 +256,37 @@ impl ScriptService {
                     }
                 }
                 LifecycleSink::Machine => {
+                    let started = Instant::now();
                     let cap = Self::execute_custom_script_captured(
                         package,
                         step_name,
                         &content,
                         step_args.to_vec(),
                     )
-                    .await?;
+                    .await
+                    .map_err(|error| {
+                        ScriptFailure::failed_to_start(
+                            package,
+                            step_name,
+                            if step_args.is_empty() {
+                                content.clone()
+                            } else {
+                                format!("{content} {}", step_args.join(" "))
+                            },
+                            started.elapsed(),
+                            &error,
+                        )
+                    })?;
                     if !cap.status.success() {
-                        anyhow::bail!(
-                            "Failed to execute {step_name}: exit code {}",
-                            cap.status.code().unwrap_or(-1)
-                        );
+                        return Err(ScriptFailure::lifecycle(
+                            package,
+                            step_name,
+                            &content,
+                            step_args,
+                            &cap,
+                            started.elapsed(),
+                        )
+                        .into());
                     }
                 }
             }

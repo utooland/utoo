@@ -10,12 +10,16 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::ScriptOutput;
 use crate::fs;
+use crate::model::cli_output::{
+    CAPTURED_OUTPUT_TAIL_LIMIT, CapturedOutput, ErrorDetails, ExecutionStatus, LifecycleExecution,
+};
 use crate::model::package::{LifecycleHook, PackageInfo};
 use crate::service::binary::get_envs;
 use crate::util::format_print::announce_script;
@@ -99,10 +103,136 @@ impl std::fmt::Display for ScriptExit {
 
 impl std::error::Error for ScriptExit {}
 
+/// A captured lifecycle script failure with machine-readable diagnostics.
+///
+/// The display text preserves the existing human error chain, while `details`
+/// exposes bounded output tails to JSON callers without producing a second
+/// stdout/stderr document.
+#[derive(Debug)]
+pub(super) struct ScriptFailure {
+    message: String,
+    execution: LifecycleExecution,
+}
+
+impl ScriptFailure {
+    pub(super) fn failed_to_start(
+        package: &PackageInfo,
+        event: &str,
+        command: String,
+        duration: Duration,
+        error: &anyhow::Error,
+    ) -> Self {
+        Self {
+            message: format!("Failed to execute {event}: {error:#}"),
+            execution: LifecycleExecution {
+                package: (!package.name.is_empty()).then(|| package.name.clone()),
+                workspace: None,
+                event: event.to_string(),
+                command,
+                cwd: package.path.to_string_lossy().into_owned(),
+                status: ExecutionStatus::FailedToStart,
+                exit_code: None,
+                stdout: CapturedOutput::empty(),
+                stderr: CapturedOutput::empty(),
+                duration_ms: duration.as_millis() as u64,
+            },
+        }
+    }
+
+    fn new(
+        message: String,
+        package: &PackageInfo,
+        event: impl Into<String>,
+        command: impl Into<String>,
+        output: &std::process::Output,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            message,
+            execution: LifecycleExecution {
+                package: (!package.name.is_empty()).then(|| package.name.clone()),
+                workspace: None,
+                event: event.into(),
+                command: command.into(),
+                cwd: package.path.to_string_lossy().into_owned(),
+                status: ExecutionStatus::Failed,
+                exit_code: Some(status_exit_code(&output.status) as u32),
+                stdout: CapturedOutput::from_bytes(&output.stdout),
+                stderr: CapturedOutput::from_bytes(&output.stderr),
+                duration_ms: duration.as_millis() as u64,
+            },
+        }
+    }
+
+    pub(super) fn lifecycle(
+        package: &PackageInfo,
+        event: &str,
+        command: &str,
+        args: &[&str],
+        output: &std::process::Output,
+        duration: Duration,
+    ) -> Self {
+        let exit_code = status_exit_code(&output.status);
+        Self::new(
+            format!("Failed to execute {event}: exit code {exit_code}"),
+            package,
+            event,
+            join_script_args(command, args),
+            output,
+            duration,
+        )
+    }
+
+    fn dependency(
+        package: &PackageInfo,
+        event: LifecycleHook,
+        command: &str,
+        output: &std::process::Output,
+        duration: Duration,
+    ) -> Self {
+        // Preserve the existing human-facing message exactly. The structured
+        // `exitCode` still uses shell-compatible signal mapping.
+        let display_exit_code = output.status.code().unwrap_or(-1);
+        Self::new(
+            format!(
+                "Script execution failed for {event} in {}:\nCommand: {command}\nExit code: {display_exit_code}",
+                package.path.display()
+            ),
+            package,
+            event.to_string(),
+            command,
+            output,
+            duration,
+        )
+    }
+
+    fn details(&self) -> ErrorDetails {
+        ErrorDetails::Lifecycle {
+            executions: vec![self.execution.clone()],
+        }
+    }
+}
+
+impl std::fmt::Display for ScriptFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ScriptFailure {}
+
+pub(crate) fn script_failure_details(error: &anyhow::Error) -> Option<ErrorDetails> {
+    error.chain().find_map(|source| {
+        source
+            .downcast_ref::<ScriptFailure>()
+            .map(ScriptFailure::details)
+    })
+}
+
 /// Map a child `ExitStatus` to the exit code utoo should adopt: `128 + signal`
 /// for a signal death (so SIGPIPE → 141), otherwise the child's own code,
 /// falling back to 1 when neither is available.
-fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
+pub(super) fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
     #[cfg(unix)]
     if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
         return 128 + signal;
@@ -113,12 +243,14 @@ fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
 /// Cap one captured stream at 64 KiB in the debug log; a runaway script can
 /// emit hundreds of megabytes and the log file is per-run, not rotated.
 fn truncate_for_log(bytes: &[u8]) -> Cow<'_, str> {
-    const LIMIT: usize = 64 * 1024;
-    if bytes.len() <= LIMIT {
+    if bytes.len() <= CAPTURED_OUTPUT_TAIL_LIMIT {
         return String::from_utf8_lossy(bytes);
     }
-    let mut s = String::from_utf8_lossy(&bytes[..LIMIT]).into_owned();
-    s.push_str(&format!("\n… [truncated {} bytes]\n", bytes.len() - LIMIT));
+    let mut s = String::from_utf8_lossy(&bytes[..CAPTURED_OUTPUT_TAIL_LIMIT]).into_owned();
+    s.push_str(&format!(
+        "\n… [truncated {} bytes]\n",
+        bytes.len() - CAPTURED_OUTPUT_TAIL_LIMIT
+    ));
     Cow::Owned(s)
 }
 
@@ -238,6 +370,7 @@ impl ScriptService {
                 // `.output()`: each line feeds `sink` so the long-run heartbeat
                 // can show what a slow, silent script is doing, while the full
                 // text is still collected for the failure dump / debug log.
+                let started = std::time::Instant::now();
                 let captured = Self::run_captured(cmd, sink.as_ref())
                     .await
                     .context("Failed to execute script")?;
@@ -269,12 +402,14 @@ impl ScriptService {
                         }
                     }
 
-                    anyhow::bail!(
-                        "Script execution failed for {hook} in {}:\nCommand: {}\nExit code: {}",
-                        package.path.display(),
+                    return Err(ScriptFailure::dependency(
+                        package,
+                        hook,
                         script,
-                        captured.status.code().unwrap_or(-1)
-                    );
+                        &captured,
+                        started.elapsed(),
+                    )
+                    .into());
                 }
 
                 // On success the output is otherwise discarded — keep it in the
@@ -538,6 +673,20 @@ mod tests {
         // Normal exit with code 7 → 7 (raw wait status encodes it in bits 8..).
         let by_code = std::process::ExitStatus::from_raw(7 << 8);
         assert_eq!(status_exit_code(&by_code), 7);
+    }
+
+    #[test]
+    fn machine_output_keeps_a_bounded_tail() {
+        let mut output = b"BEGIN_MARKER".to_vec();
+        output.resize(CAPTURED_OUTPUT_TAIL_LIMIT + 16, b'x');
+        output.extend_from_slice(b"END_MARKER");
+
+        let tail = CapturedOutput::from_bytes(&output);
+
+        assert!(tail.truncated);
+        assert_eq!(tail.tail.len(), CAPTURED_OUTPUT_TAIL_LIMIT);
+        assert!(!tail.tail.contains("BEGIN_MARKER"));
+        assert!(tail.tail.ends_with("END_MARKER"));
     }
 
     #[tokio::test]
