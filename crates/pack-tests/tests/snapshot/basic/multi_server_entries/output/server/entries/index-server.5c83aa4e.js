@@ -703,7 +703,7 @@ if (typeof exports === 'object' && typeof module === 'object') {
     for(var i in a) globalThis[i] = a[i];
 }
 })([
-["index-server.a6c5891b.js",
+["entries/index-server.5c83aa4e.js",
 
 "[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
@@ -714,8 +714,8 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entrie
 console.log("index page server", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
 }),
 ],
-["index-server.a6c5891b.js", {"otherChunks":["server-shared.d39ed76b.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)"]}],
+["entries/index-server.5c83aa4e.js", {"otherChunks":["chunks/server-shared.fbcd5f75.js","chunks/server-shared-0-1.1b081f62.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)"]}],
 ]);
 
 
-//# sourceMappingURL=index-server.a6c5891b.js.map
+//# sourceMappingURL=index-server.5c83aa4e.js.map

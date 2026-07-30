@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 5, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries/input/shared.ts"],"sourcesContent":["import { sharedAll } from \"./shared-all\";\n\nexport const shared = `shared by primary entries using ${sharedAll}`;\n"],"names":["shared"],"mappings":";;;;AAAA;;AAEO,MAAMA,SAAS,CAAC,gCAAgC,EAAE,gKAAS,EAAE"}}]
+}

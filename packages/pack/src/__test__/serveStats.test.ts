@@ -141,10 +141,11 @@ describe("serve stats", () => {
     ).resolves.toEqual({
       changedEntry: true,
       initialEntries: ["detail-server", "index-server", "server"],
-      preservedSharedAsset: true,
+      preservedSharedAssets: true,
       preservedEntries: true,
       rebuiltEntries: ["detail-server", "index-server", "server"],
-      sharedChangeInvalidatedEntries: true,
+      sharedChangeInvalidatedAffectedEntries: true,
+      sharedChangePreservedUnaffectedEntry: true,
     });
   }, 30_000);
 });

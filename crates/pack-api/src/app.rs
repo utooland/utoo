@@ -744,12 +744,15 @@ impl AppEndpoint {
         let initial_module_graph = initial_server_module_graph.await?;
 
         let mut module_usage = FxHashMap::default();
-        for modules in &entry_modules {
+        for (entry_index, modules) in entry_modules.iter().enumerate() {
             initial_module_graph.traverse_nodes_dfs(
                 modules.iter().copied(),
                 &mut module_usage,
                 |module, usage| {
-                    *usage.entry(module).or_insert(0usize) += 1;
+                    usage
+                        .entry(module)
+                        .or_insert_with(Vec::new)
+                        .push(entry_index);
                     Ok(GraphTraversalAction::Continue)
                 },
                 |_, _| Ok(()),
@@ -757,13 +760,25 @@ impl AppEndpoint {
         }
 
         let entry_module_set = all_entry_modules.iter().copied().collect::<FxHashSet<_>>();
-        let shared_modules = module_usage
-            .into_iter()
-            .filter_map(|(module, usage)| {
-                (usage > 1 && !entry_module_set.contains(&module))
-                    .then(|| ResolvedVc::try_sidecast::<Box<dyn ChunkableModule>>(module))
-                    .flatten()
-            })
+        let mut shared_module_groups = FxHashMap::default();
+        for (module, entry_indices) in module_usage {
+            if entry_indices.len() <= 1 || entry_module_set.contains(&module) {
+                continue;
+            }
+            if let Some(module) = ResolvedVc::try_sidecast::<Box<dyn ChunkableModule>>(module) {
+                shared_module_groups
+                    .entry(entry_indices)
+                    .or_insert_with(Vec::new)
+                    .push(module);
+            }
+        }
+        let mut shared_module_groups = shared_module_groups.into_iter().collect::<Vec<_>>();
+        // A shared module's dependencies are used by at least the same entries, so build wider
+        // groups first and make them available to the narrower groups that depend on them.
+        shared_module_groups.sort_by(|(a, _), (b, _)| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        let shared_modules = shared_module_groups
+            .iter()
+            .flat_map(|(_, modules)| modules.iter().copied())
             .collect::<Vec<_>>();
 
         // Shared modules are graph roots too, allowing their chunk group to be emitted first and
@@ -781,12 +796,26 @@ impl AppEndpoint {
         };
         let server_chunking_context = project.server_fn_chunking_context();
 
-        let (shared_assets, entry_availability) = if shared_modules.is_empty() {
-            (OutputAssets::empty(), AvailabilityInfo::root())
-        } else {
-            let shared_ident = AssetIdent::from_path(project_path.join("server-shared.js")?)
-                .with_query("?name=server-shared".into())
-                .into_vc();
+        let mut entry_availability = AvailabilityInfo::root();
+        let mut shared_assets_by_entry = vec![Vec::<Vc<OutputAssets>>::new(); build_entries.len()];
+        for (entry_indices, shared_modules) in shared_module_groups {
+            let shared_name: RcStr = if entry_indices.len() == build_entries.len() {
+                rcstr!("server-shared")
+            } else {
+                format!(
+                    "server-shared-{}",
+                    entry_indices
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join("-")
+                )
+                .into()
+            };
+            let shared_ident =
+                AssetIdent::from_path(project_path.join(&format!("{shared_name}.js"))?)
+                    .with_query(format!("?name={shared_name}").into())
+                    .into_vc();
             let shared_group = server_chunking_context
                 .chunk_group(
                     shared_ident,
@@ -797,41 +826,50 @@ impl AppEndpoint {
                             .collect(),
                     ),
                     server_module_graph,
-                    AvailabilityInfo::root(),
+                    entry_availability,
                 )
                 .await?;
-            (*shared_group.assets, shared_group.availability_info)
-        };
+            entry_availability = shared_group.availability_info;
+            for entry_index in entry_indices {
+                shared_assets_by_entry[entry_index].push(*shared_group.assets);
+            }
+        }
 
         let output_assets = build_entries
             .iter()
-            .map(|(name, evaluatable_assets, preserve_entry_name)| {
-                let project_path = project_path.clone();
-                async move {
-                    let modules = evaluatable_assets
-                        .iter()
-                        .map(|entry| ResolvedVc::upcast(*entry))
-                        .collect();
-                    let chunk_query = if *preserve_entry_name {
-                        format!("?name={name}&preserveEntryName=1")
-                    } else {
-                        format!("?name={name}")
-                    };
-                    let ident = AssetIdent::from_path(project_path.join(&format!("{name}.js"))?)
-                        .with_query(chunk_query.into())
-                        .into_vc();
-                    let chunk_group_result = server_chunking_context
-                        .evaluated_chunk_group(
-                            ident,
-                            ChunkGroup::Entry(modules),
-                            server_module_graph,
-                            shared_assets,
-                            entry_availability,
-                        )
-                        .await?;
-                    Ok(*chunk_group_result.assets)
-                }
-            })
+            .enumerate()
+            .map(
+                |(entry_index, (name, evaluatable_assets, preserve_entry_name))| {
+                    let project_path = project_path.clone();
+                    let shared_assets =
+                        OutputAssets::concat(shared_assets_by_entry[entry_index].clone());
+                    async move {
+                        let modules = evaluatable_assets
+                            .iter()
+                            .map(|entry| ResolvedVc::upcast(*entry))
+                            .collect();
+                        let chunk_query = if *preserve_entry_name {
+                            format!("?name={name}&preserveEntryName=1")
+                        } else {
+                            format!("?name={name}")
+                        };
+                        let ident =
+                            AssetIdent::from_path(project_path.join(&format!("{name}.js"))?)
+                                .with_query(chunk_query.into())
+                                .into_vc();
+                        let chunk_group_result = server_chunking_context
+                            .evaluated_chunk_group(
+                                ident,
+                                ChunkGroup::Entry(modules),
+                                server_module_graph,
+                                shared_assets,
+                                entry_availability,
+                            )
+                            .await?;
+                        Ok(*chunk_group_result.assets)
+                    }
+                },
+            )
             .try_join()
             .await?;
 

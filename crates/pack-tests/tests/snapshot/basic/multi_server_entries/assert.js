@@ -12,27 +12,57 @@ for (const name of expectedEntrypoints) {
   const assets = stats.entrypoints[name].assets
     .map((asset) => asset.name)
     .filter((asset) => asset.endsWith(".js"));
-  assert.equal(assets.length, 2);
+  assert.equal(assets.length, name === "detail-server" ? 2 : 3);
   entryAssets[name] = assets;
   const entryAsset = assets.find((asset) =>
-    new RegExp(`^\\./${name}\\.[a-f0-9]{8}\\.js$`).test(asset),
+    new RegExp(`^(?:\\./)?entries/${name}\\.[a-f0-9]{8}\\.js$`).test(
+      asset,
+    ),
   );
   assert.ok(entryAsset, `missing emitted bundle for ${name}`);
   const entryPath = path.join(serverOutput, entryAsset);
   assert.ok(fs.existsSync(entryPath));
 }
 
-const sharedAssets = entryAssets[expectedEntrypoints[0]].filter((asset) =>
+const allEntrySharedAssets = entryAssets[expectedEntrypoints[0]].filter((asset) =>
   expectedEntrypoints.every((name) => entryAssets[name].includes(asset)),
 );
-assert.equal(sharedAssets.length, 1);
-assert.match(sharedAssets[0], /^(?:\.\/)?server-shared\.[a-f0-9]{8}\.js$/);
-const sharedPath = path.join(serverOutput, sharedAssets[0]);
-assert.ok(fs.existsSync(sharedPath));
-assert.match(fs.readFileSync(sharedPath, "utf8"), /shared dependency/);
+assert.equal(allEntrySharedAssets.length, 1);
+assert.match(
+  allEntrySharedAssets[0],
+  /^(?:\.\/)?chunks\/server-shared\.[a-f0-9]{8}\.js$/,
+);
+
+const primarySharedAssets = entryAssets.server.filter(
+  (asset) =>
+    entryAssets["index-server"].includes(asset) &&
+    !entryAssets["detail-server"].includes(asset),
+);
+assert.equal(primarySharedAssets.length, 1);
+assert.match(
+  primarySharedAssets[0],
+  /^(?:\.\/)?chunks\/server-shared-0-1\.[a-f0-9]{8}\.js$/,
+);
+
+const allEntrySharedPath = path.join(serverOutput, allEntrySharedAssets[0]);
+const primarySharedPath = path.join(serverOutput, primarySharedAssets[0]);
+assert.ok(fs.existsSync(allEntrySharedPath));
+assert.ok(fs.existsSync(primarySharedPath));
+assert.match(fs.readFileSync(allEntrySharedPath, "utf8"), /shared by all entries/);
+assert.match(
+  fs.readFileSync(primarySharedPath, "utf8"),
+  /shared by primary entries/,
+);
 
 for (const name of expectedEntrypoints) {
-  const entryAsset = entryAssets[name].find((asset) => asset !== sharedAssets[0]);
-  assert.doesNotMatch(fs.readFileSync(path.join(serverOutput, entryAsset), "utf8"), /shared dependency/);
+  const entryAsset = entryAssets[name].find((asset) =>
+    /(?:^|\/)entries\//.test(asset),
+  );
+  const entryContent = fs.readFileSync(
+    path.join(serverOutput, entryAsset),
+    "utf8",
+  );
+  assert.doesNotMatch(entryContent, /shared by all entries/);
+  assert.doesNotMatch(entryContent, /shared by primary entries/);
   require(path.join(serverOutput, entryAsset));
 }

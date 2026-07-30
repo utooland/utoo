@@ -30,16 +30,29 @@ function entryAsset(stats: any, name: string): string | undefined {
     );
 }
 
-function sharedAsset(stats: any): string | undefined {
-  const assetsByEntry = expectedEntries.map((name) =>
-    (stats.entrypoints?.[name]?.assets ?? []).map((asset: any) =>
+function entryAssets(stats: any, name: string): string[] {
+  return (stats.entrypoints?.[name]?.assets ?? [])
+    .map((asset: any) =>
       typeof asset === "string" ? asset : (asset?.name ?? ""),
-    ),
+    )
+    .filter((asset: string) => asset.endsWith(".js"));
+}
+
+function sharedAsset(
+  stats: any,
+  includedEntries: string[],
+  excludedEntries: string[] = [],
+): string | undefined {
+  const includedAssets = includedEntries.map((name) =>
+    entryAssets(stats, name),
   );
-  return assetsByEntry[0]?.find(
+  return includedAssets[0]?.find(
     (asset: string) =>
-      asset.endsWith(".js") &&
-      assetsByEntry.every((assets) => assets.includes(asset)),
+      /(?:^|\/)chunks\/server-shared/.test(asset) &&
+      includedAssets.every((assets) => assets.includes(asset)) &&
+      excludedEntries.every(
+        (name) => !entryAssets(stats, name).includes(asset),
+      ),
   );
 }
 
@@ -67,7 +80,11 @@ async function main() {
   fs.writeFileSync(path.join(srcDir, "app.ts"), 'console.log("client");\n');
   fs.writeFileSync(
     path.join(srcDir, "shared.ts"),
-    'export const shared = "shared";\n',
+    'import { sharedAll } from "./shared-all"; export const shared = `shared by primary entries using ${sharedAll}`;\n',
+  );
+  fs.writeFileSync(
+    path.join(srcDir, "shared-all.ts"),
+    'export const sharedAll = "shared by all entries";\n',
   );
   fs.writeFileSync(
     path.join(srcDir, "server.ts"),
@@ -80,7 +97,7 @@ async function main() {
   const detailPath = path.join(srcDir, "detail.server.ts");
   fs.writeFileSync(
     detailPath,
-    'import { shared } from "./shared"; console.log("detail v1", shared);\n',
+    'import { sharedAll } from "./shared-all"; console.log("detail v1", sharedAll);\n',
   );
 
   await serve(
@@ -96,7 +113,8 @@ async function main() {
           ],
           output: {
             path: "./dist/server",
-            filename: "[name].[contenthash:8].js",
+            filename: "entries/[name].[contenthash:8].js",
+            chunkFilename: "chunks/[name].[contenthash:8].js",
           },
         },
         stats: true,
@@ -114,33 +132,48 @@ async function main() {
   const initial = await waitForStats(
     (stats) =>
       JSON.stringify(entryNames(stats)) === JSON.stringify(expectedEntries) &&
-      Boolean(sharedAsset(stats)),
+      Boolean(sharedAsset(stats, expectedEntries)) &&
+      Boolean(
+        sharedAsset(stats, ["server", "index-server"], ["detail-server"]),
+      ),
   );
   const initialDetailAsset = entryAsset(initial, "detail-server");
-  const initialSharedAsset = sharedAsset(initial);
+  const initialAllEntrySharedAsset = sharedAsset(initial, expectedEntries);
+  const initialPrimarySharedAsset = sharedAsset(
+    initial,
+    ["server", "index-server"],
+    ["detail-server"],
+  );
   if (!initialDetailAsset) {
     throw new Error("Initial stats are missing the detail-server JS asset");
   }
 
   fs.writeFileSync(
     detailPath,
-    'import { shared } from "./shared"; console.log("detail v2", shared);\n',
+    'import { sharedAll } from "./shared-all"; console.log("detail v2", sharedAll);\n',
   );
   const rebuilt = await waitForStats(
     (stats) => entryAsset(stats, "detail-server") !== initialDetailAsset,
   );
   const rebuiltDetailAsset = entryAsset(rebuilt, "detail-server");
-  const rebuiltSharedAsset = sharedAsset(rebuilt);
+  const rebuiltAllEntrySharedAsset = sharedAsset(rebuilt, expectedEntries);
+  const rebuiltPrimarySharedAsset = sharedAsset(
+    rebuilt,
+    ["server", "index-server"],
+    ["detail-server"],
+  );
   const entryAssetsBeforeSharedChange = Object.fromEntries(
     expectedEntries.map((name) => [name, entryAsset(rebuilt, name)]),
   );
 
   fs.writeFileSync(
     path.join(srcDir, "shared.ts"),
-    'export const shared = "shared v2";\n',
+    'import { sharedAll } from "./shared-all"; export const shared = `shared by primary entries v2 using ${sharedAll}`;\n',
   );
   const sharedRebuilt = await waitForStats(
-    (stats) => sharedAsset(stats) !== rebuiltSharedAsset,
+    (stats) =>
+      sharedAsset(stats, ["server", "index-server"], ["detail-server"]) !==
+      rebuiltPrimarySharedAsset,
   );
   const rebuiltEntries = entryNames(sharedRebuilt);
 
@@ -148,17 +181,22 @@ async function main() {
     `__STATS_SNAPSHOT__${JSON.stringify({
       changedEntry: rebuiltDetailAsset !== initialDetailAsset,
       initialEntries: entryNames(initial),
-      preservedSharedAsset:
-        Boolean(initialSharedAsset) &&
-        sharedAsset(rebuilt) === initialSharedAsset,
+      preservedSharedAssets:
+        Boolean(initialAllEntrySharedAsset) &&
+        Boolean(initialPrimarySharedAsset) &&
+        rebuiltAllEntrySharedAsset === initialAllEntrySharedAsset &&
+        rebuiltPrimarySharedAsset === initialPrimarySharedAsset,
       preservedEntries:
         JSON.stringify(rebuiltEntries) === JSON.stringify(expectedEntries),
       rebuiltEntries,
-      sharedChangeInvalidatedEntries: expectedEntries.every(
+      sharedChangeInvalidatedAffectedEntries: ["server", "index-server"].every(
         (name) =>
           entryAsset(sharedRebuilt, name) !==
           entryAssetsBeforeSharedChange[name],
       ),
+      sharedChangePreservedUnaffectedEntry:
+        entryAsset(sharedRebuilt, "detail-server") ===
+        entryAssetsBeforeSharedChange["detail-server"],
     })}`,
   );
   process.kill(process.pid, "SIGTERM");

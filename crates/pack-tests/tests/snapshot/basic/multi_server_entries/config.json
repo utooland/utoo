@@ -27,7 +27,8 @@
       ],
       "output": {
         "path": "output/server",
-        "filename": "[name].[contenthash:8].js"
+        "filename": "entries/[name].[contenthash:8].js",
+        "chunkFilename": "chunks/[name].[contenthash:8].js"
       }
     },
     "optimization": {

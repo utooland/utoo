@@ -703,7 +703,7 @@ if (typeof exports === 'object' && typeof module === 'object') {
     for(var i in a) globalThis[i] = a[i];
 }
 })([
-["server.7c75d587.js",
+["entries/server.5d80c3de.js",
 
 "[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
@@ -714,8 +714,8 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entrie
 console.log("server runtime", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
 }),
 ],
-["server.7c75d587.js", {"otherChunks":["server-shared.d39ed76b.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"]}],
+["entries/server.5d80c3de.js", {"otherChunks":["chunks/server-shared.fbcd5f75.js","chunks/server-shared-0-1.1b081f62.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"]}],
 ]);
 
 
-//# sourceMappingURL=server.7c75d587.js.map
+//# sourceMappingURL=server.5d80c3de.js.map

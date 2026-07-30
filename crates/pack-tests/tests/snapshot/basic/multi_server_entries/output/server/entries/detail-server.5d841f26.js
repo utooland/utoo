@@ -703,19 +703,19 @@ if (typeof exports === 'object' && typeof module === 'object') {
     for(var i in a) globalThis[i] = a[i];
 }
 })([
-["detail-server.95fc87ab.js",
+["entries/detail-server.5d841f26.js",
 
 "[project]/basic/multi_server_entries/input/detail.server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([]);
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/multi_server_entries/input/shared.ts [server] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2d$all$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/multi_server_entries/input/shared-all.ts [server] (ecmascript)");
 ;
-console.log("detail page server", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
+console.log("detail page server", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2d$all$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["sharedAll"]);
 }),
 ],
-["detail-server.95fc87ab.js", {"otherChunks":["server-shared.d39ed76b.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/detail.server.ts [server] (ecmascript)"]}],
+["entries/detail-server.5d841f26.js", {"otherChunks":["chunks/server-shared.fbcd5f75.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/detail.server.ts [server] (ecmascript)"]}],
 ]);
 
 
-//# sourceMappingURL=detail-server.95fc87ab.js.map
+//# sourceMappingURL=detail-server.5d841f26.js.map

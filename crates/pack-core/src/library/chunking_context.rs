@@ -144,6 +144,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn chunk_filename(mut self, chunk_filename: RcStr) -> Self {
+        self.chunking_context.chunk_filename = Some(chunk_filename);
+        self
+    }
+
     pub fn css_filename(mut self, css_filename: RcStr) -> Self {
         self.chunking_context.css_filename = Some(css_filename);
         self
@@ -238,6 +243,8 @@ pub struct LibraryChunkingContext {
     debug_ids: bool,
     /// Evaluate chunk filename template
     filename: Option<RcStr>,
+    /// Non-entry JavaScript chunk filename template
+    chunk_filename: Option<RcStr>,
     /// Initial css chunk filename template
     css_filename: Option<RcStr>,
     /// CSS chunking algorithm.
@@ -279,6 +286,7 @@ impl LibraryChunkingContext {
                 export_usage: None,
                 unused_references: None,
                 filename: Default::default(),
+                chunk_filename: Default::default(),
                 css_filename: Default::default(),
                 style_groups_algorithm: Default::default(),
                 asset_module_filename: Default::default(),
@@ -339,7 +347,7 @@ impl LibraryChunkingContext {
         };
         let this = self.await?;
         let root = &this.root_path;
-        let output_ident = if let Some(filename) = this.filename.as_ref() {
+        let output_ident = if let Some(filename) = this.chunk_filename.as_ref() {
             let mut filename = filename.to_string();
             let name = escape_file_path(name);
             if match_name_placeholder(&filename) {
@@ -507,14 +515,19 @@ impl ChunkingContext for LibraryChunkingContext {
             .any(|m| m.contains("evaluate"));
 
         let output_root = &self.output_root;
+        let filename_template = if evaluate {
+            self.filename.as_ref()
+        } else {
+            self.chunk_filename.as_ref().or(self.filename.as_ref())
+        };
+        let filename_prefix = filename_template
+            .and_then(|filename| filename.rsplit_once("/").map(|(prefix, _)| prefix.into()));
 
         let output_name = ident_to_output_filename(
             ident,
             self.root_path.clone(),
             extension.clone(),
-            self.filename
-                .as_ref()
-                .and_then(|f| f.rsplit_once("/").map(|p| RcStr::from(p.0))),
+            filename_prefix,
         )
         .owned()
         .await?

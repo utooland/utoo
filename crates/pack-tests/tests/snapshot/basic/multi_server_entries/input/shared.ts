@@ -1,1 +1,3 @@
-export const shared = "shared dependency";
+import { sharedAll } from "./shared-all";
+
+export const shared = `shared by primary entries using ${sharedAll}`;

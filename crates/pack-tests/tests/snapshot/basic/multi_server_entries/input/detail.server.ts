@@ -1,3 +1,3 @@
-import { shared } from "./shared";
+import { sharedAll } from "./shared-all";
 
-console.log("detail page server", shared);
+console.log("detail page server", sharedAll);

@@ -26,6 +26,7 @@ pub struct LibraryChunkingContextOptions {
     pub preserve_entry_name: bool,
     pub shared_chunks: bool,
     pub filename_override: Option<RcStr>,
+    pub chunk_filename_override: Option<RcStr>,
     pub mode: Vc<Mode>,
     pub root_path: FileSystemPath,
     pub output_root: FileSystemPath,
@@ -59,6 +60,7 @@ pub async fn get_library_chunking_context(
         preserve_entry_name,
         shared_chunks,
         filename_override,
+        chunk_filename_override,
         mode,
         root_path,
         output_root,
@@ -151,6 +153,15 @@ pub async fn get_library_chunking_context(
 
     if let Some(filename) = filename_override.as_ref().or(output.filename.as_ref()) {
         builder = builder.filename(filename.clone());
+    }
+
+    if let Some(chunk_filename) = chunk_filename_override
+        .as_ref()
+        .or(output.chunk_filename.as_ref())
+    {
+        builder = builder.chunk_filename(chunk_filename.clone());
+    } else if shared_chunks {
+        builder = builder.chunk_filename("[name].[contenthash:8].js".into());
     }
 
     if let Some(css_filename) = &output.css_filename {

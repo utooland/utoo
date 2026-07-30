@@ -1385,6 +1385,14 @@ impl Project {
                     .and_then(|output| output.filename.clone())
             })
             .flatten();
+        let chunk_filename_override = uses_named_server_entries
+            .then(|| {
+                server_config
+                    .output
+                    .as_ref()
+                    .and_then(|output| output.chunk_filename.clone())
+            })
+            .flatten();
 
         Ok(get_library_chunking_context(
             LibraryChunkingContextOptions {
@@ -1392,6 +1400,7 @@ impl Project {
                 preserve_entry_name: true,
                 shared_chunks: true,
                 filename_override,
+                chunk_filename_override,
                 mode,
                 root_path: server_root.clone(),
                 output_root: server_root,
