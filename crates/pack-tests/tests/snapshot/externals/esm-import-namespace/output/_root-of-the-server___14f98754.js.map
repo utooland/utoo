@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 30, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/esm-import-namespace/input/index.ts"],"sourcesContent":["import NativeEsm, { named } from \"native-esm\";\n\nconsole.log(NativeEsm, named);\n"],"names":["console","log"],"mappings":";;QAAA;;;;;;QAEAA,QAAQC,GAAG,CAAC,qIAAS,EAAE,mIAAK"}}]
+}

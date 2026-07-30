@@ -1,21 +1,21 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[externals]/EsmScript [external] (EsmScript@https://example.com/esm-script.js, script)", ((__turbopack_context__) => {
+"[externals]/JSZip [external] (JSZip@https://example.com/jszip.js, script)", ((__turbopack_context__) => {
 "use strict";
 
 return __turbopack_context__.a(async function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
 try {
 var mod = await (async () => {
-  if (typeof globalThis["EsmScript"] !== 'undefined') {
-    return globalThis["EsmScript"];
+  if (typeof globalThis["JSZip"] !== 'undefined') {
+    return globalThis["JSZip"];
   }
-  await __turbopack_context__.S("https://example.com/esm-script.js");
-  if (typeof globalThis["EsmScript"] !== 'undefined') {
-    return globalThis["EsmScript"];
+  await __turbopack_context__.S("https://example.com/jszip.js");
+  if (typeof globalThis["JSZip"] !== 'undefined') {
+    return globalThis["JSZip"];
   }
-  const error = new Error('Loading script failed.\n(missing: "https://example.com/esm-script.js")');
+  const error = new Error('Loading script failed.\n(missing: "https://example.com/jszip.js")');
   error.name = 'ScriptExternalLoadError';
   error.type = 'missing';
-  error.request = "https://example.com/esm-script.js";
+  error.request = "https://example.com/jszip.js";
   throw error;
 })();
 
