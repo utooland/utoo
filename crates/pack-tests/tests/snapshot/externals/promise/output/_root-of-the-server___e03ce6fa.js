@@ -6,12 +6,16 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await ($);
 
-var ns = Object.create(null);
-if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-  for (var key in mod) ns[key] = mod[key];
+if (mod && mod.__esModule) {
+  __turbopack_context__.n(mod);
+} else {
+  var ns = Object.create(null);
+  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+    for (var key in mod) ns[key] = mod[key];
+  }
+  ns.default = mod;
+  __turbopack_context__.n(ns);
 }
-ns.default = mod;
-__turbopack_context__.n(ns);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -23,12 +27,16 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await (Promise.resolve({ default: "async-value", named: true }));
 
-var ns = Object.create(null);
-if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-  for (var key in mod) ns[key] = mod[key];
+if (mod && mod.__esModule) {
+  __turbopack_context__.n(mod);
+} else {
+  var ns = Object.create(null);
+  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+    for (var key in mod) ns[key] = mod[key];
+  }
+  ns.default = mod;
+  __turbopack_context__.n(ns);
 }
-ns.default = mod;
-__turbopack_context__.n(ns);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -40,12 +48,16 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await (Promise.resolve({ __esModule: true, default: "async-esm-value", named: "esm-named" }));
 
-var ns = Object.create(null);
-if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-  for (var key in mod) ns[key] = mod[key];
+if (mod && mod.__esModule) {
+  __turbopack_context__.n(mod);
+} else {
+  var ns = Object.create(null);
+  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+    for (var key in mod) ns[key] = mod[key];
+  }
+  ns.default = mod;
+  __turbopack_context__.n(ns);
 }
-ns.default = mod;
-__turbopack_context__.n(ns);
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -67,7 +79,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         ;
         ;
         ;
-        console.log(__TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$38c1fe80__$5b$external$5d$__$28$promise$29$__["default"].ready, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$504fc35f__$5b$external$5d$__$28$promise$29$__["default"].default, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$504fc35f__$5b$external$5d$__$28$promise$29$__["default"].named, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$504fc35f__$5b$external$5d$__$28$promise$29$__["named"], __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$4821facd__$5b$external$5d$__$28$promise$29$__["default"].default, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$4821facd__$5b$external$5d$__$28$promise$29$__["default"].__esModule, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$4821facd__$5b$external$5d$__$28$promise$29$__["named"]);
+        console.log(__TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$38c1fe80__$5b$external$5d$__$28$promise$29$__["default"].ready, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$504fc35f__$5b$external$5d$__$28$promise$29$__["default"].default, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$504fc35f__$5b$external$5d$__$28$promise$29$__["default"].named, __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$504fc35f__$5b$external$5d$__$28$promise$29$__["named"], __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$4821facd__$5b$external$5d$__$28$promise$29$__["default"], __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$4821facd__$5b$external$5d$__$28$promise$29$__["named"]);
         __turbopack_context__.s([]);
         __turbopack_async_result__();
     } catch (e) {

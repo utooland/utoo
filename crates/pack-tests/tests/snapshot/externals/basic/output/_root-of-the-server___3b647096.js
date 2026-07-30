@@ -62,10 +62,16 @@ var mod = await (async () => {
   throw error;
 })();
 
-var ns = Object.create(null);
-for (var key in mod) ns[key] = mod[key];
-ns.default = mod;
-__turbopack_context__.n(ns);
+if (mod && mod.__esModule) {
+  __turbopack_context__.n(mod);
+} else {
+  var ns = Object.create(null);
+  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+    for (var key in mod) ns[key] = mod[key];
+  }
+  ns.default = mod;
+  __turbopack_context__.n(ns);
+}
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -90,10 +96,16 @@ var mod = await (async () => {
   throw error;
 })();
 
-var ns = Object.create(null);
-for (var key in mod) ns[key] = mod[key];
-ns.default = mod;
-__turbopack_context__.n(ns);
+if (mod && mod.__esModule) {
+  __turbopack_context__.n(mod);
+} else {
+  var ns = Object.create(null);
+  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+    for (var key in mod) ns[key] = mod[key];
+  }
+  ns.default = mod;
+  __turbopack_context__.n(ns);
+}
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
