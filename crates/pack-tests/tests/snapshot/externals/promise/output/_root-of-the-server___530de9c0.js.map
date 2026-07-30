@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 108, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/promise/input/index.ts"],"sourcesContent":["import $ from \"jquery\";\nimport value, { named } from \"async-value\";\nimport esmValue, { named as esmNamed } from \"async-esm-value\";\nimport NativeEsm, { named as nativeEsmNamed } from \"native-esm-value\";\n\nconsole.log(\n    $.ready,\n    value.default,\n    value.named,\n    named,\n    esmValue,\n    esmNamed,\n    NativeEsm,\n    nativeEsmNamed,\n);\n"],"names":["console","log","ready","default","named"],"mappings":";;QAAA;QACA;QACA;QACA;;;;;;;;;;;;QAEAA,QAAQC,GAAG,CACP,qHAAC,CAACC,KAAK,EACP,qHAAK,CAACC,OAAO,EACb,qHAAK,CAACC,KAAK,EACX,mHAAK,EACL,qHAAQ,EACR,mHAAQ,EACR,qHAAS,EACT,mHAAc"}}]
+}

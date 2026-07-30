@@ -23,10 +23,11 @@ if (mod && mod.__esModule) {
   __turbopack_context__.n(mod);
 } else {
   var ns = Object.create(null);
+  var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
   if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
     for (var key in mod) ns[key] = mod[key];
   }
-  ns.default = mod;
+  if (!isEsmNamespace) ns.default = mod;
   Object.defineProperty(ns, '__esModule', { value: true });
   if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
     Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
