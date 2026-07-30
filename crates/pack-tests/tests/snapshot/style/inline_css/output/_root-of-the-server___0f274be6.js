@@ -277,6 +277,7 @@ __turbopack_context__.s([
 }),
 "[project]/style/inline_css/input/index.less?modules [client] (css module)", ((__turbopack_context__) => {
 
+__turbopack_context__.i("[project]/style/inline_css/input/index.less.css.js?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript)");
 __turbopack_context__.v({
   "widget-button": "index-less__gPqa-G__widget-button",
 });

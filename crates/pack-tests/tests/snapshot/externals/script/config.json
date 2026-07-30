@@ -11,6 +11,11 @@
                 "root": "_",
                 "type": "script",
                 "script": "https://gw.alipayobjects.com/os/lib/lodash/4.17.21/lodash.min.js"
+            },
+            "esm-script": {
+                "root": "EsmScript",
+                "type": "script",
+                "script": "https://example.com/esm-script.js"
             }
         }
     }

@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 23, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/script/input/index.ts"],"sourcesContent":["const func = async () => {\n    // @ts-ignore\n    const _ = await import('lodash');\n    console.log(Object.keys(_.default.omit({ a: 1 }, 'a')).length === 0);\n    const esm = await import('esm-script');\n    console.log(esm.default, esm.named);\n};\nfunc();\n"],"names":["func","_","console","log","Object","keys","default","omit","a","length","esm","named"],"mappings":"AAAA,MAAMA,OAAO;IACT,aAAa;IACb,MAAMC,IAAI;IACVC,QAAQC,GAAG,CAACC,OAAOC,IAAI,CAACJ,EAAEK,OAAO,CAACC,IAAI,CAAC;QAAEC,GAAG;IAAE,GAAG,MAAMC,MAAM,KAAK;IAClE,MAAMC,MAAM;IACZR,QAAQC,GAAG,CAACO,IAAIJ,OAAO,EAAEI,IAAIC,KAAK;AACtC;AACAX"}}]
+}
