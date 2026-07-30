@@ -32,8 +32,7 @@ impl Source for InlineCssFileSource {
             .ident()
             .owned()
             .await?
-            .with_modifier(rcstr!("inline css"))
-            .rename_as("*.js");
+            .with_modifier(rcstr!("inline css"));
 
         Ok(ident.into_vc())
     }

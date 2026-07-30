@@ -229,7 +229,7 @@ module.exports = function(list, options) {
     };
 };
 }),
-23, ((__turbopack_context__) => {
+12, ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__37__ = __turbopack_context__.i(37);
@@ -256,7 +256,7 @@ __turbopack_context__.s([
 }),
 56, ((__turbopack_context__) => {
 
-__turbopack_context__.i(23);
+__turbopack_context__.i(12);
 __turbopack_context__.v({
   "widget-button": "index-less__-C211G__widget-button",
 });

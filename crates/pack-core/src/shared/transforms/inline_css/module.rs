@@ -24,7 +24,7 @@ use turbopack_css::{
     chunk::{CssChunk, CssChunkItem, CssChunkType, CssImport},
 };
 use turbopack_ecmascript::{
-    EcmascriptInputTransforms,
+    EcmascriptInputTransforms, EcmascriptModuleAsset, EcmascriptOptions,
     chunk::{
         EcmascriptChunkItemContent, EcmascriptChunkPlaceable, EcmascriptExports,
         ecmascript_chunk_item,
@@ -259,11 +259,8 @@ impl InlineCssModuleType {
     ) -> Result<Vc<Box<dyn Module>>> {
         let asset_context: ResolvedVc<Box<dyn AssetContext>> =
             ResolvedVc::upcast(module_asset_context);
-        let environment = asset_context
-            .compile_time_info()
-            .environment()
-            .to_resolved()
-            .await?;
+        let compile_time_info = asset_context.compile_time_info().to_resolved().await?;
+        let environment = compile_time_info.environment().to_resolved().await?;
         let is_at_import = matches!(
             &reference_type,
             ReferenceType::Css(CssReferenceSubType::AtImport(_))
@@ -293,22 +290,35 @@ impl InlineCssModuleType {
             return Ok(Vc::upcast(*css));
         }
         let content_module = InlineCssContentModule { source, css }.resolved_cell();
+        let module_options_context = module_asset_context.module_options_context().await?;
+        let injector_source: ResolvedVc<Box<dyn Source>> = ResolvedVc::upcast(
+            InlineCssFileSource {
+                css: source,
+                insert,
+                inject_type,
+            }
+            .resolved_cell(),
+        );
+        let injector = EcmascriptModuleAsset::builder(
+            injector_source,
+            asset_context,
+            EcmascriptInputTransforms::empty().to_resolved().await?,
+            EcmascriptOptions {
+                tree_shaking_mode: module_options_context.tree_shaking_mode,
+                ..Default::default()
+            }
+            .resolved_cell(),
+            compile_time_info,
+            module_options_context.side_effect_free_packages,
+        )
+        .with_inner_assets(ResolvedVc::cell(fxindexmap!(
+            rcstr!(INLINE_CSS_CONTENT) => ResolvedVc::upcast(content_module)
+        )))
+        .build()
+        .to_resolved()
+        .await?;
 
-        Ok(module_asset_context
-            .process(
-                Vc::upcast(
-                    InlineCssFileSource {
-                        css: source,
-                        insert,
-                        inject_type,
-                    }
-                    .cell(),
-                ),
-                ReferenceType::Internal(ResolvedVc::cell(fxindexmap!(
-                    rcstr!(INLINE_CSS_CONTENT) => ResolvedVc::upcast(content_module)
-                ))),
-            )
-            .module())
+        Ok(Vc::upcast(*injector))
     }
 }
 

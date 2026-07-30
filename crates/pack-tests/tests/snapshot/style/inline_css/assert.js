@@ -24,6 +24,6 @@ const cssModuleFactory = chunk.slice(cssModuleStart, entryStart);
 
 assert.match(
   cssModuleFactory,
-  /__turbopack_context__\.i\([^)]*index\.less\.css\.js\?modules/,
+  /__turbopack_context__\.i\([^)]*index\.less\.css\?modules/,
   "CSS Modules facade must evaluate the inline style injection module",
 );

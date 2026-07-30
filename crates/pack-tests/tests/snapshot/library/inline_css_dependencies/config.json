@@ -1,0 +1,21 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "InlineCssDependenciesLibrary"
+        }
+      }
+    ],
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false,
+    "styles": {
+      "inlineCss": {}
+    }
+  }
+}
