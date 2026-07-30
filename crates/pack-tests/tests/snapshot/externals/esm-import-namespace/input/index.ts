@@ -1,3 +1,4 @@
-import NativeEsm, { named } from "native-esm";
+import NativeEsm, { count, increment, named } from "native-esm";
 
-console.log(NativeEsm, named);
+increment();
+console.log(NativeEsm, named, count);

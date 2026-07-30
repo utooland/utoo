@@ -25,9 +25,16 @@ if (mod && mod.__esModule) {
   var ns = Object.create(null);
   var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
   if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-    for (var key in mod) ns[key] = mod[key];
+    for (var key in mod) {
+      if (key === '__esModule' || (!isEsmNamespace && key === 'default')) continue;
+      (function(key) {
+        Object.defineProperty(ns, key, { enumerable: true, get: function() { return mod[key]; } });
+      })(key);
+    }
   }
-  if (!isEsmNamespace) ns.default = mod;
+  if (!isEsmNamespace) {
+    Object.defineProperty(ns, 'default', { enumerable: true, value: mod });
+  }
   Object.defineProperty(ns, '__esModule', { value: true });
   if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
     Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
