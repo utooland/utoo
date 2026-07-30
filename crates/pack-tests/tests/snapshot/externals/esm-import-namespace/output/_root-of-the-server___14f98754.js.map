@@ -2,5 +2,5 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 37, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/esm-import-namespace/input/index.ts"],"sourcesContent":["import NativeEsm, { count, increment, named } from \"native-esm\";\n\nincrement();\nconsole.log(NativeEsm, named, count);\n"],"names":["console","log"],"mappings":";;QAAA;;;;;;QAEA,IAAA,uIAAS;QACTA,QAAQC,GAAG,CAAC,qIAAS,EAAE,mIAAK,EAAE,mIAAK"}}]
+    {"offset": {"line": 16, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/esm-import-namespace/input/index.ts"],"sourcesContent":["import NativeEsm, { count, increment, named } from \"native-esm\";\n\nincrement();\nconsole.log(NativeEsm, named, count);\n"],"names":["console","log"],"mappings":";;QAAA;;;;;;QAEA,IAAA,uIAAS;QACTA,QAAQC,GAAG,CAAC,qIAAS,EAAE,mIAAK,EAAE,mIAAK"}}]
 }

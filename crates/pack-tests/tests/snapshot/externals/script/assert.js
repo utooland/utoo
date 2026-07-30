@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const externalNamespace = require("../../../helpers/external-namespace");
 
 global._ = { marker: "lodash" };
 global.EsmScript = {
@@ -24,6 +25,7 @@ async function evaluateExternal(factory) {
         });
       });
     },
+    N: externalNamespace,
     n(value) {
       namespace = value;
     },

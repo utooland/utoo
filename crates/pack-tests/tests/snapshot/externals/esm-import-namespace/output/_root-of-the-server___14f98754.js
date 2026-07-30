@@ -6,28 +6,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await __turbopack_context__.y("native-esm");
 
-if (mod && mod.__esModule) {
-  __turbopack_context__.n(mod);
-} else {
-  var ns = Object.create(null);
-  var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
-  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-    for (var key in mod) {
-      if (key === '__esModule' || (!isEsmNamespace && key === 'default')) continue;
-      (function(key) {
-        Object.defineProperty(ns, key, { enumerable: true, get: function() { return mod[key]; } });
-      })(key);
-    }
-  }
-  if (!isEsmNamespace) {
-    Object.defineProperty(ns, 'default', { enumerable: true, value: mod });
-  }
-  Object.defineProperty(ns, '__esModule', { value: true });
-  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
-    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
-  }
-  __turbopack_context__.n(ns);
-}
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);

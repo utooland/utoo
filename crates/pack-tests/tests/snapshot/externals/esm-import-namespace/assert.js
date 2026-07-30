@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const externalNamespace = require("../../../helpers/external-namespace");
 
 const nativeEsmUrl =
   "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgY2xhc3MgTmF0aXZlRXNtIHt9OyBleHBvcnQgY29uc3QgbmFtZWQgPSAnbmF0aXZlLWVzbS1uYW1lZCc7IGV4cG9ydCBsZXQgY291bnQgPSAwOyBleHBvcnQgZnVuY3Rpb24gaW5jcmVtZW50KCkgeyBjb3VudCArPSAxOyB9";
@@ -23,6 +24,7 @@ async function evaluateExternal(factory) {
     async y() {
       return import(nativeEsmUrl);
     },
+    N: externalNamespace,
     n(value) {
       namespace = value;
     },

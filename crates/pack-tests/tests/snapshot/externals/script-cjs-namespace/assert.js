@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const externalNamespace = require("../../../helpers/external-namespace");
 
 global.JSZip = function JSZip() {};
 global.JSZip.version = "3.10.1";
@@ -20,6 +21,7 @@ async function evaluateExternal(factory) {
         });
       });
     },
+    N: externalNamespace,
     n(value) {
       namespace = value;
     },

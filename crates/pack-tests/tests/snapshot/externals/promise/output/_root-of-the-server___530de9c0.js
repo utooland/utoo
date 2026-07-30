@@ -6,28 +6,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await ($);
 
-if (mod && mod.__esModule) {
-  __turbopack_context__.n(mod);
-} else {
-  var ns = Object.create(null);
-  var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
-  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-    for (var key in mod) {
-      if (key === '__esModule' || (!isEsmNamespace && key === 'default')) continue;
-      (function(key) {
-        Object.defineProperty(ns, key, { enumerable: true, get: function() { return mod[key]; } });
-      })(key);
-    }
-  }
-  if (!isEsmNamespace) {
-    Object.defineProperty(ns, 'default', { enumerable: true, value: mod });
-  }
-  Object.defineProperty(ns, '__esModule', { value: true });
-  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
-    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
-  }
-  __turbopack_context__.n(ns);
-}
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -39,28 +18,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await (Promise.resolve({ default: "async-value", named: true }));
 
-if (mod && mod.__esModule) {
-  __turbopack_context__.n(mod);
-} else {
-  var ns = Object.create(null);
-  var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
-  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-    for (var key in mod) {
-      if (key === '__esModule' || (!isEsmNamespace && key === 'default')) continue;
-      (function(key) {
-        Object.defineProperty(ns, key, { enumerable: true, get: function() { return mod[key]; } });
-      })(key);
-    }
-  }
-  if (!isEsmNamespace) {
-    Object.defineProperty(ns, 'default', { enumerable: true, value: mod });
-  }
-  Object.defineProperty(ns, '__esModule', { value: true });
-  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
-    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
-  }
-  __turbopack_context__.n(ns);
-}
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -72,28 +30,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await (Promise.resolve({ __esModule: true, default: "async-esm-value", named: "esm-named" }));
 
-if (mod && mod.__esModule) {
-  __turbopack_context__.n(mod);
-} else {
-  var ns = Object.create(null);
-  var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
-  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-    for (var key in mod) {
-      if (key === '__esModule' || (!isEsmNamespace && key === 'default')) continue;
-      (function(key) {
-        Object.defineProperty(ns, key, { enumerable: true, get: function() { return mod[key]; } });
-      })(key);
-    }
-  }
-  if (!isEsmNamespace) {
-    Object.defineProperty(ns, 'default', { enumerable: true, value: mod });
-  }
-  Object.defineProperty(ns, '__esModule', { value: true });
-  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
-    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
-  }
-  __turbopack_context__.n(ns);
-}
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -105,28 +42,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await (import("data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgY2xhc3MgTmF0aXZlRXNtIHt9OyBleHBvcnQgY29uc3QgbmFtZWQgPSAnbmF0aXZlLWVzbS1uYW1lZCc7"));
 
-if (mod && mod.__esModule) {
-  __turbopack_context__.n(mod);
-} else {
-  var ns = Object.create(null);
-  var isEsmNamespace = mod && typeof Symbol !== 'undefined' && Symbol.toStringTag && mod[Symbol.toStringTag] === 'Module';
-  if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-    for (var key in mod) {
-      if (key === '__esModule' || (!isEsmNamespace && key === 'default')) continue;
-      (function(key) {
-        Object.defineProperty(ns, key, { enumerable: true, get: function() { return mod[key]; } });
-      })(key);
-    }
-  }
-  if (!isEsmNamespace) {
-    Object.defineProperty(ns, 'default', { enumerable: true, value: mod });
-  }
-  Object.defineProperty(ns, '__esModule', { value: true });
-  if (typeof Symbol !== 'undefined' && Symbol.toStringTag) {
-    Object.defineProperty(ns, Symbol.toStringTag, { value: 'Module' });
-  }
-  __turbopack_context__.n(ns);
-}
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
