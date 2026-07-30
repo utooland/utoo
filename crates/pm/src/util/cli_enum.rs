@@ -83,6 +83,33 @@ impl From<bool> for ConfigScope {
     }
 }
 
+/// Whether dependencies are installed into the project or global prefix.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum InstallScope {
+    #[default]
+    Local,
+    Global,
+}
+
+impl InstallScope {
+    pub const fn is_global(self) -> bool {
+        matches!(self, Self::Global)
+    }
+
+    pub const fn as_env_value(self) -> &'static str {
+        match self {
+            Self::Global => "true",
+            Self::Local => "",
+        }
+    }
+}
+
+impl From<bool> for InstallScope {
+    fn from(global: bool) -> Self {
+        if global { Self::Global } else { Self::Local }
+    }
+}
+
 /// Whether to perform the real operation or just simulate it.
 /// Used by `pack` and `publish` to gate side-effects behind a flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +121,143 @@ pub enum RunMode {
 impl From<bool> for RunMode {
     fn from(dry_run: bool) -> Self {
         if dry_run { Self::DryRun } else { Self::Live }
+    }
+}
+
+/// How a destructive command obtains user confirmation.
+///
+/// Constructed from the CLI flag and validated against terminal interactivity
+/// at the CLI boundary, so commands never receive a context-free boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmationPolicy {
+    Prompt,
+    AssumeYes,
+}
+
+impl ConfirmationPolicy {
+    pub const fn requires_interaction(self) -> bool {
+        matches!(self, Self::Prompt)
+    }
+}
+
+impl From<bool> for ConfirmationPolicy {
+    fn from(yes: bool) -> Self {
+        if yes { Self::AssumeYes } else { Self::Prompt }
+    }
+}
+
+/// Whether `init` prompts for package metadata or accepts all defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitMode {
+    Interactive,
+    Defaults,
+}
+
+impl InitMode {
+    pub const fn requires_interaction(self) -> bool {
+        matches!(self, Self::Interactive)
+    }
+}
+
+impl From<bool> for InitMode {
+    fn from(yes: bool) -> Self {
+        if yes {
+            Self::Defaults
+        } else {
+            Self::Interactive
+        }
+    }
+}
+
+/// Whether publishing generates and attaches a provenance attestation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvenancePolicy {
+    Skip,
+    Generate,
+}
+
+impl ProvenancePolicy {
+    pub const fn is_enabled(self) -> bool {
+        matches!(self, Self::Generate)
+    }
+}
+
+impl From<bool> for ProvenancePolicy {
+    fn from(provenance: bool) -> Self {
+        if provenance {
+            Self::Generate
+        } else {
+            Self::Skip
+        }
+    }
+}
+
+/// Console diagnostic level resolved from `--verbose` and `--quiet`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleVerbosity {
+    Quiet,
+    #[default]
+    Normal,
+    Verbose,
+}
+
+impl ConsoleVerbosity {
+    /// Quiet takes precedence when both flags are supplied.
+    pub const fn from_flags(verbose: bool, quiet: bool) -> Self {
+        if quiet {
+            Self::Quiet
+        } else if verbose {
+            Self::Verbose
+        } else {
+            Self::Normal
+        }
+    }
+}
+
+/// ANSI color behavior resolved from `--no-color`, JSON mode, and `NO_COLOR`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ColorPolicy {
+    #[default]
+    Auto,
+    Never,
+}
+
+impl ColorPolicy {
+    pub const fn ansi_enabled(self) -> bool {
+        matches!(self, Self::Auto)
+    }
+
+    pub const fn clap_choice(self) -> clap::ColorChoice {
+        match self {
+            Self::Auto => clap::ColorChoice::Auto,
+            Self::Never => clap::ColorChoice::Never,
+        }
+    }
+
+    pub fn apply(self) {
+        if self == Self::Never {
+            colored::control::set_override(self.ansi_enabled());
+        }
+    }
+}
+
+impl From<bool> for ColorPolicy {
+    fn from(no_color: bool) -> Self {
+        if no_color { Self::Never } else { Self::Auto }
+    }
+}
+
+/// Human or machine-readable command output.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[default]
+    Human,
+    Json,
+}
+
+impl From<bool> for OutputFormat {
+    fn from(json: bool) -> Self {
+        if json { Self::Json } else { Self::Human }
     }
 }
 
@@ -114,4 +278,29 @@ impl From<bool> for RunMode {
 pub enum PublishAccess {
     Public,
     Restricted,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flag_policies_resolve_at_the_cli_boundary() {
+        let no_color = true;
+        let no_color_not_requested = false;
+        let verbose = true;
+        let quiet_disabled = false;
+        let quiet = true;
+
+        assert_eq!(ColorPolicy::from(no_color), ColorPolicy::Never);
+        assert_eq!(ColorPolicy::from(no_color_not_requested), ColorPolicy::Auto);
+        assert_eq!(
+            ConsoleVerbosity::from_flags(verbose, quiet_disabled),
+            ConsoleVerbosity::Verbose
+        );
+        assert_eq!(
+            ConsoleVerbosity::from_flags(verbose, quiet),
+            ConsoleVerbosity::Quiet
+        );
+    }
 }

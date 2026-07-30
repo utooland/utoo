@@ -2,8 +2,11 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::model::cli_output::{ListPathNode, ListResult};
 use crate::service::dependency_graph::{LockGraphService, build_dep_tree};
 use crate::util::format_print::print_dep_tree;
+use crate::util::invocation;
+use crate::util::presenter::emit;
 
 /// List dependency information, similar to npm list
 pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
@@ -22,21 +25,42 @@ pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
     let graph = LockGraphService::from_lock_file(&lock_file_path)
         .context("Failed to load and parse package-lock.json")?;
 
-    show_package_dependencies(&graph, package_name)?;
-
-    Ok(())
+    show_package_dependencies(&graph, package_name)
 }
 
 /// Display dependency information for a specific package
 fn show_package_dependencies(graph: &LockGraphService, package_name: &str) -> Result<()> {
     let node_paths = graph.find_paths_to_root(package_name)?;
-    if node_paths.is_empty() {
-        tracing::debug!("No paths to root found");
+    let tree = build_dep_tree(&node_paths);
+    if !invocation::json() {
+        print_dep_tree(&tree, graph, "", true, &[package_name]);
         return Ok(());
     }
-    let tree = build_dep_tree(&node_paths);
-    print_dep_tree(&tree, graph, "", true, &[package_name]);
-    Ok(())
+    let mut paths = node_paths
+        .iter()
+        .map(|path| {
+            path.iter()
+                .rev()
+                .filter_map(|index| graph.get_graph().node_weight(*index))
+                .map(|package| ListPathNode {
+                    name: package.name(),
+                    version: package.version(),
+                    path: package.path.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    paths.sort_unstable_by(|a, b| {
+        let a = a.iter().map(|node| node.path.as_str()).collect::<Vec<_>>();
+        let b = b.iter().map(|node| node.path.as_str()).collect::<Vec<_>>();
+        a.cmp(&b)
+    });
+    let output = ListResult {
+        package: package_name.to_string(),
+        truncated: paths.len() >= 1024,
+        paths,
+    };
+    emit("list", &output, || Ok(()))
 }
 
 #[cfg(test)]

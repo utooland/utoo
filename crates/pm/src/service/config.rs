@@ -91,7 +91,13 @@ impl ConfigService {
         let builtins = builtin_commands();
 
         // Find the longest command name and option name
-        let option_names = ["-h, --help", "-v, --version"];
+        let option_names = [
+            "-h, --help",
+            "-v, --version",
+            "--json",
+            "--quiet",
+            "--no-color",
+        ];
 
         // Helper function to get max length from an iterator of strings
         let get_max_length = |items: &[&str]| items.iter().map(|s| s.len()).max().unwrap_or(0);
@@ -140,6 +146,21 @@ impl ConfigService {
         println!(
             "  {:<width$}    Print version information",
             "-v, --version".yellow(),
+            width = max_width
+        );
+        println!(
+            "  {:<width$}    Emit a machine-readable JSON result",
+            "--json".yellow(),
+            width = max_width
+        );
+        println!(
+            "  {:<width$}    Suppress non-essential diagnostics",
+            "--quiet".yellow(),
+            width = max_width
+        );
+        println!(
+            "  {:<width$}    Disable ANSI colors",
+            "--no-color".yellow(),
             width = max_width
         );
         println!();

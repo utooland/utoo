@@ -5,7 +5,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use utoo_ruborist::manifest::{PackageInstallView, PackageJson, PublishConfig};
 
-use crate::util::cli_enum::PublishAccess;
+use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
 use crate::util::json::load_package_json;
 use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_or_load_package_json;
@@ -121,17 +121,19 @@ impl PublishMeta {
         }
     }
 
-    /// Whether to attach a provenance attestation.
+    /// Resolve the provenance generation policy.
     ///
     /// Enabled by the CLI `--provenance` flag, `publishConfig.provenance: true`,
     /// or `NPM_CONFIG_PROVENANCE=true` (matching npm/pnpm).
-    pub fn resolve_provenance(&self, cli_provenance: bool) -> bool {
-        cli_provenance
-            || self.publish_config.provenance == Some(true)
-            || matches!(
-                env::var("NPM_CONFIG_PROVENANCE").ok().as_deref(),
-                Some("true" | "1")
-            )
+    pub fn resolve_provenance(&self, cli: ProvenancePolicy) -> ProvenancePolicy {
+        ProvenancePolicy::from(
+            cli.is_enabled()
+                || self.publish_config.provenance.unwrap_or_default()
+                || matches!(
+                    env::var("NPM_CONFIG_PROVENANCE").ok().as_deref(),
+                    Some("true" | "1")
+                ),
+        )
     }
 
     /// Resolve the publish tag: CLI flag > publishConfig.tag > "latest".
@@ -409,11 +411,20 @@ mod tests {
     #[test]
     fn resolve_provenance_from_cli_and_config() {
         let mut meta = PublishMeta::default();
-        assert!(!meta.resolve_provenance(false));
+        assert_eq!(
+            meta.resolve_provenance(ProvenancePolicy::Skip),
+            ProvenancePolicy::Skip
+        );
         // CLI flag enables it.
-        assert!(meta.resolve_provenance(true));
+        assert_eq!(
+            meta.resolve_provenance(ProvenancePolicy::Generate),
+            ProvenancePolicy::Generate
+        );
         // publishConfig.provenance enables it without the flag.
         meta.publish_config.provenance = Some(true);
-        assert!(meta.resolve_provenance(false));
+        assert_eq!(
+            meta.resolve_provenance(ProvenancePolicy::Skip),
+            ProvenancePolicy::Generate
+        );
     }
 }

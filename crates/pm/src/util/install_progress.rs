@@ -14,12 +14,27 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use colored::Colorize;
 use once_cell::sync::Lazy;
-use owo_colors::OwoColorize;
 
 /// Process-lifetime tarball bytes fetched from the network (counted as chunks
 /// arrive, so retries count their real traffic).
 pub static DOWNLOADED_BYTES: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy)]
+pub struct DownloadBaseline(u64);
+
+impl DownloadBaseline {
+    pub fn capture() -> Self {
+        Self(DOWNLOADED_BYTES.load(Ordering::Relaxed))
+    }
+
+    pub fn downloaded_bytes(self) -> u64 {
+        DOWNLOADED_BYTES
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.0)
+    }
+}
 
 /// Byte baseline captured at the start of the current logical install.
 static INSTALL_START_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -440,7 +455,11 @@ fn decimal_width(n: u64) -> usize {
 /// never shrinks mid-phase.
 pub fn format_counter(pos: u64, len: u64) -> String {
     let width = decimal_width(len);
-    format!("{}/{}", format!("{pos:>width$}").green(), len.magenta())
+    format!(
+        "{}/{}",
+        format!("{pos:>width$}").green(),
+        len.to_string().magenta()
+    )
 }
 
 #[cfg(test)]
@@ -645,7 +664,7 @@ mod tests {
         drop(g1);
         // A window only exists once last > first; back-to-back guards may share a
         // millisecond, so just assert it never panics and is non-negative.
-        let _ = download_window();
+        let _window = download_window();
         drop(g2);
 
         // A fresh run clears the window.
@@ -665,6 +684,21 @@ mod tests {
 
         start_install_run();
         assert_eq!(downloaded_bytes(), 0);
+    }
+
+    #[test]
+    fn command_baseline_spans_multiple_install_runs() {
+        let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        DOWNLOADED_BYTES.store(1_000, Ordering::Relaxed);
+        let baseline = DownloadBaseline::capture();
+
+        start_install_run();
+        DOWNLOADED_BYTES.fetch_add(250, Ordering::Relaxed);
+        start_install_run();
+        DOWNLOADED_BYTES.fetch_add(400, Ordering::Relaxed);
+
+        assert_eq!(baseline.downloaded_bytes(), 650);
+        assert_eq!(downloaded_bytes(), 400);
     }
 
     #[test]
