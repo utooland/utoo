@@ -227,28 +227,38 @@ pub async fn whoami(registry: &str, token: &str) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Unexpected response: missing username"))
 }
 
-/// Logout: invalidate the token on the server and remove from local config.
-pub async fn logout(registry: &str, token: &str) -> Result<()> {
+/// Logout: best-effort token invalidation followed by mandatory local removal.
+pub async fn logout(registry: &str, token: &str) -> Result<bool> {
     let response = client()?
         .delete(registry_api(registry, &format!("/-/user/token/{}", token)))
         .bearer_auth(token)
         .send()
-        .await
-        .context("Failed to send logout request")?;
+        .await;
 
-    let status = response.status();
-    if !status.is_success() && status.as_u16() != 404 {
-        let body = response.text().await.unwrap_or_default();
-        tracing::warn!(
-            "Server-side token invalidation failed (HTTP {}): {}",
-            status,
-            body
-        );
-    }
+    let remote_revoked = match response {
+        Ok(response) => {
+            let status = response.status();
+            if status.is_success() || status.as_u16() == 404 {
+                true
+            } else {
+                let body = response.text().await.unwrap_or_default();
+                tracing::warn!(
+                    "Server-side token invalidation failed (HTTP {}): {}",
+                    status,
+                    body
+                );
+                false
+            }
+        }
+        Err(error) => {
+            tracing::warn!("Server-side token invalidation failed: {error}");
+            false
+        }
+    };
 
     let mut config = Config::load(ConfigScope::Global).await?;
     config.delete(&token_key(registry), ConfigScope::Global)?;
-    Ok(())
+    Ok(remote_revoked)
 }
 
 /// Save token to ~/.utoo/config.toml, keyed by registry.

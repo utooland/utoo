@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::util::config_file::Config;
-use crate::util::format_print::print_migrate_result;
 use crate::util::json::load_package_json;
 
 #[derive(Debug)]
@@ -51,7 +50,7 @@ struct PnpmWorkspace {
 ///
 /// Must run before `Config::load` is first called so that `MERGED_CONFIG`
 /// picks up the generated `.utoo.toml`.
-pub async fn migrate_from_pnpm(root_path: &Path) -> Result<()> {
+pub async fn migrate_from_pnpm(root_path: &Path) -> Result<MigrateResult> {
     let yaml_path = root_path.join("pnpm-workspace.yaml");
     let yaml_content = match crate::fs::read_to_string(&yaml_path).await {
         Ok(c) => c,
@@ -137,8 +136,7 @@ pub async fn migrate_from_pnpm(root_path: &Path) -> Result<()> {
         fields.push(("catalogs".to_string(), catalogs_count));
     }
 
-    print_migrate_result(&MigrateResult { fields })?;
-    Ok(())
+    Ok(MigrateResult { fields })
 }
 
 #[cfg(test)]

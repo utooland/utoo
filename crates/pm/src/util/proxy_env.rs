@@ -2,6 +2,8 @@ use colored::Colorize;
 use std::ffi::OsStr;
 use std::sync::Once;
 
+use crate::util::invocation;
+
 const PROXY_ENV_VARS: [&str; 6] = [
     "http_proxy",
     "https_proxy",
@@ -24,6 +26,10 @@ where
 }
 
 pub fn print_proxy_env_hint_once() {
+    if invocation::quiet() {
+        return;
+    }
+
     PRINT_PROXY_HINT_ONCE.call_once(|| {
         let detected =
             collect_proxy_env_vars_from(PROXY_ENV_VARS.map(|key| (key, std::env::var_os(key))));

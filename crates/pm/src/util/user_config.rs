@@ -13,7 +13,7 @@ use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::is_npm_registry;
 use utoo_ruborist::spec::Catalogs;
 
-use super::cli_enum::{ConfigScope, OmitType};
+use super::cli_enum::{ConfigScope, InstallScope, OmitType};
 use super::config_file::{Config, ConfigValue};
 use super::http::client_builder;
 use super::json::load_package_json;
@@ -223,23 +223,6 @@ pub fn set_omit(value: HashSet<OmitType>) {
 
 pub fn get_omit() -> HashSet<OmitType> {
     OMIT.get().cloned().unwrap_or_default()
-}
-
-/// Whether the current install is global (`-g`) or local.
-#[derive(Default, Clone, Copy)]
-pub enum InstallScope {
-    #[default]
-    Local,
-    Global,
-}
-
-impl InstallScope {
-    pub fn as_env_value(self) -> &'static str {
-        match self {
-            Self::Global => "true",
-            Self::Local => "",
-        }
-    }
 }
 
 static INSTALL_SCOPE: OnceLock<InstallScope> = OnceLock::new();

@@ -55,6 +55,18 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub verbose: bool,
 
+    /// Emit a single machine-readable JSON result
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    /// Suppress non-essential diagnostics
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
+    /// Disable ANSI colors (also honors NO_COLOR)
+    #[arg(long, global = true)]
+    pub no_color: bool,
+
     #[arg(long, global = true)]
     pub registry: Option<String>,
 
@@ -140,6 +152,10 @@ pub enum Commands {
     Clean {
         #[arg(default_value = "*")]
         pattern: String,
+
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 
     #[command(name = DEPS_NAME, alias = DEPS_ALIAS, about = DEPS_ABOUT)]
@@ -284,6 +300,50 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Option<clap_complete::Shell>,
     },
+}
+
+impl Commands {
+    pub const fn json_name(&self) -> &'static str {
+        match self {
+            Self::Install(_) => "install",
+            Self::Uninstall { .. } => "uninstall",
+            Self::Rebuild => "rebuild",
+            Self::Clean { .. } => "clean",
+            Self::Deps { .. } => "deps",
+            Self::Update(_) => "update",
+            Self::List { .. } => "list",
+            Self::Run { .. } => "run",
+            Self::Execute { .. } => "execute",
+            Self::View { .. } => "view",
+            Self::Link { .. } => "link",
+            Self::Pack { .. } => "pack",
+            Self::Publish { .. } => "publish",
+            Self::Ping { .. } => "ping",
+            Self::Login => "login",
+            Self::Whoami => "whoami",
+            Self::Logout => "logout",
+            Self::Config { .. } => "config",
+            Self::Init { .. } => "init",
+            Self::Completions { .. } => "completions",
+        }
+    }
+
+    pub const fn json_subcommand(&self) -> Option<&'static str> {
+        match self {
+            Self::Config { command } => Some(command.json_name()),
+            _ => None,
+        }
+    }
+}
+
+impl ConfigCommands {
+    const fn json_name(&self) -> &'static str {
+        match self {
+            Self::Set { .. } => "set",
+            Self::Get { .. } => "get",
+            Self::List { .. } => "list",
+        }
+    }
 }
 
 #[cfg(test)]
