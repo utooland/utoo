@@ -225,7 +225,7 @@ module.exports = function(list, options) {
     };
 };
 }),
-"[project]/style/inline_css_postcss/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
+"[project]/style/inline_css_postcss/input/style.css { INLINE_CSS_CONTENT => \"[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$29$__ = __turbopack_context__.i("[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)");
@@ -244,20 +244,12 @@ var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d
     ]
 ], options);
 var __TURBOPACK__default__export__ = {};
-__turbopack_context__.s([
-    "default",
-    0,
-    __TURBOPACK__default__export__
-]);
-}),
-"[project]/style/inline_css_postcss/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript, inline css injection)", (function(__turbopack_context__){
-
-__turbopack_context__.n(__turbopack_context__.i("[project]/style/inline_css_postcss/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)"));
+__turbopack_context__.s([]);
 }),
 "[project]/style/inline_css_postcss/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css$2e$js__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$client$5d$__$28$inline__css$2c$__ecmascript$2c$__inline__css__injection$29$__ = __turbopack_context__.i('[project]/style/inline_css_postcss/input/style.css.js { INLINE_CSS_CONTENT => "[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)" } [client] (inline css, ecmascript, inline css injection)');
+var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$style$2f$inline_css_postcss$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/style/inline_css_postcss/input/style.css { INLINE_CSS_CONTENT => "[project]/style/inline_css_postcss/input/style.css [client] (css, inline css content)" } [client] (inline css, ecmascript)');
 ;
 console.log("inline css postcss test");
 __turbopack_context__.s([]);

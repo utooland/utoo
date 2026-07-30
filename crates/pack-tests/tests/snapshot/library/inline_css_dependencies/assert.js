@@ -24,3 +24,18 @@ assert.match(
   /\._loadingItem_fixture_1:before/,
   "precompiled dependency CSS must be inlined",
 );
+assert.doesNotMatch(
+  js,
+  /\.third-party-side-effect-free\s*\{/,
+  "CSS from a side-effect-free dependency must be tree-shaken",
+);
+assert.match(
+  js,
+  /\.third-party-selective-keep\s*\{/,
+  "CSS included by a dependency sideEffects pattern must be inlined",
+);
+assert.doesNotMatch(
+  js,
+  /\.third-party-selective-drop\s*\{/,
+  "CSS excluded by a dependency sideEffects pattern must be tree-shaken",
+);

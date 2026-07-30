@@ -3,11 +3,11 @@
 })([
 ["main.js",
 
-537, (function(__turbopack_context__){
+37, (function(__turbopack_context__){
 
 __turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.index-less__-C211G__widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
 }),
-815, ((__turbopack_context__, module, exports) => {
+15, ((__turbopack_context__, module, exports) => {
 
 /**
  * Injects styles into the DOM using <style> tags.
@@ -229,20 +229,20 @@ module.exports = function(list, options) {
     };
 };
 }),
-123, ((__turbopack_context__) => {
+12, ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__537__ = __turbopack_context__.i(537);
-var __TURBOPACK__imported__module__815__ = __turbopack_context__.i(815);
+var __TURBOPACK__imported__module__37__ = __turbopack_context__.i(37);
+var __TURBOPACK__imported__module__15__ = __turbopack_context__.i(15);
 ;
 ;
 var options = {};
 options.insert = "head";
 options.singleton = false;
-var update = (0, __TURBOPACK__imported__module__815__["default"])([
+var update = (0, __TURBOPACK__imported__module__15__["default"])([
     [
         "library/less_css_modules/input/index.less.css",
-        __TURBOPACK__imported__module__537__["default"],
+        __TURBOPACK__imported__module__37__["default"],
         undefined,
         undefined
     ]
@@ -254,23 +254,19 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__
 ]);
 }),
-835, (function(__turbopack_context__){
+56, ((__turbopack_context__) => {
 
-__turbopack_context__.n(__turbopack_context__.i(123));
-}),
-156, ((__turbopack_context__) => {
-
-__turbopack_context__.i(835);
+__turbopack_context__.i(12);
 __turbopack_context__.v({
   "widget-button": "index-less__-C211G__widget-button",
 });
 }),
-667, ((__turbopack_context__) => {
+91, ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__156__ = __turbopack_context__.i(156);
+var __TURBOPACK__imported__module__56__ = __turbopack_context__.i(56);
 ;
-var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__156__["default"];
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__56__["default"];
 __turbopack_context__.s([
     "default",
     0,
@@ -278,7 +274,7 @@ __turbopack_context__.s([
 ]);
 }),
 ],
-["main.js", {"otherChunks":[],"runtimeModuleIds":[667]}],
+["main.js", {"otherChunks":[],"runtimeModuleIds":[91]}],
 ]);
 
 

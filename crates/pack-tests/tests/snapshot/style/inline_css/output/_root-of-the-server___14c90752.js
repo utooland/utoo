@@ -225,7 +225,7 @@ module.exports = function(list, options) {
     };
 };
 }),
-"[project]/style/inline_css/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
+"[project]/style/inline_css/input/style.css { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$29$__ = __turbopack_context__.i("[project]/style/inline_css/input/style.css [client] (css, inline css content)");
@@ -244,21 +244,13 @@ var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d
     ]
 ], options);
 var __TURBOPACK__default__export__ = {};
-__turbopack_context__.s([
-    "default",
-    0,
-    __TURBOPACK__default__export__
-]);
-}),
-"[project]/style/inline_css/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript, inline css injection)", (function(__turbopack_context__){
-
-__turbopack_context__.n(__turbopack_context__.i("[project]/style/inline_css/input/style.css.js { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/style.css [client] (css, inline css content)\" } [client] (inline css, ecmascript)"));
+__turbopack_context__.s([]);
 }),
 "[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)", (function(__turbopack_context__){
 
 __turbopack_context__.v("/* [project]/style/inline_css/input/index.less.css?modules [client] (css) */\n.index-less__gPqa-G__widget-button {\n  color: #fff;\n}\n\n");
 }),
-"[project]/style/inline_css/input/index.less.css.js?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
+"[project]/style/inline_css/input/index.less.css?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$index$2e$less$2e$css$3f$modules__$5b$client$5d$__$28$css$2c$__inline__css__content$29$__ = __turbopack_context__.i("[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)");
@@ -283,13 +275,9 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__
 ]);
 }),
-"[project]/style/inline_css/input/index.less.css.js?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript, inline css injection)", (function(__turbopack_context__){
-
-__turbopack_context__.n(__turbopack_context__.i("[project]/style/inline_css/input/index.less.css.js?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript)"));
-}),
 "[project]/style/inline_css/input/index.less?modules [client] (css module)", ((__turbopack_context__) => {
 
-__turbopack_context__.i("[project]/style/inline_css/input/index.less.css.js?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript, inline css injection)");
+__turbopack_context__.i("[project]/style/inline_css/input/index.less.css?modules { INLINE_CSS_CONTENT => \"[project]/style/inline_css/input/index.less.css?modules [client] (css, inline css content)\" } [client] (inline css, ecmascript)");
 __turbopack_context__.v({
   "widget-button": "index-less__gPqa-G__widget-button",
 });
@@ -297,7 +285,7 @@ __turbopack_context__.v({
 "[project]/style/inline_css/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$style$2e$css$2e$js__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$style$2f$inline_css$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$client$5d$__$28$inline__css$2c$__ecmascript$2c$__inline__css__injection$29$__ = __turbopack_context__.i('[project]/style/inline_css/input/style.css.js { INLINE_CSS_CONTENT => "[project]/style/inline_css/input/style.css [client] (css, inline css content)" } [client] (inline css, ecmascript, inline css injection)');
+var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$style$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$style$2f$inline_css$2f$input$2f$style$2e$css__$5b$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/style/inline_css/input/style.css { INLINE_CSS_CONTENT => "[project]/style/inline_css/input/style.css [client] (css, inline css content)" } [client] (inline css, ecmascript)');
 var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$index$2e$less$3f$modules__$5b$client$5d$__$28$css__module$29$__ = __turbopack_context__.i("[project]/style/inline_css/input/index.less?modules [client] (css module)");
 ;
 ;

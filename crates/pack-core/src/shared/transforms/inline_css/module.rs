@@ -9,16 +9,14 @@ use turbopack_core::{
     chunk::{
         AsyncModuleInfo, ChunkItem, ChunkItemOrBatchWithAsyncModuleInfo,
         ChunkItemWithAsyncModuleInfo, ChunkType, ChunkableModule, ChunkingContext,
-        ModuleChunkItemIdExt,
     },
     context::AssetContext,
     ident::AssetIdent,
     module::{Module, ModuleSideEffects},
     module_graph::ModuleGraph,
     output::{OutputAssetsReference, OutputAssetsWithReferenced},
-    reference::{ModuleReferences, SingleChunkableModuleReference},
+    reference::ModuleReferences,
     reference_type::{CssReferenceSubType, ReferenceType},
-    resolve::ExportUsage,
     source::{OptionSource, Source},
 };
 use turbopack_css::{
@@ -26,13 +24,13 @@ use turbopack_css::{
     chunk::{CssChunk, CssChunkItem, CssChunkType, CssImport},
 };
 use turbopack_ecmascript::{
-    EcmascriptInputTransforms,
+    EcmascriptInputTransforms, EcmascriptModuleAsset, EcmascriptOptions,
     chunk::{
         EcmascriptChunkItemContent, EcmascriptChunkPlaceable, EcmascriptExports,
         ecmascript_chunk_item,
     },
-    runtime_functions::{TURBOPACK_EXPORT_NAMESPACE, TURBOPACK_EXPORT_VALUE, TURBOPACK_IMPORT},
-    utils::{StringifyJs, StringifyModuleId},
+    runtime_functions::TURBOPACK_EXPORT_VALUE,
+    utils::StringifyJs,
 };
 
 use super::source_asset::{INLINE_CSS_CONTENT, InlineCssFileSource};
@@ -225,95 +223,6 @@ impl EcmascriptChunkPlaceable for InlineCssContentModule {
     }
 }
 
-/// A side-effect boundary around the generated JavaScript style injector.
-///
-/// Dependency packages commonly declare CSS as side effectful with
-/// `sideEffects: ["**/*.css"]`. The generated injector has a synthetic `.css.js` identity so that
-/// it can be parsed as JavaScript, which no longer matches that declaration. Keep the injector
-/// explicitly side effectful while preserving its original exports through this wrapper.
-#[turbo_tasks::value]
-struct InlineCssInjectionModule {
-    inner: ResolvedVc<Box<dyn EcmascriptChunkPlaceable>>,
-}
-
-#[turbo_tasks::value_impl]
-impl Module for InlineCssInjectionModule {
-    #[turbo_tasks::function]
-    async fn ident(&self) -> Result<Vc<AssetIdent>> {
-        Ok(self
-            .inner
-            .ident()
-            .owned()
-            .await?
-            .with_modifier(rcstr!("inline css injection"))
-            .into_vc())
-    }
-
-    #[turbo_tasks::function]
-    fn source(&self) -> Vc<OptionSource> {
-        Vc::cell(None)
-    }
-
-    #[turbo_tasks::function]
-    async fn references(&self) -> Result<Vc<ModuleReferences>> {
-        Ok(Vc::cell(vec![ResolvedVc::upcast(
-            SingleChunkableModuleReference::new(
-                *ResolvedVc::upcast(self.inner),
-                rcstr!("inline css injection"),
-                ExportUsage::all(),
-            )
-            .to_resolved()
-            .await?,
-        )]))
-    }
-
-    #[turbo_tasks::function]
-    fn side_effects(&self) -> Vc<ModuleSideEffects> {
-        ModuleSideEffects::SideEffectful.cell()
-    }
-}
-
-#[turbo_tasks::value_impl]
-impl ChunkableModule for InlineCssInjectionModule {
-    #[turbo_tasks::function]
-    fn as_chunk_item(
-        self: ResolvedVc<Self>,
-        module_graph: ResolvedVc<ModuleGraph>,
-        chunking_context: ResolvedVc<Box<dyn ChunkingContext>>,
-    ) -> Vc<Box<dyn ChunkItem>> {
-        ecmascript_chunk_item(ResolvedVc::upcast(self), module_graph, chunking_context)
-    }
-}
-
-#[turbo_tasks::value_impl]
-impl EcmascriptChunkPlaceable for InlineCssInjectionModule {
-    #[turbo_tasks::function]
-    fn get_exports(&self) -> Vc<EcmascriptExports> {
-        self.inner.get_exports()
-    }
-
-    #[turbo_tasks::function]
-    async fn chunk_item_content(
-        self: Vc<Self>,
-        chunking_context: Vc<Box<dyn ChunkingContext>>,
-        _module_graph: Vc<ModuleGraph>,
-        _async_module_info: Option<Vc<AsyncModuleInfo>>,
-        _estimated: bool,
-    ) -> Result<Vc<EcmascriptChunkItemContent>> {
-        let inner = self.await?.inner;
-        let code = format!(
-            "{TURBOPACK_EXPORT_NAMESPACE}({TURBOPACK_IMPORT}({}));\n",
-            StringifyModuleId(&inner.chunk_item_id(chunking_context).await?)
-        );
-
-        Ok(EcmascriptChunkItemContent {
-            inner_code: code.into(),
-            ..Default::default()
-        }
-        .cell())
-    }
-}
-
 /// Custom module type that transforms CSS files into JavaScript modules that inject styles into
 /// the DOM at runtime.
 #[turbo_tasks::value]
@@ -350,11 +259,8 @@ impl InlineCssModuleType {
     ) -> Result<Vc<Box<dyn Module>>> {
         let asset_context: ResolvedVc<Box<dyn AssetContext>> =
             ResolvedVc::upcast(module_asset_context);
-        let environment = asset_context
-            .compile_time_info()
-            .environment()
-            .to_resolved()
-            .await?;
+        let compile_time_info = asset_context.compile_time_info().to_resolved().await?;
+        let environment = compile_time_info.environment().to_resolved().await?;
         let is_at_import = matches!(
             &reference_type,
             ReferenceType::Css(CssReferenceSubType::AtImport(_))
@@ -384,30 +290,35 @@ impl InlineCssModuleType {
             return Ok(Vc::upcast(*css));
         }
         let content_module = InlineCssContentModule { source, css }.resolved_cell();
+        let module_options_context = module_asset_context.module_options_context().await?;
+        let injector_source: ResolvedVc<Box<dyn Source>> = ResolvedVc::upcast(
+            InlineCssFileSource {
+                css: source,
+                insert,
+                inject_type,
+            }
+            .resolved_cell(),
+        );
+        let injector = EcmascriptModuleAsset::builder(
+            injector_source,
+            asset_context,
+            EcmascriptInputTransforms::empty().to_resolved().await?,
+            EcmascriptOptions {
+                tree_shaking_mode: module_options_context.tree_shaking_mode,
+                ..Default::default()
+            }
+            .resolved_cell(),
+            compile_time_info,
+            module_options_context.side_effect_free_packages,
+        )
+        .with_inner_assets(ResolvedVc::cell(fxindexmap!(
+            rcstr!(INLINE_CSS_CONTENT) => ResolvedVc::upcast(content_module)
+        )))
+        .build()
+        .to_resolved()
+        .await?;
 
-        let injector = module_asset_context
-            .process(
-                Vc::upcast(
-                    InlineCssFileSource {
-                        css: source,
-                        insert,
-                        inject_type,
-                    }
-                    .cell(),
-                ),
-                ReferenceType::Internal(ResolvedVc::cell(fxindexmap!(
-                    rcstr!(INLINE_CSS_CONTENT) => ResolvedVc::upcast(content_module)
-                ))),
-            )
-            .module()
-            .to_resolved()
-            .await?;
-        let injector = ResolvedVc::try_downcast::<Box<dyn EcmascriptChunkPlaceable>>(injector)
-            .context("inline CSS injector did not produce an ECMAScript module")?;
-
-        Ok(Vc::upcast(
-            InlineCssInjectionModule { inner: injector }.cell(),
-        ))
+        Ok(Vc::upcast(*injector))
     }
 }
 
