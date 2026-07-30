@@ -1,0 +1,2355 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CliOutputSchema",
+  "anyOf": [
+    {
+      "$ref": "#/definitions/VersionSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/HelpSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/InstallSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/UninstallSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/UpdateSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/RebuildSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/CleanSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/DepsSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/ListSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/RunSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/ExecuteSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/ViewSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/LinkSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/PackSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/PublishSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/PingSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/WhoamiSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/LogoutSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/ConfigSetSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/ConfigGetSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/ConfigListSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/InitSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/CompletionsSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/CustomSuccessSchema"
+    },
+    {
+      "$ref": "#/definitions/FailureEnvelope"
+    }
+  ],
+  "definitions": {
+    "CapturedOutput": {
+      "type": "object",
+      "required": [
+        "bytes",
+        "tail",
+        "truncated"
+      ],
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tail": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "CleanCommand": {
+      "type": "string",
+      "enum": [
+        "clean"
+      ]
+    },
+    "CleanPartialResult": {
+      "type": "object",
+      "required": [
+        "deleted"
+      ],
+      "properties": {
+        "deleted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageVersion"
+          }
+        }
+      }
+    },
+    "CleanResult": {
+      "type": "object",
+      "required": [
+        "deleted",
+        "pattern",
+        "summary"
+      ],
+      "properties": {
+        "deleted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageVersion"
+          }
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "summary": {
+          "$ref": "#/definitions/CleanSummary"
+        }
+      }
+    },
+    "CleanSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/CleanCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/CleanResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "CleanSummary": {
+      "type": "object",
+      "required": [
+        "deleted",
+        "matched"
+      ],
+      "properties": {
+        "deleted": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "matched": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "CompletionsCommand": {
+      "type": "string",
+      "enum": [
+        "completions"
+      ]
+    },
+    "CompletionsResult": {
+      "type": "object",
+      "required": [
+        "script",
+        "shell"
+      ],
+      "properties": {
+        "script": {
+          "type": "string"
+        },
+        "shell": {
+          "type": "string"
+        }
+      }
+    },
+    "CompletionsSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/CompletionsCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/CompletionsResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "ConfigCommand": {
+      "type": "string",
+      "enum": [
+        "config"
+      ]
+    },
+    "ConfigGetResult": {
+      "type": "object",
+      "required": [
+        "source",
+        "values"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ConfigGetSubcommand": {
+      "type": "string",
+      "enum": [
+        "get"
+      ]
+    },
+    "ConfigGetSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion",
+        "subcommand"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ConfigCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ConfigGetResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        },
+        "subcommand": {
+          "$ref": "#/definitions/ConfigGetSubcommand"
+        }
+      }
+    },
+    "ConfigListResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "scope",
+        "values"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ConfigListSubcommand": {
+      "type": "string",
+      "enum": [
+        "list"
+      ]
+    },
+    "ConfigListSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion",
+        "subcommand"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ConfigCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ConfigListResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        },
+        "subcommand": {
+          "$ref": "#/definitions/ConfigListSubcommand"
+        }
+      }
+    },
+    "ConfigSetResult": {
+      "type": "object",
+      "required": [
+        "scope",
+        "values"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ConfigSetSubcommand": {
+      "type": "string",
+      "enum": [
+        "set"
+      ]
+    },
+    "ConfigSetSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion",
+        "subcommand"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ConfigCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ConfigSetResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        },
+        "subcommand": {
+          "$ref": "#/definitions/ConfigSetSubcommand"
+        }
+      }
+    },
+    "CustomCommand": {
+      "type": "string",
+      "enum": [
+        "custom"
+      ]
+    },
+    "CustomResult": {
+      "type": "object",
+      "required": [
+        "configuredCommand",
+        "execution",
+        "name"
+      ],
+      "properties": {
+        "configuredCommand": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/ProcessExecution"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "CustomSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/CustomCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/CustomResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "DependenciesSummary": {
+      "type": "object",
+      "required": [
+        "packages"
+      ],
+      "properties": {
+        "packages": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "DependencyOperation": {
+      "type": "string",
+      "enum": [
+        "install",
+        "add",
+        "remove",
+        "update",
+        "rebuild"
+      ]
+    },
+    "DependencyScope": {
+      "type": "string",
+      "enum": [
+        "local",
+        "global"
+      ]
+    },
+    "DependencySummary": {
+      "type": "object",
+      "required": [
+        "added",
+        "changed",
+        "downloadedBytes",
+        "removed",
+        "reused"
+      ],
+      "properties": {
+        "added": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "changed": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "downloadedBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "removed": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "reused": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "DepsCommand": {
+      "type": "string",
+      "enum": [
+        "deps"
+      ]
+    },
+    "DepsResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "mode",
+            "outputPath",
+            "summary"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "dependencies"
+              ]
+            },
+            "outputPath": {
+              "type": "string"
+            },
+            "summary": {
+              "$ref": "#/definitions/DependenciesSummary"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode",
+            "outputPath",
+            "summary"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "workspace"
+              ]
+            },
+            "outputPath": {
+              "type": "string"
+            },
+            "summary": {
+              "$ref": "#/definitions/WorkspaceSummary"
+            }
+          }
+        }
+      ]
+    },
+    "DepsSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/DepsCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/DepsResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "ErrorDetails": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "executions",
+            "kind"
+          ],
+          "properties": {
+            "executions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/LifecycleExecution"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "lifecycle"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "package",
+            "requiredBy"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "dependency"
+              ]
+            },
+            "package": {
+              "$ref": "#/definitions/RequestedPackage"
+            },
+            "requiredBy": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RequiredBy"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "durationMs",
+            "kind",
+            "registry",
+            "status"
+          ],
+          "properties": {
+            "durationMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "registry"
+              ]
+            },
+            "registry": {
+              "type": "string"
+            },
+            "status": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "filesystem"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "execution",
+            "kind"
+          ],
+          "properties": {
+            "execution": {
+              "$ref": "#/definitions/ProcessExecution"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "process"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ErrorKind": {
+      "type": "string",
+      "enum": [
+        "transient",
+        "usage",
+        "auth",
+        "not_found",
+        "rate_limited",
+        "precondition",
+        "local"
+      ]
+    },
+    "ErrorOutput": {
+      "type": "object",
+      "required": [
+        "category",
+        "causes",
+        "code",
+        "exitCode",
+        "message"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "#/definitions/ErrorKind"
+        },
+        "causes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ErrorDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "logPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "partialResult": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PartialResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suggestion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ExecutableSource": {
+      "type": "string",
+      "enum": [
+        "local",
+        "cache"
+      ]
+    },
+    "ExecuteCommand": {
+      "type": "string",
+      "enum": [
+        "execute"
+      ]
+    },
+    "ExecuteResult": {
+      "type": "object",
+      "required": [
+        "executable",
+        "execution",
+        "requested",
+        "source"
+      ],
+      "properties": {
+        "executable": {
+          "type": "string"
+        },
+        "execution": {
+          "$ref": "#/definitions/ProcessExecution"
+        },
+        "requested": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/ExecutableSource"
+        }
+      }
+    },
+    "ExecuteSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ExecuteCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ExecuteResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "ExecutionStatus": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed",
+        "failed_to_start"
+      ]
+    },
+    "FailureEnvelope": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "error",
+        "ok",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "error": {
+          "$ref": "#/definitions/ErrorOutput"
+        },
+        "ok": {
+          "type": "boolean",
+          "const": false
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "subcommand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "HelpCommand": {
+      "type": "string",
+      "enum": [
+        "help"
+      ]
+    },
+    "HelpResult": {
+      "type": "object",
+      "required": [
+        "target",
+        "text"
+      ],
+      "properties": {
+        "target": {
+          "type": "object",
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "subcommand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "HelpSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/HelpCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/HelpResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "InitCommand": {
+      "type": "string",
+      "enum": [
+        "init"
+      ]
+    },
+    "InitResult": {
+      "type": "object",
+      "required": [
+        "name",
+        "path",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "InitSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/InitCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/InitResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "InstallCommand": {
+      "type": "string",
+      "enum": [
+        "install"
+      ]
+    },
+    "InstallResult": {
+      "type": "object",
+      "required": [
+        "operation",
+        "requested",
+        "resolved",
+        "scope",
+        "summary",
+        "workspace"
+      ],
+      "properties": {
+        "operation": {
+          "$ref": "#/definitions/DependencyOperation"
+        },
+        "requested": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resolved": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageVersion"
+          }
+        },
+        "scope": {
+          "$ref": "#/definitions/DependencyScope"
+        },
+        "summary": {
+          "$ref": "#/definitions/DependencySummary"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      }
+    },
+    "InstallSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/InstallCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/InstallResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "LifecycleExecution": {
+      "type": "object",
+      "required": [
+        "command",
+        "cwd",
+        "durationMs",
+        "event",
+        "exitCode",
+        "package",
+        "status",
+        "stderr",
+        "stdout",
+        "workspace"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "event": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "package": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ExecutionStatus"
+        },
+        "stderr": {
+          "$ref": "#/definitions/CapturedOutput"
+        },
+        "stdout": {
+          "$ref": "#/definitions/CapturedOutput"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      }
+    },
+    "LinkCommand": {
+      "type": "string",
+      "enum": [
+        "link"
+      ]
+    },
+    "LinkDirection": {
+      "type": "string",
+      "enum": [
+        "global_to_local",
+        "local_to_global"
+      ]
+    },
+    "LinkEntry": {
+      "type": "object",
+      "required": [
+        "bins",
+        "package",
+        "source",
+        "target"
+      ],
+      "properties": {
+        "bins": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "package": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      }
+    },
+    "LinkPartialResult": {
+      "type": "object",
+      "required": [
+        "links"
+      ],
+      "properties": {
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LinkEntry"
+          }
+        }
+      }
+    },
+    "LinkResult": {
+      "type": "object",
+      "required": [
+        "direction",
+        "links"
+      ],
+      "properties": {
+        "direction": {
+          "$ref": "#/definitions/LinkDirection"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LinkEntry"
+          }
+        }
+      }
+    },
+    "LinkSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/LinkCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/LinkResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "ListCommand": {
+      "type": "string",
+      "enum": [
+        "list"
+      ]
+    },
+    "ListPathNode": {
+      "type": "object",
+      "required": [
+        "name",
+        "path",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "ListResult": {
+      "type": "object",
+      "required": [
+        "package",
+        "paths",
+        "truncated"
+      ],
+      "properties": {
+        "package": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/ListPathNode"
+            }
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ListSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ListCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ListResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "LogoutCommand": {
+      "type": "string",
+      "enum": [
+        "logout"
+      ]
+    },
+    "LogoutResult": {
+      "type": "object",
+      "required": [
+        "registry",
+        "remoteRevoked"
+      ],
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "remoteRevoked": {
+          "type": "boolean"
+        }
+      }
+    },
+    "LogoutSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/LogoutCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/LogoutResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "PackCommand": {
+      "type": "string",
+      "enum": [
+        "pack"
+      ]
+    },
+    "PackFile": {
+      "type": "object",
+      "required": [
+        "path",
+        "size"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "PackResult": {
+      "type": "object",
+      "required": [
+        "dryRun",
+        "filename",
+        "files",
+        "integrity",
+        "name",
+        "packedSize",
+        "tarballPath",
+        "unpackedSize",
+        "version"
+      ],
+      "properties": {
+        "dryRun": {
+          "type": "boolean"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackFile"
+          }
+        },
+        "integrity": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "packedSize": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tarballPath": {
+          "type": "string"
+        },
+        "unpackedSize": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "PackSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/PackCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/PackResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "PackageVersion": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "PartialResult": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PublishPartialResult"
+        },
+        {
+          "$ref": "#/definitions/RunPartialResult"
+        },
+        {
+          "$ref": "#/definitions/LinkPartialResult"
+        },
+        {
+          "$ref": "#/definitions/CleanPartialResult"
+        }
+      ]
+    },
+    "PingCommand": {
+      "type": "string",
+      "enum": [
+        "ping"
+      ]
+    },
+    "PingResult": {
+      "type": "object",
+      "required": [
+        "latencyMs",
+        "registry",
+        "supportsSemver"
+      ],
+      "properties": {
+        "latencyMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "registry": {
+          "type": "string"
+        },
+        "supportsSemver": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PingSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/PingCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/PingResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "ProcessExecution": {
+      "type": "object",
+      "required": [
+        "command",
+        "cwd",
+        "durationMs",
+        "exitCode",
+        "status",
+        "stderr",
+        "stdout"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "status": {
+          "$ref": "#/definitions/ExecutionStatus"
+        },
+        "stderr": {
+          "$ref": "#/definitions/CapturedOutput"
+        },
+        "stdout": {
+          "$ref": "#/definitions/CapturedOutput"
+        }
+      }
+    },
+    "PublishCommand": {
+      "type": "string",
+      "enum": [
+        "publish"
+      ]
+    },
+    "PublishPartialResult": {
+      "type": "object",
+      "required": [
+        "packages"
+      ],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PublishedPackage"
+          }
+        }
+      }
+    },
+    "PublishResult": {
+      "type": "object",
+      "required": [
+        "dryRun",
+        "packages"
+      ],
+      "properties": {
+        "dryRun": {
+          "type": "boolean"
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PublishedPackage"
+          }
+        }
+      }
+    },
+    "PublishSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/PublishCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/PublishResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "PublishedPackage": {
+      "type": "object",
+      "required": [
+        "access",
+        "files",
+        "integrity",
+        "name",
+        "packedSize",
+        "provenance",
+        "registry",
+        "tag",
+        "version"
+      ],
+      "properties": {
+        "access": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackFile"
+          }
+        },
+        "integrity": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "packedSize": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "provenance": {
+          "type": "boolean"
+        },
+        "registry": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "RebuildCommand": {
+      "type": "string",
+      "enum": [
+        "rebuild"
+      ]
+    },
+    "RebuildResult": {
+      "type": "object",
+      "required": [
+        "operation",
+        "summary"
+      ],
+      "properties": {
+        "operation": {
+          "$ref": "#/definitions/DependencyOperation"
+        },
+        "summary": {
+          "$ref": "#/definitions/RebuildSummary"
+        }
+      }
+    },
+    "RebuildSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/RebuildCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/RebuildResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "RebuildSummary": {
+      "type": "object",
+      "required": [
+        "bins",
+        "packages",
+        "scripts"
+      ],
+      "properties": {
+        "bins": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "packages": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "scripts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "RequestedPackage": {
+      "type": "object",
+      "required": [
+        "name",
+        "spec"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "spec": {
+          "type": "string"
+        }
+      }
+    },
+    "RequiredBy": {
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "RunCommand": {
+      "type": "string",
+      "enum": [
+        "run"
+      ]
+    },
+    "RunPartialResult": {
+      "type": "object",
+      "required": [
+        "executions"
+      ],
+      "properties": {
+        "executions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LifecycleExecution"
+          }
+        }
+      }
+    },
+    "RunResult": {
+      "type": "object",
+      "required": [
+        "executions",
+        "script",
+        "skipped"
+      ],
+      "properties": {
+        "executions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LifecycleExecution"
+          }
+        },
+        "script": {
+          "type": "string"
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SkippedExecution"
+          }
+        }
+      }
+    },
+    "RunSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/RunCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/RunResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "SchemaVersionOne": {
+      "type": "integer",
+      "const": 1
+    },
+    "SkippedExecution": {
+      "type": "object",
+      "required": [
+        "cwd",
+        "package",
+        "workspace"
+      ],
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      }
+    },
+    "SuccessMarker": {
+      "type": "boolean",
+      "const": true
+    },
+    "UninstallCommand": {
+      "type": "string",
+      "enum": [
+        "uninstall"
+      ]
+    },
+    "UninstallResult": {
+      "type": "object",
+      "required": [
+        "operation",
+        "removed",
+        "requested",
+        "scope",
+        "summary",
+        "workspace"
+      ],
+      "properties": {
+        "operation": {
+          "$ref": "#/definitions/DependencyOperation"
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageVersion"
+          }
+        },
+        "requested": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "$ref": "#/definitions/DependencyScope"
+        },
+        "summary": {
+          "$ref": "#/definitions/DependencySummary"
+        },
+        "workspace": {
+          "type": "string"
+        }
+      }
+    },
+    "UninstallSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/UninstallCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/UninstallResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "UpdateCommand": {
+      "type": "string",
+      "enum": [
+        "update"
+      ]
+    },
+    "UpdateResult": {
+      "type": "object",
+      "required": [
+        "force",
+        "operation",
+        "scope",
+        "summary",
+        "updated",
+        "workspace"
+      ],
+      "properties": {
+        "force": {
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/definitions/DependencyOperation"
+        },
+        "scope": {
+          "$ref": "#/definitions/DependencyScope"
+        },
+        "summary": {
+          "$ref": "#/definitions/DependencySummary"
+        },
+        "updated": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UpdatedPackage"
+          }
+        },
+        "workspace": {
+          "type": "string"
+        }
+      }
+    },
+    "UpdateSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/UpdateCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/UpdateResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "UpdatedPackage": {
+      "type": "object",
+      "required": [
+        "fromVersion",
+        "name",
+        "toVersion"
+      ],
+      "properties": {
+        "fromVersion": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "toVersion": {
+          "type": "string"
+        }
+      }
+    },
+    "VersionCommand": {
+      "type": "string",
+      "enum": [
+        "version"
+      ]
+    },
+    "VersionResult": {
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "VersionSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/VersionCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/VersionResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "ViewCommand": {
+      "type": "string",
+      "enum": [
+        "view"
+      ]
+    },
+    "ViewDist": {
+      "type": "object",
+      "properties": {
+        "fileCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "integrity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shasum": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tarball": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unpackedSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ViewResult": {
+      "type": "object",
+      "required": [
+        "dependencies",
+        "dist",
+        "distTags",
+        "name",
+        "requested",
+        "version"
+      ],
+      "properties": {
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dist": {
+          "$ref": "#/definitions/ViewDist"
+        },
+        "distTags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "homepage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "license": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "requested": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "ViewSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ViewCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ViewResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "WhoamiCommand": {
+      "type": "string",
+      "enum": [
+        "whoami"
+      ]
+    },
+    "WhoamiResult": {
+      "type": "object",
+      "required": [
+        "registry",
+        "username"
+      ],
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      }
+    },
+    "WhoamiSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/WhoamiCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/WhoamiResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "WorkspaceSummary": {
+      "type": "object",
+      "required": [
+        "edges",
+        "layers",
+        "workspaces"
+      ],
+      "properties": {
+        "edges": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "layers": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "workspaces": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    }
+  }
+}

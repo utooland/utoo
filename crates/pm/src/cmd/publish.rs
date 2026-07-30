@@ -8,11 +8,18 @@ use utoo_ruborist::spec::Protocol;
 
 use crate::helper::workspace::{init_project_root, update_cwd_to_project};
 use crate::model::RunMode;
+use crate::model::cli_output::{
+    PackFile, PartialResult, PublishPartialResult, PublishResult, PublishedPackage,
+};
 use crate::model::package::{PackageInfo, PublishMeta};
-use crate::service::publish::{self as publish_service, PublishOptions};
+use crate::service::publish::{self as publish_service, PublishOptions, PublishOutcome, WebAuth};
+use crate::service::script::{ScriptOutput, script_failure_details};
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
-use crate::util::cli_enum::PublishAccess;
+use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
+use crate::util::invocation;
+use crate::util::presenter::emit;
 use crate::util::user_config::{get_or_load_package_json, get_registry};
+use crate::{error::CliError, error::classify};
 
 /// Publish one or more packages.
 ///
@@ -26,14 +33,56 @@ pub async fn publish(
     otp: Option<&str>,
     access: Option<PublishAccess>,
     filter: WorkspaceFilter,
-    provenance: bool,
+    provenance: ProvenancePolicy,
 ) -> Result<()> {
     let cwd = std::env::current_dir().context("Failed to get current directory")?;
     let roots = resolve_publish_roots(&cwd, filter).await?;
+    let mut packages = Vec::with_capacity(roots.len());
+    let script_output = if invocation::json() {
+        ScriptOutput::Machine
+    } else {
+        ScriptOutput::Verbose
+    };
+    let web_auth = if !invocation::json() && invocation::interactive() {
+        WebAuth::Allow
+    } else {
+        WebAuth::Deny
+    };
+    let options = PublishCommandOptions {
+        tag,
+        mode,
+        otp,
+        access,
+        provenance,
+        script_output,
+        web_auth,
+    };
     for root in roots {
-        publish_one(&root, tag, mode, otp, access, provenance).await?;
+        match publish_one(&root, &options).await {
+            Ok(outcome) => {
+                if !invocation::json() {
+                    print_publish_result(&outcome.package, mode)?;
+                }
+                packages.push(outcome.package);
+                if let Some(error) = outcome.lifecycle_error {
+                    return if invocation::json() {
+                        Err(partial_publish_error(error, packages))
+                    } else {
+                        Err(error)
+                    };
+                }
+            }
+            Err(error) if invocation::json() && !packages.is_empty() => {
+                return Err(partial_publish_error(error, packages));
+            }
+            Err(error) => return Err(error),
+        }
     }
-    Ok(())
+    let output = PublishResult {
+        dry_run: mode == RunMode::DryRun,
+        packages: packages.into_iter().map(|package| package.output).collect(),
+    };
+    emit("publish", &output, || Ok(()))
 }
 
 /// Resolve the set of package directories to publish, preserving workspace
@@ -67,12 +116,8 @@ async fn resolve_publish_roots(cwd: &Path, filter: WorkspaceFilter) -> Result<Ve
 /// Validate, pack, and publish a single package located at `package_root`.
 async fn publish_one(
     package_root: &Path,
-    tag: Option<&str>,
-    mode: RunMode,
-    otp: Option<&str>,
-    access: Option<PublishAccess>,
-    provenance: bool,
-) -> Result<()> {
+    options: &PublishCommandOptions<'_>,
+) -> Result<PublishOneOutcome> {
     // Run each publish from inside its own package directory, matching the
     // single-package flow (`update_cwd_to_project`). The filtered path anchors
     // resolution at the workspace root, so without this every member would
@@ -85,10 +130,11 @@ async fn publish_one(
     let meta = PublishMeta::from_package_json(&pkg);
     meta.validate()?;
 
-    let tag = meta.resolve_tag(tag)?;
-    let access = meta.resolve_access(access)?;
+    let tag = meta.resolve_tag(options.tag)?;
+    let access = meta.resolve_access(options.access)?;
+    let access_name: &'static str = access.into();
     // CLI `--provenance` OR `publishConfig.provenance` OR `NPM_CONFIG_PROVENANCE`.
-    let provenance = meta.resolve_provenance(provenance);
+    let provenance = meta.resolve_provenance(options.provenance);
     let registry = meta
         .publish_config
         .registry
@@ -100,36 +146,106 @@ async fn publish_one(
         package_info: &package_info,
         registry: &registry,
         tag: &tag,
-        mode,
-        otp,
+        mode: options.mode,
+        otp: options.otp,
         access,
         provenance,
+        script_output: options.script_output,
+        web_auth: options.web_auth,
     })
     .await?;
+    let (result, lifecycle_error) = match result {
+        PublishOutcome::Completed(result) => (result, None),
+        PublishOutcome::Committed {
+            result,
+            lifecycle_error,
+        } => (result, Some(lifecycle_error)),
+    };
 
-    let mut stdout = io::stdout().lock();
-    if mode == RunMode::DryRun {
-        // Surface `workspace:`/`catalog:` specifiers rewritten to concrete
-        // versions so the user can confirm resolution before publishing.
-        print_resolved_protocol_deps(&mut stdout, &pkg, &result.pack.manifest)?;
-        writeln!(
-            stdout,
-            "{}",
-            format!(
-                "(dry run) Would publish {}@{} to {} with tag '{}'",
-                result.pack.name, result.pack.version, result.registry, result.tag
-            )
-            .yellow()
-        )?;
+    let mut files = result
+        .pack
+        .files
+        .iter()
+        .map(|(path, size)| PackFile {
+            path: path.replace('\\', "/"),
+            size: *size,
+        })
+        .collect::<Vec<_>>();
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    Ok(PublishOneOutcome {
+        package: PublishedPackageRecord {
+            output: crate::model::cli_output::PublishedPackage {
+                name: result.pack.name,
+                version: result.pack.version,
+                registry: result.registry,
+                tag: result.tag,
+                access: access_name.to_string(),
+                provenance: provenance.is_enabled(),
+                files,
+                packed_size: result.pack.packed_size,
+                integrity: result.pack.integrity,
+            },
+            resolved_dependencies: resolved_protocol_deps(&pkg, &result.pack.manifest),
+        },
+        lifecycle_error,
+    })
+}
+
+fn partial_publish_error(
+    error: anyhow::Error,
+    completed_packages: Vec<PublishedPackageRecord>,
+) -> anyhow::Error {
+    let details = script_failure_details(&error);
+    let completed_packages = completed_packages
+        .into_iter()
+        .map(|package| package.output)
+        .collect();
+    let mut cli_error = if let Some(source) = error.downcast_ref::<CliError>() {
+        let mut copied = CliError::new(source.kind(), source.message()).with_code(source.code());
+        if let Some(suggestion) = source.suggestion() {
+            copied = copied.with_suggestion(suggestion);
+        }
+        if let Some(details) = source.details() {
+            copied = copied.with_details(details.clone());
+        }
+        copied
     } else {
-        writeln!(
+        CliError::new(classify(&error), format!("{error:#}"))
+    }
+    .with_partial_result(PartialResult::Publish(PublishPartialResult {
+        packages: completed_packages,
+    }));
+    if let Some(details) = details {
+        cli_error = cli_error.with_code("script_failed").with_details(details);
+    }
+    cli_error.into()
+}
+
+fn print_publish_result(package: &PublishedPackageRecord, mode: RunMode) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    match mode {
+        RunMode::DryRun => {
+            print_resolved_protocol_deps(&mut stdout, &package.resolved_dependencies)?;
+            writeln!(
+                stdout,
+                "{}",
+                format!(
+                    "(dry run) Would publish {}@{} to {} with tag '{}'",
+                    package.output.name,
+                    package.output.version,
+                    package.output.registry,
+                    package.output.tag
+                )
+                .yellow()
+            )
+        }
+        RunMode::Live => writeln!(
             stdout,
             "{}",
-            format!("+ {}@{}", result.pack.name, result.pack.version).green()
-        )?;
-    }
-
-    Ok(())
+            format!("+ {}@{}", package.output.name, package.output.version).green()
+        ),
+    }?;
+    stdout.flush()
 }
 
 /// Print dependencies whose `workspace:`/`catalog:` specifier was rewritten to a
@@ -139,9 +255,32 @@ async fn publish_one(
 /// standalone package), nothing is printed. Entries are sorted for stable output.
 fn print_resolved_protocol_deps(
     w: &mut impl Write,
+    rewritten: &[ResolvedDependency],
+) -> io::Result<()> {
+    if rewritten.is_empty() {
+        return Ok(());
+    }
+
+    writeln!(w, "{}", "Resolved workspace/catalog dependencies:".dimmed())?;
+    for dep in rewritten {
+        writeln!(
+            w,
+            "  {} {}: {} {} {}",
+            dep.dependency_type.dimmed(),
+            dep.name,
+            dep.from,
+            "->".dimmed(),
+            dep.to.green()
+        )?;
+    }
+    writeln!(w)?;
+    Ok(())
+}
+
+fn resolved_protocol_deps(
     original: &PackageJson,
     resolved: &PackageJson,
-) -> io::Result<()> {
+) -> Vec<ResolvedDependency> {
     type DepMap = Option<HashMap<String, String>>;
     let maps: [(&str, &DepMap, &DepMap); 4] = [
         (
@@ -166,7 +305,7 @@ fn print_resolved_protocol_deps(
         ),
     ];
 
-    let mut rewritten: Vec<(&str, &str, &str, &str)> = Vec::new();
+    let mut rewritten = Vec::new();
     for (label, orig, res) in maps {
         let (Some(orig), Some(res)) = (orig, res) else {
             continue;
@@ -175,27 +314,44 @@ fn print_resolved_protocol_deps(
             if Protocol::strip_prefix(spec).is_some()
                 && let Some(resolved_spec) = res.get(name)
             {
-                rewritten.push((label, name, spec, resolved_spec));
+                rewritten.push(ResolvedDependency {
+                    dependency_type: label.to_string(),
+                    name: name.clone(),
+                    from: spec.clone(),
+                    to: resolved_spec.clone(),
+                });
             }
         }
     }
 
-    if rewritten.is_empty() {
-        return Ok(());
-    }
+    rewritten
+        .sort_unstable_by(|a, b| (&a.dependency_type, &a.name).cmp(&(&b.dependency_type, &b.name)));
+    rewritten
+}
 
-    rewritten.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-    writeln!(w, "{}", "Resolved workspace/catalog dependencies:".dimmed())?;
-    for (label, name, orig_spec, resolved_spec) in rewritten {
-        writeln!(
-            w,
-            "  {} {name}: {} {} {}",
-            label.dimmed(),
-            orig_spec,
-            "->".dimmed(),
-            resolved_spec.green()
-        )?;
-    }
-    writeln!(w)?;
-    Ok(())
+struct PublishedPackageRecord {
+    output: PublishedPackage,
+    resolved_dependencies: Vec<ResolvedDependency>,
+}
+
+struct PublishOneOutcome {
+    package: PublishedPackageRecord,
+    lifecycle_error: Option<anyhow::Error>,
+}
+
+struct PublishCommandOptions<'a> {
+    tag: Option<&'a str>,
+    mode: RunMode,
+    otp: Option<&'a str>,
+    access: Option<PublishAccess>,
+    provenance: ProvenancePolicy,
+    script_output: ScriptOutput,
+    web_auth: WebAuth,
+}
+
+struct ResolvedDependency {
+    dependency_type: String,
+    name: String,
+    from: String,
+    to: String,
 }

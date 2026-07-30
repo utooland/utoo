@@ -90,24 +90,29 @@ pub fn print_pack_details(
 /// Kept separate from `ResolveError::Display` because tree-drawing with box
 /// characters is a CLI presentation concern.
 pub fn format_resolve_chain(err: &anyhow::Error) -> Option<String> {
-    let chain = err
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<ResolveError<RegistryError>>())
-        .and_then(|re| match re {
-            ResolveError::WithChain { chain, .. } => Some(chain),
-            _ => None,
-        })?;
+    let chain = resolve_chain(err)?;
 
     let mut out = String::from("required by:");
     for (i, (name, version)) in chain.iter().enumerate() {
         if i == 0 {
-            let _ = write!(out, "\n  {name}@{version}");
+            write!(out, "\n  {name}@{version}")
+                .expect("writing a dependency chain to String cannot fail");
         } else {
             let indent = "    ".repeat(i - 1);
-            let _ = write!(out, "\n  {indent}└── {name}@{version}");
+            write!(out, "\n  {indent}└── {name}@{version}")
+                .expect("writing a dependency chain to String cannot fail");
         }
     }
     Some(out)
+}
+
+pub fn resolve_chain(err: &anyhow::Error) -> Option<&[(String, String)]> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<ResolveError<RegistryError>>())
+        .and_then(|re| match re {
+            ResolveError::WithChain { chain, .. } => Some(chain.as_slice()),
+            _ => None,
+        })
 }
 
 /// `"3 packages installed"` / `"1 package uninstalled"` — the count line
@@ -390,13 +395,11 @@ pub fn print_dep_tree(
     }
 }
 
-/// Display helpers for `ut view`. Kept in their own module because they use
-/// `owo_colors` while the rest of this file uses `colored`; both traits have
-/// blanket-style impls whose methods collide when imported in the same scope.
+/// Display helpers for `ut view`.
 mod package_view {
     use anyhow::Result;
     use chrono::Utc;
-    use owo_colors::OwoColorize;
+    use colored::Colorize;
     use utoo_ruborist::manifest::{FullManifest, VersionManifest};
 
     use super::print_grid;
@@ -459,7 +462,7 @@ mod package_view {
             version_manifest.core.version.bright_green(),
             license.yellow(),
             deps_str.cyan(),
-            versions_count.magenta()
+            versions_count.to_string().magenta()
         );
 
         if !description.is_empty() {
@@ -582,7 +585,7 @@ mod package_view {
             println!(
                 "\n{} {}",
                 "dependencies:".bright_yellow().bold(),
-                dependencies.len().white()
+                dependencies.len().to_string().white()
             );
 
             let show_count = 24;
