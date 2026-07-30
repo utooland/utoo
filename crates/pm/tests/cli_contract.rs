@@ -14,6 +14,15 @@ fn utoo() -> Command {
     command
 }
 
+fn assert_same_path(actual: &str, expected: &Path) {
+    let actual = Path::new(actual);
+    assert!(actual.is_absolute(), "{} is not absolute", actual.display());
+    assert_eq!(
+        fs::canonicalize(actual).unwrap(),
+        fs::canonicalize(expected).unwrap()
+    );
+}
+
 fn serve_publish_registry_responses(
     responses: &[(&str, &str)],
 ) -> (String, thread::JoinHandle<()>) {
@@ -249,10 +258,9 @@ fn install_json_lifecycle_failure_is_one_stable_error_document() {
     assert_eq!(execution["package"], "fixture");
     assert_eq!(execution["event"], "install");
     assert_eq!(execution["command"], "node lifecycle.js");
-    let canonical_project = fs::canonicalize(project.path()).unwrap();
-    assert_eq!(
-        execution["cwd"].as_str(),
-        Some(canonical_project.to_string_lossy().as_ref())
+    assert_same_path(
+        execution["cwd"].as_str().expect("cwd should be a string"),
+        project.path(),
     );
     assert_eq!(execution["status"], "failed");
     assert_eq!(execution["exitCode"], 42);
@@ -656,12 +664,11 @@ fn init_json_returns_the_created_manifest_identity() {
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["command"], "init");
     assert_eq!(value["result"]["version"], "1.0.0");
-    assert_eq!(
-        value["result"]["path"],
-        fs::canonicalize(project.path().join("package.json"))
-            .unwrap()
-            .to_string_lossy()
-            .as_ref()
+    assert_same_path(
+        value["result"]["path"]
+            .as_str()
+            .expect("path should be a string"),
+        &project.path().join("package.json"),
     );
 }
 
