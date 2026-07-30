@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const externalNamespace = require("../../../helpers/external-namespace");
 
 global.$ = { ready: true };
 
@@ -19,6 +20,7 @@ async function evaluateExternal(factory) {
         });
       });
     },
+    N: externalNamespace,
     n(value) {
       namespace = value;
     },
@@ -49,17 +51,24 @@ async function main() {
     }
   }
 
-  assert.strictEqual(factories.length, 3);
+  assert.strictEqual(factories.length, 4);
 
   const namespaces = await Promise.all(factories.map(evaluateExternal));
   const commonJsNamespace = namespaces.find((value) => value.named === true);
   const esmNamespace = namespaces.find((value) => value.named === "esm-named");
+  const nativeEsmNamespace = namespaces.find(
+    (value) => value.named === "native-esm-named",
+  );
 
   assert.deepStrictEqual(commonJsNamespace.default, {
     default: "async-value",
     named: true,
   });
   assert.strictEqual(esmNamespace.default, "async-esm-value");
+  assert.strictEqual(typeof nativeEsmNamespace.default, "function");
+  assert.strictEqual(nativeEsmNamespace.__esModule, true);
+  assert.strictEqual(nativeEsmNamespace[Symbol.toStringTag], "Module");
+  assert.doesNotThrow(() => new nativeEsmNamespace.default());
 }
 
 main().catch((error) => {

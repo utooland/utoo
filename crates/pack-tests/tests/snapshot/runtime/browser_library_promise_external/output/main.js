@@ -1,6 +1,12 @@
-var RUNTIME_PUBLIC_PATH = "_turbopack__runtime.js";
-var RELATIVE_ROOT_PATH = "/ROOT";
-var ASSET_PREFIX = "/";
+((__UTOOPACK__) => {
+if (!Array.isArray(__UTOOPACK__)) {
+    return;
+}
+
+const CHUNK_BASE_PATH = "";
+const CHUNK_SUFFIX_PATH = "";
+const RELATIVE_ROOT_PATH = "..";
+const RUNTIME_PUBLIC_PATH = "";
 /**
  * This file contains runtime types and functions that are shared between all
  * TurboPack ECMAScript runtimes.
@@ -490,36 +496,41 @@ function applyModuleFactoryName(factory) {
         value: 'module evaluation'
     });
 }
-/// <reference path="../shared/runtime/runtime-utils.ts" />
-/// A 'base' utilities to support runtime can have externals.
-/// Currently this is for node.js / edge runtime both.
-/// If a fn requires node.js specific behavior, it should be placed in `node-external-utils` instead.
-async function externalImport(id) {
-    let raw;
-    try {
-        raw = await import(id);
-    } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
-        throw new Error(`Failed to load external module ${id}: ${err}`);
+/**
+ * This file contains runtime types and functions that are shared between all
+ * Turbopack UMD library runtimes (DOM and Node.js).
+ *
+ * It will be appended to the runtime code of each runtime right after the
+ * shared runtime utils.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
+/// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
+// Provided by build
+let BACKEND;
+const moduleFactories = new Map();
+contextPrototype.M = moduleFactories;
+/**
+ * Determine the chunk to register from a registration entry.
+ * In library builds, chunks are always string paths or script objects.
+ */ function getChunkFromRegistration(chunk) {
+    if (typeof chunk === "string") {
+        return chunk;
+    } else if (chunk) {
+        return {
+            src: chunk.getAttribute("src")
+        };
+    } else {
+        throw new Error("chunk path is empty");
     }
-    if (raw && raw.__esModule && raw.default && 'default' in raw.default) {
-        return interopEsm(raw.default, createNS(raw), true);
-    }
-    return raw;
 }
-contextPrototype.y = externalImport;
-function externalRequire(id, thunk, esm = false) {
+/**
+ * Load CommonJS externals when a UMD bundle runs in a CommonJS environment.
+ * Browser-targeted UMD bundles need this too because their wrapper supports
+ * both global and CommonJS consumers.
+ */ function externalRequire(id, thunk, esm = false) {
     let raw;
     try {
         raw = thunk();
     } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
         throw new Error(`Failed to load external module ${id}: ${err}`);
     }
     if (!esm || raw.__esModule) {
@@ -537,10 +548,10 @@ contextPrototype.x = externalRequire;
  */ function externalNamespace(mod) {
     if (mod && mod.__esModule) return mod;
     const ns = Object.create(null);
-    const isEsmNamespace = mod && toStringTag && mod[toStringTag] === 'Module';
-    if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+    const isEsmNamespace = mod && toStringTag && mod[toStringTag] === "Module";
+    if (mod && (typeof mod === "object" || typeof mod === "function")) {
         for(const key in mod){
-            if (key === '__esModule' || !isEsmNamespace && key === 'default') {
+            if (key === "__esModule" || !isEsmNamespace && key === "default") {
                 continue;
             }
             Object.defineProperty(ns, key, {
@@ -550,182 +561,55 @@ contextPrototype.x = externalRequire;
         }
     }
     if (!isEsmNamespace) {
-        Object.defineProperty(ns, 'default', {
+        Object.defineProperty(ns, "default", {
             enumerable: true,
             value: mod
         });
     }
-    Object.defineProperty(ns, '__esModule', {
+    Object.defineProperty(ns, "__esModule", {
         value: true
     });
     if (toStringTag) {
         Object.defineProperty(ns, toStringTag, {
-            value: 'Module'
+            value: "Module"
         });
     }
     return ns;
 }
 contextPrototype.N = externalNamespace;
-/* eslint-disable @typescript-eslint/no-unused-vars */ const path = require('path');
-const relativePathToRuntimeRoot = path.relative(RUNTIME_PUBLIC_PATH, '.');
-// Compute the relative path to the `distDir`.
-const relativePathToDistRoot = path.join(relativePathToRuntimeRoot, RELATIVE_ROOT_PATH);
-const RUNTIME_ROOT = path.resolve(__filename, relativePathToRuntimeRoot);
-// Compute the absolute path to the root, by stripping distDir from the absolute path to this file.
-const ABSOLUTE_ROOT = path.resolve(__filename, relativePathToDistRoot);
+/// <reference path="./runtime-base.ts" />
+/// <reference path="./dummy.ts" />
+const moduleCache = {};
+contextPrototype.c = moduleCache;
 /**
- * Returns an absolute path to the given module path.
- * Module path should be relative, either path to a file or a directory.
- *
- * This fn allows to calculate an absolute path for some global static values, such as
- * `__dirname` or `import.meta.url` that Turbopack will not embeds in compile time.
- * See ImportMetaBinding::code_generation for the usage.
- */ function resolveAbsolutePath(modulePath) {
-    if (modulePath) {
-        return path.join(ABSOLUTE_ROOT, modulePath);
-    }
-    return ABSOLUTE_ROOT;
-}
-Context.prototype.P = resolveAbsolutePath;
-/**
- * Returns an absolute `file://` URL for the given module path.
- *
- * Uses `url.pathToFileURL` so that the resulting URL is a valid file URI on
- * all platforms (forward slashes on Windows, drive letters handled
- * correctly, path segments URL-encoded).
- */ function resolveFileUrl(modulePath) {
-    return require('url').pathToFileURL(resolveAbsolutePath(modulePath)).href;
-}
-Context.prototype.F = resolveFileUrl;
-/* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../shared/runtime/runtime-utils.ts" />
-/// <reference path="../../shared-node/base-externals-utils.ts" />
-/// <reference path="../../shared-node/node-externals-utils.ts" />
-/// <reference path="./nodejs-globals.d.ts" />
-/**
- * Base Node.js runtime shared between production and development.
- * Contains chunk loading, module caching, and other non-HMR functionality.
- */ process.env.TURBOPACK = '1';
-const url = require('url');
-const moduleFactories = new Map();
-const moduleCache = Object.create(null);
-/**
- * Returns an absolute path to the given module's id.
- */ function resolvePathFromModule(moduleId) {
-    const exported = this.r(moduleId);
-    const exportedPath = exported?.default ?? exported;
-    if (typeof exportedPath !== 'string') {
-        return exported;
-    }
-    const strippedAssetPrefix = exportedPath.slice(ASSET_PREFIX.length);
-    const resolved = path.resolve(RUNTIME_ROOT, strippedAssetPrefix);
-    return url.pathToFileURL(resolved).href;
-}
-/**
- * Exports a URL value. No suffix is added in Node.js runtime.
- */ function exportUrl(urlValue, id) {
-    exportValue.call(this, urlValue, id);
-}
-function loadRuntimeChunk(sourcePath, chunkData) {
-    if (typeof chunkData === 'string') {
-        loadRuntimeChunkPath(sourcePath, chunkData);
-    } else {
-        loadRuntimeChunkPath(sourcePath, chunkData.path);
-    }
-}
-const loadedChunks = new Set();
-const unsupportedLoadChunk = Promise.resolve(undefined);
-const loadedChunk = Promise.resolve(undefined);
-const chunkCache = new Map();
-function clearChunkCache() {
-    chunkCache.clear();
-    loadedChunks.clear();
-}
-function loadRuntimeChunkPath(sourcePath, chunkPath) {
-    if (!isJs(chunkPath)) {
-        // We only support loading JS chunks in Node.js.
-        // This branch can be hit when trying to load a CSS chunk.
-        return;
-    }
-    if (loadedChunks.has(chunkPath)) {
-        return;
-    }
-    try {
-        const resolved = path.resolve(RUNTIME_ROOT, chunkPath);
-        const chunkModules = require(resolved);
-        installCompressedModuleFactories(chunkModules, 0, moduleFactories);
-        loadedChunks.add(chunkPath);
-    } catch (cause) {
-        let errorMessage = `Failed to load chunk ${chunkPath}`;
-        if (sourcePath) {
-            errorMessage += ` from runtime for chunk ${sourcePath}`;
+ * Gets or instantiates a runtime module.
+ */ // @ts-ignore
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
+    const module = moduleCache[moduleId];
+    if (module) {
+        if (module.error) {
+            throw module.error;
         }
-        const error = new Error(errorMessage, {
-            cause
-        });
-        error.name = 'ChunkLoadError';
-        throw error;
+        return module;
     }
+    return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
 }
-function loadChunkAsync(chunkData) {
-    const chunkPath = typeof chunkData === 'string' ? chunkData : chunkData.path;
-    if (!isJs(chunkPath)) {
-        // We only support loading JS chunks in Node.js.
-        // This branch can be hit when trying to load a CSS chunk.
-        return unsupportedLoadChunk;
-    }
-    let entry = chunkCache.get(chunkPath);
-    if (entry === undefined) {
-        try {
-            // resolve to an absolute path to simplify `require` handling
-            const resolved = path.resolve(RUNTIME_ROOT, chunkPath);
-            // TODO: consider switching to `import()` to enable concurrent chunk loading and async file io
-            // However this is incompatible with hot reloading (since `import` doesn't use the require cache)
-            const chunkModules = require(resolved);
-            installCompressedModuleFactories(chunkModules, 0, moduleFactories);
-            entry = loadedChunk;
-        } catch (cause) {
-            const errorMessage = `Failed to load chunk ${chunkPath} from module ${this.m.id}`;
-            const error = new Error(errorMessage, {
-                cause
-            });
-            error.name = 'ChunkLoadError';
-            // Cache the failure promise, future requests will also get this same rejection
-            entry = Promise.reject(error);
+/**
+ * Retrieves a module from the cache, or instantiate it if it is not cached.
+ */ // Used by the backend
+// @ts-ignore
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const getOrInstantiateModuleFromParent = (id, sourceModule)=>{
+    const module = moduleCache[id];
+    if (module) {
+        if (module.error) {
+            throw module.error;
         }
-        chunkCache.set(chunkPath, entry);
+        return module;
     }
-    // TODO: Return an instrumented Promise that React can use instead of relying on referential equality.
-    return entry;
-}
-contextPrototype.l = loadChunkAsync;
-function loadChunkAsyncByUrl(chunkUrl) {
-    const path1 = url.fileURLToPath(new URL(chunkUrl, RUNTIME_ROOT));
-    return loadChunkAsync.call(this, path1);
-}
-contextPrototype.L = loadChunkAsyncByUrl;
-// Shared runtime primitive: the root that on-disk chunk paths are resolved
-// against. Used by the bundled wasm helper (exposed as `__turbopack_runtime_root__`).
-contextPrototype.w = RUNTIME_ROOT;
-const regexJsUrl = /\.js(?:\?[^#]*)?(?:#.*)?$/;
-/**
- * Checks if a given path/URL ends with .js, optionally followed by ?query or #fragment.
- */ function isJs(chunkUrlOrPath) {
-    return regexJsUrl.test(chunkUrlOrPath);
-}
-/* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
-/**
- * Production Node.js runtime.
- * Uses ModuleWithDirection and simple module instantiation without HMR support.
- */ // moduleCache and moduleFactories are declared in runtime-base.ts
-// this is read in runtime-utils.ts so it creates a module with direction for hmr
-createModuleWithDirectionFlag = true;
-const nodeContextPrototype = Context.prototype;
-nodeContextPrototype.q = exportUrl;
-nodeContextPrototype.M = moduleFactories;
-// Cast moduleCache to ModuleWithDirection for production mode
-nodeContextPrototype.c = moduleCache;
-nodeContextPrototype.R = resolvePathFromModule;
-nodeContextPrototype.C = clearChunkCache;
+    return instantiateModule(id, SourceType.Parent, sourceModule.id);
+};
 function instantiateModule(id, sourceType, sourceData) {
     const moduleFactory = moduleFactories.get(id);
     if (typeof moduleFactory !== 'function') {
@@ -734,60 +618,153 @@ function instantiateModule(id, sourceType, sourceData) {
         // and contains e.g. a `require("something")` call.
         throw new Error(factoryNotAvailableMessage(id, sourceType, sourceData));
     }
-    const module1 = createModuleWithDirection(id);
-    const exports = module1.exports;
-    moduleCache[id] = module1;
-    const context = new Context(module1, exports);
+    const module = createModuleObject(id);
+    const exports = module.exports;
+    moduleCache[id] = module;
     // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
+    const context = new Context(module, exports);
     try {
-        moduleFactory(context, module1, exports);
+        moduleFactory(context, module, exports);
     } catch (error) {
-        module1.error = error;
+        module.error = error;
         throw error;
     }
-    ;
-    module1.loaded = true;
-    if (module1.namespaceObject && module1.exports !== module1.namespaceObject) {
+    if (module.namespaceObject && module.exports !== module.namespaceObject) {
         // in case of a circular dependency: cjs1 -> esm2 -> cjs1
-        interopEsm(module1.exports, module1.namespaceObject);
+        interopEsm(module.exports, module.namespaceObject);
     }
-    return module1;
+    return module;
+}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function registerChunk(registration) {
+    const chunk = getChunkFromRegistration(registration[0]);
+    let runtimeParams;
+    // When bootstrapping we are passed a single runtimeParams object so we can distinguish purely based on length
+    if (registration.length === 2) {
+        runtimeParams = registration[1];
+    } else {
+        runtimeParams = undefined;
+        installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories);
+    }
+    return BACKEND.registerChunk(chunk, runtimeParams);
 }
 /**
- * Retrieves a module from the cache, or instantiate it if it is not cached.
- */ // @ts-ignore
-function getOrInstantiateModuleFromParent(id, sourceModule) {
-    const module1 = moduleCache[id];
-    if (module1) {
-        if (module1.error) {
-            throw module1.error;
-        }
-        return module1;
-    }
-    return instantiateModule(id, SourceType.Parent, sourceModule.id);
-}
+ * This file contains the runtime code specific to the Turbopack
+ * ECMAScript DOM runtime for library builds.
+ *
+ * It will be appended to the base runtime code in place of
+ * runtime-backend-node.ts when the target platform is browser/web.
+ *
+ * Since library builds produce a single, self-contained chunk,
+ * no dynamic chunk loading is needed. The BACKEND simply registers
+ * modules and instantiates runtime entries.
+ *
+ * The only DOM-specific addition is `loadScript` for script externals
+ * that need to be loaded from CDN or other external sources.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
+const loadedScripts = new Map();
 /**
- * Instantiates a runtime module.
- */ function instantiateRuntimeModule(chunkPath, moduleId) {
-    return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
-}
-/**
- * Retrieves a module from the cache, or instantiate it as a runtime module if it is not cached.
- */ // @ts-ignore TypeScript doesn't separate this module space from the browser runtime
-function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
-    const module1 = moduleCache[moduleId];
-    if (module1) {
-        if (module1.error) {
-            throw module1.error;
-        }
-        return module1;
+ * Load an external script by creating a <script> tag.
+ * This is used for script externals that need to be loaded from CDN or other external sources.
+ */ function loadScript(scriptUrl) {
+    // Return cached promise if script is already loading or loaded
+    let promise = loadedScripts.get(scriptUrl);
+    if (promise) {
+        return promise;
     }
-    return instantiateRuntimeModule(chunkPath, moduleId);
-}
-module.exports = (sourcePath)=>({
-        m: (id)=>getOrInstantiateRuntimeModule(sourcePath, id),
-        c: (chunkData)=>loadRuntimeChunk(sourcePath, chunkData)
+    promise = new Promise((resolve, reject)=>{
+        const script = document.createElement("script");
+        script.src = scriptUrl;
+        script.onload = ()=>resolve();
+        script.onerror = ()=>reject(new Error(`Failed to load script: ${scriptUrl}`));
+        document.head.appendChild(script);
     });
+    loadedScripts.set(scriptUrl, promise);
+    return promise;
+}
+contextPrototype.S = loadScript;
+(()=>{
+    BACKEND = {
+        registerChunk (chunk, params) {
+            if (params == null) {
+                return;
+            }
+            if (params.runtimeModuleIds.length > 0) {
+                for (const moduleId of params.runtimeModuleIds){
+                    getOrInstantiateRuntimeModule(chunk, moduleId);
+                }
+            }
+        }
+    };
+})();
+const chunksToRegister = __UTOOPACK__;
+__UTOOPACK__ = { push: registerChunk };
+chunksToRegister.forEach(registerChunk);
+function factory () {
+    const runtimeModuleIds = ["[project]/runtime/browser_library_promise_external/input/index.js [library-client] (ecmascript)"];
+    let exports;
+    for (let i = 0; i < runtimeModuleIds.length; i++) {
+        const module = moduleCache[runtimeModuleIds[i]];
+        if (module.error) throw module.error;
+        exports = module;
+    }
+    if (exports) {
+        // any ES module has to have `module.namespaceObject` defined.
+        if (exports.namespaceObject) return exports.namespaceObject;
+        // only ESM can be an async module, so we don't need to worry about exports being a promise here.
+        const raw = exports.exports;
+        return exports.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
+    }
+}
+
+if (typeof exports === 'object' && typeof module === 'object') {
+    module.exports = factory();
+} else if (typeof exports === 'object') {
+    exports["PromiseLibrary"] = factory();
+} else {
+    globalThis["PromiseLibrary"] = factory();
+}
+})([
+["main.js",
+
+"[externals]/promise-8d97b07c [external] (promise)", ((__turbopack_context__) => {
+"use strict";
+
+return __turbopack_context__.a(async function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
+try {
+var mod = await (Promise.resolve({ marker: "external value" }));
+
+__turbopack_context__.n(__turbopack_context__.N(mod));
+__turbopack_async_result__();
+} catch(e) { __turbopack_async_result__(e); }
+}, true);
+}),
+"[project]/runtime/browser_library_promise_external/input/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+return __turbopack_context__.a(async function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
+    try {
+        var __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$8d97b07c__$5b$external$5d$__$28$promise$29$__ = __turbopack_context__.i("[externals]/promise-8d97b07c [external] (promise)");
+        var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
+            __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$8d97b07c__$5b$external$5d$__$28$promise$29$__
+        ]);
+        [__TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$8d97b07c__$5b$external$5d$__$28$promise$29$__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+        ;
+        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__$5b$externals$5d2f$promise$2d$8d97b07c__$5b$external$5d$__$28$promise$29$__["default"];
+        __turbopack_context__.s([
+            "default",
+            0,
+            __TURBOPACK__default__export__
+        ]);
+        __turbopack_async_result__();
+    } catch (e) {
+        __turbopack_async_result__(e);
+    }
+}, false);
+}),
+],
+["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/browser_library_promise_external/input/index.js [library-client] (ecmascript)"]}],
+]);
 
 
-//# sourceMappingURL=_turbopack__runtime.js.map
+//# sourceMappingURL=main.js.map

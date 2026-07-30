@@ -12,7 +12,8 @@
         "type": "promise"
       },
       "async-value": "promise Promise.resolve({ default: \"async-value\", named: true })",
-      "async-esm-value": "promise Promise.resolve({ __esModule: true, default: \"async-esm-value\", named: \"esm-named\" })"
+      "async-esm-value": "promise Promise.resolve({ __esModule: true, default: \"async-esm-value\", named: \"esm-named\" })",
+      "native-esm-value": "promise import(\"data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgY2xhc3MgTmF0aXZlRXNtIHt9OyBleHBvcnQgY29uc3QgbmFtZWQgPSAnbmF0aXZlLWVzbS1uYW1lZCc7\")"
     }
   }
 }
