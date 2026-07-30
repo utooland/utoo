@@ -1520,8 +1520,14 @@ impl Project {
     /// referenced from the roots
     #[turbo_tasks::function]
     pub async fn server_changed(self: Vc<Self>, roots: Vc<OutputAssets>) -> Result<Vc<Completion>> {
-        let path = self.node_root().owned().await?;
-        Ok(any_output_changed(roots, path, true))
+        // `node_root` contains build-time evaluator assets, not endpoint output assets. Endpoint
+        // server outputs are written to `dist_root` and, when configured separately, to
+        // `server_dist_root`.
+        let paths = vec![
+            self.dist_root().owned().await?,
+            self.server_dist_root().owned().await?,
+        ];
+        Ok(any_output_changed(roots, paths, true))
     }
 
     /// Completion when client side changes are detected in output assets
@@ -1529,7 +1535,7 @@ impl Project {
     #[turbo_tasks::function]
     pub async fn client_changed(self: Vc<Self>, roots: Vc<OutputAssets>) -> Result<Vc<Completion>> {
         let path = self.client_root().owned().await?;
-        Ok(any_output_changed(roots, path, false))
+        Ok(any_output_changed(roots, vec![path], false))
     }
 
     #[turbo_tasks::function]
@@ -1784,7 +1790,7 @@ pub struct BaseAndFullModuleGraph {
 #[turbo_tasks::function]
 async fn any_output_changed(
     roots: Vc<OutputAssets>,
-    path: FileSystemPath,
+    paths: Vec<FileSystemPath>,
     server: bool,
 ) -> Result<Vc<Completion>> {
     let all_assets = expand_output_assets(
@@ -1795,13 +1801,13 @@ async fn any_output_changed(
     let completions = all_assets
         .into_iter()
         .map(|m| {
-            let path = path.clone();
+            let paths = paths.clone();
 
             async move {
                 let asset_path = m.path().await?;
                 if !asset_path.path.ends_with(".map")
                     && (!server || !asset_path.path.ends_with(".css"))
-                    && asset_path.is_inside_ref(&path)
+                    && paths.iter().any(|path| asset_path.is_inside_ref(path))
                 {
                     anyhow::Ok(Some(
                         content_changed(*ResolvedVc::upcast(m))
