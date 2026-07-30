@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 5, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries/input/shared-all.ts"],"sourcesContent":["export const sharedAll = \"shared by all entries\";\n"],"names":["sharedAll"],"mappings":";;;;AAAO,MAAMA,YAAY"}}]
-}

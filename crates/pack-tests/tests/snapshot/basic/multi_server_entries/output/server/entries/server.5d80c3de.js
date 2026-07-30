@@ -17,7 +17,7 @@ const RUNTIME_PUBLIC_PATH = "";
 /**
  * Describes why a module was instantiated.
  * Shared between browser and Node.js runtimes.
- */ var SourceType = /*#__PURE__*/ function(SourceType) {
+ */ var SourceType = function(SourceType) {
     /**
    * The module was instantiated because it was included in an evaluated chunk's
    * runtime.
@@ -716,6 +716,3 @@ console.log("server runtime", __TURBOPACK__imported__module__$5b$project$5d2f$ba
 ],
 ["entries/server.5d80c3de.js", {"otherChunks":["chunks/server-shared.fbcd5f75.js","chunks/server-shared-0-1.1b081f62.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"]}],
 ]);
-
-
-//# sourceMappingURL=server.5d80c3de.js.map

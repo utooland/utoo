@@ -61,7 +61,7 @@
       "entry": false,
       "recorded": false,
       "id": "./chunks/server-shared-0-1.1b081f62.js",
-      "size": 742,
+      "size": 686,
       "hash": "",
       "files": [
         "./chunks/server-shared-0-1.1b081f62.js"
@@ -73,7 +73,7 @@
       "entry": false,
       "recorded": false,
       "id": "./chunks/server-shared.fbcd5f75.js",
-      "size": 314,
+      "size": 262,
       "hash": "",
       "files": [
         "./chunks/server-shared.fbcd5f75.js"
@@ -85,7 +85,7 @@
       "entry": false,
       "recorded": false,
       "id": "./entries/detail-server.5d841f26.js",
-      "size": 27274,
+      "size": 27208,
       "hash": "",
       "files": [
         "./entries/detail-server.5d841f26.js"
@@ -97,7 +97,7 @@
       "entry": false,
       "recorded": false,
       "id": "./entries/index-server.5c83aa4e.js",
-      "size": 27285,
+      "size": 27220,
       "hash": "",
       "files": [
         "./entries/index-server.5c83aa4e.js"
@@ -109,7 +109,7 @@
       "entry": false,
       "recorded": false,
       "id": "./entries/server.5d80c3de.js",
-      "size": 27246,
+      "size": 27187,
       "hash": "",
       "files": [
         "./entries/server.5d80c3de.js"
@@ -121,7 +121,7 @@
       "type": "asset",
       "name": "chunks/server-shared-0-1.1b081f62.js",
       "info": {},
-      "size": 742,
+      "size": 686,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -131,21 +131,9 @@
     },
     {
       "type": "asset",
-      "name": "chunks/server-shared-0-1.1b081f62.js.map",
-      "info": {},
-      "size": 422,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "chunks/server-shared-0-1.1b081f62.js.map"
-      ]
-    },
-    {
-      "type": "asset",
       "name": "chunks/server-shared.fbcd5f75.js",
       "info": {},
-      "size": 314,
+      "size": 262,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -155,21 +143,9 @@
     },
     {
       "type": "asset",
-      "name": "chunks/server-shared.fbcd5f75.js.map",
-      "info": {},
-      "size": 330,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "chunks/server-shared.fbcd5f75.js.map"
-      ]
-    },
-    {
-      "type": "asset",
       "name": "entries/detail-server.5d841f26.js",
       "info": {},
-      "size": 27274,
+      "size": 27208,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -179,21 +155,9 @@
     },
     {
       "type": "asset",
-      "name": "entries/detail-server.5d841f26.js.map",
-      "info": {},
-      "size": 46829,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "entries/detail-server.5d841f26.js.map"
-      ]
-    },
-    {
-      "type": "asset",
       "name": "entries/index-server.5c83aa4e.js",
       "info": {},
-      "size": 27285,
+      "size": 27220,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -203,38 +167,14 @@
     },
     {
       "type": "asset",
-      "name": "entries/index-server.5c83aa4e.js.map",
-      "info": {},
-      "size": 46817,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "entries/index-server.5c83aa4e.js.map"
-      ]
-    },
-    {
-      "type": "asset",
       "name": "entries/server.5d80c3de.js",
       "info": {},
-      "size": 27246,
+      "size": 27187,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
         "entries/server.5d80c3de.js"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "entries/server.5d80c3de.js.map",
-      "info": {},
-      "size": 46808,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "entries/server.5d80c3de.js.map"
       ]
     }
   ],

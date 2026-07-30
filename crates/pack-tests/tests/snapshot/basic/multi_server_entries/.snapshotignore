@@ -1,0 +1,3 @@
+# This fixture exercises server outputs only. The client entry exists solely to
+# drive the app build that emits the configured server entries.
+client/

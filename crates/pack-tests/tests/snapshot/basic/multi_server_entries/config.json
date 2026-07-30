@@ -10,6 +10,7 @@
     "output": {
       "path": "output/client"
     },
+    "sourceMaps": false,
     "server": {
       "entry": [
         {
