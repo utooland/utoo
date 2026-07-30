@@ -2,5 +2,5 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 55, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/promise/input/index.ts"],"sourcesContent":["import $ from \"jquery\";\nimport value, { named } from \"async-value\";\nimport esmValue, { named as esmNamed } from \"async-esm-value\";\n\nconsole.log($.ready, value.default, value.named, named, esmValue.default, esmValue.__esModule, esmNamed);\n"],"names":["console","log","ready","default","named","__esModule"],"mappings":";;QAAA;QACA;QACA;;;;;;;;;;QAEAA,QAAQC,GAAG,CAAC,qHAAC,CAACC,KAAK,EAAE,qHAAK,CAACC,OAAO,EAAE,qHAAK,CAACC,KAAK,EAAE,mHAAK,EAAE,qHAAQ,CAACD,OAAO,EAAE,qHAAQ,CAACE,UAAU,EAAE,mHAAQ"}}]
+    {"offset": {"line": 67, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/promise/input/index.ts"],"sourcesContent":["import $ from \"jquery\";\nimport value, { named } from \"async-value\";\nimport esmValue, { named as esmNamed } from \"async-esm-value\";\n\nconsole.log($.ready, value.default, value.named, named, esmValue, esmNamed);\n"],"names":["console","log","ready","default","named"],"mappings":";;QAAA;QACA;QACA;;;;;;;;;;QAEAA,QAAQC,GAAG,CAAC,qHAAC,CAACC,KAAK,EAAE,qHAAK,CAACC,OAAO,EAAE,qHAAK,CAACC,KAAK,EAAE,mHAAK,EAAE,qHAAQ,EAAE,mHAAQ"}}]
 }
