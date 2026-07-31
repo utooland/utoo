@@ -8,6 +8,15 @@ type Scenario = "dist-root" | "server-dist-root";
 
 const execFileAsync = promisify(execFile);
 const [, , projectPath, portArg, scenarioArg] = process.argv;
+let compilingLogCount = 0;
+const originalConsoleLog = console.log;
+
+console.log = (...args: unknown[]) => {
+  if (args[0] === "Compiling...") {
+    compilingLogCount++;
+  }
+  originalConsoleLog(...args);
+};
 
 if (!projectPath || !portArg) {
   throw new Error(
@@ -130,14 +139,17 @@ async function main() {
   );
 
   const initial = await waitForBundleOutput("SERVER_OUTPUT_V1");
+  const initialCompilingLogs = compilingLogCount;
   writeDependency("SERVER_OUTPUT_V2");
   const updated = await waitForBundleOutput("SERVER_OUTPUT_V2");
 
   console.log(
     `__SERVER_OUTPUT_HMR__${JSON.stringify({
       initial,
+      initialCompilingLogs,
       scenario,
       updated,
+      updateCompilingLogs: compilingLogCount - initialCompilingLogs,
     })}`,
   );
   process.kill(process.pid, "SIGTERM");

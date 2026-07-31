@@ -8,8 +8,10 @@ type Scenario = "dist-root" | "server-dist-root";
 
 type FixtureResult = {
   initial: string;
+  initialCompilingLogs: number;
   scenario: Scenario;
   updated: string;
+  updateCompilingLogs: number;
 };
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -119,8 +121,10 @@ describe("serve server output HMR", () => {
     async (scenario) => {
       await expect(runServerOutputHmrFixture(scenario)).resolves.toEqual({
         initial: "SERVER_OUTPUT_V1",
+        initialCompilingLogs: 0,
         scenario,
         updated: "SERVER_OUTPUT_V2",
+        updateCompilingLogs: 1,
       });
     },
     60_000,
