@@ -1,0 +1,18 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "node",
+    "provider": {
+      "define": "./define.js"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  }
+}

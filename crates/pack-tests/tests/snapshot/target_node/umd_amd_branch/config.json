@@ -1,0 +1,15 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "node",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  }
+}

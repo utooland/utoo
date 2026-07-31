@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 9, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/umd_amd_branch/input/index.js"],"sourcesContent":["module.exports = (function (definition) {\n  if (typeof define === \"function\") {\n    define([\"missing-amd-only\"], definition);\n  } else if (typeof module !== \"undefined\" && module.exports) {\n    return definition(require(\"node:path\"));\n  }\n})(function (path) {\n  return path.basename(\"/tmp/utoo\");\n});\n"],"names":["module","exports","definition","path","basename"],"mappings":"AAAAA,OAAOC,OAAO,GAAG,AAAC,SAAUC,UAAU;IACpC;;SAEO,IAAI,+CAAkB,eAAeF,OAAOC,OAAO,EAAE;QAC1D,OAAOC;IACT;AACF,EAAG,SAAUC,IAAI;IACf,OAAOA,KAAKC,QAAQ,CAAC;AACvB"}}]
+}

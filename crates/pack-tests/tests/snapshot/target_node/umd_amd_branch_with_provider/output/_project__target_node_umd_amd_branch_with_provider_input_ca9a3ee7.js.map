@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/umd_amd_branch_with_provider/input/define.js"],"sourcesContent":["function define(_dependencies, factory) {\n  return factory(\"amd\");\n}\n\ndefine.amd = {};\nmodule.exports = define;\n"],"names":["define","_dependencies","factory","amd","module","exports"],"mappings":"AAAA,SAASA,OAAOC,aAAa,EAAEC,OAAO;IACpC,OAAOA,QAAQ;AACjB;AAEAF,OAAOG,GAAG,GAAG,CAAC;AACdC,OAAOC,OAAO,GAAGL"}},
+    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/umd_amd_branch_with_provider/input/cjs-dep.js"],"sourcesContent":["module.exports = \"cjs\";\n"],"names":["module","exports"],"mappings":"AAAAA,OAAOC,OAAO,GAAG"}},
+    {"offset": {"line": 15, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/umd_amd_branch_with_provider/input/amd-dep.js"],"sourcesContent":["module.exports = \"amd\";\n"],"names":["module","exports"],"mappings":"AAAAA,OAAOC,OAAO,GAAG"}},
+    {"offset": {"line": 19, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/umd_amd_branch_with_provider/input/index.js"],"sourcesContent":["module.exports = (function (definition) {\n  if (typeof define === \"function\") {\n    return define([\"./amd-dep\"], definition);\n  } else if (typeof module !== \"undefined\" && module.exports) {\n    return definition(require(\"./cjs-dep\"));\n  }\n})(function (value) {\n  return value;\n});\n"],"names":["module","exports","definition","value"],"mappings":"AACa;AADbA,OAAOC,OAAO,GAAG,AAAC,SAAUC,UAAU;IACpC,IAAI,OAAO,qKAAM,KAAK,YAAY;QAChC,OAAO,qDAAsBA;IAC/B,OAAO,IAAI,+CAAkB,eAAeF,OAAOC,OAAO,EAAE;QAC1D,OAAOC;IACT;AACF,EAAG,SAAUC,KAAK;IAChB,OAAOA;AACT"}}]
+}

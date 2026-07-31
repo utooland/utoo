@@ -15,7 +15,9 @@ use turbopack_core::{
         ChunkingConfig, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
         UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
-    compile_time_info::CompileTimeInfo,
+    compile_time_info::{
+        CompileTimeDefines, CompileTimeInfo, DefinableNameSegment, FreeVarReferences,
+    },
     environment::{Environment, ExecutionEnvironment, NodeJsEnvironment, NodeJsVersion},
     module_graph::binding_usage_info::OptionBindingUsageInfo,
 };
@@ -100,6 +102,26 @@ pub async fn get_server_compile_time_info(
         ..Default::default()
     };
 
+    // AMD's `define` is not available in Node.js unless it is explicitly provided. Marking the
+    // free variable's type as undefined lets Turbopack eliminate AMD-first UMD branches before
+    // resolving their dependency arrays. `free_vars` contains entries from both `define` and
+    // `provider`, so checking it prevents this fallback from overriding either configuration.
+    let mut server_defines = defines(define_env).owned().await?;
+    let mut server_free_vars = free_vars(define_env, provider_config).owned().await?;
+    let define = vec![DefinableNameSegment::Name(rcstr!("define"))];
+    if !server_free_vars.contains_key(&define) {
+        let typeof_define = vec![
+            DefinableNameSegment::Name(rcstr!("define")),
+            DefinableNameSegment::TypeOf,
+        ];
+        server_defines
+            .entry(typeof_define.clone())
+            .or_insert(rcstr!("undefined").into());
+        server_free_vars
+            .entry(typeof_define)
+            .or_insert(rcstr!("undefined").into());
+    }
+
     CompileTimeInfo::builder(
         Environment::new(ExecutionEnvironment::NodeJsLambda(
             environment.resolved_cell(),
@@ -107,8 +129,8 @@ pub async fn get_server_compile_time_info(
         .to_resolved()
         .await?,
     )
-    .defines(defines(define_env).to_resolved().await?)
-    .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .defines(CompileTimeDefines(server_defines).resolved_cell())
+    .free_var_references(FreeVarReferences(server_free_vars).resolved_cell())
     .cell()
     .await
 }
