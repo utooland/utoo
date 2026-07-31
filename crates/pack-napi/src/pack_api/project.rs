@@ -48,6 +48,7 @@ use turbo_tasks::{
     OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TransientInstance,
     TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects, trace::TraceRawVcs,
 };
+use turbo_tasks_backend::EvictionMode;
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
 use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
@@ -186,6 +187,9 @@ pub struct NapiTurboEngineOptions {
 pub enum MemoryEvictionMode {
     /// Never evict.
     Off,
+    /// Evict after a snapshot only once enough memory has been allocated since
+    /// the last eviction to justify restoring evicted tasks on demand.
+    Auto,
     /// After every snapshot, evict all evictable tasks from memory, reloading
     /// them from disk on demand.
     Full,
@@ -193,14 +197,26 @@ pub enum MemoryEvictionMode {
 
 impl MemoryEvictionMode {
     fn from_env_or_default() -> Self {
-        match std::env::var("TURBO_ENGINE_EVICT_AFTER_SNAPSHOT") {
-            Ok(value) if value != "1" && value != "true" => Self::Off,
-            _ => Self::Full,
-        }
+        let value = std::env::var("TURBO_ENGINE_EVICT_AFTER_SNAPSHOT").ok();
+        Self::from_legacy_env(value.as_deref())
     }
 
-    pub(crate) fn evicts_after_snapshot(self) -> bool {
-        matches!(self, Self::Full)
+    fn from_legacy_env(value: Option<&str>) -> Self {
+        match value {
+            None => Self::Auto,
+            Some("1" | "true") => Self::Full,
+            Some(_) => Self::Off,
+        }
+    }
+}
+
+impl From<MemoryEvictionMode> for EvictionMode {
+    fn from(mode: MemoryEvictionMode) -> Self {
+        match mode {
+            MemoryEvictionMode::Off => EvictionMode::Off,
+            MemoryEvictionMode::Auto => EvictionMode::Auto,
+            MemoryEvictionMode::Full => EvictionMode::Full,
+        }
     }
 }
 
@@ -253,6 +269,47 @@ mod watch_options_tests {
                 "!node_modules/.*cssinjs.*",
                 "!node_modules/@rc-component/.*",
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod memory_eviction_tests {
+    use super::{EvictionMode, MemoryEvictionMode};
+
+    #[test]
+    fn defaults_to_auto_without_a_legacy_environment_override() {
+        assert_eq!(
+            MemoryEvictionMode::from_legacy_env(None),
+            MemoryEvictionMode::Auto
+        );
+    }
+
+    #[test]
+    fn preserves_legacy_environment_overrides() {
+        assert_eq!(
+            MemoryEvictionMode::from_legacy_env(Some("true")),
+            MemoryEvictionMode::Full
+        );
+        assert_eq!(
+            MemoryEvictionMode::from_legacy_env(Some("0")),
+            MemoryEvictionMode::Off
+        );
+    }
+
+    #[test]
+    fn maps_all_napi_modes_to_the_backend() {
+        assert_eq!(
+            EvictionMode::from(MemoryEvictionMode::Off),
+            EvictionMode::Off
+        );
+        assert_eq!(
+            EvictionMode::from(MemoryEvictionMode::Auto),
+            EvictionMode::Auto
+        );
+        assert_eq!(
+            EvictionMode::from(MemoryEvictionMode::Full),
+            EvictionMode::Full
         );
     }
 }
@@ -452,7 +509,7 @@ pub fn project_new(
                 memory_limit,
                 dependency_tracking,
                 is_short_session,
-                turbopack_memory_eviction.evicts_after_snapshot(),
+                turbopack_memory_eviction.into(),
                 small_preallocation,
             )?;
             let turbopack_ctx = TurbopackContext::new(turbo_tasks.clone(), napi_callbacks);

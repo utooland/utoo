@@ -184,6 +184,7 @@ pub enum SchemaTurbopackMemoryEviction {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SchemaTurbopackMemoryEvictionMode {
+    Auto,
     Full,
 }
 
@@ -1281,6 +1282,22 @@ mod tests {
         assert!(schema_str.contains("crossOriginLoading"));
         assert!(schema_str.contains("cssFilename"));
         assert!(schema_str.contains("assetModuleFilename"));
+    }
+
+    #[test]
+    fn test_memory_eviction_schema_accepts_auto() {
+        let mode = serde_json::from_str::<SchemaTurbopackMemoryEviction>(r#""auto""#).unwrap();
+        let schema = generate_schema();
+        let generated_modes = schema
+            .pointer("/definitions/SchemaTurbopackMemoryEvictionMode/enum")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+
+        assert!(matches!(
+            mode,
+            SchemaTurbopackMemoryEviction::Mode(SchemaTurbopackMemoryEvictionMode::Auto)
+        ));
+        assert!(generated_modes.contains(&serde_json::Value::String("auto".into())));
     }
 
     #[test]

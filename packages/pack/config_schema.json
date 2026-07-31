@@ -1881,6 +1881,7 @@
     "SchemaTurbopackMemoryEvictionMode": {
       "type": "string",
       "enum": [
+        "auto",
         "full"
       ]
     },

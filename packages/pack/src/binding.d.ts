@@ -141,6 +141,11 @@ export const enum MemoryEvictionMode {
   /** Never evict. */
   Off = 'off',
   /**
+   * Evict after a snapshot only once enough memory has been allocated since
+   * the last eviction to justify restoring evicted tasks on demand.
+   */
+  Auto = 'auto',
+  /**
    * After every snapshot, evict all evictable tasks from memory, reloading
    * them from disk on demand.
    */

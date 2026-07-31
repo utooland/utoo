@@ -31,7 +31,7 @@ pub fn create_turbo_tasks(
     _memory_limit: usize,
     dependency_tracking: bool,
     is_short_session: bool,
-    evict_after_snapshot: bool,
+    eviction_mode: EvictionMode,
     small_preallocation: bool,
 ) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
@@ -61,11 +61,7 @@ pub fn create_turbo_tasks(
                 }),
                 dependency_tracking,
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
-                eviction_mode: if evict_after_snapshot {
-                    EvictionMode::Full
-                } else {
-                    EvictionMode::Off
-                },
+                eviction_mode,
                 small_preallocation,
                 ..Default::default()
             },

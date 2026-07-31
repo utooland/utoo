@@ -343,7 +343,12 @@ export interface ConfigComplete {
   swcPlugins?: [string, any][];
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
-  turbopackMemoryEviction?: boolean | "full";
+  /**
+   * Controls memory eviction for the persistent Turbopack cache.
+   * Defaults to "auto". Use false to disable eviction or "full" to evict
+   * after every snapshot.
+   */
+  turbopackMemoryEviction?: boolean | "auto" | "full";
   nodePolyfill?: boolean;
   mdx?: MdxOptions;
   devServer?: DevServerConfig;
