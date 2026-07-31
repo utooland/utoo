@@ -64,6 +64,7 @@ pub async fn get_server_compile_time_info(
     define_env: Vc<EnvMap>,
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
+    import_meta_env_base_url: RcStr,
 ) -> Result<Vc<CompileTimeInfo>> {
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
@@ -109,6 +110,7 @@ pub async fn get_server_compile_time_info(
     )
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .import_meta_env_base_url(import_meta_env_base_url)
     .cell()
     .await
 }
@@ -150,11 +152,11 @@ pub async fn get_server_module_options_context(
     let enable_webpack_loaders =
         *webpack_loader_options(project_path.clone(), config, loader_conditions).await?;
 
-    let tree_shaking_mode_for_user_code = *config
-        .tree_shaking_mode_for_user_code(mode_ref.is_development())
+    let module_fragments_enabled_for_user_code = *config
+        .module_fragments_enabled_for_user_code(mode_ref.is_development())
         .await?;
-    let tree_shaking_mode_for_foreign_code = *config
-        .tree_shaking_mode_for_foreign_code(mode_ref.is_development())
+    let module_fragments_enabled_for_foreign_code = *config
+        .module_fragments_enabled_for_foreign_code(mode_ref.is_development())
         .await?;
     let target_browsers = env.runtime_versions();
 
@@ -262,7 +264,8 @@ pub async fn get_server_module_options_context(
         },
         environment: Some(env),
         execution_context: Some(execution_context),
-        tree_shaking_mode: tree_shaking_mode_for_user_code,
+        follow_reexports: true,
+        module_fragments_enabled: module_fragments_enabled_for_user_code,
         enable_postcss_transform,
         side_effect_free_packages: Some(
             side_effect_free_packages_glob(config.optimize_package_imports())
@@ -283,7 +286,8 @@ pub async fn get_server_module_options_context(
         enable_webpack_loaders: foreign_enable_webpack_loaders,
         enable_postcss_transform: enable_foreign_postcss_transform,
         module_rules: foreign_server_rules,
-        tree_shaking_mode: tree_shaking_mode_for_foreign_code,
+        follow_reexports: true,
+        module_fragments_enabled: module_fragments_enabled_for_foreign_code,
         ..module_options_context.clone()
     };
 

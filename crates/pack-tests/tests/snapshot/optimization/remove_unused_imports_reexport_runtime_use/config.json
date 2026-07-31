@@ -9,7 +9,8 @@
     "optimization": {
       "moduleIds": "named",
       "minify": false,
-      "concatenateModules": true
+      "concatenateModules": true,
+      "treeShaking": true
     }
   }
 }

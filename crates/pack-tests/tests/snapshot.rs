@@ -27,7 +27,7 @@ use turbo_tasks::{
     Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc,
     read_strongly_consistent_and_apply_effects, take_effects,
 };
-use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
+use turbo_tasks_backend::{BackendOptions, EvictionMode, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, FileSystemPath};
 use turbopack_core::{
     asset::Asset,
@@ -148,6 +148,7 @@ async fn run(resource: PathBuf) -> Result<()> {
             // Enable dependency tracking when we are running under UPDATE=1 to ensure file writes
             // don't crash the test.
             dependency_tracking: *UPDATE,
+            eviction_mode: EvictionMode::Off,
             ..Default::default()
         },
         noop_backing_storage(),

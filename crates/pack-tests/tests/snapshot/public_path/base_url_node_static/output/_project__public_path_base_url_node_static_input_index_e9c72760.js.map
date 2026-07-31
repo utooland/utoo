@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/base_url_node_static/input/index.js"],"sourcesContent":["globalThis.__UTOO_IMPORT_META_ENV__ = {\n  baseUrl: import.meta.env.BASE_URL,\n  mode: import.meta.env.MODE,\n  dev: import.meta.env.DEV,\n  prod: import.meta.env.PROD,\n  ssr: import.meta.env.SSR,\n};\n"],"names":["globalThis","__UTOO_IMPORT_META_ENV__","baseUrl","env","BASE_URL","mode","MODE","dev","DEV","prod","PROD","ssr","SSR"],"mappings":";;;;;;;;;;;;;;AAAAA,WAAWC,wBAAwB,GAAG;IACpCC,SAAS,8BAAYC,GAAG,CAACC,QAAQ;IACjCC,MAAM,8BAAYF,GAAG,CAACG,IAAI;IAC1BC,KAAK,8BAAYJ,GAAG,CAACK,GAAG;IACxBC,MAAM,8BAAYN,GAAG,CAACO,IAAI;IAC1BC,KAAK,8BAAYR,GAAG,CAACS,GAAG;AAC1B"}}]
+}

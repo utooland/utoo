@@ -15,8 +15,8 @@ export interface NapiWorkerCreation {
   options: NapiWorkerOptions
 }
 export interface NapiWorkerOptions {
-  filename: RcStr
-  cwd: RcStr
+  filename: string
+  cwd: string
 }
 export interface NapiWorkerTermination {
   options: NapiWorkerOptions
@@ -139,12 +139,12 @@ export interface NapiTurboEngineOptions {
 /** Turbopack's memory eviction strategy for the persistent cache. */
 export const enum MemoryEvictionMode {
   /** Never evict. */
-  Off = "off",
+  Off = 'off',
   /**
    * After every snapshot, evict all evictable tasks from memory, reloading
    * them from disk on demand.
    */
-  Full = "full"
+  Full = 'full'
 }
 export declare function projectNew(options: NapiProjectOptions, turboEngineOptions: NapiTurboEngineOptions, napiCallbacks: NapiTurbopackCallbacksJsObject): Promise<{ __napiType: "Project" }>
 export declare function projectUpdate(project: { __napiType: "Project" }, options: NapiPartialProjectOptions): Promise<void>

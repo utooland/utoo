@@ -21,7 +21,7 @@ use turbo_tasks::{
     read_strongly_consistent_and_apply_effects, Completion, OperationVc, PrettyPrintError,
     ReadConsistency, ResolvedVc, TransientInstance, TurboTasks, Vc,
 };
-use turbo_tasks_backend::{noop_backing_storage, BackendOptions, TurboTasksBackend};
+use turbo_tasks_backend::{noop_backing_storage, BackendOptions, EvictionMode, TurboTasksBackend};
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
     issue::{PlainIssue, PlainIssueSource, PlainSource},
@@ -109,16 +109,15 @@ impl BuildOptions {
 }
 
 pub fn create_turbo_tasks() -> Result<UtooTurboTasks> {
-    Ok(TurboTasks::new(
-        turbo_tasks_backend::TurboTasksBackend::new(
-            turbo_tasks_backend::BackendOptions {
-                storage_mode: None,
-                dependency_tracking: true,
-                ..Default::default()
-            },
-            noop_backing_storage(),
-        ),
-    ))
+    Ok(TurboTasks::new(TurboTasksBackend::new(
+        BackendOptions {
+            storage_mode: None,
+            dependency_tracking: true,
+            eviction_mode: EvictionMode::Off,
+            ..Default::default()
+        },
+        noop_backing_storage(),
+    )))
 }
 
 pub async fn dispose_pack_project() {

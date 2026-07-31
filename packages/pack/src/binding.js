@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, lockfileTryAcquireSync, lockfileTryAcquire, lockfileUnlockSync, lockfileUnlock, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
+const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, lockfileTryAcquireSync, lockfileTryAcquire, lockfileUnlockSync, lockfileUnlock, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, MemoryEvictionMode, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
 
 module.exports.registerWorkerScheduler = registerWorkerScheduler
 module.exports.workerCreated = workerCreated
@@ -323,6 +323,7 @@ module.exports.lockfileUnlock = lockfileUnlock
 module.exports.endpointWriteToDisk = endpointWriteToDisk
 module.exports.endpointServerChangedSubscribe = endpointServerChangedSubscribe
 module.exports.endpointClientChangedSubscribe = endpointClientChangedSubscribe
+module.exports.MemoryEvictionMode = MemoryEvictionMode
 module.exports.projectNew = projectNew
 module.exports.projectUpdate = projectUpdate
 module.exports.projectOnExit = projectOnExit

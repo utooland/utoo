@@ -1,0 +1,19 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "production",
+    "output": {
+      "path": "output"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "Production"
+}
