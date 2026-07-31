@@ -406,8 +406,8 @@ export async function createHotReloader(
           return;
         }
 
-        await writeOutputToDisk(entrypoint);
         markHmrEvent();
+        await writeOutputToDisk(entrypoint);
       })
       .finally(() => {
         if (shouldCreateWebpackStats) {
