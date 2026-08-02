@@ -264,6 +264,13 @@ export async function createHotReloader(
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
+  function markHmrEvent() {
+    if (!hmrEventHappened) {
+      console.log("Compiling...");
+      hmrEventHappened = true;
+    }
+  }
+
   function sendToClient(client: WSLike, payload: HMR_ACTION_TYPES) {
     client.send(JSON.stringify(payload));
   }
@@ -306,7 +313,7 @@ export async function createHotReloader(
       clientStates.get(client)?.turbopackUpdates.push(payload);
     }
 
-    hmrEventHappened = true;
+    markHmrEvent();
     sendEnqueuedMessagesDebounce();
   }
 
@@ -399,8 +406,8 @@ export async function createHotReloader(
           return;
         }
 
+        markHmrEvent();
         await writeOutputToDisk(entrypoint);
-        hmrEventHappened = true;
       })
       .finally(() => {
         if (shouldCreateWebpackStats) {
@@ -459,7 +466,7 @@ export async function createHotReloader(
               processIssues(currentEntryIssues, issueKey, data, false, true);
 
               if (hasBlockingResultIssues(data)) {
-                hmrEventHappened = true;
+                markHmrEvent();
                 sendEnqueuedMessagesDebounce();
                 continue;
               }
@@ -821,7 +828,6 @@ export async function createHotReloader(
       switch (updateMessage.updateType) {
         case "start": {
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });
-          console.log("Compiling...");
           break;
         }
         case "end": {
