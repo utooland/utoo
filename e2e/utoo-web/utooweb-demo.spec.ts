@@ -31,7 +31,9 @@ const waitForConsoleMessage = async (
 const expandDirectory = async (directory: Locator) => {
   await expect(directory).toBeVisible();
   if ((await directory.getAttribute("aria-expanded")) !== "true") {
-    await directory.click();
+    // The directory row grows action buttons on hover that intentionally stop
+    // click propagation. Click the stable disclosure indicator instead.
+    await directory.locator(":scope > span").first().click();
   }
   await expect(directory).toHaveAttribute("aria-expanded", "true");
 };
