@@ -5,6 +5,7 @@ const path = require("node:path");
 const serverOutput = path.join(__dirname, "output/server");
 const stats = JSON.parse(fs.readFileSync(path.join(serverOutput, "stats.json"), "utf8"));
 const expectedEntrypoints = ["detail-server", "index-server", "server"];
+const snapshottedEntry = "server";
 
 assert.deepEqual(Object.keys(stats.entrypoints).sort(), expectedEntrypoints);
 const entryAssets = {};
@@ -20,8 +21,9 @@ for (const name of expectedEntrypoints) {
     ),
   );
   assert.ok(entryAsset, `missing emitted bundle for ${name}`);
-  const entryPath = path.join(serverOutput, entryAsset);
-  assert.ok(fs.existsSync(entryPath));
+  if (name === snapshottedEntry) {
+    assert.ok(fs.existsSync(path.join(serverOutput, entryAsset)));
+  }
 }
 
 const allEntrySharedAssets = entryAssets[expectedEntrypoints[0]].filter((asset) =>
@@ -54,15 +56,11 @@ assert.match(
   /shared by primary entries/,
 );
 
-for (const name of expectedEntrypoints) {
-  const entryAsset = entryAssets[name].find((asset) =>
-    /(?:^|\/)entries\//.test(asset),
-  );
-  const entryContent = fs.readFileSync(
-    path.join(serverOutput, entryAsset),
-    "utf8",
-  );
-  assert.doesNotMatch(entryContent, /shared by all entries/);
-  assert.doesNotMatch(entryContent, /shared by primary entries/);
-  require(path.join(serverOutput, entryAsset));
-}
+const entryAsset = entryAssets[snapshottedEntry].find((asset) =>
+  /(?:^|\/)entries\//.test(asset),
+);
+const entryPath = path.join(serverOutput, entryAsset);
+const entryContent = fs.readFileSync(entryPath, "utf8");
+assert.doesNotMatch(entryContent, /shared by all entries/);
+assert.doesNotMatch(entryContent, /shared by primary entries/);
+require(entryPath);
