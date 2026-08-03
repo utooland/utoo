@@ -7,6 +7,7 @@ use clap::{CommandFactory, FromArgMatches};
 use crate::cli::{Cli, Commands, detect_shell_from_env};
 use crate::cmd::clean::clean;
 use crate::cmd::list::list_dependencies;
+use crate::cmd::outdated::{OutdatedStatus, outdated};
 use crate::cmd::rebuild::rebuild;
 use crate::cmd::run::{run, run_fallback};
 use crate::cmd::update::update;
@@ -370,6 +371,12 @@ async fn async_main() -> Result<()> {
         Some(Commands::Update(args)) => {
             update(args, ScriptPolicy::Run).await?;
             log_time_end("All packages updated");
+        }
+        Some(Commands::Outdated { patterns, omit }) => {
+            let filter = WorkspaceFilter::from_flags(cli.workspace, cli.workspaces);
+            if outdated(patterns, omit, filter).await? == OutdatedStatus::Outdated {
+                process::exit(1);
+            }
         }
         Some(Commands::List { package }) => {
             let cwd = std::env::current_dir()?;

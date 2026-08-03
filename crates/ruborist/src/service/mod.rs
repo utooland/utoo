@@ -55,6 +55,7 @@ mod store;
 
 pub use api::{BuildDepsOptions, build_deps, build_deps_with_root_dev_deps, read_root_manifest};
 pub use cache::{Versions, VersionsInfo};
+pub use fetch::HttpStatusError;
 pub use fs::{Glob, NoopGlob, exists, read_to_string};
 pub use http::client_builder;
 pub use manifest::{

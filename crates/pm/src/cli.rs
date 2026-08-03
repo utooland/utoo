@@ -13,14 +13,14 @@ use crate::constants::cmd::{
     DEPS_ALIAS, DEPS_NAME, EXECUTE_ABOUT, EXECUTE_ALIAS, EXECUTE_NAME, INIT_ABOUT, INIT_ALIAS,
     INIT_NAME, INSTALL_ABOUT, INSTALL_NAME, LINK_ABOUT, LINK_ALIAS, LINK_NAME, LIST_ABOUT,
     LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME, LOGOUT_ABOUT, LOGOUT_ALIAS,
-    LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
-    PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
-    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
-    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
-    WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
+    LOGOUT_NAME, OUTDATED_ABOUT, OUTDATED_ALIAS, OUTDATED_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME,
+    PING_ABOUT, PING_ALIAS, PING_NAME, PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT,
+    REBUILD_ALIAS, REBUILD_NAME, RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,
+    UNINSTALL_NAME, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS,
+    VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
-use crate::util::cli_enum::PublishAccess;
+use crate::util::cli_enum::{OmitType, PublishAccess};
 
 pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
@@ -167,6 +167,16 @@ pub enum Commands {
     #[command(name = UPDATE_NAME, alias = UPDATE_ALIAS, about = UPDATE_ABOUT)]
     Update(UpdateArgs),
 
+    #[command(name = OUTDATED_NAME, alias = OUTDATED_ALIAS, about = OUTDATED_ABOUT)]
+    Outdated {
+        /// Package name patterns (same `*` wildcard semantics as `ut clean`)
+        patterns: Vec<String>,
+
+        /// Dependency types to omit
+        #[arg(long, value_enum)]
+        omit: Vec<OmitType>,
+    },
+
     #[command(name = LIST_NAME, alias = LIST_ALIAS, about = LIST_ABOUT)]
     List {
         /// Package name to show dependencies for
@@ -311,6 +321,7 @@ impl Commands {
             Self::Clean { .. } => "clean",
             Self::Deps { .. } => "deps",
             Self::Update(_) => "update",
+            Self::Outdated { .. } => "outdated",
             Self::List { .. } => "list",
             Self::Run { .. } => "run",
             Self::Execute { .. } => "execute",

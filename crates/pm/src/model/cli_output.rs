@@ -287,6 +287,47 @@ pub struct UpdateResult {
     pub summary: DependencySummary,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyType {
+    Prod,
+    Dev,
+    Peer,
+    Optional,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyProtocol {
+    Catalog,
+    #[serde(rename = "npm")]
+    NpmAlias,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutdatedPackage {
+    pub package: String,
+    pub registry_package: String,
+    #[schemars(required)]
+    pub protocol: Option<DependencyProtocol>,
+    pub dependency_type: DependencyType,
+    pub dependent: String,
+    pub declared: String,
+    pub resolved_spec: String,
+    #[schemars(required)]
+    pub current: Option<String>,
+    pub wanted: String,
+    pub latest: String,
+    #[schemars(required)]
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OutdatedResult {
+    pub packages: Vec<OutdatedPackage>,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RebuildResult {
     pub operation: DependencyOperation,
@@ -622,6 +663,12 @@ success_schema!(
 );
 success_schema!(UpdateSuccessSchema, UpdateCommand, "update", UpdateResult);
 success_schema!(
+    OutdatedSuccessSchema,
+    OutdatedCommand,
+    "outdated",
+    OutdatedResult
+);
+success_schema!(
     RebuildSuccessSchema,
     RebuildCommand,
     "rebuild",
@@ -716,6 +763,7 @@ enum CliOutputSchema {
     Install(InstallSuccessSchema),
     Uninstall(UninstallSuccessSchema),
     Update(UpdateSuccessSchema),
+    Outdated(OutdatedSuccessSchema),
     Rebuild(RebuildSuccessSchema),
     Clean(CleanSuccessSchema),
     Deps(DepsSuccessSchema),

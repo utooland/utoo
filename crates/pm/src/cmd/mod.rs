@@ -24,6 +24,7 @@ pub mod link;
 pub mod list;
 pub mod login;
 pub mod logout;
+pub mod outdated;
 pub mod ping;
 pub mod pm_pack;
 pub mod publish;

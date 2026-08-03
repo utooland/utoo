@@ -1,3 +1,4 @@
+use std::array;
 use std::fmt;
 use std::fmt::Write as _;
 use std::io;
@@ -10,10 +11,112 @@ use utoo_ruborist::registry::{RegistryError, ResolveError};
 
 use crate::helper::migrate::MigrateResult;
 use crate::service::dependency_graph::{DepTreeNode, LockGraphService};
+use crate::service::outdated::OutdatedInfo;
 use crate::service::pm_pack::PackResult;
+use crate::util::cli_enum::ColorPolicy;
+use crate::util::invocation;
 use crate::util::logger::format_elapsed_time;
 
 pub use package_view::print_package_info;
+
+pub fn print_outdated(items: &[OutdatedInfo]) {
+    if !items.is_empty() {
+        println!("{}", render_outdated_table(items, invocation::color()));
+    }
+}
+
+fn render_outdated_table(items: &[OutdatedInfo], color: ColorPolicy) -> String {
+    let headers = [
+        "Package",
+        "Current",
+        "Wanted",
+        "Latest",
+        "Location",
+        "Depended by",
+    ];
+    let rows: Vec<[String; 6]> = items
+        .iter()
+        .map(|item| {
+            [
+                item.package.clone(),
+                item.current
+                    .clone()
+                    .unwrap_or_else(|| "MISSING".to_string()),
+                item.wanted.clone(),
+                item.latest.clone(),
+                item.location.clone().unwrap_or_else(|| "-".to_string()),
+                item.dependent.clone(),
+            ]
+        })
+        .collect();
+    let widths: [usize; 6] = array::from_fn(|column| {
+        rows.iter()
+            .map(|row| row[column].len())
+            .max()
+            .unwrap_or(0)
+            .max(headers[column].len())
+    });
+
+    let mut output = String::new();
+    let header = format!(
+        "{:<p$}  {:>c$}  {:>w$}  {:>l$}  {:<o$}  {:<d$}",
+        headers[0],
+        headers[1],
+        headers[2],
+        headers[3],
+        headers[4],
+        headers[5],
+        p = widths[0],
+        c = widths[1],
+        w = widths[2],
+        l = widths[3],
+        o = widths[4],
+        d = widths[5],
+    );
+    if color.ansi_enabled() {
+        output.push_str(&header.bold().underline().to_string());
+    } else {
+        output.push_str(&header);
+    }
+
+    for (item, row) in items.iter().zip(rows) {
+        output.push('\n');
+        let package = format!("{:<width$}", row[0], width = widths[0]);
+        let package = if color.ansi_enabled() {
+            if item.current.as_deref() != Some(item.wanted.as_str()) {
+                package.red().to_string()
+            } else {
+                package.yellow().to_string()
+            }
+        } else {
+            package
+        };
+        let wanted = format!("{:>width$}", row[2], width = widths[2]);
+        let latest = format!("{:>width$}", row[3], width = widths[3]);
+        let wanted = if color.ansi_enabled() {
+            wanted.cyan().to_string()
+        } else {
+            wanted
+        };
+        let latest = if color.ansi_enabled() {
+            latest.blue().to_string()
+        } else {
+            latest
+        };
+        write!(
+            output,
+            "{package}  {:>c$}  {wanted}  {latest}  {:<o$}  {:<d$}",
+            row[1],
+            row[4],
+            row[5],
+            c = widths[1],
+            o = widths[4],
+            d = widths[5],
+        )
+        .expect("writing an outdated row to String cannot fail");
+    }
+    output
+}
 
 /// Print `prompt` (no trailing newline), flush stdout, and read one line from
 /// stdin. Returns `true` when the user answers `y`/`Y`.
@@ -392,6 +495,39 @@ pub fn print_dep_tree(
             format!("{}{}", prefix, if is_last { "    " } else { "│   " })
         };
         print_dep_tree(child, graph, &new_prefix, is_last_child, highlight);
+    }
+}
+
+#[cfg(test)]
+mod outdated_tests {
+    use utoo_ruborist::graph::EdgeType;
+
+    use super::*;
+
+    #[test]
+    fn renders_outdated_table_without_color() {
+        let table = render_outdated_table(
+            &[OutdatedInfo {
+                package: "react".to_string(),
+                registry_package: "react".to_string(),
+                protocol: None,
+                dependency_type: EdgeType::Prod,
+                dependent: "app".to_string(),
+                declared: "^18.0.0".to_string(),
+                resolved_spec: "^18.0.0".to_string(),
+                current: Some("18.2.0".to_string()),
+                wanted: "18.3.1".to_string(),
+                latest: "19.1.0".to_string(),
+                location: Some("node_modules/react".to_string()),
+            }],
+            ColorPolicy::Never,
+        );
+
+        assert_eq!(
+            table,
+            "Package  Current  Wanted  Latest  Location            Depended by\n\
+             react     18.2.0  18.3.1  19.1.0  node_modules/react  app        "
+        );
     }
 }
 

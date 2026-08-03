@@ -18,6 +18,9 @@
       "$ref": "#/definitions/UpdateSuccessSchema"
     },
     {
+      "$ref": "#/definitions/OutdatedSuccessSchema"
+    },
+    {
       "$ref": "#/definitions/RebuildSuccessSchema"
     },
     {
@@ -535,6 +538,15 @@
           "minimum": 0.0
         }
       }
+    },
+    "DependencyType": {
+      "type": "string",
+      "enum": [
+        "prod",
+        "dev",
+        "peer",
+        "optional"
+      ]
     },
     "DepsCommand": {
       "type": "string",
@@ -1386,6 +1398,110 @@
         },
         "result": {
           "$ref": "#/definitions/LogoutResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        }
+      }
+    },
+    "OutdatedCommand": {
+      "type": "string",
+      "enum": [
+        "outdated"
+      ]
+    },
+    "OutdatedPackage": {
+      "type": "object",
+      "required": [
+        "current",
+        "declared",
+        "dependencyType",
+        "dependent",
+        "latest",
+        "location",
+        "package",
+        "protocol",
+        "registryPackage",
+        "resolvedSpec",
+        "wanted"
+      ],
+      "properties": {
+        "current": {
+          "type": "string"
+        },
+        "declared": {
+          "type": "string"
+        },
+        "dependencyType": {
+          "$ref": "#/definitions/DependencyType"
+        },
+        "dependent": {
+          "type": "string"
+        },
+        "latest": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "catalog",
+            "npm"
+          ]
+        },
+        "registryPackage": {
+          "type": "string"
+        },
+        "resolvedSpec": {
+          "type": "string"
+        },
+        "wanted": {
+          "type": "string"
+        }
+      }
+    },
+    "OutdatedResult": {
+      "type": "object",
+      "required": [
+        "packages"
+      ],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OutdatedPackage"
+          }
+        }
+      }
+    },
+    "OutdatedSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/OutdatedCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/OutdatedResult"
         },
         "schemaVersion": {
           "$ref": "#/definitions/SchemaVersionOne"

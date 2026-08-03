@@ -1,0 +1,14 @@
+{
+  "name": "e2e-outdated",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@outdated/scope": "^3.0.0",
+    "outdated-alias": "npm:outdated-alias-target@^5.0.0",
+    "outdated-normal": "^1.0.0",
+    "outdated-overridden": "^7.0.0"
+  },
+  "overrides": {
+    "outdated-overridden": "7.0.0"
+  }
+}

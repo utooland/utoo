@@ -201,7 +201,7 @@ impl WorkspaceService {
                 let layers = match filter {
                     WorkspaceFilter::All => topo.topology,
                     WorkspaceFilter::Selected(ref filters) => {
-                        let selected = expand_filters(&topo.nodes, filters)?;
+                        let selected = expand_workspace_filters(&topo.nodes, filters)?;
                         project_topology_layers(&topo.topology, &selected)
                     }
                     WorkspaceFilter::Current => unreachable!(),
@@ -244,7 +244,10 @@ pub struct WorkspaceJson {
 /// Each filter is matched against the workspace name and its project-relative
 /// path via [`matches_pattern`], which handles both literal equality and the
 /// `*` glob forms supported elsewhere in the codebase (e.g. `packages/*`).
-fn expand_filters(nodes: &[WorkspaceNode], filters: &[String]) -> Result<BTreeSet<String>> {
+pub(crate) fn expand_workspace_filters(
+    nodes: &[WorkspaceNode],
+    filters: &[String],
+) -> Result<BTreeSet<String>> {
     // Stringify each node's relative path once instead of per filter.
     let node_paths: Vec<(&str, String)> = nodes
         .iter()
@@ -440,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expand_filters_against_nodes() {
+    fn test_expand_workspace_filters_against_nodes() {
         let nodes = vec![
             WorkspaceNode {
                 name: "@scope/a".into(),
@@ -453,27 +456,28 @@ mod tests {
         ];
 
         // Match by name
-        let by_name = expand_filters(&nodes, &["@scope/a".into()]).unwrap();
+        let by_name = expand_workspace_filters(&nodes, &["@scope/a".into()]).unwrap();
         assert!(by_name.contains("@scope/a"));
         assert_eq!(by_name.len(), 1);
 
         // Match by relative path
-        let by_path = expand_filters(&nodes, &["packages/b".into()]).unwrap();
+        let by_path = expand_workspace_filters(&nodes, &["packages/b".into()]).unwrap();
         assert!(by_path.contains("@scope/b"));
         assert_eq!(by_path.len(), 1);
 
         // Glob match
-        let by_glob = expand_filters(&nodes, &["packages/*".into()]).unwrap();
+        let by_glob = expand_workspace_filters(&nodes, &["packages/*".into()]).unwrap();
         assert_eq!(by_glob.len(), 2);
         assert!(by_glob.contains("@scope/a"));
         assert!(by_glob.contains("@scope/b"));
 
         // Multiple filters dedupe
-        let multi = expand_filters(&nodes, &["@scope/a".into(), "packages/a".into()]).unwrap();
+        let multi =
+            expand_workspace_filters(&nodes, &["@scope/a".into(), "packages/a".into()]).unwrap();
         assert_eq!(multi.len(), 1);
 
         // No-match name errors
-        assert!(expand_filters(&nodes, &["does-not-exist".into()]).is_err());
+        assert!(expand_workspace_filters(&nodes, &["does-not-exist".into()]).is_err());
     }
 
     #[tokio::test]
