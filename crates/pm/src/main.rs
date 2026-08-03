@@ -545,7 +545,7 @@ fn detect_command_token(args: &[String]) -> Option<(&'static str, usize)> {
         }
         let command = match value {
             "i" | "add" | "install" => "install",
-            "un" | "uninstall" => "uninstall",
+            "un" | "uninstall"|"remove"|"rm" => "uninstall",
             "rb" | "rebuild" => "rebuild",
             "c" | "clean" => "clean",
             "d" | "deps" => "deps",

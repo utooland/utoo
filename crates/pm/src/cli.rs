@@ -15,7 +15,7 @@ use crate::constants::cmd::{
     LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME, LOGOUT_ABOUT, LOGOUT_ALIAS,
     LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
     PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
-    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME, UPDATE_ABOUT,
+    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,UNINSTALL_REMOVE,UNINSTALL_RM, UNINSTALL_NAME, UPDATE_ABOUT,
     UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
     WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
@@ -131,7 +131,7 @@ pub enum Commands {
     #[command(name = INSTALL_NAME, aliases = ["i", "add"], about = INSTALL_ABOUT)]
     Install(InstallArgs),
 
-    #[command(name = UNINSTALL_NAME, alias = UNINSTALL_ALIAS, about = UNINSTALL_ABOUT)]
+    #[command(name = UNINSTALL_NAME, aliases = [UNINSTALL_ALIAS,UNINSTALL_REMOVE,UNINSTALL_RM], about = UNINSTALL_ABOUT)]
     Uninstall {
         /// Package specifications (e.g. "lodash@4.17.21" "react@18.0.0")
         specs: Vec<String>,
@@ -476,5 +476,86 @@ mod tests {
             }
             _ => panic!("expected Execute subcommand"),
         }
+    }
+
+    //test 'un','uninstall','remove','rm'
+     #[test]
+    fn test_install_un_alias_recognized() {
+        // Verify clap correctly recognizes "un" as an alias for uninstall
+        let cmd = Cli::command();
+
+        // Test "un" is recognized as uninstall command
+        let result = cmd.clone().try_get_matches_from(["utoo", "un", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo un' as valid uninstall command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(
+            matches.subcommand_name(),
+            Some("uninstall"),
+            "un alias should map to uninstall subcommand"
+        );
+    }
+
+    #[test]
+    fn test_install_uninstall_alias_recognized() {
+        // Verify clap correctly recognizes "uninstall" as an alias for uninstall
+        let cmd = Cli::command();
+
+        // Test "uninstall" is recognized as uninstall command
+        let result = cmd.clone().try_get_matches_from(["utoo", "uninstall", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo uninstall' as valid uninstall command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(
+            matches.subcommand_name(),
+            Some("uninstall"),
+            "uninstall alias should map to uninstall subcommand"
+        );
+    }
+
+     #[test]
+    fn test_install_remove_alias_recognized() {
+        // Verify clap correctly recognizes "remove" as an alias for uninstall
+        let cmd = Cli::command();
+
+        // Test "remove" is recognized as uninstall command
+        let result = cmd.clone().try_get_matches_from(["utoo", "remove", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo remove' as valid uninstall command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(
+            matches.subcommand_name(),
+            Some("uninstall"),
+            "remove alias should map to uninstall subcommand"
+        );
+    }
+
+    #[test]
+    fn test_install_rm_alias_recognized() {
+        // Verify clap correctly recognizes "rm" as an alias for uninstall
+        let cmd = Cli::command();
+
+        // Test "rm" is recognized as uninstall command
+        let result = cmd.clone().try_get_matches_from(["utoo", "rm", "lodash"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo rm' as valid uninstall command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(
+            matches.subcommand_name(),
+            Some("uninstall"),
+            "rm alias should map to uninstall subcommand"
+        );
     }
 }

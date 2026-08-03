@@ -24,6 +24,8 @@ pub mod cmd {
 
     pub const UNINSTALL_NAME: &str = "uninstall";
     pub const UNINSTALL_ALIAS: &str = "un";
+    pub const UNINSTALL_REMOVE: &str = "remove";
+    pub const UNINSTALL_RM: &str = "rm";
     pub const UNINSTALL_ABOUT: &str = "Uninstall spec dependencies";
 
     pub const EXECUTE_NAME: &str = "execute";
