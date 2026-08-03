@@ -183,6 +183,54 @@ fn strip_root_prefix_for_file_system(path: &str, root: &str) -> Option<String> {
     strip_root_prefix(path, root).map(|relative| to_file_system_path(&relative))
 }
 
+fn canonicalize_project_root(root_path: RcStr) -> Result<RcStr> {
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    {
+        turbo_tasks_fs::canonicalize_to_rcstr(Path::new(&*root_path))
+            .with_context(|| format!("failed to canonicalize project root `{root_path}`"))
+    }
+
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    {
+        Ok(root_path)
+    }
+}
+
+fn rebase_path_to_canonical_root(
+    path: &str,
+    source_root: &str,
+    canonical_root: &str,
+) -> Option<RcStr> {
+    let relative =
+        strip_root_prefix(path, source_root).or_else(|| strip_root_prefix(path, canonical_root))?;
+    Some(
+        Path::new(canonical_root)
+            .join(relative)
+            .to_string_lossy()
+            .into_owned()
+            .into(),
+    )
+}
+
+fn normalize_path_for_canonical_root(
+    path: RcStr,
+    source_root: &str,
+    canonical_root: &RcStr,
+) -> RcStr {
+    if let Some(path) = rebase_path_to_canonical_root(&path, source_root, canonical_root) {
+        return path;
+    }
+
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    if let Ok(canonical_path) = turbo_tasks_fs::canonicalize_to_rcstr(Path::new(&*path))
+        && strip_root_prefix(&canonical_path, canonical_root).is_some()
+    {
+        return canonical_path;
+    }
+
+    path
+}
+
 fn extend_client_define_env_with_socket_server(
     define_env: &mut FxIndexMap<RcStr, RcStr>,
     socket_server: Option<RcStr>,
@@ -214,6 +262,15 @@ async fn client_define_env(
     extend_client_define_env_with_socket_server(&mut define_env, socket_server);
 
     Ok(Vc::cell(define_env))
+}
+
+async fn import_meta_env_base_url(config: ResolvedVc<Config>) -> Result<RcStr> {
+    let public_path = config.computed_public_path().owned().await?;
+
+    Ok(match public_path.as_str() {
+        "__RUNTIME_PUBLIC_PATH__" | "__AUTO_PUBLIC_PATH__" => rcstr!("/"),
+        _ => public_path.clone(),
+    })
 }
 
 #[derive(
@@ -283,6 +340,42 @@ pub struct PartialProjectOptions {
     pub pack_path: Option<RcStr>,
 }
 
+fn normalize_project_options_paths(options: &mut ProjectOptions) -> Result<()> {
+    let source_root = options.root_path.clone();
+    let canonical_root = canonicalize_project_root(source_root.clone())?;
+    options.project_path = normalize_path_for_canonical_root(
+        options.project_path.clone(),
+        &source_root,
+        &canonical_root,
+    );
+    options.pack_path =
+        normalize_path_for_canonical_root(options.pack_path.clone(), &source_root, &canonical_root);
+    options.root_path = canonical_root;
+    Ok(())
+}
+
+fn update_project_option_paths(
+    options: &mut ProjectOptions,
+    root_path: Option<RcStr>,
+    project_path: Option<RcStr>,
+    pack_path: Option<RcStr>,
+) -> Result<()> {
+    let previous_root = options.root_path.clone();
+    let source_root = root_path.unwrap_or_else(|| previous_root.clone());
+    let canonical_root = canonicalize_project_root(source_root.clone())?;
+
+    if let Some(project_path) = project_path {
+        options.project_path =
+            normalize_path_for_canonical_root(project_path, &source_root, &canonical_root);
+    }
+    if let Some(pack_path) = pack_path {
+        options.pack_path =
+            normalize_path_for_canonical_root(pack_path, &source_root, &canonical_root);
+    }
+    options.root_path = canonical_root;
+    Ok(())
+}
+
 #[turbo_tasks::value(transparent)]
 #[derive(Default, Debug, Clone, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
@@ -338,7 +431,7 @@ impl ProjectContainer {
     /// This is an associated function instead of a method because we don't currently implement
     /// [`std::ops::Receiver`] on [`OperationVc`].
     // #[tracing::instrument(level = "trace", name = "initialize project", skip_all)]
-    pub async fn initialize(this_op: OperationVc<Self>, options: ProjectOptions) -> Result<()> {
+    pub async fn initialize(this_op: OperationVc<Self>, mut options: ProjectOptions) -> Result<()> {
         let this = this_op.read_strongly_consistent().await?;
         let span = tracing::info_span!(
             "initialize project",
@@ -349,6 +442,7 @@ impl ProjectContainer {
         let span_clone = span.clone();
 
         async move {
+            normalize_project_options_paths(&mut options)?;
             let watch = options.watch.clone();
 
             this.options_state.set(Some(options));
@@ -425,12 +519,7 @@ impl ProjectContainer {
                 .clone()
                 .context("ProjectContainer need to be initialized with initialize()")?;
 
-            if let Some(root_path) = root_path {
-                new_options.root_path = root_path;
-            }
-            if let Some(project_path) = project_path {
-                new_options.project_path = project_path;
-            }
+            update_project_option_paths(&mut new_options, root_path, project_path, pack_path)?;
             if let Some(config) = config {
                 new_options.config = config;
             }
@@ -444,10 +533,6 @@ impl ProjectContainer {
 
             if let Some(build_id) = build_id {
                 new_options.build_id = build_id;
-            }
-
-            if let Some(pack_path) = pack_path {
-                new_options.pack_path = pack_path;
             }
 
             // TODO: Handle mode switch, should prevent mode being switched.
@@ -1167,21 +1252,25 @@ impl Project {
 
     #[turbo_tasks::function]
     pub(super) async fn client_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
+        let import_meta_env_base_url = import_meta_env_base_url(self.config).await?;
         Ok(get_client_compile_time_info(
             (*self.config.target().await?).clone(),
             client_define_env(*self.config, self.process_env).await?,
             self.config.mode(),
             self.config.provider_config(),
+            import_meta_env_base_url,
         ))
     }
 
     #[turbo_tasks::function]
     pub(super) async fn server_compile_time_info(&self) -> Result<Vc<CompileTimeInfo>> {
+        let import_meta_env_base_url = import_meta_env_base_url(self.config).await?;
         Ok(get_server_compile_time_info(
             (*self.config.target().await?).clone(),
             self.config.define_env(),
             self.config.mode(),
             self.config.provider_config(),
+            import_meta_env_base_url,
         ))
     }
 
@@ -1189,18 +1278,21 @@ impl Project {
     #[turbo_tasks::function]
     pub(super) async fn compile_time_info_for_platform(&self) -> Result<Vc<CompileTimeInfo>> {
         let target = (*self.config.target().await?).clone();
+        let import_meta_env_base_url = import_meta_env_base_url(self.config).await?;
         match &*self.config.platform().await? {
             Platform::Web => Ok(get_client_compile_time_info(
                 target,
                 client_define_env(*self.config, self.process_env).await?,
                 self.config.mode(),
                 self.config.provider_config(),
+                import_meta_env_base_url,
             )),
             Platform::Node => Ok(get_server_compile_time_info(
                 target,
                 self.config.define_env(),
                 self.config.mode(),
                 self.config.provider_config(),
+                import_meta_env_base_url,
             )),
         }
     }
@@ -1835,7 +1927,10 @@ async fn all_assets_from_entries_operation(
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_root_prefix, strip_root_prefix_for_file_system, to_file_system_path};
+    use super::{
+        ProjectOptions, WatchOptions, normalize_project_options_paths, strip_root_prefix,
+        strip_root_prefix_for_file_system, to_file_system_path, update_project_option_paths,
+    };
     use turbo_unix_path::unix_to_sys;
 
     #[test]
@@ -1886,5 +1981,134 @@ mod tests {
             strip_root_prefix("C:/Repo/App", "c:/repo").as_deref(),
             Some("App")
         );
+    }
+
+    #[cfg(unix)]
+    fn test_project_options(root: &std::path::Path) -> ProjectOptions {
+        ProjectOptions {
+            root_path: root.to_string_lossy().into_owned().into(),
+            project_path: root.join("project").to_string_lossy().into_owned().into(),
+            config: "{}".into(),
+            process_env: Vec::new(),
+            watch: WatchOptions::default(),
+            dev: false,
+            build_id: "test".into(),
+            pack_path: root.join("pack").to_string_lossy().into_owned().into(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn create_test_root(name: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "utoo-pack-api-{name}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_paths_follow_canonical_symlink_root() {
+        use std::{fs, os::unix::fs::symlink};
+
+        let base = create_test_root("canonical-paths");
+        let real_root = base.join("real");
+        let alias_root = base.join("alias");
+        fs::create_dir_all(real_root.join("project")).unwrap();
+        fs::create_dir_all(real_root.join("pack")).unwrap();
+        symlink(&real_root, &alias_root).unwrap();
+        let canonical_real_root = fs::canonicalize(&real_root).unwrap();
+
+        let mut options = test_project_options(&alias_root);
+        normalize_project_options_paths(&mut options).unwrap();
+
+        assert_eq!(
+            options.root_path.as_str(),
+            canonical_real_root.to_string_lossy()
+        );
+        assert_eq!(
+            options.project_path.as_str(),
+            canonical_real_root.join("project").to_string_lossy()
+        );
+        assert_eq!(
+            options.pack_path.as_str(),
+            canonical_real_root.join("pack").to_string_lossy()
+        );
+
+        update_project_option_paths(
+            &mut options,
+            None,
+            Some(
+                alias_root
+                    .join("project")
+                    .to_string_lossy()
+                    .into_owned()
+                    .into(),
+            ),
+            Some(
+                alias_root
+                    .join("pack")
+                    .to_string_lossy()
+                    .into_owned()
+                    .into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            options.project_path.as_str(),
+            canonical_real_root.join("project").to_string_lossy()
+        );
+        assert_eq!(
+            options.pack_path.as_str(),
+            canonical_real_root.join("pack").to_string_lossy()
+        );
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_only_update_preserves_absolute_project_and_pack_paths() {
+        use std::{fs, os::unix::fs::symlink};
+
+        let base = create_test_root("root-update");
+        let new_root = base.join("repo");
+        let old_root = new_root.join("app");
+        let new_root_alias = base.join("new-alias");
+        fs::create_dir_all(old_root.join("project")).unwrap();
+        fs::create_dir_all(old_root.join("pack")).unwrap();
+        symlink(&new_root, &new_root_alias).unwrap();
+        let canonical_new_root = fs::canonicalize(&new_root).unwrap();
+        let canonical_old_root = fs::canonicalize(&old_root).unwrap();
+
+        let mut options = test_project_options(&old_root);
+        normalize_project_options_paths(&mut options).unwrap();
+        update_project_option_paths(
+            &mut options,
+            Some(new_root_alias.to_string_lossy().into_owned().into()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            options.root_path.as_str(),
+            canonical_new_root.to_string_lossy()
+        );
+        assert_eq!(
+            options.project_path.as_str(),
+            canonical_old_root.join("project").to_string_lossy()
+        );
+        assert_eq!(
+            options.pack_path.as_str(),
+            canonical_old_root.join("pack").to_string_lossy()
+        );
+
+        fs::remove_dir_all(base).unwrap();
     }
 }

@@ -95,6 +95,13 @@ __turbopack_context__.q("/ignore-worker.4e0cf842.cjs");}),
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
         return __turbopack_context__.F("input/index.js");
+    },
+    env: {
+        DEV: false,
+        PROD: true,
+        MODE: "production",
+        BASE_URL: "/",
+        SSR: false
     }
 };
 __turbopack_context__.A("[project]/ignore_comments/input/vercel.mjs [client] (ecmascript, async loader)").then(console.log);

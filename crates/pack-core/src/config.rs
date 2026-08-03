@@ -25,11 +25,8 @@ use turbopack_core::{
     module_graph::style_groups::StyleGroupsAlgorithm,
     resolve::ResolveAliasMap,
 };
-use turbopack_ecmascript::{
-    OptionTreeShaking, TreeShakingMode,
-    transform::{
-        OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
-    },
+use turbopack_ecmascript::transform::{
+    OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
 };
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
@@ -1818,36 +1815,23 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn tree_shaking_mode_for_foreign_code(
-        &self,
-        _is_development: bool,
-    ) -> Vc<OptionTreeShaking> {
+    pub fn module_fragments_enabled_for_foreign_code(&self, _is_development: bool) -> Vc<bool> {
         let tree_shaking = self
             .optimization
             .as_ref()
             .map(|op| op.tree_shaking.unwrap_or_default());
 
-        OptionTreeShaking(match tree_shaking {
-            Some(false) => Some(TreeShakingMode::ReexportsOnly),
-            Some(true) => Some(TreeShakingMode::ModuleFragments),
-            None => Some(TreeShakingMode::ReexportsOnly),
-        })
-        .cell()
+        Vc::cell(matches!(tree_shaking, Some(true)))
     }
 
     #[turbo_tasks::function]
-    pub fn tree_shaking_mode_for_user_code(&self, _is_development: bool) -> Vc<OptionTreeShaking> {
+    pub fn module_fragments_enabled_for_user_code(&self, _is_development: bool) -> Vc<bool> {
         let tree_shaking = self
             .optimization
             .as_ref()
             .map(|op| op.tree_shaking.unwrap_or_default());
 
-        OptionTreeShaking(match tree_shaking {
-            Some(false) => Some(TreeShakingMode::ReexportsOnly),
-            Some(true) => Some(TreeShakingMode::ModuleFragments),
-            None => Some(TreeShakingMode::ReexportsOnly),
-        })
-        .cell()
+        Vc::cell(matches!(tree_shaking, Some(true)))
     }
 
     #[turbo_tasks::function]

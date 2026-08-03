@@ -8,7 +8,6 @@ use turbopack_core::{
     compile_time_info::CompileTimeInfo, context::AssetContext, environment::Environment,
     ident::Layer,
 };
-use turbopack_ecmascript::TreeShakingMode;
 
 /// Returns the runtime asset context to use to process runtime code assets.
 #[turbo_tasks::function]
@@ -24,7 +23,8 @@ pub async fn get_runtime_asset_context(
             ..Default::default()
         },
         environment: Some(environment.to_resolved().await?),
-        tree_shaking_mode: Some(TreeShakingMode::ReexportsOnly),
+        follow_reexports: true,
+        module_fragments_enabled: false,
         ..Default::default()
     }
     .cell();

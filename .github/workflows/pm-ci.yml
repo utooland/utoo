@@ -61,7 +61,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
           targets: x86_64-unknown-linux-gnu
 
       - name: Assert release dependency trim
@@ -175,7 +175,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
           targets: ${{ matrix.settings.target }}
       
       # - name: Cache cargo

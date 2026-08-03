@@ -15,8 +15,9 @@ use turbo_tasks::{
     message_queue::{CompilationEvent, Severity},
 };
 use turbo_tasks_backend::{
-    BackendOptions, GitVersionInfo, StartupCacheState, StorageMode, TurboTasksBackend,
-    db_invalidation::invalidation_reasons, noop_backing_storage, turbo_backing_storage,
+    BackendOptions, EvictionMode, GitVersionInfo, StartupCacheState, StorageMode,
+    TurboTasksBackend, db_invalidation::invalidation_reasons, noop_backing_storage,
+    turbo_backing_storage,
 };
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
@@ -30,7 +31,7 @@ pub fn create_turbo_tasks(
     _memory_limit: usize,
     dependency_tracking: bool,
     is_short_session: bool,
-    evict_after_snapshot: bool,
+    eviction_mode: EvictionMode,
     small_preallocation: bool,
 ) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
@@ -60,7 +61,7 @@ pub fn create_turbo_tasks(
                 }),
                 dependency_tracking,
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
-                evict_after_snapshot,
+                eviction_mode,
                 small_preallocation,
                 ..Default::default()
             },
@@ -76,6 +77,7 @@ pub fn create_turbo_tasks(
             BackendOptions {
                 storage_mode: None,
                 dependency_tracking,
+                eviction_mode: EvictionMode::Off,
                 ..Default::default()
             },
             noop_backing_storage(),

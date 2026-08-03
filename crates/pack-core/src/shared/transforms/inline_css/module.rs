@@ -126,7 +126,7 @@ impl InlineCssContentModule {
         }
 
         let chunk = Vc::<CssChunkType>::default()
-            .chunk(chunking_context, items_with_info, Vec::new())
+            .chunk(chunking_context, items_with_info, Vec::new(), Vec::new())
             .to_resolved()
             .await?;
         let css_chunk = ResolvedVc::try_downcast_type::<CssChunk>(chunk)
@@ -304,7 +304,8 @@ impl InlineCssModuleType {
             asset_context,
             EcmascriptInputTransforms::empty().to_resolved().await?,
             EcmascriptOptions {
-                tree_shaking_mode: module_options_context.tree_shaking_mode,
+                follow_reexports: module_options_context.follow_reexports,
+                module_fragments_enabled: module_options_context.module_fragments_enabled,
                 ..Default::default()
             }
             .resolved_cell(),

@@ -69,6 +69,9 @@ pub async fn get_library_runtime_code(
             const CHUNK_SUFFIX_PATH = {};
             const RELATIVE_ROOT_PATH = {};
             const RUNTIME_PUBLIC_PATH = {};
+            // Library builds deliberately collapse JavaScript into one chunk, so the
+            // component-chunk runtime path is unsupported in this custom runtime.
+            const SUPPORT_COMPONENT_CHUNKS = false;
         "#,
         StringifyJs(chunk_base_path),
         StringifyJs(chunk_suffix_path),

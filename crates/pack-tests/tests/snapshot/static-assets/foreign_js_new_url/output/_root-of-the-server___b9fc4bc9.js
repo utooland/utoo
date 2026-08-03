@@ -81,6 +81,13 @@ __turbopack_context__.v(__turbopack_context__.r(730)["default"]("turbopack-worke
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
         return __turbopack_context__.F("node_modules/static-url-package/index.js");
+    },
+    env: {
+        DEV: false,
+        PROD: true,
+        MODE: "production",
+        BASE_URL: "/",
+        SSR: false
     }
 };
 const resourceProxyUrl = new __turbopack_context__.U(__turbopack_context__.r(727)).toString();
