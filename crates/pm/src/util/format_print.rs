@@ -1,3 +1,4 @@
+use std::array;
 use std::fmt;
 use std::fmt::Write as _;
 use std::io;
@@ -12,17 +13,19 @@ use crate::helper::migrate::MigrateResult;
 use crate::service::dependency_graph::{DepTreeNode, LockGraphService};
 use crate::service::outdated::OutdatedInfo;
 use crate::service::pm_pack::PackResult;
+use crate::util::cli_enum::ColorPolicy;
+use crate::util::invocation;
 use crate::util::logger::format_elapsed_time;
 
 pub use package_view::print_package_info;
 
 pub fn print_outdated(items: &[OutdatedInfo]) {
     if !items.is_empty() {
-        println!("{}", render_outdated_table(items, true));
+        println!("{}", render_outdated_table(items, invocation::color()));
     }
 }
 
-fn render_outdated_table(items: &[OutdatedInfo], colors: bool) -> String {
+fn render_outdated_table(items: &[OutdatedInfo], color: ColorPolicy) -> String {
     let headers = [
         "Package",
         "Current",
@@ -46,7 +49,7 @@ fn render_outdated_table(items: &[OutdatedInfo], colors: bool) -> String {
             ]
         })
         .collect();
-    let widths: [usize; 6] = std::array::from_fn(|column| {
+    let widths: [usize; 6] = array::from_fn(|column| {
         rows.iter()
             .map(|row| row[column].len())
             .max()
@@ -70,7 +73,7 @@ fn render_outdated_table(items: &[OutdatedInfo], colors: bool) -> String {
         o = widths[4],
         d = widths[5],
     );
-    if colors {
+    if color.ansi_enabled() {
         output.push_str(&header.bold().underline().to_string());
     } else {
         output.push_str(&header);
@@ -79,7 +82,7 @@ fn render_outdated_table(items: &[OutdatedInfo], colors: bool) -> String {
     for (item, row) in items.iter().zip(rows) {
         output.push('\n');
         let package = format!("{:<width$}", row[0], width = widths[0]);
-        let package = if colors {
+        let package = if color.ansi_enabled() {
             if item.current.as_deref() != Some(item.wanted.as_str()) {
                 package.red().to_string()
             } else {
@@ -90,17 +93,17 @@ fn render_outdated_table(items: &[OutdatedInfo], colors: bool) -> String {
         };
         let wanted = format!("{:>width$}", row[2], width = widths[2]);
         let latest = format!("{:>width$}", row[3], width = widths[3]);
-        let wanted = if colors {
+        let wanted = if color.ansi_enabled() {
             wanted.cyan().to_string()
         } else {
             wanted
         };
-        let latest = if colors {
+        let latest = if color.ansi_enabled() {
             latest.blue().to_string()
         } else {
             latest
         };
-        let _ = write!(
+        write!(
             output,
             "{package}  {:>c$}  {wanted}  {latest}  {:<o$}  {:<d$}",
             row[1],
@@ -109,7 +112,8 @@ fn render_outdated_table(items: &[OutdatedInfo], colors: bool) -> String {
             c = widths[1],
             o = widths[4],
             d = widths[5],
-        );
+        )
+        .expect("writing an outdated row to String cannot fail");
     }
     output
 }
@@ -516,7 +520,7 @@ mod outdated_tests {
                 latest: "19.1.0".to_string(),
                 location: Some("node_modules/react".to_string()),
             }],
-            false,
+            ColorPolicy::Never,
         );
 
         assert_eq!(

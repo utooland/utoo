@@ -213,29 +213,35 @@ fn resolve_dep_target(
         .and_then(|p| path_index.get(&p).copied())
 }
 
-/// Resolve one dependency edge from an importer/package lock path to the
-/// nearest package entry selected by npm's `node_modules` ancestor lookup.
+/// Read-only index for resolving dependency edges against a lockfile's
+/// physical `node_modules` layout.
 ///
-/// This is the read-only counterpart of the graph seeding logic above. Query
-/// commands such as `outdated` need the exact lock entry behind an importer
-/// edge without reconstructing the full resolver graph or guessing that every
-/// dependency is hoisted to the root.
-pub fn resolve_lock_dependency<'a>(
-    lock: &'a PackageLock,
-    from_path: &str,
-    dep_name: &str,
-) -> Option<(&'a str, &'a LockPackage)> {
-    let from_path = to_lock_key(from_path);
-    let resolved = resolve_dep_path(&from_path, dep_name, |candidate| {
-        lock.packages
-            .keys()
-            .any(|path| to_lock_key(path) == candidate)
-    })?;
+/// Building the normalized path map once keeps query commands at O(packages +
+/// direct dependencies * tree depth), rather than scanning every lock entry
+/// for every direct dependency.
+pub struct LockDependencyIndex<'a> {
+    packages: HashMap<Cow<'a, str>, (&'a str, &'a LockPackage)>,
+}
 
-    lock.packages
-        .iter()
-        .find(|(path, _)| to_lock_key(path) == resolved)
-        .map(|(path, package)| (path.as_str(), package))
+impl<'a> LockDependencyIndex<'a> {
+    pub fn new(lock: &'a PackageLock) -> Self {
+        let packages = lock
+            .packages
+            .iter()
+            .map(|(path, package)| (to_lock_key(path), (path.as_str(), package)))
+            .collect();
+        Self { packages }
+    }
+
+    /// Resolve one dependency edge from an importer/package lock path to the
+    /// nearest package entry selected by npm's ancestor lookup.
+    pub fn resolve(&self, from_path: &str, dep_name: &str) -> Option<(&'a str, &'a LockPackage)> {
+        let from_path = to_lock_key(from_path);
+        let resolved = resolve_dep_path(&from_path, dep_name, |candidate| {
+            self.packages.contains_key(candidate)
+        })?;
+        self.packages.get(resolved.as_str()).copied()
+    }
 }
 
 /// Whether `lock` is internally complete enough to seed: every **prod**
@@ -339,6 +345,14 @@ fn lock_package_to_manifest(name: &str, pkg: &LockPackage) -> CoreVersionManifes
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use crate::model::graph::FindResult;
+    use crate::model::node::{DevDeps, PeerDeps};
+    use crate::model::package_json::PackageJson;
+    use crate::resolver::builder::{add_workspace_member, resolve_workspace_member_edges};
+    use crate::resolver::edges::{EdgeContext, add_edges_from};
+
     use super::*;
 
     #[test]
@@ -364,12 +378,6 @@ mod tests {
         assert_eq!(lock_path_depth("node_modules/a/node_modules/b"), 2);
         assert_eq!(lock_path_depth("packages/ws/node_modules/bar"), 1);
     }
-
-    use crate::model::graph::FindResult;
-    use crate::model::node::{DevDeps, PeerDeps};
-    use crate::model::package_json::PackageJson;
-    use crate::resolver::edges::{EdgeContext, add_edges_from};
-    use std::path::PathBuf;
 
     /// A regular (registry) lock entry with the given version, tarball, and prod deps.
     fn lock_entry(version: &str, deps: &[(&str, &str)]) -> LockPackage {
@@ -604,8 +612,6 @@ mod tests {
     /// name. Regression test for that.
     #[test]
     fn test_prune_keeps_workspace_link() {
-        use crate::resolver::builder::{add_workspace_member, resolve_workspace_member_edges};
-
         let root_path = PathBuf::from("/proj");
         let mut root_pkg = PackageJson::new("wsroot", "1.0.0");
         root_pkg.dependencies = Some(HashMap::from([
@@ -693,6 +699,31 @@ mod tests {
             resolve_dep_target(&index, "node_modules/a", "missing"),
             None
         );
+    }
+
+    #[test]
+    fn lock_dependency_index_resolves_nearest_hoisted_entry() {
+        let lock = PackageLock::new(
+            "root",
+            "1.0.0",
+            HashMap::from([
+                (String::new(), root_entry(&[])),
+                ("node_modules/dep".to_string(), lock_entry("1.0.0", &[])),
+                (
+                    "node_modules/a/node_modules/dep".to_string(),
+                    lock_entry("2.0.0", &[]),
+                ),
+            ]),
+        );
+        let index = LockDependencyIndex::new(&lock);
+
+        let (nested_path, nested) = index.resolve("node_modules/a", "dep").unwrap();
+        assert_eq!(nested_path, "node_modules/a/node_modules/dep");
+        assert_eq!(nested.version.as_deref(), Some("2.0.0"));
+
+        let (hoisted_path, hoisted) = index.resolve("packages/workspace", "dep").unwrap();
+        assert_eq!(hoisted_path, "node_modules/dep");
+        assert_eq!(hoisted.version.as_deref(), Some("1.0.0"));
     }
 
     #[test]

@@ -20,7 +20,7 @@ use crate::constants::cmd::{
     VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
-use crate::util::cli_enum::PublishAccess;
+use crate::util::cli_enum::{OmitType, PublishAccess};
 
 pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
     // Most common on Unix-like systems.
@@ -171,6 +171,10 @@ pub enum Commands {
     Outdated {
         /// Package name patterns (same `*` wildcard semantics as `ut clean`)
         patterns: Vec<String>,
+
+        /// Dependency types to omit
+        #[arg(long, value_enum)]
+        omit: Vec<OmitType>,
     },
 
     #[command(name = LIST_NAME, alias = LIST_ALIAS, about = LIST_ABOUT)]
@@ -317,6 +321,7 @@ impl Commands {
             Self::Clean { .. } => "clean",
             Self::Deps { .. } => "deps",
             Self::Update(_) => "update",
+            Self::Outdated { .. } => "outdated",
             Self::List { .. } => "list",
             Self::Run { .. } => "run",
             Self::Execute { .. } => "execute",

@@ -25,6 +25,27 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use tokio_retry::RetryIf;
 
+/// HTTP response metadata preserved through the retry and registry layers.
+#[derive(Debug)]
+pub struct HttpStatusError {
+    status: u16,
+    url: String,
+}
+
+impl HttpStatusError {
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+}
+
+impl std::fmt::Display for HttpStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP {}: {}", self.status, self.url)
+    }
+}
+
+impl std::error::Error for HttpStatusError {}
+
 /// Fixed retry delays used for all fetch operations in this crate.
 pub const RETRY_DELAYS: [Duration; 5] = [
     Duration::from_millis(100),
@@ -72,12 +93,11 @@ where
     A: FnMut() -> Fut,
     Fut: Future<Output = Result<T, FetchError>>,
 {
+    let context = format!("Failed to fetch {target}");
     RetryIf::spawn(retry_strategy(), attempt, is_retryable)
         .await
         .map_err(|e| match e {
-            FetchError::Retryable(e) | FetchError::Permanent(e) => {
-                anyhow!("Failed to fetch {target}: {e:#}")
-            }
+            FetchError::Retryable(e) | FetchError::Permanent(e) => e.context(context),
         })
 }
 
@@ -114,15 +134,49 @@ pub fn classify_status(status: reqwest::StatusCode, url: &str) -> FetchError {
     // Status + URL are carried by the anyhow chain; the tokio-retry caller
     // surfaces them to the user on final failure. Skip per-attempt tracing
     // here so a 10-retry loop doesn't spam the same line ten times.
-    match status.as_u16() {
-        404 => FetchError::Permanent(anyhow!("HTTP 404: {url}")),
+    let status = status.as_u16();
+    let error = || {
+        anyhow!(HttpStatusError {
+            status,
+            url: url.to_string(),
+        })
+    };
+    match status {
+        404 => FetchError::Permanent(error()),
         // npmjs's Cloudflare edge intermittently answers a manifest request
         // with 406 under heavy concurrent fan-out (different package each time,
         // ~one per run) — a transient content-negotiation hiccup, not a real
         // "your Accept header is unsatisfiable" (that would 406 every request).
         // Retry it like a 429 rather than aborting the whole resolve.
-        406 | 429 => FetchError::Retryable(anyhow!("HTTP {status}: {url}")),
-        s if (500..600).contains(&s) => FetchError::Retryable(anyhow!("HTTP {status}: {url}")),
-        _ => FetchError::Permanent(anyhow!("HTTP {status}: {url}")),
+        406 | 429 => FetchError::Retryable(error()),
+        s if (500..600).contains(&s) => FetchError::Retryable(error()),
+        _ => FetchError::Permanent(error()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn retry_context_preserves_http_status() {
+        let error = with_fetch_retry("fixture", || async {
+            Err::<(), _>(classify_status(
+                reqwest::StatusCode::NOT_FOUND,
+                "https://registry.test/fixture",
+            ))
+        })
+        .await
+        .unwrap_err();
+
+        let status = error
+            .chain()
+            .find_map(|source| source.downcast_ref::<HttpStatusError>())
+            .map(HttpStatusError::status);
+        assert_eq!(status, Some(404));
+        assert_eq!(
+            format!("{error:#}"),
+            "Failed to fetch fixture: HTTP 404: https://registry.test/fixture"
+        );
     }
 }

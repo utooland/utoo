@@ -23,9 +23,7 @@ fn assert_same_path(actual: &str, expected: &Path) {
     );
 }
 
-fn serve_publish_registry_responses(
-    responses: &[(&str, &str)],
-) -> (String, thread::JoinHandle<()>) {
+fn serve_registry_responses(responses: &[(&str, &str)]) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let responses: Vec<_> = responses
@@ -73,7 +71,7 @@ fn serve_publish_registry_responses(
 }
 
 fn serve_publish_registry(status: &str, body: &str) -> (String, thread::JoinHandle<()>) {
-    serve_publish_registry_responses(&[("404 Not Found", "{}"), (status, body)])
+    serve_registry_responses(&[("404 Not Found", "{}"), (status, body)])
 }
 
 fn publish_command(project: &Path, registry: &str) -> Command {
@@ -134,6 +132,27 @@ process.exit({exit_code});
     .unwrap();
 }
 
+fn write_outdated_project(project: &Path) {
+    fs::write(
+        project.join("package.json"),
+        r#"{"name":"fixture","version":"1.0.0","dependencies":{"foo-alias":"npm:foo@^1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("package-lock.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {"name": "fixture", "version": "1.0.0", "dependencies": {"foo-alias": "npm:foo@^1.0.0"}},
+    "node_modules/foo-alias": {"name": "foo", "version": "1.0.0"}
+  }
+}"#,
+    )
+    .unwrap();
+}
+
 #[test]
 fn json_version_is_one_machine_document() {
     let output = utoo().args(["--json", "--version"]).output().unwrap();
@@ -160,6 +179,56 @@ fn json_help_is_one_machine_document() {
     assert_eq!(value["command"], "help");
     assert_eq!(value["result"]["target"]["command"], "view");
     assert!(value["result"]["text"].as_str().unwrap().contains("Usage:"));
+}
+
+#[test]
+fn outdated_json_reports_findings_as_one_success_document() {
+    let project = tempdir().unwrap();
+    write_outdated_project(project.path());
+    let manifest = r#"{
+  "name": "foo",
+  "dist-tags": {"latest": "2.0.0"},
+  "versions": {
+    "1.0.0": {"name": "foo", "version": "1.0.0"},
+    "1.1.0": {"name": "foo", "version": "1.1.0"},
+    "2.0.0": {"name": "foo", "version": "2.0.0"}
+  }
+}"#;
+    let (registry, server) =
+        serve_registry_responses(&[("404 Not Found", "{}"), ("200 OK", manifest)]);
+
+    let output = publish_command(project.path(), &registry)
+        .args(["--json", "outdated"])
+        .output()
+        .unwrap();
+    server.join().unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(value["schemaVersion"], 1);
+    assert_eq!(value["command"], "outdated");
+    assert_eq!(value["ok"], true);
+    let package = &value["result"]["packages"][0];
+    assert_eq!(package["package"], "foo-alias");
+    assert_eq!(package["registryPackage"], "foo");
+    assert_eq!(package["protocol"], "npm");
+    assert_eq!(package["dependencyType"], "prod");
+    assert_eq!(package["dependent"], "fixture");
+    assert_eq!(package["declared"], "npm:foo@^1.0.0");
+    assert_eq!(package["resolvedSpec"], "^1.0.0");
+    assert_eq!(package["current"], "1.0.0");
+    assert_eq!(package["wanted"], "1.1.0");
+    assert_eq!(package["latest"], "2.0.0");
+    assert_eq!(package["location"], "node_modules/foo-alias");
+    assert_eq!(package.as_object().unwrap().len(), 11);
 }
 
 #[test]

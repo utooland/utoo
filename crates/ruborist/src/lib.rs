@@ -51,7 +51,7 @@ pub mod manifest {
 
 /// Package lock types (package-lock.json).
 pub mod lock {
-    pub use crate::model::lock_codec::resolve_lock_dependency;
+    pub use crate::model::lock_codec::LockDependencyIndex;
     pub use crate::model::package_lock::{LockPackage, LockPackageNode, PackageLock};
 }
 
@@ -81,7 +81,7 @@ pub mod runtime {
 
 /// Workspace member discovery.
 pub mod workspace {
-    pub use crate::resolver::workspace::WorkspaceDiscovery;
+    pub use crate::resolver::workspace::{WorkspaceDiscovery, WorkspacePackage};
 }
 
 /// Progress events for build process.
