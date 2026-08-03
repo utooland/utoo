@@ -786,6 +786,7 @@ impl ChunkingContext for LibraryChunkingContext {
             references: ResolvedVc::cell(references),
             referenced_assets: OutputAssets::empty_resolved(),
             availability_info,
+            chunk_group_bootstrap_params: None,
         }
         .cell())
     }
