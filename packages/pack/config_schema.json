@@ -1727,9 +1727,13 @@
       "properties": {
         "entry": {
           "description": "Entry point for the server runtime (e.g. \"src/server.ts\")",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaServerEntry"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "function": {
@@ -1742,6 +1746,45 @@
               "type": "null"
             }
           ]
+        },
+        "output": {
+          "description": "Server output configuration.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaServerOutputConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SchemaServerEntry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaServerEntryOptions"
+          }
+        }
+      ]
+    },
+    "SchemaServerEntryOptions": {
+      "type": "object",
+      "required": [
+        "import",
+        "name"
+      ],
+      "properties": {
+        "import": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
         }
       }
     },
@@ -1757,6 +1800,29 @@
         },
         "serverRegister": {
           "description": "Module that exports registerServerReference(action, actionId, name) for the server bundle",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SchemaServerOutputConfig": {
+      "type": "object",
+      "properties": {
+        "chunkFilename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
           "type": [
             "string",
             "null"

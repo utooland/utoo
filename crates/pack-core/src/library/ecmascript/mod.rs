@@ -1,3 +1,3 @@
 pub(crate) mod chunk;
 
-pub use chunk::EcmascriptLibraryEvaluateChunk;
+pub use chunk::{EcmascriptLibraryChunk, EcmascriptLibraryEvaluateChunk};

@@ -22,7 +22,7 @@ use std::{
     process::Command,
     sync::{LazyLock, Mutex},
 };
-use turbo_rcstr::rcstr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc,
     read_strongly_consistent_and_apply_effects, take_effects,
@@ -39,6 +39,23 @@ use turbopack_test_utils::snapshot::{UPDATE, diff, matches_expected, snapshot_is
 use crate::util::REPO_ROOT;
 
 static SNAPSHOT_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+#[turbo_tasks::value(transparent)]
+struct SnapshotIgnorePrefixes(Vec<RcStr>);
+
+fn snapshot_ignore_prefixes(resource: &Path) -> Result<Vec<RcStr>> {
+    let ignore_path = resource.join(".snapshotignore");
+    if !ignore_path.try_exists()? {
+        return Ok(Vec::new());
+    }
+
+    Ok(fs::read_to_string(ignore_path)?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.trim_start_matches("./").replace('\\', "/").into())
+        .collect())
+}
 
 fn default_config() -> String {
     r#"{
@@ -142,6 +159,7 @@ fn run_assertion(resource: &Path) -> Result<()> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn run(resource: PathBuf) -> Result<()> {
+    let snapshot_ignore_prefixes = snapshot_ignore_prefixes(&resource)?;
     let tt = TurboTasks::new(TurboTasksBackend::new(
         BackendOptions {
             storage_mode: None,
@@ -225,7 +243,10 @@ async fn run(resource: PathBuf) -> Result<()> {
             Ok(take_effects(out_op).await?.cell())
         }
 
-        let out_op = run_test_operation(container_op);
+        let snapshot_ignore_prefixes = Vc::<SnapshotIgnorePrefixes>::cell(snapshot_ignore_prefixes)
+            .to_resolved()
+            .await?;
+        let out_op = run_test_operation(container_op, snapshot_ignore_prefixes);
         read_strongly_consistent_and_apply_effects(snapshot_effects_operation(out_op), |e| e)
             .await?;
         read_strongly_consistent_and_apply_effects(output_effects_operation(out_op), |e| e).await?;
@@ -388,6 +409,7 @@ fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, boo
 #[turbo_tasks::function(operation, root)]
 async fn run_test_operation(
     container_op: OperationVc<ProjectContainer>,
+    snapshot_ignore_prefixes: ResolvedVc<SnapshotIgnorePrefixes>,
 ) -> Result<Vc<FileSystemPath>> {
     let project_container = container_op.resolve().strongly_consistent().await?;
 
@@ -416,6 +438,7 @@ async fn run_test_operation(
     } else {
         dist_root.parent()
     };
+    let snapshot_ignore_prefixes = snapshot_ignore_prefixes.await?;
 
     // Get expected output files from the output directory (recursive)
     let expected_paths = expected_recursive(output_path.clone()).await?;
@@ -435,12 +458,19 @@ async fn run_test_operation(
 
     // Process all assets
     while let Some(asset) = queue.pop_front() {
-        walk_asset(asset, &output_path, &dist_root, &mut seen, &mut queue)
-            .await
-            .context(format!(
-                "Failed to walk asset {}",
-                asset.path().to_string().await.context("to_string failed")?
-            ))?;
+        walk_asset(
+            asset,
+            &output_path,
+            &dist_root,
+            &snapshot_ignore_prefixes,
+            &mut seen,
+            &mut queue,
+        )
+        .await
+        .context(format!(
+            "Failed to walk asset {}",
+            asset.path().to_string().await.context("to_string failed")?
+        ))?;
     }
 
     // Verify that actual assets match expected assets
@@ -477,6 +507,7 @@ async fn walk_asset(
     asset: ResolvedVc<Box<dyn OutputAsset>>,
     output_path: &FileSystemPath,
     dist_root: &FileSystemPath,
+    snapshot_ignore_prefixes: &[RcStr],
     seen: &mut FxHashSet<FileSystemPath>,
     queue: &mut VecDeque<ResolvedVc<Box<dyn OutputAsset>>>,
 ) -> Result<()> {
@@ -500,9 +531,18 @@ async fn walk_asset(
         }
     };
 
-    // Add the full path to seen set
-    seen.insert(full_path.clone());
-    diff(full_path, asset.content()).await?;
+    let relative_path = output_path
+        .get_path_to(&full_path)
+        .expect("snapshot output is rebased inside the comparison root");
+    let ignored = snapshot_ignore_prefixes
+        .iter()
+        .any(|prefix| relative_path.starts_with(prefix.as_str()));
+
+    if !ignored {
+        // Add the full path to seen set
+        seen.insert(full_path.clone());
+        diff(full_path, asset.content()).await?;
+    }
 
     queue.extend(asset.references().all_assets().await?.iter().copied());
 

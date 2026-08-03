@@ -80,7 +80,11 @@ pub async fn all_output_assets_operation(
 
     let dist_root = container.project().dist_root();
     let server_config = container.project().config().server().await?;
-    let has_server = server_config.entry.is_some() || server_config.function.is_some();
+    let has_server = server_config
+        .entry
+        .as_ref()
+        .is_some_and(|entry| entry.has_entries())
+        || server_config.function.is_some();
 
     let mut stats_outputs: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
 

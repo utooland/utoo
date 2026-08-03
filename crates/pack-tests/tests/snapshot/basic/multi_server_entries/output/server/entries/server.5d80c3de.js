@@ -5,7 +5,7 @@ if (!Array.isArray(__UTOOPACK__)) {
 
 const CHUNK_BASE_PATH = "";
 const CHUNK_SUFFIX_PATH = "";
-const RELATIVE_ROOT_PATH = "..";
+const RELATIVE_ROOT_PATH = "/ROOT";
 const RUNTIME_PUBLIC_PATH = "";
 // Library builds deliberately collapse JavaScript into one chunk, so the
 // component-chunk runtime path is unsupported in this custom runtime.
@@ -20,7 +20,7 @@ const SUPPORT_COMPONENT_CHUNKS = false;
 /**
  * Describes why a module was instantiated.
  * Shared between browser and Node.js runtimes.
- */ var SourceType = /*#__PURE__*/ function(SourceType) {
+ */ var SourceType = function(SourceType) {
     /**
    * The module was instantiated because it was included in an evaluated chunk's
    * runtime.
@@ -793,7 +793,7 @@ const chunksToRegister = __UTOOPACK__;
 __UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    const runtimeModuleIds = ["[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)"];
+    const runtimeModuleIds = ["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"];
     let exports;
     for (let i = 0; i < runtimeModuleIds.length; i++) {
         const module = moduleCache[runtimeModuleIds[i]];
@@ -812,28 +812,23 @@ function factory () {
 if (typeof exports === 'object' && typeof module === 'object') {
     module.exports = factory();
 } else if (typeof exports === 'object') {
-    exports["NodeRuntimeLibrary"] = factory();
+    var a = factory();
+    for(var i in a) exports[i] = a[i];
 } else {
-    globalThis["NodeRuntimeLibrary"] = factory();
+    var a = factory();
+    for(var i in a) globalThis[i] = a[i];
 }
 })([
-["main.js",
+["entries/server.5d80c3de.js",
 
-"[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-function answer() {
-    return 42;
-}
-__turbopack_context__.s([
-    "answer",
-    0,
-    answer
-]);
+__turbopack_context__.s([]);
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/multi_server_entries/input/shared.ts [server] (ecmascript)");
+;
+console.log("server runtime", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
 }),
 ],
-["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/node_library_build_runtime/input/index.js [library-server] (ecmascript)"]}],
+["entries/server.5d80c3de.js", {"otherChunks":["chunks/server-shared.fbcd5f75.js","chunks/server-shared-0-1.1b081f62.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"]}],
 ]);
-
-
-//# sourceMappingURL=main.js.map

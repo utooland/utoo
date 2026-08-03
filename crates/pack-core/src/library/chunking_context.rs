@@ -42,7 +42,7 @@ use turbopack_ecmascript::{
 };
 use turbopack_ecmascript_runtime::RuntimeType;
 
-use crate::library::ecmascript::chunk::EcmascriptLibraryEvaluateChunk;
+use crate::library::ecmascript::chunk::{EcmascriptLibraryChunk, EcmascriptLibraryEvaluateChunk};
 
 #[turbo_tasks::task_input]
 #[derive(
@@ -66,6 +66,16 @@ pub struct LibraryChunkingContextBuilder {
 impl LibraryChunkingContextBuilder {
     pub fn name(mut self, name: RcStr) -> Self {
         self.chunking_context.name = Some(name);
+        self
+    }
+
+    pub fn preserve_entry_name(mut self, preserve_entry_name: bool) -> Self {
+        self.chunking_context.preserve_entry_name = preserve_entry_name;
+        self
+    }
+
+    pub fn shared_chunks(mut self, shared_chunks: bool) -> Self {
+        self.chunking_context.shared_chunks = shared_chunks;
         self
     }
 
@@ -134,6 +144,11 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
+    pub fn chunk_filename(mut self, chunk_filename: RcStr) -> Self {
+        self.chunking_context.chunk_filename = Some(chunk_filename);
+        self
+    }
+
     pub fn css_filename(mut self, css_filename: RcStr) -> Self {
         self.chunking_context.css_filename = Some(css_filename);
         self
@@ -184,6 +199,10 @@ impl LibraryChunkingContextBuilder {
 #[derive(Debug, Clone)]
 pub struct LibraryChunkingContext {
     name: Option<RcStr>,
+    /// Keep the configured entry name on the evaluate chunk ident for stats generation.
+    preserve_entry_name: bool,
+    /// Allow Node.js library entry chunks to synchronously load shared JavaScript chunks.
+    shared_chunks: bool,
     /// The library root name
     runtime_root: Option<RcStr>,
     /// The library export subpaths
@@ -224,6 +243,8 @@ pub struct LibraryChunkingContext {
     debug_ids: bool,
     /// Evaluate chunk filename template
     filename: Option<RcStr>,
+    /// Non-entry JavaScript chunk filename template
+    chunk_filename: Option<RcStr>,
     /// Initial css chunk filename template
     css_filename: Option<RcStr>,
     /// CSS chunking algorithm.
@@ -249,6 +270,8 @@ impl LibraryChunkingContext {
         LibraryChunkingContextBuilder {
             chunking_context: LibraryChunkingContext {
                 name: None,
+                preserve_entry_name: false,
+                shared_chunks: false,
                 root_path,
                 output_root,
                 output_root_to_root_path,
@@ -263,6 +286,7 @@ impl LibraryChunkingContext {
                 export_usage: None,
                 unused_references: None,
                 filename: Default::default(),
+                chunk_filename: Default::default(),
                 css_filename: Default::default(),
                 style_groups_algorithm: Default::default(),
                 asset_module_filename: Default::default(),
@@ -316,13 +340,14 @@ impl LibraryChunkingContext {
         ident: Vc<AssetIdent>,
         ecmascript_chunk: Vc<EcmascriptChunk>,
     ) -> Result<Vc<AssetIdent>> {
-        let query = QString::from(ident.await?.query.as_str());
+        let ident = ident.await?;
+        let query = QString::from(ident.query.as_str());
         let Some(name) = query.get("name") else {
             bail!("Failed to get name for entry")
         };
         let this = self.await?;
         let root = &this.root_path;
-        if let Some(filename) = self.await?.filename.as_ref() {
+        let output_ident = if let Some(filename) = this.chunk_filename.as_ref() {
             let mut filename = filename.to_string();
             let name = escape_file_path(name);
             if match_name_placeholder(&filename) {
@@ -332,10 +357,68 @@ impl LibraryChunkingContext {
                 let content_hash = self.ecmascript_chunk_content_hash(ecmascript_chunk).await?;
                 filename = replace_content_hash_placeholder(&filename, &content_hash);
             };
-            Ok(AssetIdent::from_path(root.join(&filename)?).into_vc())
+            AssetIdent::from_path(root.join(&filename)?)
         } else {
-            Ok(AssetIdent::from_path(root.join(name)?).into_vc())
-        }
+            AssetIdent::from_path(root.join(name)?)
+        };
+
+        Ok(
+            if this.preserve_entry_name && query.get("preserveEntryName").is_some() {
+                output_ident.with_query(ident.query.clone()).into_vc()
+            } else {
+                output_ident.into_vc()
+            },
+        )
+    }
+
+    #[turbo_tasks::function]
+    pub(crate) async fn ecmascript_evaluate_chunk_ident_with_filename_template(
+        self: Vc<Self>,
+        ident: Vc<AssetIdent>,
+        ecmascript_chunk: Vc<EcmascriptChunk>,
+        other_chunks: Vc<OutputAssets>,
+    ) -> Result<Vc<AssetIdent>> {
+        let ident = ident.await?;
+        let query = QString::from(ident.query.as_str());
+        let Some(name) = query.get("name") else {
+            bail!("Failed to get name for entry")
+        };
+        let this = self.await?;
+        let root = &this.root_path;
+        let output_ident = if let Some(filename) = this.filename.as_ref() {
+            let mut filename = filename.to_string();
+            let name = escape_file_path(name);
+            if match_name_placeholder(&filename) {
+                filename = replace_name_placeholder(&filename, &name);
+            }
+            if match_content_hash_placeholder(&filename) {
+                let chunk_content_hash =
+                    self.ecmascript_chunk_content_hash(ecmascript_chunk).await?;
+                let other_chunks = other_chunks.await?;
+                let content_hash = if other_chunks.is_empty() {
+                    chunk_content_hash.to_string()
+                } else {
+                    let mut hasher = Xxh3Hash64Hasher::new();
+                    hasher.write_value(chunk_content_hash.as_str());
+                    for asset in other_chunks.iter() {
+                        hasher.write_value(asset.path().await?.path.as_str());
+                    }
+                    encode_hex(hasher.finish())
+                };
+                filename = replace_content_hash_placeholder(&filename, &content_hash);
+            };
+            AssetIdent::from_path(root.join(&filename)?)
+        } else {
+            AssetIdent::from_path(root.join(name)?)
+        };
+
+        Ok(
+            if this.preserve_entry_name && query.get("preserveEntryName").is_some() {
+                output_ident.with_query(ident.query.clone()).into_vc()
+            } else {
+                output_ident.into_vc()
+            },
+        )
     }
 
     #[turbo_tasks::function]
@@ -432,14 +515,19 @@ impl ChunkingContext for LibraryChunkingContext {
             .any(|m| m.contains("evaluate"));
 
         let output_root = &self.output_root;
+        let filename_template = if evaluate {
+            self.filename.as_ref()
+        } else {
+            self.chunk_filename.as_ref().or(self.filename.as_ref())
+        };
+        let filename_prefix = filename_template
+            .and_then(|filename| filename.rsplit_once("/").map(|(prefix, _)| prefix.into()));
 
         let output_name = ident_to_output_filename(
             ident,
             self.root_path.clone(),
             extension.clone(),
-            self.filename
-                .as_ref()
-                .and_then(|f| f.rsplit_once("/").map(|p| RcStr::from(p.0))),
+            filename_prefix,
         )
         .owned()
         .await?
@@ -491,6 +579,8 @@ impl ChunkingContext for LibraryChunkingContext {
                             }
                             None => output_name,
                         }
+                    } else if self.shared_chunks {
+                        output_name
                     } else {
                         bail!(
                             "library building can not generate more then one js chunk and css chunk"
@@ -645,12 +735,60 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     async fn chunk_group(
         self: ResolvedVc<Self>,
-        _ident: Vc<AssetIdent>,
-        _chunk_group: ChunkGroup,
-        _module_graph: Vc<ModuleGraph>,
-        _availability_info: AvailabilityInfo,
+        ident: Vc<AssetIdent>,
+        chunk_group: ChunkGroup,
+        module_graph: Vc<ModuleGraph>,
+        availability_info: AvailabilityInfo,
     ) -> Result<Vc<ChunkGroupResult>> {
-        bail!("Library chunking context does not support chunk groups")
+        if !self.await?.shared_chunks {
+            bail!("Library chunking context does not support chunk groups")
+        }
+
+        let module_graph = module_graph.to_resolved().await?;
+        let MakeChunkGroupResult {
+            chunks,
+            references,
+            availability_info,
+        } = make_chunk_group(
+            chunk_group,
+            module_graph,
+            ResolvedVc::upcast(self),
+            availability_info,
+        )
+        .await?;
+        let chunks = chunks.await?;
+        let assets = chunks
+            .iter()
+            .map(async |chunk| {
+                if let Some(ecmascript_chunk) =
+                    ResolvedVc::try_downcast_type::<EcmascriptChunk>(*chunk)
+                {
+                    let output_ident = self
+                        .ecmascript_chunk_ident_with_filename_template(ident, *ecmascript_chunk);
+                    Ok(ResolvedVc::upcast(
+                        EcmascriptLibraryChunk::new(*self, output_ident, *ecmascript_chunk)
+                            .to_resolved()
+                            .await?,
+                    ))
+                } else if let Some(output_asset) =
+                    ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*chunk)
+                {
+                    Ok(output_asset)
+                } else {
+                    bail!("Unable to generate output asset for shared library chunk")
+                }
+            })
+            .try_join()
+            .await?;
+
+        Ok(ChunkGroupResult {
+            assets: ResolvedVc::cell(assets),
+            references: ResolvedVc::cell(references),
+            referenced_assets: OutputAssets::empty_resolved(),
+            availability_info,
+            chunk_group_bootstrap_params: None,
+        }
+        .cell())
     }
 
     #[turbo_tasks::function]
@@ -659,7 +797,7 @@ impl ChunkingContext for LibraryChunkingContext {
         ident: Vc<AssetIdent>,
         chunk_group: ChunkGroup,
         module_graph: Vc<ModuleGraph>,
-        _extra_chunks: Vc<OutputAssets>,
+        extra_chunks: Vc<OutputAssets>,
         availability_info: AvailabilityInfo,
     ) -> Result<Vc<ChunkGroupResult>> {
         let span = {
@@ -692,6 +830,7 @@ impl ChunkingContext for LibraryChunkingContext {
             );
 
             let chunks = chunks.await?;
+            let extra_chunks = extra_chunks.await?;
 
             let assets: Vec<ResolvedVc<Box<dyn OutputAsset>>> = chunks
                 .iter()
@@ -699,10 +838,6 @@ impl ChunkingContext for LibraryChunkingContext {
                     if let Some(ecmascript_chunk) =
                         ResolvedVc::try_downcast_type::<EcmascriptChunk>(*chunk)
                     {
-                        let ident = self.ecmascript_chunk_ident_with_filename_template(
-                            ident,
-                            *ecmascript_chunk,
-                        );
                         let other_chunks = chunks
                             .iter()
                             .filter_map(|c| {
@@ -714,14 +849,21 @@ impl ChunkingContext for LibraryChunkingContext {
                                     ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(*c)
                                 }
                             })
+                            .chain(extra_chunks.iter().copied())
                             .collect::<Vec<_>>();
+                        let other_chunks = Vc::cell(other_chunks);
+                        let ident = self.ecmascript_evaluate_chunk_ident_with_filename_template(
+                            ident,
+                            *ecmascript_chunk,
+                            other_chunks,
+                        );
 
                         Ok(ResolvedVc::upcast(
                             EcmascriptLibraryEvaluateChunk::new(
                                 *self,
                                 ident,
                                 *ecmascript_chunk,
-                                Vc::cell(other_chunks),
+                                other_chunks,
                                 evaluatable_assets,
                                 *module_graph,
                             )
