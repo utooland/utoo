@@ -1,0 +1,14 @@
+/* [project]/style/css_module_global_leak_loose/input/a.module.css [client] (css) */
+.a-module__-uTsoq__local {
+  color: red;
+}
+
+:root {
+  --page-a-global-only: "PAGE_A_GLOBAL_ONLY_3275";
+}
+
+body {
+  overflow: hidden;
+}
+
+/*# sourceMappingURL=input_a_module_8a752676.css.map*/

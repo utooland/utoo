@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_graph/input/a.module.css"],"sourcesContent":[".local {\n  color: red;\n}\n\n:global(:root) {\n  --page-a-global-only: \"PAGE_A_GLOBAL_ONLY_3275\";\n}\n\n:global(body) {\n  overflow: hidden;\n}\n"],"names":[],"mappings":"AAAA;;;;AAIA;;;;AAIA"}}]
+}
