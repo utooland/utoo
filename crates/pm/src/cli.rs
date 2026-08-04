@@ -15,9 +15,10 @@ use crate::constants::cmd::{
     LIST_ALIAS, LIST_NAME, LOGIN_ABOUT, LOGIN_ALIAS, LOGIN_NAME, LOGOUT_ABOUT, LOGOUT_ALIAS,
     LOGOUT_NAME, PACK_ABOUT, PACK_ALIAS, PACK_NAME, PING_ABOUT, PING_ALIAS, PING_NAME,
     PUBLISH_ABOUT, PUBLISH_ALIAS, PUBLISH_NAME, REBUILD_ABOUT, REBUILD_ALIAS, REBUILD_NAME,
-    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS,UNINSTALL_REMOVE,UNINSTALL_RM, UNINSTALL_NAME, UPDATE_ABOUT,
-    UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT, VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME,
-    WHOAMI_ABOUT, WHOAMI_ALIAS, WHOAMI_NAME,
+    RUN_ABOUT, RUN_ALIAS, RUN_NAME, UNINSTALL_ABOUT, UNINSTALL_ALIAS, UNINSTALL_NAME,
+    UNINSTALL_REMOVE, UNINSTALL_RM, UPDATE_ABOUT, UPDATE_ALIAS, UPDATE_NAME, VIEW_ABOUT,
+    VIEW_ALIAS, VIEW_ALIAS_INFO, VIEW_ALIAS_SHOW, VIEW_NAME, WHOAMI_ABOUT, WHOAMI_ALIAS,
+    WHOAMI_NAME,
 };
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::util::cli_enum::PublishAccess;
@@ -479,7 +480,7 @@ mod tests {
     }
 
     //test 'un','uninstall','remove','rm'
-     #[test]
+    #[test]
     fn test_install_un_alias_recognized() {
         // Verify clap correctly recognizes "un" as an alias for uninstall
         let cmd = Cli::command();
@@ -505,7 +506,9 @@ mod tests {
         let cmd = Cli::command();
 
         // Test "uninstall" is recognized as uninstall command
-        let result = cmd.clone().try_get_matches_from(["utoo", "uninstall", "lodash"]);
+        let result = cmd
+            .clone()
+            .try_get_matches_from(["utoo", "uninstall", "lodash"]);
         assert!(
             result.is_ok(),
             "Should parse 'utoo uninstall' as valid uninstall command"
@@ -519,13 +522,15 @@ mod tests {
         );
     }
 
-     #[test]
+    #[test]
     fn test_install_remove_alias_recognized() {
         // Verify clap correctly recognizes "remove" as an alias for uninstall
         let cmd = Cli::command();
 
         // Test "remove" is recognized as uninstall command
-        let result = cmd.clone().try_get_matches_from(["utoo", "remove", "lodash"]);
+        let result = cmd
+            .clone()
+            .try_get_matches_from(["utoo", "remove", "lodash"]);
         assert!(
             result.is_ok(),
             "Should parse 'utoo remove' as valid uninstall command"

@@ -1,0 +1,21 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/a.js",
+        "name": "a"
+      },
+      {
+        "import": "input/b.js",
+        "name": "b"
+      }
+    ],
+    "mode": "production",
+    "optimization": {
+      "cssChunking": "loose",
+      "minify": false,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "dummy"
+}

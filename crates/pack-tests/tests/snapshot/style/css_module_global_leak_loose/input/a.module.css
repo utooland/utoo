@@ -1,0 +1,11 @@
+.local {
+  color: red;
+}
+
+:global(:root) {
+  --page-a-global-only: "PAGE_A_GLOBAL_ONLY_3275";
+}
+
+:global(body) {
+  overflow: hidden;
+}
