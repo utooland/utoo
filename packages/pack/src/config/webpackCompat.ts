@@ -25,7 +25,7 @@ export function resolveBundleOptions(
       if (!result.config.entry || result.config.entry.length === 0) {
         throw new Error(
           'webpack.config.js is missing "entry" configuration.\n' +
-            'Please define an entry, for example:\n' +
+            "Please define an entry, for example:\n" +
             '  module.exports = { entry: "./src/index.js" };',
         );
       }
