@@ -700,6 +700,133 @@ fn config_json_uses_command_and_subcommand_fields() {
     assert_eq!(value["result"]["scope"], "local");
 }
 
+#[test]
+fn config_delete_local_roundtrip() {
+    let project = tempdir().unwrap();
+    let set = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "set", "fixture-key", "fixture-value"])
+        .output()
+        .unwrap();
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "delete", "fixture-key"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "config");
+    assert_eq!(value["subcommand"], "delete");
+    assert_eq!(value["result"]["key"], "fixture-key");
+    assert_eq!(value["result"]["scope"], "local");
+    assert_eq!(value["result"]["deleted"], true);
+
+    let get = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "get", "fixture-key"])
+        .output()
+        .unwrap();
+    assert_eq!(get.status.code(), Some(4));
+}
+
+#[test]
+fn config_delete_missing_key_is_idempotent_noop() {
+    let project = tempdir().unwrap();
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "delete", "never-set-key"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "config");
+    assert_eq!(value["subcommand"], "delete");
+    assert_eq!(value["result"]["deleted"], false);
+    assert_eq!(value["result"]["scope"], "local");
+}
+
+#[test]
+fn config_delete_rm_alias() {
+    let project = tempdir().unwrap();
+    let set = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "set", "fixture-key", "fixture-value"])
+        .output()
+        .unwrap();
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "config", "rm", "fixture-key"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "config");
+    assert_eq!(value["subcommand"], "delete");
+}
+
+#[test]
+fn config_delete_global_scope() {
+    let project = tempdir().unwrap();
+    let set = utoo()
+        .current_dir(project.path())
+        .env("HOME", project.path())
+        .env("USERPROFILE", project.path())
+        .args(["--json", "config", "set", "--global", "g-key", "g-val"])
+        .output()
+        .unwrap();
+    assert!(
+        set.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set.stderr)
+    );
+
+    let output = utoo()
+        .current_dir(project.path())
+        .env("HOME", project.path())
+        .env("USERPROFILE", project.path())
+        .args(["--json", "config", "delete", "--global", "g-key"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "config");
+    assert_eq!(value["subcommand"], "delete");
+    assert_eq!(value["result"]["scope"], "global");
+    assert_eq!(value["result"]["deleted"], true);
+}
+
 #[cfg(unix)]
 #[test]
 fn execute_json_captures_child_output() {

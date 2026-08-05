@@ -125,6 +125,12 @@ pub enum ConfigCommands {
         #[arg(long)]
         global: bool,
     },
+    #[command(about = "Delete a configuration value by its key", alias = "rm")]
+    Delete {
+        key: String,
+        #[arg(long)]
+        global: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -343,6 +349,7 @@ impl ConfigCommands {
             Self::Set { .. } => "set",
             Self::Get { .. } => "get",
             Self::List { .. } => "list",
+            Self::Delete { .. } => "delete",
         }
     }
 }
@@ -562,5 +569,74 @@ mod tests {
             Some("uninstall"),
             "rm alias should map to uninstall subcommand"
         );
+    }
+
+    #[test]
+    fn test_config_delete_command_recognized() {
+        // Verify clap recognizes "config delete" as a valid subcommand
+        let cli = Cli::try_parse_from(["utoo", "config", "delete", "some-key"])
+            .unwrap_or_else(|e| panic!("`utoo config delete some-key` should parse, got: {e}"));
+        match cli.command {
+            Some(Commands::Config { command }) => {
+                assert!(
+                    matches!(command, ConfigCommands::Delete { global: false, .. }),
+                    "config delete should resolve to Delete with global=false"
+                );
+            }
+            _ => panic!("expected Config subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_config_delete_rm_alias_recognized() {
+        // Verify clap recognizes "rm" as an alias for config delete
+        let cmd = Cli::command();
+
+        // Test "rm" is recognized as a config delete command
+        let result = cmd
+            .clone()
+            .try_get_matches_from(["utoo", "config", "rm", "some-key"]);
+        assert!(
+            result.is_ok(),
+            "Should parse 'utoo config rm' as valid config delete command"
+        );
+
+        let matches = result.unwrap();
+        assert_eq!(
+            matches.subcommand_name(),
+            Some("config"),
+            "config subcommand should be recognized"
+        );
+
+        // The nested config subcommand should resolve to Delete
+        let cli = Cli::try_parse_from(["utoo", "config", "rm", "some-key"])
+            .unwrap_or_else(|e| panic!("`utoo config rm some-key` should parse, got: {e}"));
+        match cli.command {
+            Some(Commands::Config { command }) => {
+                assert!(
+                    matches!(command, ConfigCommands::Delete { .. }),
+                    "config rm alias should resolve to Delete"
+                );
+            }
+            _ => panic!("expected Config subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_config_delete_global_flag() {
+        // Verify the --global flag on config delete
+        let cli = Cli::try_parse_from(["utoo", "config", "delete", "--global", "some-key"])
+            .unwrap_or_else(|e| {
+                panic!("`utoo config delete --global some-key` should parse, got: {e}")
+            });
+        match cli.command {
+            Some(Commands::Config { command }) => {
+                assert!(
+                    matches!(command, ConfigCommands::Delete { global: true, .. }),
+                    "config delete --global should resolve to Delete with global=true"
+                );
+            }
+            _ => panic!("expected Config subcommand"),
+        }
     }
 }
