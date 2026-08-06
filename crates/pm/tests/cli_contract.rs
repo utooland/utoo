@@ -593,6 +593,45 @@ fn bare_script_json_captures_the_script_result() {
 }
 
 #[test]
+fn run_accepts_explicit_relative_workspace_path() {
+    let project = tempdir().unwrap();
+    let workspace = project.path().join("tools").join("egg-bin");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["tools/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("package.json"),
+        r#"{"name":"@eggjs/bin","version":"1.0.0","scripts":{"build":"node build.js"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("build.js"),
+        r#"process.stdout.write("WORKSPACE_BUILD_MARKER\n");"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["run", "build", "--workspace", "./tools/egg-bin"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("WORKSPACE_BUILD_MARKER"),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn invalid_json_invocation_returns_a_json_usage_error() {
     let output = utoo()
         .args(["--json", "view", "--definitely-invalid"])

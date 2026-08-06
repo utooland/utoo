@@ -244,18 +244,26 @@ pub struct WorkspaceJson {
 /// Each filter is matched against the workspace name and its project-relative
 /// path via [`matches_pattern`], which handles both literal equality and the
 /// `*` glob forms supported elsewhere in the codebase (e.g. `packages/*`).
+/// Paths are normalized before matching so CLI-friendly forms such as
+/// `./packages/a` and Windows separators match the stored relative path.
 fn expand_filters(nodes: &[WorkspaceNode], filters: &[String]) -> Result<BTreeSet<String>> {
     // Stringify each node's relative path once instead of per filter.
     let node_paths: Vec<(&str, String)> = nodes
         .iter()
-        .map(|n| (n.name.as_str(), n.path.to_string_lossy().into_owned()))
+        .map(|n| {
+            (
+                n.name.as_str(),
+                normalize_workspace_path(&n.path.to_string_lossy()),
+            )
+        })
         .collect();
 
     let mut selected = BTreeSet::new();
     for filter in filters {
+        let normalized_filter = normalize_workspace_path(filter);
         let mut matched = false;
         for (name, path) in &node_paths {
-            if matches_pattern(name, filter) || matches_pattern(path, filter) {
+            if matches_pattern(name, filter) || matches_pattern(path, &normalized_filter) {
                 selected.insert((*name).to_string());
                 matched = true;
             }
@@ -266,6 +274,13 @@ fn expand_filters(nodes: &[WorkspaceNode], filters: &[String]) -> Result<BTreeSe
     }
 
     Ok(selected)
+}
+
+fn normalize_workspace_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 /// Project the full workspace topology onto a selected subset, preserving
@@ -462,11 +477,26 @@ mod tests {
         assert!(by_path.contains("@scope/b"));
         assert_eq!(by_path.len(), 1);
 
+        // Accept the common explicit-relative form used by package-manager CLIs.
+        let by_explicit_relative_path = expand_filters(&nodes, &["./packages/b".into()]).unwrap();
+        assert!(by_explicit_relative_path.contains("@scope/b"));
+        assert_eq!(by_explicit_relative_path.len(), 1);
+
         // Glob match
-        let by_glob = expand_filters(&nodes, &["packages/*".into()]).unwrap();
+        let by_glob = expand_filters(&nodes, &["./packages/*".into()]).unwrap();
         assert_eq!(by_glob.len(), 2);
         assert!(by_glob.contains("@scope/a"));
         assert!(by_glob.contains("@scope/b"));
+
+        // Normalize both filters and discovered paths across Windows/POSIX.
+        let windows_nodes = vec![WorkspaceNode {
+            name: "@scope/windows".into(),
+            path: PathBuf::from(r"tools\egg-bin"),
+        }];
+        for filter in [r".\tools\egg-bin", "./tools/egg-bin", "tools/egg-bin/"] {
+            let selected = expand_filters(&windows_nodes, &[filter.into()]).unwrap();
+            assert_eq!(selected, BTreeSet::from(["@scope/windows".to_string()]));
+        }
 
         // Multiple filters dedupe
         let multi = expand_filters(&nodes, &["@scope/a".into(), "packages/a".into()]).unwrap();
