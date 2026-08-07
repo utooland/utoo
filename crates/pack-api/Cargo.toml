@@ -6,38 +6,39 @@ license.workspace = true
 
 # tombi: format.rules.table-keys-order.disabled = true
 [dependencies]
-anyhow              = { workspace = true, features = ["backtrace"] }
-async-trait         = { workspace = true }
-bincode             = { workspace = true }
-either              = { workspace = true }
-futures             = { workspace = true }
-parking_lot         = { workspace = true }
-qstring             = { workspace = true }
-rustc-hash          = { workspace = true }
-serde               = { workspace = true }
-serde_json          = { workspace = true }
-tokio               = { workspace = true, features = ["sync"] }
-tracing             = { workspace = true }
-url                 = { workspace = true }
-urlencoding         = { workspace = true }
+anyhow               = { workspace = true, features = ["backtrace"] }
+async-trait          = { workspace = true }
+bincode              = { workspace = true }
+either               = { workspace = true }
+futures              = { workspace = true }
+parking_lot          = { workspace = true }
+qstring              = { workspace = true }
+rustc-hash           = { workspace = true }
+serde                = { workspace = true }
+serde_json           = { workspace = true }
+tokio                = { workspace = true, features = ["sync"] }
+tracing              = { workspace = true }
+url                  = { workspace = true }
+urlencoding          = { workspace = true }
 ## turbpack specific
-pack-core           = { workspace = true }
-turbo-bincode       = { workspace = true }
-turbo-rcstr         = { workspace = true }
-turbo-tasks         = { workspace = true }
-turbo-tasks-backend = { workspace = true }
-turbo-tasks-env     = { workspace = true }
-turbo-tasks-fs      = { workspace = true }
-turbo-tasks-hash    = { workspace = true }
-turbo-unix-path     = { workspace = true }
-turbopack           = { workspace = true }
-turbopack-browser   = { workspace = true }
-turbopack-core      = { workspace = true }
-turbopack-css       = { workspace = true }
-turbopack-node      = { workspace = true, default-features = false }
-turbopack-nodejs    = { workspace = true }
-turbopack-resolve   = { workspace = true }
-turbopack-static    = { workspace = true }
+pack-core            = { workspace = true }
+turbo-bincode        = { workspace = true }
+turbo-rcstr          = { workspace = true }
+turbo-tasks          = { workspace = true }
+turbo-tasks-backend  = { workspace = true }
+turbo-tasks-env      = { workspace = true }
+turbo-tasks-fs       = { workspace = true }
+turbo-tasks-hash     = { workspace = true }
+turbo-unix-path      = { workspace = true }
+turbopack            = { workspace = true }
+turbopack-browser    = { workspace = true }
+turbopack-core       = { workspace = true }
+turbopack-css        = { workspace = true }
+turbopack-ecmascript = { workspace = true }
+turbopack-node       = { workspace = true, default-features = false }
+turbopack-nodejs     = { workspace = true }
+turbopack-resolve    = { workspace = true }
+turbopack-static     = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
