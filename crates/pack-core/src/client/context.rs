@@ -21,7 +21,8 @@ use turbopack_core::{
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::{
-        CompileTimeInfo, DefinableNameSegment, FreeVarReference, FreeVarReferences,
+        CompileTimeDefineValue, CompileTimeInfo, DefinableNameSegment, FreeVarReference,
+        FreeVarReferences,
     },
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     ident::Layer,
@@ -108,11 +109,22 @@ pub async fn get_client_compile_time_info(
     )]);
     let define_env = Vc::cell(define_env);
     let mut free_vars = (*free_vars(define_env, provider_config).await?).clone();
-    // Keep the documented `if (module.hot)` guard safe when HMR is disabled.
-    free_vars.insert(
-        vec![DefinableNameSegment::Name(rcstr!("module"))],
-        FreeVarReference::from(TURBOPACK_MODULE),
-    );
+    if hmr_enabled {
+        free_vars.insert(
+            vec![DefinableNameSegment::Name(rcstr!("module"))],
+            FreeVarReference::from(TURBOPACK_MODULE),
+        );
+    } else {
+        // Keep the documented `if (module.hot)` guard safe without changing
+        // unrelated CommonJS expressions such as `module.exports`.
+        free_vars.insert(
+            vec![
+                DefinableNameSegment::Name(rcstr!("module")),
+                DefinableNameSegment::Name(rcstr!("hot")),
+            ],
+            FreeVarReference::Value(CompileTimeDefineValue::Undefined),
+        );
+    }
     let environment = BrowserEnvironment {
         dom: true,
         web_worker: true,
