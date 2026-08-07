@@ -20,7 +20,9 @@ use turbopack_core::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
-    compile_time_info::CompileTimeInfo,
+    compile_time_info::{
+        CompileTimeInfo, DefinableNameSegment, FreeVarReference, FreeVarReferences,
+    },
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
@@ -29,7 +31,8 @@ use turbopack_core::{
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{
-    TypeofWindow, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
+    TypeofWindow, chunk::EcmascriptChunkType, runtime_functions::TURBOPACK_MODULE,
+    transform::ReactCompilerTarget,
 };
 use turbopack_ecmascript_runtime::chunk_update_listeners_global_name;
 use turbopack_node::{
@@ -95,14 +98,20 @@ pub async fn get_client_compile_time_info(
     provider_config: Vc<ProviderConfig>,
     import_meta_env_base_url: RcStr,
 ) -> Result<Vc<CompileTimeInfo>> {
+    let mode = mode.await?;
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
         "process.env.NODE_ENV".into(),
-        serde_json::to_string(mode.await?.node_env())
-            .unwrap()
-            .into(),
+        serde_json::to_string(mode.node_env()).unwrap().into(),
     )]);
     let define_env = Vc::cell(define_env);
+    let mut free_vars = (*free_vars(define_env, provider_config).await?).clone();
+    if mode.is_development() {
+        free_vars.insert(
+            vec![DefinableNameSegment::Name(rcstr!("module"))],
+            FreeVarReference::from(TURBOPACK_MODULE),
+        );
+    }
     let environment = BrowserEnvironment {
         dom: true,
         web_worker: true,
@@ -117,8 +126,9 @@ pub async fn get_client_compile_time_info(
             .await?,
     )
     .defines(defines(define_env).to_resolved().await?)
-    .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .free_var_references(FreeVarReferences(free_vars).resolved_cell())
     .import_meta_env_base_url(import_meta_env_base_url)
+    .hot_module_replacement_enabled(mode.is_development())
     .cell()
     .await
 }

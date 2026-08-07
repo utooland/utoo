@@ -1,0 +1,20 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false,
+    "output": {
+      "chunkLoadingGlobal": "publicHmrApi"
+    }
+  },
+  "runtimeType": "Development"
+}
