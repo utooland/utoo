@@ -9,7 +9,7 @@
     ],
     "mode": "development",
     "devServer": {
-      "hot": true
+      "hot": false
     },
     "optimization": {
       "minify": false,
@@ -17,7 +17,7 @@
     },
     "sourceMaps": false,
     "output": {
-      "chunkLoadingGlobal": "publicHmrApi"
+      "chunkLoadingGlobal": "publicHmrApiDisabled"
     }
   },
   "runtimeType": "Development"

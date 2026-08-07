@@ -1,5 +1,5 @@
 (globalThis["utooChunk_publicHmrApi"] || (globalThis["utooChunk_publicHmrApi"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/runtime/public_hmr_api/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/runtime/public_hmr_api/input/hmr.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([
@@ -8,7 +8,7 @@ __turbopack_context__.s([
 ]);
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
-        return __turbopack_context__.F("input/index.js");
+        return __turbopack_context__.F("input/hmr.js");
     },
     env: {
         DEV: true,
@@ -29,5 +29,8 @@ if ("TURBOPACK compile-time truthy", 1) {
     /*TURBOPACK member replacement*/ __turbopack_context__.m.hot.accept();
 }
 const value = "initial";
+if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
+    __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
+}
 }),
 ]);

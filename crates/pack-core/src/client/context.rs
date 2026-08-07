@@ -97,8 +97,10 @@ pub async fn get_client_compile_time_info(
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
     import_meta_env_base_url: RcStr,
+    hmr_enabled: Vc<bool>,
 ) -> Result<Vc<CompileTimeInfo>> {
     let mode = mode.await?;
+    let hmr_enabled = *hmr_enabled.await?;
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
         "process.env.NODE_ENV".into(),
@@ -106,12 +108,11 @@ pub async fn get_client_compile_time_info(
     )]);
     let define_env = Vc::cell(define_env);
     let mut free_vars = (*free_vars(define_env, provider_config).await?).clone();
-    if mode.is_development() {
-        free_vars.insert(
-            vec![DefinableNameSegment::Name(rcstr!("module"))],
-            FreeVarReference::from(TURBOPACK_MODULE),
-        );
-    }
+    // Keep the documented `if (module.hot)` guard safe when HMR is disabled.
+    free_vars.insert(
+        vec![DefinableNameSegment::Name(rcstr!("module"))],
+        FreeVarReference::from(TURBOPACK_MODULE),
+    );
     let environment = BrowserEnvironment {
         dom: true,
         web_worker: true,
@@ -128,7 +129,7 @@ pub async fn get_client_compile_time_info(
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(FreeVarReferences(free_vars).resolved_cell())
     .import_meta_env_base_url(import_meta_env_base_url)
-    .hot_module_replacement_enabled(mode.is_development())
+    .hot_module_replacement_enabled(hmr_enabled)
     .cell()
     .await
 }

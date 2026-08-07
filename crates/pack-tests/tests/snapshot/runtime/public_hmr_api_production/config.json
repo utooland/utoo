@@ -1,5 +1,4 @@
 {
-  "watch": true,
   "config": {
     "entry": [
       {
@@ -7,18 +6,15 @@
         "name": "main"
       }
     ],
-    "mode": "development",
-    "devServer": {
-      "hot": true
-    },
+    "mode": "production",
     "optimization": {
       "minify": false,
       "moduleIds": "named"
     },
     "sourceMaps": false,
     "output": {
-      "chunkLoadingGlobal": "publicHmrApi"
+      "chunkLoadingGlobal": "publicHmrApiProduction"
     }
   },
-  "runtimeType": "Development"
+  "runtimeType": "Dummy"
 }
