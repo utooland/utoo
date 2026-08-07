@@ -95,12 +95,11 @@
   "modules": [
     {
       "name": "basic/chunk_loading_global/input/index.js",
-      "id": "basic/chunk_loading_global/input/index.js",
+      "id": "[project]/basic/chunk_loading_global/input/index.js [client] (ecmascript)",
       "chunks": [
-        "input_index_eff851b8.js",
-        "main.js"
+        "input_index_eff851b8.js"
       ],
-      "size": 42
+      "size": 93
     }
   ]
 }
