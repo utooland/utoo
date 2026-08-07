@@ -20,5 +20,5 @@
       "chunkLoadingGlobal": "publicHmrApi"
     }
   },
-  "runtimeType": "Development"
+  "runtimeType": "dummy"
 }

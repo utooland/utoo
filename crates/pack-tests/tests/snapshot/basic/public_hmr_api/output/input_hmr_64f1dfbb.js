@@ -1,5 +1,5 @@
 (globalThis["utooChunk_publicHmrApi"] || (globalThis["utooChunk_publicHmrApi"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/runtime/public_hmr_api/input/hmr.js [client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/public_hmr_api/input/hmr.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([
