@@ -20,7 +20,10 @@ use turbopack_core::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
-    compile_time_info::CompileTimeInfo,
+    compile_time_info::{
+        CompileTimeDefineValue, CompileTimeInfo, DefinableNameSegment, FreeVarReference,
+        FreeVarReferences,
+    },
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
@@ -29,7 +32,8 @@ use turbopack_core::{
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{
-    TypeofWindow, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
+    TypeofWindow, chunk::EcmascriptChunkType, runtime_functions::TURBOPACK_MODULE,
+    transform::ReactCompilerTarget,
 };
 use turbopack_ecmascript_runtime::chunk_update_listeners_global_name;
 use turbopack_node::{
@@ -94,15 +98,33 @@ pub async fn get_client_compile_time_info(
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
     import_meta_env_base_url: RcStr,
+    hmr_enabled: Vc<bool>,
 ) -> Result<Vc<CompileTimeInfo>> {
+    let mode = mode.await?;
+    let hmr_enabled = *hmr_enabled.await?;
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
         "process.env.NODE_ENV".into(),
-        serde_json::to_string(mode.await?.node_env())
-            .unwrap()
-            .into(),
+        serde_json::to_string(mode.node_env()).unwrap().into(),
     )]);
     let define_env = Vc::cell(define_env);
+    let mut free_vars = (*free_vars(define_env, provider_config).await?).clone();
+    if hmr_enabled {
+        free_vars.insert(
+            vec![DefinableNameSegment::Name(rcstr!("module"))],
+            FreeVarReference::from(TURBOPACK_MODULE),
+        );
+    } else {
+        // Keep the documented `if (module.hot)` guard safe without changing
+        // unrelated CommonJS expressions such as `module.exports`.
+        free_vars.insert(
+            vec![
+                DefinableNameSegment::Name(rcstr!("module")),
+                DefinableNameSegment::Name(rcstr!("hot")),
+            ],
+            FreeVarReference::Value(CompileTimeDefineValue::Undefined),
+        );
+    }
     let environment = BrowserEnvironment {
         dom: true,
         web_worker: true,
@@ -117,8 +139,9 @@ pub async fn get_client_compile_time_info(
             .await?,
     )
     .defines(defines(define_env).to_resolved().await?)
-    .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .free_var_references(FreeVarReferences(free_vars).resolved_cell())
     .import_meta_env_base_url(import_meta_env_base_url)
+    .hot_module_replacement_enabled(hmr_enabled)
     .cell()
     .await
 }
