@@ -680,6 +680,12 @@ pub struct Project {
     pack_path: RcStr,
 }
 
+async fn is_client_hmr_enabled(project: &Project) -> Result<bool> {
+    Ok(project.config.mode().await?.is_development()
+        && project.watch.enable
+        && project.config.dev_server().await?.hot.unwrap_or_default())
+}
+
 #[turbo_tasks::value(transparent)]
 pub struct ProjectDefineEnv(pub ResolvedVc<EnvMap>);
 
@@ -1064,6 +1070,11 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub(super) async fn client_hmr_enabled(&self) -> Result<Vc<bool>> {
+        Ok(Vc::cell(is_client_hmr_enabled(self).await?))
+    }
+
+    #[turbo_tasks::function]
     pub(super) async fn per_entry_module_graph(&self) -> Result<Vc<bool>> {
         Ok(Vc::cell(*self.config.mode().await? == Mode::Development))
     }
@@ -1260,6 +1271,7 @@ impl Project {
             self.config.mode(),
             self.config.provider_config(),
             import_meta_env_base_url,
+            Vc::cell(is_client_hmr_enabled(self).await?),
         ))
     }
 
@@ -1287,6 +1299,7 @@ impl Project {
                 self.config.mode(),
                 self.config.provider_config(),
                 import_meta_env_base_url,
+                Vc::cell(is_client_hmr_enabled(self).await?),
             )),
             Platform::Node => Ok(get_server_compile_time_info(
                 target,

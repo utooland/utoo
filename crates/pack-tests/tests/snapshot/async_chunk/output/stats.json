@@ -131,52 +131,51 @@
   "modules": [
     {
       "name": "async_chunk/input/import.js",
-      "id": "async_chunk/input/import.js",
-      "chunks": [
-        "input_97190704.js"
-      ],
-      "size": 91
-    },
-    {
-      "name": "async_chunk/input/import.js",
-      "id": "async_chunk/input/import.js",
+      "id": 192,
       "chunks": [
         "input_86dfc83f.js"
       ],
-      "size": 91
-    },
-    {
-      "name": "async_chunk/input/index.js",
-      "id": "async_chunk/input/index.js",
-      "chunks": [
-        "input_86dfc83f.js",
-        "main.js"
-      ],
-      "size": 110
+      "size": 233
     },
     {
       "name": "async_chunk/input/node_modules/bar/index.js",
-      "id": "async_chunk/input/node_modules/bar/index.js",
+      "id": 402,
       "chunks": [
         "input_86dfc83f.js"
       ],
-      "size": 56
+      "size": 154
     },
     {
-      "name": "async_chunk/input/node_modules/foo/index.js",
-      "id": "async_chunk/input/node_modules/foo/index.js",
+      "name": "async_chunk/input/import.js",
+      "id": 476,
       "chunks": [
         "input_97190704.js"
       ],
-      "size": 56
+      "size": 413
     },
     {
-      "name": "async_chunk/input/shared.js",
-      "id": "async_chunk/input/shared.js",
+      "name": "async_chunk/input/index.js",
+      "id": 545,
       "chunks": [
         "input_86dfc83f.js"
       ],
-      "size": 18
+      "size": 348
+    },
+    {
+      "name": "async_chunk/input/shared.js",
+      "id": 743,
+      "chunks": [
+        "input_86dfc83f.js"
+      ],
+      "size": 68
+    },
+    {
+      "name": "async_chunk/input/node_modules/foo/index.js",
+      "id": 976,
+      "chunks": [
+        "input_97190704.js"
+      ],
+      "size": 154
     }
   ]
 }
