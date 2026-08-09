@@ -836,3 +836,63 @@ fn precondition_errors_have_their_own_exit_code() {
         .unwrap();
     assert_eq!(output.status.code(), Some(7));
 }
+
+#[test]
+fn completions_auto_detects_shell_from_shell_env() {
+    let output = utoo()
+        .env("SHELL", "/bin/zsh")
+        .arg("completions")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("#compdef utoo"),
+        "expected a zsh completion script, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("install"),
+        "completion script should include subcommands"
+    );
+}
+
+#[test]
+fn completions_without_shell_env_reports_error() {
+    let output = utoo()
+        .env_remove("SHELL")
+        .arg("completions")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {}", stderr);
+    assert!(
+        stderr.contains("Could not detect shell"),
+        "expected a shell-detection error, stderr: {}",
+        stderr
+    );
+}
+
+#[test]
+fn completions_with_unsupported_shell_reports_error() {
+    let output = utoo()
+        .env("SHELL", "/bin/tcsh")
+        .arg("completions")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {}", stderr);
+    assert!(
+        stderr.contains("Could not detect shell"),
+        "expected a shell-detection error, stderr: {}",
+        stderr
+    );
+}
