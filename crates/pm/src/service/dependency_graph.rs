@@ -254,7 +254,10 @@ impl LockGraphService {
         let package_indices = self.find_package_indices_by_name(package_name);
 
         if package_indices.is_empty() {
-            return Err(anyhow::anyhow!("Package '{package_name}' not found"));
+            return Err(anyhow::anyhow!(
+                "Package '{package_name}' was not found in the lockfile.\n\
+                 Run `utoo deps` to list installed packages, or `utoo install` to sync the lockfile."
+            ));
         }
 
         let mut all_paths = Vec::new();
@@ -536,5 +539,33 @@ mod tests {
         let tree = build_dep_tree(&paths);
         // root should have one child (a)
         assert_eq!(tree.children.len(), 1);
+    }
+
+    #[test]
+    fn test_find_paths_to_root_not_found_includes_package_name() {
+        let graph = LockGraphService::new();
+        let result = graph.find_paths_to_root("nonexistent-package");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nonexistent-package"),
+            "error should mention the queried package name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_find_paths_to_root_not_found_suggests_actions() {
+        let graph = LockGraphService::new();
+        let result = graph.find_paths_to_root("nonexistent-package");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("utoo deps"),
+            "error should suggest `utoo deps`, got: {err}"
+        );
+        assert!(
+            err.contains("utoo install"),
+            "error should suggest `utoo install`, got: {err}"
+        );
     }
 }
