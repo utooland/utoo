@@ -534,6 +534,11 @@ impl EcmascriptLibraryEvaluateChunk {
     pub fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
         Vc::upcast(*self.chunking_context)
     }
+
+    #[turbo_tasks::function]
+    pub fn chunk(&self) -> Vc<EcmascriptChunk> {
+        *self.chunk
+    }
 }
 
 #[turbo_tasks::value_impl]

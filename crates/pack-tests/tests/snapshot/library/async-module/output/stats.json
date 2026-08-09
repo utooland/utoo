@@ -1,13 +1,13 @@
 {
   "entrypoints": {
-    "./main": {
-      "name": "./main",
+    "main": {
+      "name": "main",
       "chunks": [
-        "./main.js"
+        "main.js"
       ],
       "assets": [
         {
-          "name": "./main.js"
+          "name": "main.js"
         }
       ]
     }
@@ -18,11 +18,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./main.js",
+      "id": "main.js",
       "size": 4455,
       "hash": "",
       "files": [
-        "./main.js"
+        "main.js"
       ]
     }
   ],
@@ -54,12 +54,52 @@
   ],
   "modules": [
     {
-      "name": "library/async-module/input/index.js",
-      "id": "library/async-module/input/index.js",
+      "name": "library/async-module/input/main.js",
+      "id": 220,
       "chunks": [
-        "./main.js"
+        "main.js"
       ],
-      "size": 82
+      "size": 1152
+    },
+    {
+      "name": "library/async-module/input/shared.js",
+      "id": 263,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 500
+    },
+    {
+      "name": "library/async-module/input/b.js",
+      "id": 356,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 927
+    },
+    {
+      "name": "library/async-module/input/index.js",
+      "id": 511,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 440
+    },
+    {
+      "name": "library/async-module/input/a.js",
+      "id": 513,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 927
+    },
+    {
+      "name": "library/async-module/input/async.js",
+      "id": 864,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 312
     }
   ]
 }

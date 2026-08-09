@@ -137,10 +137,15 @@ pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
     emit("config", &output, || {
         println!("Configuration file: {}", config_path.display());
         println!();
-        for (key, value) in config.list()? {
+        let mut values = config.list()?.collect::<Vec<_>>();
+        values.sort_unstable_by_key(|(key, _)| *key);
+        for (key, value) in values {
             println!("{key} = {value}");
         }
-        for (key, values) in config.list_arrays() {
+
+        let mut arrays = config.list_arrays().collect::<Vec<_>>();
+        arrays.sort_unstable_by_key(|(key, _)| *key);
+        for (key, values) in arrays {
             println!("{key} = [{}]", values.join(", "));
         }
         Ok(())

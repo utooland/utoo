@@ -1,13 +1,13 @@
 {
   "entrypoints": {
-    "./main": {
-      "name": "./main",
+    "main": {
+      "name": "main",
       "chunks": [
-        "./main.js"
+        "main.js"
       ],
       "assets": [
         {
-          "name": "./main.js"
+          "name": "main.js"
         }
       ]
     }
@@ -18,11 +18,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./main.js",
+      "id": "main.js",
       "size": 9424,
       "hash": "",
       "files": [
-        "./main.js"
+        "main.js"
       ]
     }
   ],
@@ -66,12 +66,44 @@
   ],
   "modules": [
     {
-      "name": "library/less_css_modules/input/index.ts",
-      "id": "library/less_css_modules/input/index.ts",
+      "name": "library/less_css_modules/input/index.less.css",
+      "id": 12,
       "chunks": [
-        "./main.js"
+        "main.js"
       ],
-      "size": 59
+      "size": 633
+    },
+    {
+      "name": "inline_css/injectStylesIntoStyleTag.js",
+      "id": 15,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 7902
+    },
+    {
+      "name": "library/less_css_modules/input/index.less.css",
+      "id": 37,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 265
+    },
+    {
+      "name": "library/less_css_modules/input/index.less",
+      "id": 56,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 148
+    },
+    {
+      "name": "library/less_css_modules/input/index.ts",
+      "id": 91,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 292
     }
   ]
 }

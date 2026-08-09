@@ -5105,6 +5105,7 @@ dependencies = [
  "turbopack-browser",
  "turbopack-core",
  "turbopack-css",
+ "turbopack-ecmascript",
  "turbopack-node",
  "turbopack-nodejs",
  "turbopack-resolve",

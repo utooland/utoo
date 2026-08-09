@@ -330,7 +330,7 @@ impl AppEndpoint {
                     project.execution_context(),
                     project.pack_path().owned().await?,
                     Vc::cell(watch),
-                    Vc::cell(watch && project.config().dev_server().await?.hot.unwrap_or_default()),
+                    project.client_hmr_enabled(),
                 )
                 .resolve_entries(Vc::upcast(self.app_module_context())))
             }

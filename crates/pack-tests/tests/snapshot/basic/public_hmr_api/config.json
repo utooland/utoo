@@ -1,0 +1,24 @@
+{
+  "watch": true,
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "devServer": {
+      "hot": true
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false,
+    "output": {
+      "chunkLoadingGlobal": "publicHmrApi"
+    }
+  },
+  "runtimeType": "dummy"
+}

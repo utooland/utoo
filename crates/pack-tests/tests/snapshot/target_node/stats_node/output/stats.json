@@ -1,17 +1,17 @@
 {
   "entrypoints": {
-    "./main": {
-      "name": "./main",
+    "main": {
+      "name": "main",
       "chunks": [
-        "./main.js",
-        "_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___7e972a20.js",
+        "main.js"
       ],
       "assets": [
         {
-          "name": "./main.js"
+          "name": "_root-of-the-server___7e972a20.js"
         },
         {
-          "name": "_root-of-the-server___7e972a20.js"
+          "name": "main.js"
         }
       ]
     }
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./_root-of-the-server___7e972a20.js",
+      "id": "_root-of-the-server___7e972a20.js",
       "size": 934,
       "hash": "",
       "files": [
-        "./_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___7e972a20.js"
       ]
     },
     {
@@ -34,11 +34,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./main.js",
+      "id": "main.js",
       "size": 271,
       "hash": "",
       "files": [
-        "./main.js"
+        "main.js"
       ]
     }
   ],
@@ -119,28 +119,27 @@
   "modules": [
     {
       "name": "path",
-      "id": "path",
+      "id": "[externals]/path [external] (path, cjs)",
       "chunks": [
-        "./_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___7e972a20.js"
       ],
-      "size": null
+      "size": 139
     },
     {
       "name": "target_node/stats_node/input/index.js",
-      "id": "target_node/stats_node/input/index.js",
+      "id": "[project]/target_node/stats_node/input/index.js [server] (ecmascript)",
       "chunks": [
-        "./_root-of-the-server___7e972a20.js",
-        "./main.js"
+        "_root-of-the-server___7e972a20.js"
       ],
-      "size": 147
+      "size": 279
     },
     {
       "name": "target_node/stats_node/input/utils.js",
-      "id": "target_node/stats_node/input/utils.js",
+      "id": "[project]/target_node/stats_node/input/utils.js [server] (ecmascript)",
       "chunks": [
-        "./_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___7e972a20.js"
       ],
-      "size": 135
+      "size": 240
     }
   ]
 }

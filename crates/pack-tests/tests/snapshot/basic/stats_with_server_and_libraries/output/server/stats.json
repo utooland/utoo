@@ -1,13 +1,13 @@
 {
   "entrypoints": {
-    "./index": {
-      "name": "./index",
+    "index": {
+      "name": "index",
       "chunks": [
-        "./index.js"
+        "index.js"
       ],
       "assets": [
         {
-          "name": "./index.js"
+          "name": "index.js"
         }
       ]
     }
@@ -18,11 +18,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./index.js",
+      "id": "index.js",
       "size": 412,
       "hash": "",
       "files": [
-        "./index.js"
+        "index.js"
       ]
     }
   ],
@@ -55,11 +55,11 @@
   "modules": [
     {
       "name": "basic/stats_with_server_and_libraries/input/server.ts",
-      "id": "basic/stats_with_server_and_libraries/input/server.ts",
+      "id": "[project]/basic/stats_with_server_and_libraries/input/server.ts [server] (ecmascript)",
       "chunks": [
-        "./index.js"
+        "index.js"
       ],
-      "size": 29
+      "size": 79
     }
   ]
 }
