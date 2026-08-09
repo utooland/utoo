@@ -746,6 +746,21 @@ fn write_cache_entry(cache_dir: &Path) -> std::path::PathBuf {
     entry
 }
 
+/// Seed a cache dir with a mix of regular, scoped and multi-version entries.
+/// `lodash/10.0.0` is included so the lexical-vs-semantic version sort
+/// distinction stays observable (lexically it sorts between 1.0.0 and 2.0.0).
+fn seed_cache_dir(cache_dir: &Path) {
+    for entry in [
+        "lodash/1.0.0",
+        "lodash/2.0.0",
+        "lodash/10.0.0",
+        "@types/node/20.0.0",
+        "axios/1.0.0",
+    ] {
+        fs::create_dir_all(cache_dir.join(entry)).unwrap();
+    }
+}
+
 #[test]
 fn clean_does_not_prompt_without_a_tty() {
     let home = tempdir().unwrap();
@@ -805,6 +820,144 @@ fn clean_json_reports_deleted_entries() {
     assert_eq!(value["result"]["summary"]["matched"], 1);
     assert_eq!(value["result"]["summary"]["deleted"], 1);
     assert!(!entry.exists());
+}
+
+#[test]
+fn clean_version_wildcard_only_deletes_matching_versions() {
+    let home = tempdir().unwrap();
+    let cache_dir = home.path().join("cache");
+    seed_cache_dir(&cache_dir);
+
+    let output = utoo()
+        .env("UTOO_CACHE_DIR", &cache_dir)
+        .args(["clean", "lodash@1.*", "--yes"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!cache_dir.join("lodash/1.0.0").exists());
+    assert!(cache_dir.join("lodash/2.0.0").exists());
+    assert!(cache_dir.join("lodash/10.0.0").exists());
+}
+
+#[test]
+fn clean_json_reports_deleted_entries_in_deterministic_order() {
+    let home = tempdir().unwrap();
+    let cache_dir = home.path().join("cache");
+    seed_cache_dir(&cache_dir);
+
+    let output = utoo()
+        .env("UTOO_CACHE_DIR", &cache_dir)
+        .args(["--json", "clean", "*", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "clean");
+    let deleted: Vec<String> = value["result"]["deleted"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}@{}",
+                entry["name"].as_str().unwrap(),
+                entry["version"].as_str().unwrap()
+            )
+        })
+        .collect();
+    assert_eq!(
+        deleted,
+        [
+            "@types/node@20.0.0",
+            "axios@1.0.0",
+            "lodash@1.0.0",
+            "lodash@10.0.0",
+            "lodash@2.0.0",
+        ]
+    );
+    assert_eq!(value["result"]["summary"]["matched"], 5);
+    assert_eq!(value["result"]["summary"]["deleted"], 5);
+}
+
+#[test]
+fn clean_matches_regular_package_pattern() {
+    let home = tempdir().unwrap();
+    let cache_dir = home.path().join("cache");
+    seed_cache_dir(&cache_dir);
+
+    let output = utoo()
+        .env("UTOO_CACHE_DIR", &cache_dir)
+        .args(["clean", "lodash", "--yes"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!cache_dir.join("lodash/1.0.0").exists());
+    assert!(!cache_dir.join("lodash/2.0.0").exists());
+    assert!(!cache_dir.join("lodash/10.0.0").exists());
+    assert!(cache_dir.join("@types/node/20.0.0").exists());
+    assert!(cache_dir.join("axios/1.0.0").exists());
+}
+
+#[test]
+fn clean_matches_scoped_package_wildcard() {
+    let home = tempdir().unwrap();
+    let cache_dir = home.path().join("cache");
+    seed_cache_dir(&cache_dir);
+
+    let output = utoo()
+        .env("UTOO_CACHE_DIR", &cache_dir)
+        .args(["clean", "@types/*", "--yes"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!cache_dir.join("@types/node/20.0.0").exists());
+    assert!(cache_dir.join("lodash/1.0.0").exists());
+    assert!(cache_dir.join("axios/1.0.0").exists());
+}
+
+#[test]
+fn clean_no_match_reports_empty_summary() {
+    let home = tempdir().unwrap();
+    let cache_dir = home.path().join("cache");
+    seed_cache_dir(&cache_dir);
+
+    let output = utoo()
+        .env("UTOO_CACHE_DIR", &cache_dir)
+        .args(["--json", "clean", "nonexistent-pkg", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "clean");
+    assert_eq!(value["result"]["summary"]["matched"], 0);
+    assert_eq!(value["result"]["summary"]["deleted"], 0);
+    assert_eq!(value["result"]["deleted"].as_array().unwrap().len(), 0);
+    // Nothing in the seeded cache dir is touched.
+    for entry in ["lodash/1.0.0", "@types/node/20.0.0", "axios/1.0.0"] {
+        assert!(cache_dir.join(entry).exists());
+    }
 }
 
 #[test]
