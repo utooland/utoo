@@ -1,0 +1,69 @@
+{
+  "entrypoints": {
+    "server": {
+      "name": "server",
+      "chunks": [
+        "server.js"
+      ],
+      "assets": [
+        {
+          "name": "server.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "server.js",
+      "size": 33370,
+      "hash": "",
+      "files": [
+        "server.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "server.js",
+      "info": {},
+      "size": 33370,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server.js"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "server-only",
+      "id": "[externals]/server-only [external] (server-only, cjs)",
+      "chunks": [
+        "server.js"
+      ],
+      "size": 153
+    },
+    {
+      "name": "externals/server-specific/input/node_modules/client-only/index.js",
+      "id": "[project]/externals/server-specific/input/node_modules/client-only/index.js [server] (ecmascript)",
+      "chunks": [
+        "server.js"
+      ],
+      "size": 191
+    },
+    {
+      "name": "externals/server-specific/input/server.ts",
+      "id": "[project]/externals/server-specific/input/server.ts [server] (ecmascript)",
+      "chunks": [
+        "server.js"
+      ],
+      "size": 925
+    }
+  ]
+}

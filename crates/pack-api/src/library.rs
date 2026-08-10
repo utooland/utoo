@@ -184,6 +184,7 @@ impl LibraryEndpoint {
                 project.project_path().owned().await?,
                 project.mode(),
                 project.config(),
+                project.config().externals_config(),
                 project.execution_context(),
                 project.pack_path().owned().await?,
             )),

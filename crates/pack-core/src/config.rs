@@ -161,6 +161,12 @@ pub struct ProviderConfig(
 pub struct ServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
     pub entry: Option<ServerEntry>,
+    /// Server-specific external dependencies. When omitted, the top-level `externals`
+    /// configuration is used for backwards compatibility. When present, including an
+    /// empty object, this completely replaces the top-level configuration for server
+    /// entries and Server Functions.
+    #[bincode(with = "option_indexmap")]
+    pub externals: Option<FxIndexMap<RcStr, ExternalConfig>>,
     /// Configuration for Server Functions (RPC)
     pub function: Option<ServerFunctionConfig>,
     /*
@@ -287,6 +293,15 @@ pub struct Config {
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
+}
+
+impl Config {
+    fn resolved_server_externals(&self) -> Option<&FxIndexMap<RcStr, ExternalConfig>> {
+        self.server
+            .as_ref()
+            .and_then(|server| server.externals.as_ref())
+            .or(self.externals.as_ref())
+    }
 }
 
 #[turbo_tasks::value]
@@ -1378,6 +1393,16 @@ impl Config {
     }
 
     #[turbo_tasks::function]
+    pub fn server_externals_config(&self) -> Vc<ExternalsConfig> {
+        let externals = self
+            .resolved_server_externals()
+            .cloned()
+            .unwrap_or_default();
+
+        ExternalsConfig(externals).cell()
+    }
+
+    #[turbo_tasks::function]
     pub fn optimization(&self) -> Vc<OptimizationConfig> {
         self.optimization.clone().unwrap_or_default().cell()
     }
@@ -2082,6 +2107,55 @@ mod tests {
             legacy.server.unwrap().entry,
             Some(ServerEntry::Import(import)) if import == "./src/server.ts"
         ));
+    }
+
+    #[test]
+    fn test_server_externals_override_and_fallback() {
+        let overridden: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "externals": {
+                "client-only": "global ClientOnly"
+            },
+            "server": {
+                "externals": {
+                    "server-only": "commonjs server-only"
+                }
+            }
+        }))
+        .unwrap();
+        let overridden_externals = overridden.resolved_server_externals().unwrap();
+        assert!(!overridden_externals.contains_key("client-only"));
+        assert!(matches!(
+            overridden_externals.get("server-only"),
+            Some(ExternalConfig::Basic(name)) if name == "commonjs server-only"
+        ));
+
+        let inherited: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "externals": {
+                "shared": "commonjs shared"
+            },
+            "server": {}
+        }))
+        .unwrap();
+        assert!(matches!(
+            inherited
+                .resolved_server_externals()
+                .and_then(|externals| externals.get("shared")),
+            Some(ExternalConfig::Basic(name)) if name == "commonjs shared"
+        ));
+
+        let disabled: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "externals": {
+                "shared": "commonjs shared"
+            },
+            "server": {
+                "externals": {}
+            }
+        }))
+        .unwrap();
+        assert!(disabled.resolved_server_externals().unwrap().is_empty());
     }
 
     #[test]

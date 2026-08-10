@@ -52,7 +52,7 @@
       ]
     },
     "externals": {
-      "description": "External dependencies configuration",
+      "description": "External dependencies for client and Node-target builds, and the fallback for server builds",
       "type": [
         "object",
         "null"
@@ -1742,6 +1742,16 @@
               "type": "null"
             }
           ]
+        },
+        "externals": {
+          "description": "Server-specific externals. Replaces top-level externals for server entries and Server Functions when provided",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/SchemaExternalConfig"
+          }
         },
         "function": {
           "description": "Configuration for Server Functions (RPC) boundaries",
