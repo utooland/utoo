@@ -715,7 +715,11 @@ pub async fn get_client_chunking_context(
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
 
-        if matches!(runtime_type, RuntimeType::Development) {
+        let dev_server = config.dev_server().await?;
+        if matches!(runtime_type, RuntimeType::Development)
+            && dev_server.hot.unwrap_or_default()
+            && dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+        {
             builder = builder.dynamic_hmr_chunk_lists();
         }
     } else {

@@ -8,6 +8,10 @@
     ],
     "mode": "development",
     "sourceMaps": false,
+    "devServer": {
+      "hot": true,
+      "dynamicHmrChunkLists": true
+    },
     "optimization": {
       "minify": false
     },

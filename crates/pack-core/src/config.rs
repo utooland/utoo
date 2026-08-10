@@ -135,6 +135,7 @@ pub struct Entries(Vec<EntryOptions>);
 #[serde(rename_all = "camelCase")]
 pub struct DevServer {
     pub hot: Option<bool>,
+    pub dynamic_hmr_chunk_lists: Option<bool>,
 }
 
 /// Provider configuration item - can be a module name string or [module, export] tuple.
