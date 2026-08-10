@@ -1,5 +1,5 @@
 {
-  "runtimeType": "Production",
+  "runtimeType": "dummy",
   "config": {
     "entry": [
       {
@@ -32,7 +32,6 @@
       "minify": false,
       "moduleIds": "named"
     },
-    "sourceMaps": false,
-    "stats": true
+    "sourceMaps": false
   }
 }

@@ -2,35 +2,26 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 
-function modules(output) {
-  const stats = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "output", output, "stats.json")),
-  );
-  return stats.modules;
-}
-
-function hasExternal(modules, name) {
-  return modules.some(
-    (module) => module.name === name && module.id.includes("[external]"),
-  );
-}
-
-const clientModules = modules("client");
-assert(
-  hasExternal(clientModules, "global ClientOnly"),
-  "client should use top-level externals",
-);
-assert(
-  !hasExternal(clientModules, "server-only"),
-  "server.externals must not affect the client",
+const serverOutput = fs.readFileSync(
+  path.join(__dirname, "output", "server", "server.js"),
+  "utf8",
 );
 
-const serverModules = modules("server");
 assert(
-  hasExternal(serverModules, "server-only"),
+  serverOutput.includes(
+    '"[externals]/server-only [external] (server-only, cjs)"',
+  ),
   "server should use server.externals",
 );
 assert(
-  !hasExternal(serverModules, "global ClientOnly"),
+  serverOutput.includes('require("server-only")'),
+  "server external should be emitted as a CommonJS require",
+);
+assert(
+  serverOutput.includes("/client-only/index.js [server]"),
+  "top-level external should be bundled when server.externals replaces it",
+);
+assert(
+  !serverOutput.includes("[externals]/client-only [external]"),
   "server.externals should replace top-level externals",
 );
