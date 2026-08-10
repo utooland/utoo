@@ -53,3 +53,14 @@ esmValue.default = "updated";
 esmValue.count = 1;
 assert.strictEqual(normalizedEsmNamespace.default, "updated");
 assert.strictEqual(normalizedEsmNamespace.count, 1);
+
+async function main() {
+  const library = await require("./output/main.js");
+
+  assert.strictEqual(library.default.marker, "external value");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
