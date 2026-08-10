@@ -35,7 +35,7 @@ use turbopack_ecmascript::{
     TypeofWindow, chunk::EcmascriptChunkType, runtime_functions::TURBOPACK_MODULE,
     transform::ReactCompilerTarget,
 };
-use turbopack_ecmascript_runtime::chunk_update_listeners_global_name;
+use turbopack_ecmascript_runtime::{RuntimeType, chunk_update_listeners_global_name};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransform, PostCssTransformOptions},
@@ -632,7 +632,6 @@ pub async fn get_client_chunking_context(
     let runtime_type = {
         #[cfg(feature = "test")]
         {
-            use turbopack_ecmascript_runtime::RuntimeType;
             match config.runtime_type_str().await?.as_deref() {
                 Some(rt) if rt.eq_ignore_ascii_case("Development") => RuntimeType::Development,
                 Some(rt) if rt.eq_ignore_ascii_case("Production") => RuntimeType::Production,
@@ -713,9 +712,12 @@ pub async fn get_client_chunking_context(
     if mode.is_development() {
         builder = builder
             .hot_module_replacement()
-            .dynamic_hmr_chunk_lists()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
+
+        if matches!(runtime_type, RuntimeType::Development) {
+            builder = builder.dynamic_hmr_chunk_lists();
+        }
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;
