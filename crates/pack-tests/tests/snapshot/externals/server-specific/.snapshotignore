@@ -1,5 +1,4 @@
-# The assertions and stats cover external resolution. Runtime implementation
-# snapshots add no signal for this configuration test.
+# Keep the server entry snapshot to show the emitted CommonJS external. Ignore
+# client runtime implementation details that add no signal for this test.
 client/_root-of-the-server_
 client/client.js
-server/server.js
