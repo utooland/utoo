@@ -236,6 +236,10 @@ pub struct SchemaDevServer {
     /// Enable hot module replacement
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot: Option<bool>,
+
+    /// Register HMR chunk lists as dynamic chunks are loaded
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_hmr_chunk_lists: Option<bool>,
 }
 
 // ---------------------------------------------------------------------------

@@ -755,6 +755,9 @@ function compatDevServer(devServer: any): ConfigComplete["devServer"] {
   if (!devServer) return undefined;
   const result: NonNullable<ConfigComplete["devServer"]> = {};
   if (typeof devServer.hot !== "undefined") result.hot = !!devServer.hot;
+  if (typeof devServer.dynamicHmrChunkLists !== "undefined") {
+    result.dynamicHmrChunkLists = !!devServer.dynamicHmrChunkLists;
+  }
   if (typeof devServer.port !== "undefined") {
     const p = Number(devServer.port);
     if (!Number.isNaN(p)) result.port = p;

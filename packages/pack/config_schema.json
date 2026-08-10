@@ -667,6 +667,13 @@
       "description": "Development server configuration",
       "type": "object",
       "properties": {
+        "dynamicHmrChunkLists": {
+          "description": "Register HMR chunk lists as dynamic chunks are loaded",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hot": {
           "description": "Enable hot module replacement",
           "type": [

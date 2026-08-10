@@ -207,6 +207,8 @@ export type ProviderConfig = Record<string, string | [string, string]>;
 export interface DevServerConfig {
   /** Enable Hot Module Replacement. */
   hot?: boolean;
+  /** Register HMR chunk lists as dynamic chunks are loaded. */
+  dynamicHmrChunkLists?: boolean;
   /** Port to listen on. */
   port?: number;
   /** Host to bind (e.g. localhost, 0.0.0.0). */
