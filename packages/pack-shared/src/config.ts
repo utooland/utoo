@@ -238,6 +238,10 @@ export interface ConfigComplete {
   mode?: "production" | "development";
   module?: ModuleOptions;
   resolve?: ResolveOptions;
+  /**
+   * External dependencies for client and Node-target builds. Server entries and
+   * Server Functions also use this map unless `server.externals` is provided.
+   */
   externals?: Record<string, ExternalConfig>;
   output?: {
     path?: string;
@@ -370,6 +374,12 @@ export interface ConfigComplete {
   server?: {
     /** Entry point for the server runtime (e.g. "src/server.ts") */
     entry?: ServerEntry;
+    /**
+     * Server-specific externals. When omitted, top-level `externals` are used for
+     * backwards compatibility. When provided, this replaces the top-level map for
+     * server entries and Server Functions; use `{}` to disable configured externals.
+     */
+    externals?: Record<string, ExternalConfig>;
     output?: {
       /** Output path for server chunks, relative to project root. */
       path?: string;

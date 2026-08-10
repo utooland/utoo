@@ -29,7 +29,9 @@ pub struct CompleteConfig {
 
     /// External dependencies configuration
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "External dependencies configuration")]
+    #[schemars(
+        description = "External dependencies for client and Node-target builds, and the fallback for server builds"
+    )]
     pub externals: Option<HashMap<String, SchemaExternalConfig>>,
 
     /// Output configuration
@@ -254,6 +256,14 @@ pub struct SchemaServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
     pub entry: Option<SchemaServerEntry>,
+
+    /// Server-specific external dependencies. If omitted, top-level externals are used.
+    /// If provided, this replaces the top-level map for server entries and Server Functions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Server-specific externals. Replaces top-level externals for server entries and Server Functions when provided"
+    )]
+    pub externals: Option<HashMap<String, SchemaExternalConfig>>,
 
     /// Configuration for Server Functions (RPC)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1591,6 +1601,9 @@ mod tests {
                   { "name": "server", "import": "./src/server.ts" },
                   { "name": "index-server", "import": "./src/pages/index.server.ts" }
                 ],
+                "externals": {
+                  "server-only": "commonjs server-only"
+                },
                 "output": {
                   "path": "dist/server",
                   "filename": "[name].[contenthash:8].js"
@@ -1611,6 +1624,13 @@ mod tests {
                     && server_import == "./src/server.ts"
                     && page_name == "index-server"
                     && page_import == "./src/pages/index.server.ts")
+        ));
+        assert!(matches!(
+            server
+                .externals
+                .as_ref()
+                .and_then(|externals| externals.get("server-only")),
+            Some(SchemaExternalConfig::Basic(name)) if name == "commonjs server-only"
         ));
         assert_eq!(server.output.unwrap().path.as_deref(), Some("dist/server"));
 

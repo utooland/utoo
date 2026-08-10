@@ -29,7 +29,7 @@ use turbopack_nodejs::NodeJsChunkingContext;
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
-    config::{Config, OptionCompressType, ProviderConfig},
+    config::{Config, ExternalsConfig, OptionCompressType, ProviderConfig},
     import_map::get_postcss_package_mapping,
     mode::Mode,
     server::{
@@ -337,6 +337,7 @@ pub async fn get_server_resolve_options_context(
     project_path: FileSystemPath,
     mode: Vc<Mode>,
     config: Vc<Config>,
+    externals_config: Vc<ExternalsConfig>,
     execution_context: Vc<ExecutionContext>,
     pack_path: FileSystemPath,
 ) -> Result<Vc<ResolveOptionsContext>> {
@@ -346,7 +347,7 @@ pub async fn get_server_resolve_options_context(
             .await?;
     let server_fallback_import_map = get_server_fallback_import_map().to_resolved().await?;
 
-    let external_config = *config.externals_config().to_resolved().await?;
+    let external_config = *externals_config.to_resolved().await?;
 
     let externals_plugin = ExternalsPlugin::new(
         project_path.clone(),
