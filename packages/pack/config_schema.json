@@ -1774,6 +1774,17 @@
               "type": "null"
             }
           ]
+        },
+        "resolve": {
+          "description": "Server-only resolution options. Alias entries override matching resolve.alias entries; extensions replace resolve.extensions when provided",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaResolveConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },

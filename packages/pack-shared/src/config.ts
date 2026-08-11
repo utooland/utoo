@@ -375,6 +375,11 @@ export interface ConfigComplete {
     /** Entry point for the server runtime (e.g. "src/server.ts") */
     entry?: ServerEntry;
     /**
+     * Server-only resolution options. Alias entries override matching
+     * `resolve.alias` entries; extensions replace `resolve.extensions` when set.
+     */
+    resolve?: ResolveOptions;
+    /**
      * Server-specific externals. When omitted, top-level `externals` are used for
      * backwards compatibility. When provided, this replaces the top-level map for
      * server entries and Server Functions; use `{}` to disable configured externals.

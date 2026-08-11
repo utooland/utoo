@@ -395,7 +395,7 @@ pub async fn get_server_resolve_options_context(
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
-        custom_extensions: config.resolve_extension().owned().await?,
+        custom_extensions: config.server_resolve_extension().owned().await?,
         rules: vec![(
             foreign_code_context_condition(config).await?,
             foreign_resolve_options.resolved_cell(),
