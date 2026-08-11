@@ -23,21 +23,17 @@ pub async fn create_web_entry_source(
 ) -> Result<Vc<Box<dyn ContentSource>>> {
     let entries = match &*project.app_project().await? {
         Some(app_project) => {
-            let app_endpoint = app_project.get_app_endpoint();
-
-            let asset_context = Vc::upcast(app_endpoint.app_module_context());
-
-            let runtime_entries = app_endpoint.app_runtime_entries();
-
-            let chunking_context = app_endpoint
+            let asset_context = Vc::upcast(app_project.app_module_context());
+            let runtime_entries = app_project.app_runtime_entries();
+            let chunking_context = app_project
                 .project()
                 .client_chunking_context()
                 .to_resolved()
                 .await?;
 
-            app_endpoint
+            app_project
+                .resolved_entrypoints()
                 .await?
-                .entrypoints
                 .iter()
                 .map(async |app| {
                     let module_graph = app

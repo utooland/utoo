@@ -1,4 +1,4 @@
-import { EntryOptions, handleIssues } from "@utoo/pack-shared";
+import { handleIssues } from "@utoo/pack-shared";
 import { spawn } from "child_process";
 import fs from "fs";
 import { nanoid } from "nanoid";
@@ -6,7 +6,6 @@ import path from "path";
 import { BundleOptions } from "../config/types";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
-import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
 import {
@@ -15,7 +14,7 @@ import {
   normalizeTurbopackMemoryEviction,
 } from "../utils/env";
 import { findRootDir } from "../utils/findRoot";
-import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
+import { HtmlGenerationManager } from "../utils/HtmlGenerationManager";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
@@ -111,36 +110,13 @@ async function buildInternal(
     const entrypoints = await project.writeAllEntrypointsToDisk();
 
     handleIssues(entrypoints.issues);
-
-    const htmlConfigs = [
-      ...(Array.isArray((bundleOptions.config as any).html)
-        ? (bundleOptions.config as any).html
-        : (bundleOptions.config as any).html
-          ? [(bundleOptions.config as any).html]
-          : []),
-      ...bundleOptions.config.entry
-        .filter((e: EntryOptions) => !!e.html)
-        .map((e: EntryOptions) => e.html!),
-    ];
-
-    if (htmlConfigs.length > 0) {
-      const assets = getInitialAssetsFromEndpointPaths([
-        ...(entrypoints.appPaths ?? []),
-        ...(entrypoints.libraryPaths ?? []),
-      ]);
-
-      const outputDir = getOutputPath(
-        bundleOptions.config,
-        resolvedProjectPath,
-      );
-
-      const publicPath = bundleOptions.config.output?.publicPath;
-
-      for (const config of htmlConfigs) {
-        const plugin = new HtmlPlugin(config);
-        await plugin.generate(outputDir, assets, publicPath);
-      }
-    }
+    const htmlGenerationManager = new HtmlGenerationManager(
+      bundleOptions.config,
+      getOutputPath(bundleOptions.config, resolvedProjectPath),
+      bundleOptions.config.output?.publicPath,
+    );
+    htmlGenerationManager.setEntrypoints(entrypoints);
+    await htmlGenerationManager.generateAll();
 
     if (process.env.ANALYZE) {
       await analyzeBundle(bundleOptions.config.output?.path || "dist");

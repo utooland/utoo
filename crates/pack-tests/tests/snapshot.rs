@@ -172,12 +172,12 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let (project_options, write_endpoints_individually) =
+        let (project_options, write_endpoints_individually, expected_app_endpoints) =
             project_options_from_resource(&resource)?;
         let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
         ProjectContainer::initialize(container_op, project_options).await?;
 
-        if write_endpoints_individually {
+        if write_endpoints_individually || expected_app_endpoints.is_some() {
             let project_container = container_op.resolve().strongly_consistent().await?;
             let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
                 get_entrypoints_with_issues_operation(project_container),
@@ -185,27 +185,37 @@ async fn run(resource: PathBuf) -> Result<()> {
             )
             .await?;
 
-            for endpoint in entrypoints_with_issues
-                .entrypoints
-                .apps
-                .iter()
-                .chain(&entrypoints_with_issues.entrypoints.libraries)
-            {
-                let written_endpoint = get_written_endpoint_with_issues_operation(*endpoint)
-                    .read_strongly_consistent()
-                    .await?;
-                let error_count = written_endpoint
-                    .issues
-                    .iter()
-                    .filter(|issue| issue.severity <= IssueSeverity::Error)
-                    .count();
+            if let Some(expected) = expected_app_endpoints {
                 anyhow::ensure!(
-                    error_count == 0,
-                    "writing an endpoint to disk produced {error_count} error issue(s)"
+                    entrypoints_with_issues.entrypoints.apps.len() == expected,
+                    "expected {expected} app endpoint(s), got {}",
+                    entrypoints_with_issues.entrypoints.apps.len()
                 );
             }
 
-            return Ok(());
+            if write_endpoints_individually {
+                for endpoint in entrypoints_with_issues
+                    .entrypoints
+                    .apps
+                    .iter()
+                    .chain(&entrypoints_with_issues.entrypoints.libraries)
+                {
+                    let written_endpoint = get_written_endpoint_with_issues_operation(*endpoint)
+                        .read_strongly_consistent()
+                        .await?;
+                    let error_count = written_endpoint
+                        .issues
+                        .iter()
+                        .filter(|issue| issue.severity <= IssueSeverity::Error)
+                        .count();
+                    anyhow::ensure!(
+                        error_count == 0,
+                        "writing an endpoint to disk produced {error_count} error issue(s)"
+                    );
+                }
+
+                return Ok(());
+            }
         }
 
         #[turbo_tasks::function(operation, root)]
@@ -258,7 +268,7 @@ async fn run(resource: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, bool)> {
+fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, bool, Option<usize>)> {
     let test_path = canonicalize(resource)?;
     assert!(test_path.exists(), "{} does not exist", resource.display());
     assert!(
@@ -288,38 +298,51 @@ fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, boo
     };
 
     // Parse config content and determine if it's in development or production mode
-    let (mut user_config, runtime_type_override, watch_enabled, write_endpoints_individually): (
-        serde_json::Value,
-        Option<String>,
-        bool,
-        bool,
-    ) = if config_content.trim().is_empty() {
-        (serde_json::from_str(&default_config())?, None, false, false)
-    } else {
-        let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
-        let runtime_type_from_root = raw_root
-            .get("runtimeType")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let watch_enabled = raw_root
-            .get("watch")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let write_endpoints_individually = raw_root
-            .get("writeEndpointsIndividually")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let user_cfg = raw_root
-            .get("config")
-            .cloned()
-            .expect("config.json must contain a top-level `config` object");
-        (
-            user_cfg,
-            runtime_type_from_root,
-            watch_enabled,
-            write_endpoints_individually,
-        )
-    };
+    let (
+        mut user_config,
+        runtime_type_override,
+        watch_enabled,
+        write_endpoints_individually,
+        expected_app_endpoints,
+    ): (serde_json::Value, Option<String>, bool, bool, Option<usize>) =
+        if config_content.trim().is_empty() {
+            (
+                serde_json::from_str(&default_config())?,
+                None,
+                false,
+                false,
+                None,
+            )
+        } else {
+            let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
+            let runtime_type_from_root = raw_root
+                .get("runtimeType")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let watch_enabled = raw_root
+                .get("watch")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let write_endpoints_individually = raw_root
+                .get("writeEndpointsIndividually")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let expected_app_endpoints = raw_root
+                .get("expectedAppEndpoints")
+                .and_then(|v| v.as_u64())
+                .map(|value| value as usize);
+            let user_cfg = raw_root
+                .get("config")
+                .cloned()
+                .expect("config.json must contain a top-level `config` object");
+            (
+                user_cfg,
+                runtime_type_from_root,
+                watch_enabled,
+                write_endpoints_individually,
+                expected_app_endpoints,
+            )
+        };
 
     // Ensure default output configuration is present
     if user_config.get("output").is_none() {
@@ -403,7 +426,11 @@ fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, boo
             .into(),
     };
 
-    Ok((project_options, write_endpoints_individually))
+    Ok((
+        project_options,
+        write_endpoints_individually,
+        expected_app_endpoints,
+    ))
 }
 
 #[turbo_tasks::function(operation, root)]

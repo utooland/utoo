@@ -1489,12 +1489,7 @@ impl Project {
         let app_project = self.app_project().to_resolved().await?.await?;
         Ok(Entrypoints {
             apps: match *app_project {
-                Some(app) => Some(
-                    Endpoints(vec![ResolvedVc::upcast(
-                        app.get_app_endpoint().to_resolved().await?,
-                    )])
-                    .resolved_cell(),
-                ),
+                Some(app) => Some(app.get_app_endpoints().to_resolved().await?),
                 None => None,
             },
             libraries: match *library_project {
