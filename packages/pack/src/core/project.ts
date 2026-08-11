@@ -23,6 +23,7 @@ import { getPackPath, rustifyEnv } from "../utils/common";
 import { normalizePath } from "../utils/normalizePath";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
+  DevAssetResponse,
   Endpoint,
   Project,
   ProjectOptions,
@@ -533,6 +534,23 @@ export function projectFactory() {
       });
     }
 
+    async prepareDevAssets(): Promise<TurbopackResult<RawEntrypoints>> {
+      return await withErrorCause(async () => {
+        const napiEndpoints = (await binding.projectPrepareDevAssets(
+          this._nativeProject,
+        )) as TurbopackResult<{ __napiType: "Endpoint" }>;
+
+        return napiEntrypointsToRawEntrypoints(napiEndpoints);
+      });
+    }
+
+    async getDevAsset(path: string): Promise<DevAssetResponse> {
+      const result = await withErrorCause(() =>
+        binding.projectGetDevAsset(this._nativeProject, path),
+      );
+      return { ...result, asset: result.asset ?? null };
+    }
+
     entrypointsSubscribe() {
       type NapiEndpoint = { __napiType: "Endpoint" };
 
@@ -556,6 +574,16 @@ export function projectFactory() {
     hmrEvents(identifier: string) {
       return subscribe<TurbopackResult<Update>>(true, async (callback) =>
         binding.projectHmrEvents(this._nativeProject, identifier, callback),
+      );
+    }
+
+    devAssetHmrEvents(identifier: string) {
+      return subscribe<TurbopackResult<Update>>(true, async (callback) =>
+        binding.projectDevAssetHmrEvents(
+          this._nativeProject,
+          identifier,
+          callback,
+        ),
       );
     }
 

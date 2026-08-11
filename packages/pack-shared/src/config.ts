@@ -209,6 +209,8 @@ export interface DevServerConfig {
   hot?: boolean;
   /** Register HMR chunk lists as dynamic chunks are loaded. */
   dynamicHmrChunkLists?: boolean;
+  /** Compile development assets when they are requested instead of eagerly. */
+  lazyCompilation?: boolean;
   /** Port to listen on. */
   port?: number;
   /** Host to bind (e.g. localhost, 0.0.0.0). */

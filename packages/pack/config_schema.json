@@ -680,6 +680,13 @@
             "boolean",
             "null"
           ]
+        },
+        "lazyCompilation": {
+          "description": "Compile development assets when they are requested instead of eagerly",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },

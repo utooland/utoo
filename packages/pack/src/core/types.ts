@@ -44,6 +44,17 @@ export interface PartialUpdate extends BaseUpdate {
 
 export type Update = IssuesUpdate | PartialUpdate;
 
+export interface DevAsset {
+  body: Buffer;
+  headers: Array<{ name: string; value: string }>;
+  statusCode: number;
+}
+
+export interface DevAssetResponse {
+  asset: DevAsset | null;
+  issues: NapiIssue[];
+}
+
 export interface ProjectOptions extends BundleOptions {
   /**
    * A root path from which all files must be nested under. Trying to access
@@ -62,11 +73,19 @@ export interface Project {
 
   writeAllEntrypointsToDisk(): Promise<TurbopackResult<RawEntrypoints>>;
 
+  prepareDevAssets(): Promise<TurbopackResult<RawEntrypoints>>;
+
+  getDevAsset(path: string): Promise<DevAssetResponse>;
+
   entrypointsSubscribe(): AsyncIterableIterator<
     TurbopackResult<RawEntrypoints>
   >;
 
   hmrEvents(identifier: string): AsyncIterableIterator<TurbopackResult<Update>>;
+
+  devAssetHmrEvents(
+    identifier: string,
+  ): AsyncIterableIterator<TurbopackResult<Update>>;
 
   hmrIdentifiersSubscribe(): AsyncIterableIterator<
     TurbopackResult<HmrIdentifiers>

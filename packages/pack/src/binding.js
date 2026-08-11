@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, lockfileTryAcquireSync, lockfileTryAcquire, lockfileUnlockSync, lockfileUnlock, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, MemoryEvictionMode, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
+const { registerWorkerScheduler, workerCreated, recvTaskMessageInWorker, sendTaskMessage, lockfileTryAcquireSync, lockfileTryAcquire, lockfileUnlockSync, lockfileUnlock, projectGetDevAsset, projectPrepareDevAssets, projectDevAssetHmrEvents, endpointWriteToDisk, endpointServerChangedSubscribe, endpointClientChangedSubscribe, MemoryEvictionMode, projectNew, projectUpdate, projectOnExit, projectShutdown, projectWriteAllEntrypointsToDisk, projectEntrypointsSubscribe, projectHmrEvents, projectHmrIdentifiersSubscribe, projectUpdateInfoSubscribe, projectTraceSource, projectGetSourceForAsset, projectGetSourceMap, projectGetSourceMapSync, rootTaskDispose, initCustomTraceSubscriber, teardownTraceSubscriber } = nativeBinding
 
 module.exports.registerWorkerScheduler = registerWorkerScheduler
 module.exports.workerCreated = workerCreated
@@ -320,6 +320,9 @@ module.exports.lockfileTryAcquireSync = lockfileTryAcquireSync
 module.exports.lockfileTryAcquire = lockfileTryAcquire
 module.exports.lockfileUnlockSync = lockfileUnlockSync
 module.exports.lockfileUnlock = lockfileUnlock
+module.exports.projectGetDevAsset = projectGetDevAsset
+module.exports.projectPrepareDevAssets = projectPrepareDevAssets
+module.exports.projectDevAssetHmrEvents = projectDevAssetHmrEvents
 module.exports.endpointWriteToDisk = endpointWriteToDisk
 module.exports.endpointServerChangedSubscribe = endpointServerChangedSubscribe
 module.exports.endpointClientChangedSubscribe = endpointClientChangedSubscribe

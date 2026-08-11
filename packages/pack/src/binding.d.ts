@@ -32,6 +32,22 @@ export declare function lockfileTryAcquireSync(path: string, content?: string | 
 export declare function lockfileTryAcquire(path: string, content?: string | undefined | null): Promise<{ __napiType: "Lockfile" } | null>
 export declare function lockfileUnlockSync(lockfile: { __napiType: "Lockfile" }): void
 export declare function lockfileUnlock(lockfile: { __napiType: "Lockfile" }): Promise<void>
+export interface NapiDevAssetHeader {
+  name: string
+  value: string
+}
+export interface NapiDevAsset {
+  statusCode: number
+  headers: Array<NapiDevAssetHeader>
+  body: Buffer
+}
+export interface NapiDevAssetResponse {
+  asset?: NapiDevAsset
+  issues: Array<NapiIssue>
+}
+export declare function projectGetDevAsset(project: { __napiType: "Project" }, path: string): Promise<NapiDevAssetResponse>
+export declare function projectPrepareDevAssets(project: { __napiType: "Project" }): Promise<TurbopackResult>
+export declare function projectDevAssetHmrEvents(project: { __napiType: "Project" }, identifier: RcStr, func: (...args: any[]) => any): { __napiType: "RootTask" }
 export interface NapiEndpointConfig {
   
 }

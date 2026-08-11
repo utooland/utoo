@@ -718,7 +718,8 @@ pub async fn get_client_chunking_context(
         let dev_server = config.dev_server().await?;
         if matches!(runtime_type, RuntimeType::Development)
             && dev_server.hot.unwrap_or_default()
-            && dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+            && (dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+                || dev_server.lazy_compilation.unwrap_or_default())
         {
             builder = builder.dynamic_hmr_chunk_lists();
         }
