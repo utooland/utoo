@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 9424,
+      "size": 9432,
       "hash": "",
       "files": [
         "main.js"
@@ -43,7 +43,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 9424,
+      "size": 9432,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -55,7 +55,7 @@
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 15560,
+      "size": 15568,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -71,7 +71,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 633
+      "size": 641
     },
     {
       "name": "inline_css/injectStylesIntoStyleTag.js",
