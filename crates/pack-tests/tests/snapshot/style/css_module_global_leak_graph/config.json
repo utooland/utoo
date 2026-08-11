@@ -1,4 +1,5 @@
 {
+  "expectedAppEndpoints": 2,
   "config": {
     "entry": [
       {
