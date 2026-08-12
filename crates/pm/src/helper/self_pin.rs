@@ -95,7 +95,7 @@ pub async fn handoff_if_needed(
     let target = platform_target(std::env::consts::OS, std::env::consts::ARCH)?;
     let cache_path = release_cache_path_for(&target, &pin.version)?;
     let lock_path = sibling_lock_path(&cache_path, ".self-pin.lock")?;
-    let _lock = lock_exclusive(&lock_path).await?;
+    let lock = lock_exclusive(&lock_path).await?;
     let executable = match cached_release_at(&cache_path, &target, &pin.version).await? {
         CachedRelease::Valid(executable) => executable,
         CachedRelease::Missing => {
@@ -122,7 +122,7 @@ pub async fn handoff_if_needed(
             executable.display()
         );
     }
-    handoff(&executable, args, &pin.version)
+    handoff(&executable, args, &pin.version, lock)
 }
 
 pub fn is_active() -> bool {
@@ -398,7 +398,12 @@ async fn validate_executable_version(executable: &Path, version: &str) -> Result
 }
 
 #[cfg(unix)]
-fn handoff(executable: &Path, args: &[String], version: &str) -> Result<()> {
+fn handoff(
+    executable: &Path,
+    args: &[String],
+    version: &str,
+    _lock: crate::util::process_lock::ProcessLock,
+) -> Result<()> {
     use std::os::unix::process::CommandExt;
 
     let error = Command::new(executable)
@@ -410,13 +415,25 @@ fn handoff(executable: &Path, args: &[String], version: &str) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn handoff(executable: &Path, args: &[String], version: &str) -> Result<()> {
-    let status = Command::new(executable)
+fn handoff(
+    executable: &Path,
+    args: &[String],
+    version: &str,
+    lock: crate::util::process_lock::ProcessLock,
+) -> Result<()> {
+    let mut child = Command::new(executable)
         .args(args)
         .env(HANDOFF_ENV, version)
         .env_remove("UTOO_MANAGED_PACKAGE_ROOT")
-        .status()
+        .spawn()
         .with_context(|| format!("Failed to start pinned Utoo at {}", executable.display()))?;
+    // Windows cannot replace the current process. Keep the slot stable until
+    // CreateProcess has opened the executable, then release it before waiting
+    // so the pinned child can run `utoo clean` without deadlocking its parent.
+    drop(lock);
+    let status = child
+        .wait()
+        .with_context(|| format!("Failed to wait for pinned Utoo at {}", executable.display()))?;
     std::process::exit(status.code().unwrap_or(1));
 }
 
