@@ -222,8 +222,8 @@ fn platform_target(os: &str, arch: &str) -> Result<PlatformTarget> {
 
 fn release_cache_path_for(target: &PlatformTarget, version: &str) -> PathBuf {
     get_cache_dir()
-        .join("self")
-        .join(format!("{version}@{}", target.cache_key))
+        .join(format!("self-{}", target.cache_key))
+        .join(version)
 }
 
 async fn cached_release_at(
@@ -526,14 +526,26 @@ mod tests {
         );
         let mac_arm64_path = release_cache_path_for(&mac_arm64, version);
         let mac_x64_path = release_cache_path_for(&mac_x64, version);
-        assert!(mac_arm64_path.ends_with("self/1.1.8@darwin-arm64"));
+        assert!(mac_arm64_path.ends_with("self-darwin-arm64/1.1.8"));
         assert_ne!(
             sibling_lock_path(&mac_arm64_path, ".self-pin.lock").unwrap(),
             sibling_lock_path(&mac_x64_path, ".self-pin.lock").unwrap(),
         );
         let legacy_path = get_cache_dir().join("self").join(version);
-        assert_eq!(mac_arm64_path.parent(), legacy_path.parent());
+        assert_eq!(mac_arm64_path.file_name(), legacy_path.file_name());
         assert_ne!(mac_arm64_path, legacy_path);
+        let package = mac_arm64_path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
+        let cached_version = mac_arm64_path.file_name().unwrap().to_string_lossy();
+        let cache_spec = format!("{package}@{cached_version}");
+        assert_eq!(
+            utoo_ruborist::util::parse_package_spec(&cache_spec),
+            ("self-darwin-arm64", "1.1.8"),
+        );
         assert_eq!(
             release_cache_path_for(&windows_arm64, version),
             release_cache_path_for(&windows_x64, version),
@@ -543,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_self_pin_metadata_requires_reprovision_without_early_deletion() {
         let temp = TempDir::new().unwrap();
-        let cache_path = temp.path().join("self/1.1.8@darwin-arm64");
+        let cache_path = temp.path().join("self-darwin-arm64/1.1.8");
         let package_root = cache_path.join("package");
         let target = platform_target("macos", "aarch64").unwrap();
         std::fs::create_dir_all(package_root.join("bin")).unwrap();
@@ -568,7 +580,7 @@ mod tests {
     #[tokio::test]
     async fn corrupt_self_pin_executable_requires_reprovision_without_execution() {
         let temp = TempDir::new().unwrap();
-        let cache_path = temp.path().join("self/1.1.8@darwin-arm64");
+        let cache_path = temp.path().join("self-darwin-arm64/1.1.8");
         let package_root = cache_path.join("package");
         let target = platform_target("macos", "aarch64").unwrap();
         std::fs::create_dir_all(package_root.join("bin")).unwrap();

@@ -80,7 +80,7 @@ uses the same package-manager implementation:
 
 When a local dependency command runs with another Utoo version, Utoo downloads
 the matching native release, verifies the registry checksum, caches it under
-`~/.cache/nm/self/<version>@<platform>`, and hands the command off with the same
+`~/.cache/nm/self-<platform>/<version>`, and hands the command off with the same
 arguments, working directory, and exit behavior. Warm caches work offline. An
 invalid cached release is never executed and is reprovisioned from the registry
 when available. This applies to local install/add, uninstall, update, rebuild,
