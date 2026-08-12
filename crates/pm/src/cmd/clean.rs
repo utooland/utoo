@@ -31,8 +31,8 @@ pub async fn clean(pattern: &str, confirmation: ConfirmationPolicy) -> Result<()
 
     if !invocation::json() {
         println!("\nThe following caches will be deleted:");
-        for (pkg, version, _) in &to_delete {
-            println!("- {pkg}@{version}");
+        for entry in &to_delete {
+            println!("- {}@{}", entry.name, entry.version);
         }
 
         println!();
@@ -57,19 +57,22 @@ pub async fn clean(pattern: &str, confirmation: ConfirmationPolicy) -> Result<()
         }
         let deleted = deleted
             .into_iter()
-            .map(|(name, version, _)| PackageVersion { name, version })
+            .map(|entry| PackageVersion {
+                name: entry.name,
+                version: entry.version,
+            })
             .collect::<Vec<_>>();
-        if let Some(((name, version, path), error)) = failed.into_iter().next() {
+        if let Some((entry, error)) = failed.into_iter().next() {
             return Err(CliError::new(
                 ErrorKind::Local,
-                format!("failed to delete {name}@{version}: {error}"),
+                format!("failed to delete {}@{}: {error}", entry.name, entry.version),
             )
             .with_code("cache_delete_failed")
             .with_partial_result(PartialResult::Clean(CleanPartialResult {
                 deleted: deleted.clone(),
             }))
             .with_details(ErrorDetails::Filesystem {
-                path: path.to_string_lossy().into_owned(),
+                path: entry.path.to_string_lossy().into_owned(),
             })
             .into());
         }
