@@ -1,0 +1,46 @@
+name: utoopack-windows-builder-cache
+
+on:
+  push:
+    branches:
+      - next
+    paths:
+      - .github/workflows/pack-release.yml
+      - .github/workflows/pack-windows-builder-cache.yml
+      - scripts/pack-windows-builder.Dockerfile
+      - rust-toolchain.toml
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  warm-cache:
+    # Only trusted runs on the default branch may populate the shared cache.
+    if: github.ref == 'refs/heads/next'
+    name: Warm Windows builder cache
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: utoo-pack-windows-builder-cache
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          buildkitd-flags: --allow-insecure-entitlement=network.host
+          driver-opts: image=moby/buildkit@sha256:63db51c9b30208a7c2b1c40392c7ebb9ce2f85ba238a18a85420f8f5ea2d4684
+      - name: Warm builder cache
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.0.0
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: .
+          file: scripts/pack-windows-builder.Dockerfile
+          outputs: type=cacheonly
+          provenance: false
+          cache-from: type=gha,scope=utoo-pack-windows-builder-v1
+          cache-to: type=gha,scope=utoo-pack-windows-builder-v1,mode=max
