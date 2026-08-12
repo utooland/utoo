@@ -56,9 +56,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
-          # Supplying a harmless explicit flag prevents the action from
-          # enabling its default security.insecure/network.host entitlements.
-          buildkitd-flags: --debug
+          # Buildx requires this daemon-side entitlement for its isolated
+          # container driver. The build command deliberately does not grant it.
+          buildkitd-flags: --allow-insecure-entitlement=network.host
           driver-opts: image=moby/buildkit@sha256:63db51c9b30208a7c2b1c40392c7ebb9ce2f85ba238a18a85420f8f5ea2d4684
 
       # Build before initializing the large next.js submodule or installing
