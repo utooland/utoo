@@ -1,0 +1,37 @@
+{
+  "runtimeType": "dummy",
+  "config": {
+    "entry": [
+      {
+        "name": "client",
+        "import": "input/client.ts"
+      }
+    ],
+    "externals": {
+      "client-only": "global ClientOnly"
+    },
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "entry": [
+        {
+          "name": "server",
+          "import": "input/server.ts"
+        }
+      ],
+      "externals": {
+        "server-only": "commonjs server-only"
+      },
+      "output": {
+        "path": "output/server",
+        "filename": "[name].js"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false
+  }
+}

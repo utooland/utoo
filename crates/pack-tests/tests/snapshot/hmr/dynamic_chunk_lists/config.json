@@ -1,0 +1,23 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "sourceMaps": false,
+    "devServer": {
+      "hot": true,
+      "dynamicHmrChunkLists": true
+    },
+    "optimization": {
+      "minify": false
+    },
+    "output": {
+      "path": "output"
+    }
+  },
+  "runtimeType": "Development"
+}
