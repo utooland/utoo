@@ -10,10 +10,9 @@
 FROM ghcr.io/rust-cross/rust-musl-cross:x86_64-musl@sha256:bcf6a66615f9d5bae659e38ab4311260e0488d1c34ad0ab9f9147f4cd5ef64ed AS musl_x86_64
 FROM ghcr.io/rust-cross/rust-musl-cross:aarch64-musl@sha256:eab6a58ff66eaa33fa87fc31ed11403596719ca3f23aa51626fb993d77c1200b AS musl_aarch64
 
-# The host glibc version does not affect the musl output. Jammy remains on the
-# normal Ubuntu security-support path; pin this tag to a digest after the PoC
-# has produced its first verified CI image.
-FROM ubuntu:22.04 AS builder
+# The host glibc version does not affect the musl output. Pin the Jammy image
+# used by the verified benchmark so a tag release cannot silently change it.
+FROM ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 

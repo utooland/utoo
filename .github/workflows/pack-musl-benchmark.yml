@@ -1,11 +1,6 @@
 name: utoopack-musl-benchmark
 
 on:
-  # Temporary bootstrap trigger: GitHub cannot dispatch a workflow until the
-  # workflow file exists on the default branch. Remove after the first run.
-  push:
-    branches:
-      - zoomdong/optimize-pack-musl-build
   workflow_dispatch:
 
 concurrency:
@@ -59,7 +54,12 @@ jobs:
           df -h
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          # Supplying a harmless explicit flag prevents the action from
+          # enabling its default security.insecure/network.host entitlements.
+          buildkitd-flags: --debug
+          driver-opts: image=moby/buildkit@sha256:63db51c9b30208a7c2b1c40392c7ebb9ce2f85ba238a18a85420f8f5ea2d4684
 
       # Build before initializing the large next.js submodule or installing
       # node_modules so they are not transferred as part of the Docker context.
@@ -86,6 +86,9 @@ jobs:
 
       - name: Set up Utoo
         uses: utooland/setup-utoo@e7aa4d726a17f79f68aed736476ea5bd68f8ba52 # v1
+        with:
+          cache-utoo: false
+          utoo-version: 1.1.7
 
       - name: Disable managed install-node
         run: |
@@ -168,6 +171,8 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
+          cache-image: false
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
           platforms: arm64
 
       - name: Load binding in Alpine Node.js
@@ -180,7 +185,7 @@ jobs:
             --env BINDING \
             --env LOCKFILE=/tmp/utoo-pack-musl-smoke.lock \
             --volume "$GITHUB_WORKSPACE:/workspace:ro" \
-            node:22.14.0-alpine3.21 \
+            node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 \
             node /workspace/scripts/pack-native-smoke.js
 
       - name: Upload native binding
@@ -190,7 +195,7 @@ jobs:
           name: pack-musl-benchmark-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: packages/pack/src/${{ matrix.binding }}
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 1
 
       - name: Write benchmark summary
         if: always()
