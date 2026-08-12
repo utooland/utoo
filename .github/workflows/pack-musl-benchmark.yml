@@ -1,6 +1,11 @@
 name: utoopack-musl-benchmark
 
 on:
+  # Temporary bootstrap trigger: GitHub cannot dispatch a workflow until the
+  # workflow file exists on the default branch. Remove after the first run.
+  push:
+    branches:
+      - zoomdong/optimize-pack-musl-build
   workflow_dispatch:
 
 concurrency:
