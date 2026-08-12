@@ -52,7 +52,7 @@ const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours
 pub async fn init_auto_update() {
     // A project-pinned child must stay on the requested release for the whole
     // operation instead of replacing the user's global installation.
-    if invocation::quiet() || std::env::var_os("UTOO_SELF_PIN_VERSION").is_some() {
+    if invocation::quiet() || crate::helper::self_pin::is_active() {
         return;
     }
 

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
@@ -20,6 +21,7 @@ const DISABLE_ENV: &str = "UTOO_SELF_PIN";
 // Earlier releases do not understand HANDOFF_ENV and may auto-update the
 // global installation while serving a pin. Limit pins to self-pin-aware builds.
 const MINIMUM_PINNED_VERSION: &str = "1.1.8";
+static SELF_PIN_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +73,7 @@ pub async fn handoff_if_needed(
     };
     validate_exact_version(&pin)?;
     if pin.version == APP_VERSION || handoff_version().as_deref() == Some(pin.version.as_str()) {
+        SELF_PIN_ACTIVE.store(true, Ordering::Relaxed);
         return Ok(());
     }
 
@@ -96,6 +99,10 @@ pub async fn handoff_if_needed(
         );
     }
     handoff(&executable, args, &pin.version)
+}
+
+pub fn is_active() -> bool {
+    SELF_PIN_ACTIVE.load(Ordering::Relaxed) || std::env::var_os(HANDOFF_ENV).is_some()
 }
 
 async fn find_project_pin(start: &Path) -> Result<Option<ProjectPin>> {
