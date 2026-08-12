@@ -1,0 +1,206 @@
+name: utoopack-musl-benchmark
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  BUILDER_IMAGE: utoo-pack-native-builder:benchmark
+
+jobs:
+  build:
+    name: musl benchmark - ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            binding: pack.linux-x64-musl.node
+            container-platform: linux/amd64
+            file-arch-pattern: x86-64
+            elf-machine: Advanced Micro Devices X86-64
+          - target: aarch64-unknown-linux-musl
+            binding: pack.linux-arm64-musl.node
+            container-platform: linux/arm64
+            file-arch-pattern: ARM aarch64|aarch64
+            elf-machine: AArch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 100
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/share/miniconda
+          sudo docker image prune --all --force
+          df -h
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
+
+      # Build before initializing the large next.js submodule or installing
+      # node_modules so they are not transferred as part of the Docker context.
+      - name: Build native builder image
+        run: |
+          /usr/bin/time \
+            --format="%e" \
+            --output="$RUNNER_TEMP/builder-wall-seconds.txt" \
+            docker buildx build \
+              --load \
+              --provenance=false \
+              --tag "$BUILDER_IMAGE" \
+              --file scripts/pack-native-builder.Dockerfile \
+              .
+
+      - name: Initialize git submodules
+        run: git submodule update --init --recursive --depth 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.14.0
+          package-manager-cache: false
+
+      - name: Set up Utoo
+        uses: utooland/setup-utoo@e7aa4d726a17f79f68aed736476ea5bd68f8ba52 # v1
+
+      - name: Disable managed install-node
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          delete packageJson.engines["install-node"];
+          fs.writeFileSync("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: utoo install
+
+      - name: Verify NAPI CLI version
+        run: |
+          actual=$(node -p 'require("@napi-rs/cli/package.json").version')
+          test "$actual" = "2.18.4"
+
+      - name: Build native binding
+        env:
+          BINDING: packages/pack/src/${{ matrix.binding }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          rm -f "$BINDING"
+          /usr/bin/time \
+            --format="%e" \
+            --output="$RUNNER_TEMP/native-wall-seconds.txt" \
+            docker run --rm \
+              --env CI=1 \
+              --env CARGO_INCREMENTAL=0 \
+              --env CARGO_TERM_COLOR=always \
+              --env RUST_BACKTRACE=1 \
+              --env TARGET \
+              --volume "$GITHUB_WORKSPACE:/build" \
+              --workdir /build \
+              "$BUILDER_IMAGE" \
+              /bin/bash /build/scripts/pack-native-build.sh
+
+      - name: Check generated binding files
+        run: git diff --exit-code -- packages/pack/src/binding.js packages/pack/src/binding.d.ts
+
+      - name: Verify ELF target and loader
+        env:
+          BINDING: packages/pack/src/${{ matrix.binding }}
+          EXPECTED_FILE_ARCH: ${{ matrix.file-arch-pattern }}
+          EXPECTED_ELF_MACHINE: ${{ matrix.elf-machine }}
+        run: |
+          set -euo pipefail
+          test -s "$BINDING"
+
+          file_output=$(file --brief "$BINDING")
+          echo "$file_output"
+          if ! grep -Eq "ELF 64-bit LSB shared object.*(${EXPECTED_FILE_ARCH})" <<<"$file_output"; then
+            echo "::error file=$BINDING::Unexpected file architecture: $file_output"
+            exit 1
+          fi
+
+          readelf --file-header "$BINDING"
+          machine=$(readelf --file-header "$BINDING" | sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p')
+          if [[ "$machine" != "$EXPECTED_ELF_MACHINE" ]]; then
+            echo "::error file=$BINDING::Expected ELF machine '$EXPECTED_ELF_MACHINE', got '$machine'"
+            exit 1
+          fi
+
+          dynamic_section=$(readelf --dynamic "$BINDING")
+          echo "$dynamic_section"
+          if grep -q 'libc\.so\.6' <<<"$dynamic_section"; then
+            echo "::error file=$BINDING::Musl binding unexpectedly depends on glibc"
+            exit 1
+          fi
+
+          program_headers=$(readelf --program-headers "$BINDING")
+          echo "$program_headers"
+          if grep -Eq '/lib(64)?/(ld-linux|ld64)|ld-linux-' <<<"$program_headers"; then
+            echo "::error file=$BINDING::Musl binding unexpectedly names a glibc loader"
+            exit 1
+          fi
+
+      - name: Set up QEMU for arm64 smoke test
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
+
+      - name: Load binding in Alpine Node.js
+        env:
+          BINDING: /workspace/packages/pack/src/${{ matrix.binding }}
+          CONTAINER_PLATFORM: ${{ matrix.container-platform }}
+        run: |
+          docker run --rm \
+            --platform "$CONTAINER_PLATFORM" \
+            --env BINDING \
+            --env LOCKFILE=/tmp/utoo-pack-musl-smoke.lock \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            node:22.14.0-alpine3.21 \
+            node /workspace/scripts/pack-native-smoke.js
+
+      - name: Upload native binding
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pack-musl-benchmark-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: packages/pack/src/${{ matrix.binding }}
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Write benchmark summary
+        if: always()
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          builder_seconds=$(cat "$RUNNER_TEMP/builder-wall-seconds.txt" 2>/dev/null || echo unavailable)
+          native_seconds=$(cat "$RUNNER_TEMP/native-wall-seconds.txt" 2>/dev/null || echo unavailable)
+          {
+            echo "### Musl benchmark: \`$TARGET\`"
+            echo
+            echo "> Each matrix job builds its own uncached builder image so the native-build measurement remains a cold benchmark."
+            echo
+            echo "| Phase | Wall time (seconds) |"
+            echo "| --- | ---: |"
+            echo "| Build builder image | $builder_seconds |"
+            echo "| Build native binding | $native_seconds |"
+          } >> "$GITHUB_STEP_SUMMARY"

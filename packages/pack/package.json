@@ -62,7 +62,7 @@
     "styled-jsx": "^5.1.6"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.0",
+    "@napi-rs/cli": "2.18.4",
     "@types/babel__code-frame": "7.0.2",
     "@types/mime": "^3.0.4",
     "@types/mime-types": "3.0.1",
