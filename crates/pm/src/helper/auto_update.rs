@@ -50,7 +50,9 @@ const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours
 ///
 /// Either way this function returns quickly and never blocks the main command.
 pub async fn init_auto_update() {
-    if invocation::quiet() {
+    // A project-pinned child must stay on the requested release for the whole
+    // operation instead of replacing the user's global installation.
+    if invocation::quiet() || std::env::var_os("UTOO_SELF_PIN_VERSION").is_some() {
         return;
     }
 

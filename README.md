@@ -69,6 +69,23 @@ ut add lodash       # Add a package (or use `ut add`)
 ut x create-react   # Execute a package (npx style, or use `ut x`)
 ```
 
+Pin the project to an exact Utoo release so every contributor and CI runner
+uses the same package-manager implementation:
+
+```json
+{
+  "packageManager": "utoo@1.1.8"
+}
+```
+
+When a local dependency command runs with another Utoo version, Utoo downloads
+the matching native release, verifies the registry checksum, caches it under
+`~/.cache/nm/self/<version>`, and hands the command off with the same arguments,
+working directory, and exit behavior. Warm caches work offline. This applies to
+local install/add, uninstall, update, rebuild, and deps commands; scripts,
+`ut x`, query commands, and global installs keep using the current executable.
+Set `UTOO_SELF_PIN=0` to bypass the handoff temporarily.
+
 #### Bundling via @utoo/pack-cli
 ```bash
 utx up dev          # Start dev server with HMR
@@ -98,4 +115,3 @@ We love contributions! Check out [CONTRIBUTING.md](CONTRIBUTING.md) to get start
 ## 📄 License
 
 Utoo is licensed under the [MIT License](LICENSE).
-
