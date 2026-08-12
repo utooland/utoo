@@ -51,6 +51,14 @@ struct CacheMetadata {
 struct PlatformTarget {
     package_name: &'static str,
     executable: &'static str,
+    cache_key: &'static str,
+}
+
+#[derive(Debug)]
+enum CachedRelease {
+    Missing,
+    Valid(PathBuf),
+    Invalid(anyhow::Error),
 }
 
 /// Switch dependency-changing project commands to the exact Utoo version in
@@ -82,14 +90,28 @@ pub async fn handoff_if_needed(
     // `--from` migration), and unpinned invocations keep the existing order.
     set_cache_dir(cache_dir).await;
 
-    let cache_path = release_cache_path(&pin.version);
+    let target = platform_target(std::env::consts::OS, std::env::consts::ARCH)?;
+    let cache_path = release_cache_path_for(&target, &pin.version);
     let lock_path = sibling_lock_path(&cache_path, ".self-pin.lock")?;
     let _lock = lock_exclusive(&lock_path).await?;
-    let executable = if let Some(executable) = cached_release(&pin.version).await? {
-        executable
-    } else {
-        init_registry(registry).await?;
-        provision_release(&pin.version).await?
+    let executable = match cached_release_at(&cache_path, &target, &pin.version).await? {
+        CachedRelease::Valid(executable) => executable,
+        CachedRelease::Missing => {
+            init_registry(registry).await?;
+            provision_release_at(&cache_path, &target, &pin.version).await?
+        }
+        CachedRelease::Invalid(validation_error) => {
+            let recovery_context = format!(
+                "Failed to recover invalid pinned release cache at {} after validation failed: {validation_error:#}",
+                cache_path.display()
+            );
+            init_registry(registry)
+                .await
+                .context(recovery_context.clone())?;
+            provision_release_at(&cache_path, &target, &pin.version)
+                .await
+                .context(recovery_context)?
+        }
     };
     if !crate::util::invocation::quiet() {
         eprintln!(
@@ -170,51 +192,63 @@ fn platform_target(os: &str, arch: &str) -> Result<PlatformTarget> {
         ("macos", "x86_64") => PlatformTarget {
             package_name: "@utoo/utoo-darwin-x64",
             executable: "bin/utoo",
+            cache_key: "darwin-x64",
         },
         ("macos", "aarch64") => PlatformTarget {
             package_name: "@utoo/utoo-darwin-arm64",
             executable: "bin/utoo",
+            cache_key: "darwin-arm64",
         },
         ("linux", "x86_64") => PlatformTarget {
             package_name: "@utoo/utoo-linux-x64",
             executable: "bin/utoo",
+            cache_key: "linux-x64",
         },
         ("linux", "aarch64") => PlatformTarget {
             package_name: "@utoo/utoo-linux-arm64",
             executable: "bin/utoo",
+            cache_key: "linux-arm64",
         },
         // Windows 11 on ARM64 can run the published x64 binary under emulation.
         ("windows", "x86_64" | "aarch64") => PlatformTarget {
             package_name: "@utoo/utoo-win32-x64",
             executable: "bin/utoo.exe",
+            cache_key: "win32-x64",
         },
         _ => bail!("Utoo self-pinning does not support {os}-{arch}"),
     };
     Ok(target)
 }
 
-fn release_cache_path(version: &str) -> PathBuf {
-    get_cache_dir().join("self").join(version)
+fn release_cache_path_for(target: &PlatformTarget, version: &str) -> PathBuf {
+    get_cache_dir()
+        .join("self")
+        .join(format!("{version}@{}", target.cache_key))
 }
 
-async fn cached_release(version: &str) -> Result<Option<PathBuf>> {
-    let target = platform_target(std::env::consts::OS, std::env::consts::ARCH)?;
-    let cache_path = release_cache_path(version);
+async fn cached_release_at(
+    cache_path: &Path,
+    target: &PlatformTarget,
+    version: &str,
+) -> Result<CachedRelease> {
     if crate::fs::try_exists(cache_path.join("_resolved")).await?
         && crate::fs::try_exists(cache_path.join("_utoo-self-pin.json")).await?
     {
-        validate_cached_release(&cache_path, &target, version)
-            .await
-            .map(Some)
-    } else {
-        Ok(None)
+        return Ok(
+            match validate_cached_release(cache_path, target, version).await {
+                Ok(executable) => CachedRelease::Valid(executable),
+                Err(error) => CachedRelease::Invalid(error),
+            },
+        );
     }
+    Ok(CachedRelease::Missing)
 }
 
-async fn provision_release(version: &str) -> Result<PathBuf> {
-    let target = platform_target(std::env::consts::OS, std::env::consts::ARCH)?;
-    let cache_path = release_cache_path(version);
-
+async fn provision_release_at(
+    cache_path: &Path,
+    target: &PlatformTarget,
+    version: &str,
+) -> Result<PathBuf> {
     if !crate::util::invocation::quiet() {
         eprintln!("utoo: provisioning pinned utoo@{version}...");
     }
@@ -241,17 +275,18 @@ async fn provision_release(version: &str) -> Result<PathBuf> {
     )
     .with_context(|| format!("Failed to verify pinned release {spec}"))?;
 
-    // `_resolved` is the package-cache commit marker. Reaching the cold path
-    // with a visible slot means its self-pin metadata was never committed;
-    // clear it while holding the self-pin lock and repopulate atomically.
+    // `_resolved` is the package-cache commit marker. A visible slot on this
+    // path is invalid: archive download and registry checksum verification have
+    // already succeeded, so it is now safe to replace the slot atomically while
+    // holding the platform-specific self-pin lock.
     if crate::fs::try_exists(cache_path.join("_resolved")).await? {
-        crate::fs::remove_dir_all(&cache_path).await?;
+        crate::fs::remove_dir_all(cache_path).await?;
     }
-    extract_and_write(archive, &cache_path)
+    extract_and_write(archive, cache_path)
         .await
         .with_context(|| format!("Failed to cache pinned release {spec}"))?;
-    write_cache_metadata(&cache_path, &target, version).await?;
-    validate_cached_release(&cache_path, &target, version).await
+    write_cache_metadata(cache_path, target, version).await?;
+    validate_cached_release(cache_path, target, version).await
 }
 
 fn verify_release_archive(
@@ -463,6 +498,7 @@ mod tests {
             PlatformTarget {
                 package_name: "@utoo/utoo-darwin-arm64",
                 executable: "bin/utoo",
+                cache_key: "darwin-arm64",
             }
         );
         assert_eq!(
@@ -470,9 +506,95 @@ mod tests {
             PlatformTarget {
                 package_name: "@utoo/utoo-win32-x64",
                 executable: "bin/utoo.exe",
+                cache_key: "win32-x64",
             }
         );
         assert!(platform_target("freebsd", "x86_64").is_err());
+    }
+
+    #[test]
+    fn isolates_self_pin_caches_by_platform_package() {
+        let version = "1.1.8";
+        let mac_arm64 = platform_target("macos", "aarch64").unwrap();
+        let mac_x64 = platform_target("macos", "x86_64").unwrap();
+        let windows_arm64 = platform_target("windows", "aarch64").unwrap();
+        let windows_x64 = platform_target("windows", "x86_64").unwrap();
+
+        assert_ne!(
+            release_cache_path_for(&mac_arm64, version),
+            release_cache_path_for(&mac_x64, version),
+        );
+        let mac_arm64_path = release_cache_path_for(&mac_arm64, version);
+        let mac_x64_path = release_cache_path_for(&mac_x64, version);
+        assert!(mac_arm64_path.ends_with("self/1.1.8@darwin-arm64"));
+        assert_ne!(
+            sibling_lock_path(&mac_arm64_path, ".self-pin.lock").unwrap(),
+            sibling_lock_path(&mac_x64_path, ".self-pin.lock").unwrap(),
+        );
+        let legacy_path = get_cache_dir().join("self").join(version);
+        assert_eq!(mac_arm64_path.parent(), legacy_path.parent());
+        assert_ne!(mac_arm64_path, legacy_path);
+        assert_eq!(
+            release_cache_path_for(&windows_arm64, version),
+            release_cache_path_for(&windows_x64, version),
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_self_pin_metadata_requires_reprovision_without_early_deletion() {
+        let temp = TempDir::new().unwrap();
+        let cache_path = temp.path().join("self/1.1.8@darwin-arm64");
+        let package_root = cache_path.join("package");
+        let target = platform_target("macos", "aarch64").unwrap();
+        std::fs::create_dir_all(package_root.join("bin")).unwrap();
+        std::fs::write(cache_path.join("_resolved"), b"").unwrap();
+        std::fs::write(
+            package_root.join("package.json"),
+            r#"{"name":"@utoo/utoo-darwin-arm64","version":"1.1.8"}"#,
+        )
+        .unwrap();
+        std::fs::write(package_root.join("bin/utoo"), b"not executed").unwrap();
+        std::fs::write(cache_path.join("_utoo-self-pin.json"), b"not json").unwrap();
+
+        assert!(matches!(
+            cached_release_at(&cache_path, &target, "1.1.8")
+                .await
+                .unwrap(),
+            CachedRelease::Invalid(_)
+        ));
+        assert!(cache_path.exists());
+    }
+
+    #[tokio::test]
+    async fn corrupt_self_pin_executable_requires_reprovision_without_execution() {
+        let temp = TempDir::new().unwrap();
+        let cache_path = temp.path().join("self/1.1.8@darwin-arm64");
+        let package_root = cache_path.join("package");
+        let target = platform_target("macos", "aarch64").unwrap();
+        std::fs::create_dir_all(package_root.join("bin")).unwrap();
+        std::fs::write(cache_path.join("_resolved"), b"").unwrap();
+        std::fs::write(
+            package_root.join("package.json"),
+            r#"{"name":"@utoo/utoo-darwin-arm64","version":"1.1.8"}"#,
+        )
+        .unwrap();
+        std::fs::write(package_root.join("bin/utoo"), b"corrupt executable").unwrap();
+        std::fs::write(
+            cache_path.join("_utoo-self-pin.json"),
+            serde_json::to_vec(&CacheMetadata {
+                executable_integrity: compute_integrity(b"expected executable"),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            cached_release_at(&cache_path, &target, "1.1.8")
+                .await
+                .unwrap(),
+            CachedRelease::Invalid(_)
+        ));
+        assert!(cache_path.exists());
     }
 
     #[test]
