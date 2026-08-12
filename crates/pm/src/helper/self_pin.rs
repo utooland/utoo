@@ -222,7 +222,9 @@ fn platform_target(os: &str, arch: &str) -> Result<PlatformTarget> {
 
 fn release_cache_path_for(target: &PlatformTarget, version: &str) -> PathBuf {
     get_cache_dir()
-        .join(format!("self-{}", target.cache_key))
+        // Leading underscores are rejected for registry package names, keeping
+        // this internal namespace disjoint from ordinary package cache slots.
+        .join(format!("_utoo-self-{}", target.cache_key))
         .join(version)
 }
 
@@ -277,8 +279,8 @@ async fn provision_release_at(
 
     // `_resolved` is the package-cache commit marker. A visible slot on this
     // path is invalid: archive download and registry checksum verification have
-    // already succeeded, so it is now safe to replace the slot atomically while
-    // holding the platform-specific self-pin lock.
+    // already succeeded, so it is now safe to repopulate the slot via an atomic
+    // cache commit while holding the platform-specific self-pin lock.
     if crate::fs::try_exists(cache_path.join("_resolved")).await? {
         crate::fs::remove_dir_all(cache_path).await?;
     }
@@ -526,7 +528,7 @@ mod tests {
         );
         let mac_arm64_path = release_cache_path_for(&mac_arm64, version);
         let mac_x64_path = release_cache_path_for(&mac_x64, version);
-        assert!(mac_arm64_path.ends_with("self-darwin-arm64/1.1.8"));
+        assert!(mac_arm64_path.ends_with("_utoo-self-darwin-arm64/1.1.8"));
         assert_ne!(
             sibling_lock_path(&mac_arm64_path, ".self-pin.lock").unwrap(),
             sibling_lock_path(&mac_x64_path, ".self-pin.lock").unwrap(),
@@ -544,7 +546,7 @@ mod tests {
         let cache_spec = format!("{package}@{cached_version}");
         assert_eq!(
             utoo_ruborist::util::parse_package_spec(&cache_spec),
-            ("self-darwin-arm64", "1.1.8"),
+            ("_utoo-self-darwin-arm64", "1.1.8"),
         );
         assert_eq!(
             release_cache_path_for(&windows_arm64, version),
@@ -555,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_self_pin_metadata_requires_reprovision_without_early_deletion() {
         let temp = TempDir::new().unwrap();
-        let cache_path = temp.path().join("self-darwin-arm64/1.1.8");
+        let cache_path = temp.path().join("_utoo-self-darwin-arm64/1.1.8");
         let package_root = cache_path.join("package");
         let target = platform_target("macos", "aarch64").unwrap();
         std::fs::create_dir_all(package_root.join("bin")).unwrap();
@@ -580,7 +582,7 @@ mod tests {
     #[tokio::test]
     async fn corrupt_self_pin_executable_requires_reprovision_without_execution() {
         let temp = TempDir::new().unwrap();
-        let cache_path = temp.path().join("self-darwin-arm64/1.1.8");
+        let cache_path = temp.path().join("_utoo-self-darwin-arm64/1.1.8");
         let package_root = cache_path.join("package");
         let target = platform_target("macos", "aarch64").unwrap();
         std::fs::create_dir_all(package_root.join("bin")).unwrap();
