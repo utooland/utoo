@@ -257,6 +257,13 @@ pub struct SchemaServerConfig {
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
     pub entry: Option<SchemaServerEntry>,
 
+    /// Server-only resolution options.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Server-only resolution options. Alias entries override matching resolve.alias entries; extensions replace resolve.extensions when provided"
+    )]
+    pub resolve: Option<SchemaResolveConfig>,
+
     /// Server-specific external dependencies. If omitted, top-level externals are used.
     /// If provided, this replaces the top-level map for server entries and Server Functions.
     #[serde(skip_serializing_if = "Option::is_none")]
