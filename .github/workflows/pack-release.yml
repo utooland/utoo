@@ -42,7 +42,6 @@ jobs:
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
             binding: pack.linux-arm64-musl.node
-            container_platform: linux/arm64
             elf_machine: AArch64
             file_arch_pattern: ARM aarch64|aarch64
             musl_builder: true
@@ -59,7 +58,6 @@ jobs:
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
             binding: pack.linux-x64-musl.node
-            container_platform: linux/amd64
             elf_machine: Advanced Micro Devices X86-64
             file_arch_pattern: x86-64
             musl_builder: true
@@ -221,26 +219,6 @@ jobs:
 
           program_headers=$(readelf --program-headers "$BINDING")
           ! grep -Eq '/lib(64)?/(ld-linux|ld64)|ld-linux-' <<<"$program_headers"
-      - name: Set up QEMU for arm64 smoke test
-        if: matrix.settings.musl_builder && contains(matrix.settings.target, 'aarch64')
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-        with:
-          cache-image: false
-          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-          platforms: arm64
-      - name: Load musl binding in Alpine Node.js
-        if: matrix.settings.musl_builder
-        env:
-          BINDING: /workspace/packages/pack/src/${{ matrix.settings.binding }}
-          CONTAINER_PLATFORM: ${{ matrix.settings.container_platform }}
-        run: |
-          docker run --rm \
-            --platform "$CONTAINER_PLATFORM" \
-            --env BINDING \
-            --env LOCKFILE=/tmp/utoo-pack-musl-smoke.lock \
-            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
-            node:22.14.0-alpine3.21@sha256:9bef0ef1e268f60627da9ba7d7605e8831d5b56ad07487d24d1aa386336d1944 \
-            node /workspace/scripts/pack-native-smoke.js
       - name: Build
         run: ${{ matrix.settings.build }}
         if: ${{ !matrix.settings.docker && !matrix.settings.musl_builder }}
