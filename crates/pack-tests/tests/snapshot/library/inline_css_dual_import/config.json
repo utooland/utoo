@@ -1,0 +1,22 @@
+{
+  "runtimeType": "Dummy",
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.ts",
+        "name": "main",
+        "library": {
+          "name": "InlineCssDualImportLibrary"
+        }
+      }
+    ],
+    "output": {
+      "filename": "index.morpho.min.js",
+      "cssFilename": "index.morpho.min.css"
+    },
+    "sourceMaps": true,
+    "styles": {
+      "inlineCss": {}
+    }
+  }
+}

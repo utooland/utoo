@@ -47,6 +47,14 @@ pub async fn get_server_import_map(
     )
     .await?;
 
+    insert_alias_option(
+        &mut import_map,
+        &project_path,
+        config.server_resolve_alias_options(),
+        [],
+    )
+    .await?;
+
     // Auto-register server reference aliases from config
     insert_server_reference_aliases(&mut import_map, &project_path, config).await?;
 
