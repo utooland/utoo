@@ -192,6 +192,8 @@ pub struct ResolvedPackageSpec {
     pub version: String,
     pub version_spec: String,
     pub tarball_url: String,
+    pub integrity: Option<String>,
+    pub shasum: Option<String>,
 }
 
 pub async fn resolve_package_spec_details(spec: &str) -> Result<ResolvedPackageSpec> {
@@ -212,6 +214,8 @@ pub async fn resolve_package_spec_details(spec: &str) -> Result<ResolvedPackageS
                 version: resolved.version,
                 version_spec,
                 tarball_url,
+                integrity: resolved.manifest.dist.integrity.clone(),
+                shasum: resolved.manifest.dist.shasum.clone(),
             })
         }
         PackageSpec::Git { url, commit_ish } => {
@@ -221,6 +225,8 @@ pub async fn resolve_package_spec_details(spec: &str) -> Result<ResolvedPackageS
                 version: resolved.version.clone(),
                 version_spec: resolved.resolved_url.clone(),
                 tarball_url: resolved.resolved_url.clone(),
+                integrity: None,
+                shasum: None,
             })
         }
         PackageSpec::GitHub {
@@ -234,6 +240,8 @@ pub async fn resolve_package_spec_details(spec: &str) -> Result<ResolvedPackageS
                 version: resolved.version.clone(),
                 version_spec: resolved.resolved_url.clone(),
                 tarball_url: resolved.resolved_url.clone(),
+                integrity: None,
+                shasum: None,
             })
         }
         PackageSpec::Local { protocol, .. } => {

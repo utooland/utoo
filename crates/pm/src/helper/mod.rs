@@ -21,5 +21,6 @@ pub mod global_bin;
 pub mod lock;
 pub mod migrate;
 pub mod ruborist_context;
+pub mod self_pin;
 pub mod tree_builder;
 pub mod workspace;
