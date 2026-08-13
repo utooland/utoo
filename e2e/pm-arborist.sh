@@ -105,11 +105,6 @@ SKIP_PLATFORM=(
   platform-specification
 )
 
-# [SKIP:workspace-duplicate] utoo does not detect duplicate workspace package names.
-SKIP_WORKSPACE_DUP=(
-  workspaces-duplicate
-)
-
 # [SKIP:dep-cycle-oom] infinite dep cycle causes OOM/timeout — CI runner kills
 # the whole job with SIGTERM once utoo goes into a recursive fetch loop.
 SKIP_DEP_CYCLE=(
@@ -143,7 +138,6 @@ _add_skip "file: resolver limitation"              "${SKIP_FILE_SEMANTIC[@]}"
 _add_skip "optional transitive"  "${SKIP_OPTIONAL_TRANSITIVE[@]}"
 _add_skip "strict peer deps"    "${SKIP_PEER_STRICT[@]}"
 _add_skip "platform reject"     "${SKIP_PLATFORM[@]}"
-_add_skip "workspace duplicate"  "${SKIP_WORKSPACE_DUP[@]}"
 _add_skip "dep cycle OOM"       "${SKIP_DEP_CYCLE[@]}"
 _add_skip "mock registry only"  "${SKIP_REGISTRY_ONLY[@]}"
 _add_skip "misc"                "${SKIP_MISC[@]}"

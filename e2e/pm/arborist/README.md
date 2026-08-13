@@ -73,14 +73,6 @@ utoo does not check `os` / `cpu` / `libc` fields against the current platform fo
 
 ---
 
-### Duplicate workspace name detection
-
-**Fixtures (1):** `workspaces-duplicate`
-
-utoo does not detect when multiple workspace packages declare the same `name` in their package.json (should error with `EDUPLICATEWORKSPACE`).
-
----
-
 ### Dependency cycle OOM
 
 **Fixtures (1):** `pathological-dep-nesting-cycle`
