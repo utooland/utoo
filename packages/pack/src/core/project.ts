@@ -422,7 +422,10 @@ async function rustifyProjectOptions(
   };
 }
 
-export function projectFactory() {
+export function projectFactory(endpointWatchOptions?: {
+  hasServerOutput: boolean;
+  nodeTarget: boolean;
+}) {
   const cancel = new (class Cancel extends Error {})();
 
   function subscribe<T>(
@@ -613,9 +616,12 @@ export function projectFactory() {
 
   class EndpointImpl implements Endpoint {
     readonly _nativeEndpoint: { __napiType: "Endpoint" };
+    /** Undefined for library endpoints. */
+    readonly _appIndex: number | undefined;
 
-    constructor(nativeEndpoint: { __napiType: "Endpoint" }) {
+    constructor(nativeEndpoint: { __napiType: "Endpoint" }, appIndex?: number) {
       this._nativeEndpoint = nativeEndpoint;
+      this._appIndex = appIndex;
     }
 
     async writeToDisk(): Promise<TurbopackResult<NapiWrittenEndpoint>> {
@@ -628,6 +634,12 @@ export function projectFactory() {
     }
 
     async clientChanged(): Promise<AsyncIterableIterator<TurbopackResult<{}>>> {
+      // Preserve projectFactory()'s public behavior for callers outside dev HMR.
+      // The dev server supplies endpointWatchOptions so it can avoid creating
+      // NAPI root tasks for output directions that cannot change.
+      if (endpointWatchOptions?.nodeTarget) {
+        return emptySubscription();
+      }
       const clientSubscription = subscribe<TurbopackResult>(
         false,
         async (callback) =>
@@ -643,6 +655,13 @@ export function projectFactory() {
     async serverChanged(
       includeIssues: boolean,
     ): Promise<AsyncIterableIterator<TurbopackResult<{}>>> {
+      if (
+        endpointWatchOptions &&
+        !endpointWatchOptions.nodeTarget &&
+        (!endpointWatchOptions.hasServerOutput || this._appIndex !== 0)
+      ) {
+        return emptySubscription();
+      }
       const serverSubscription = subscribe<TurbopackResult>(
         false,
         async (callback) =>
@@ -657,6 +676,10 @@ export function projectFactory() {
     }
   }
 
+  async function* emptySubscription(): AsyncIterableIterator<
+    TurbopackResult<{}>
+  > {}
+
   function napiEntrypointsToRawEntrypoints(
     entrypoints: TurbopackResult<{
       apps?: { __napiType: "Endpoint" }[];
@@ -666,7 +689,9 @@ export function projectFactory() {
     }>,
   ) {
     return {
-      apps: (entrypoints.apps || []).map((e) => new EndpointImpl(e)),
+      apps: (entrypoints.apps || []).map(
+        (e, index) => new EndpointImpl(e, index),
+      ),
       libraries: (entrypoints.libraries || []).map((e) => new EndpointImpl(e)),
       appPaths: entrypoints.appPaths,
       libraryPaths: entrypoints.libraryPaths,
