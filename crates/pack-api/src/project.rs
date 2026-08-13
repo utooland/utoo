@@ -1958,10 +1958,11 @@ async fn all_assets_from_entries_operation(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::{
-        ProjectOptions, WatchOptions, normalize_project_options_paths, strip_root_prefix,
-        strip_root_prefix_for_file_system, to_file_system_path, update_project_option_paths,
+        ProjectOptions, WatchOptions, normalize_project_options_paths, update_project_option_paths,
     };
+    use super::{strip_root_prefix, strip_root_prefix_for_file_system, to_file_system_path};
     use turbo_unix_path::unix_to_sys;
 
     #[test]
