@@ -239,22 +239,16 @@ impl AppProject {
 
         let endpoints = entrypoints
             .iter()
-            .enumerate()
-            .map(|(index, entrypoint)| {
-                let server_reference_entrypoints = (index == 0).then(|| entrypoints.clone());
-                async move {
-                    let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(
-                        AppEndpoint {
-                            app_project,
-                            project,
-                            entrypoints: vec![*entrypoint],
-                            server_reference_entrypoints,
-                            include_shared_output_assets: index == 0,
-                        }
-                        .cell(),
-                    );
-                    endpoint.to_resolved().await
-                }
+            .map(|entrypoint| async move {
+                let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(
+                    AppEndpoint {
+                        app_project,
+                        project,
+                        entrypoints: vec![*entrypoint],
+                    }
+                    .cell(),
+                );
+                endpoint.to_resolved().await
             })
             .try_join()
             .await?;
@@ -473,8 +467,6 @@ pub struct AppEndpoint {
     app_project: ResolvedVc<AppProject>,
     project: ResolvedVc<Project>,
     pub entrypoints: Vec<ResolvedVc<AppEntrypoint>>,
-    server_reference_entrypoints: Option<Vec<ResolvedVc<AppEntrypoint>>>,
-    include_shared_output_assets: bool,
 }
 
 #[turbo_tasks::value_impl]
@@ -522,41 +514,57 @@ impl Endpoint for AppEndpoint {
             let this = self.await?;
             let asset_context = this.app_project.app_module_context();
             let runtime_entries = this.app_project.app_runtime_entries();
-            let output_assets = {
+            let client_output_assets = {
                 let mut vcs = this
                     .entrypoints
                     .iter()
                     .map(|e| e.output_assets_for_entry(Vc::upcast(asset_context), runtime_entries))
                     .collect::<Vec<_>>();
-                if this.include_shared_output_assets {
-                    vcs.push(this.project.copy_output_assets());
-                }
+                // Copy assets are project-level output. Include the shared task in every
+                // endpoint so writing any endpoint independently preserves the historical
+                // aggregated-endpoint behavior. The all-endpoints path deduplicates assets.
+                vcs.push(this.project.copy_output_assets());
                 OutputAssets::concat(vcs)
             };
 
             // Build server functions as Node.js if configured
             let server_config = this.project.config().server().await?;
-            let server_output = if this.server_reference_entrypoints.is_some()
-                && (server_config.function.is_some()
-                    || server_config
-                        .entry
-                        .as_ref()
-                        .is_some_and(|entry| entry.has_entries()))
+            let server_output = if server_config.function.is_some()
+                || server_config
+                    .entry
+                    .as_ref()
+                    .is_some_and(|entry| entry.has_entries())
             {
-                Some(
-                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries),
-                )
+                Some(this.app_project.server_output_assets())
             } else {
                 None
             };
 
             let dist_root_vc = this.project.dist_root();
+            let (client_paths, server_output) = futures::future::try_join(
+                async {
+                    Ok::<_, anyhow::Error>(
+                        initial_paths_in_root(client_output_assets, dist_root_vc)
+                            .await?
+                            .iter()
+                            .cloned()
+                            .collect(),
+                    )
+                },
+                async {
+                    match server_output {
+                        Some(server_output) => {
+                            // Drive the independent Server build concurrently with Client path
+                            // discovery while preserving the Vc for the final asset union.
+                            server_output.await?;
+                            Ok(Some(server_output))
+                        }
+                        None => Ok(None),
+                    }
+                },
+            )
+            .await?;
             let dist_root = dist_root_vc.await?;
-            let client_paths = initial_paths_in_root(output_assets, dist_root_vc)
-                .await?
-                .iter()
-                .cloned()
-                .collect();
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 server_entry_path: dist_root.path.clone(),
@@ -564,7 +572,7 @@ impl Endpoint for AppEndpoint {
                 client_paths,
             };
 
-            let mut output_assets = output_assets;
+            let mut output_assets = client_output_assets;
 
             if let Some(server_output) = server_output {
                 output_assets = output_assets.concatenate(server_output);
@@ -583,6 +591,17 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn server_changed(self: Vc<Self>) -> Result<Vc<Completion>> {
+        let this = self.await?;
+        let server_config = this.project.config().server().await?;
+        if *this.project.platform().await? == Platform::Web
+            && server_config.function.is_none()
+            && !server_config
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.has_entries())
+        {
+            return Ok(Completion::new());
+        }
         let EndpointOutput {
             output_assets,
             project,
@@ -593,6 +612,10 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn client_changed(self: Vc<Self>) -> Result<Vc<Completion>> {
+        let this = self.await?;
+        if *this.project.platform().await? == Platform::Node {
+            return Ok(Completion::new());
+        }
         let EndpointOutput {
             output_assets,
             project,
@@ -604,20 +627,16 @@ impl Endpoint for AppEndpoint {
 
 /// Server function build support
 #[turbo_tasks::value_impl]
-impl AppEndpoint {
+impl AppProject {
     /// Discovers `ServerReferenceModule`s in the client module graph and builds
     /// their inner server modules as Node.js chunks.
     #[turbo_tasks::function]
-    async fn server_reference_output_assets(
-        self: Vc<Self>,
-        asset_context: Vc<Box<dyn AssetContext>>,
-        runtime_entries: Vc<EvaluatableAssets>,
-    ) -> Result<Vc<OutputAssets>> {
+    async fn server_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
         let this = self.await?;
         let project = *this.project;
-        let Some(entrypoints) = &this.server_reference_entrypoints else {
-            return Ok(OutputAssets::empty());
-        };
+        let entrypoints = self.resolved_entrypoints().await?.to_vec();
+        let asset_context = Vc::upcast(self.app_module_context());
+        let runtime_entries = self.app_runtime_entries();
         let server_config = project.config().server().await?;
 
         let server_function_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> =

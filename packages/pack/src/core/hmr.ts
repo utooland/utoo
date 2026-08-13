@@ -173,7 +173,17 @@ export async function createHotReloader(
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
-  const createProject = projectFactory();
+  const createProject = projectFactory({
+    hasServerOutput: Boolean(
+      bundleOptions.config.server?.entry ||
+        bundleOptions.config.server?.function,
+    ),
+    // The Rust config treats the common `node`/`node <version>` forms as Node.
+    // Other browserslist queries remain Web targets.
+    nodeTarget: /^node(?:\s|$)/i.test(
+      bundleOptions.config.target?.trim() ?? "",
+    ),
+  });
   const persistentCaching = isPersistentCachingEnabled(
     bundleOptions.config.persistentCaching,
   );
