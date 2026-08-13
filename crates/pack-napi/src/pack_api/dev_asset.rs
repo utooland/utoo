@@ -49,6 +49,7 @@ pub struct DevAssetSourceInstance {
 }
 
 const DEV_ASSET_GRAPH_ROOT: &str = "__utoo_dev_asset_graph_root__";
+const DEV_COPY_ASSET_GRAPH_ROOT: &str = "__utoo_dev_copy_asset_graph_root__";
 
 #[turbo_tasks::value]
 struct DevAssetGraphRoot {
@@ -111,16 +112,34 @@ async fn project_dev_asset_source_operation(
         let endpoint = app_project.get_app_endpoint();
         let output = endpoint.output().await?;
         let client_root = project.client_root().owned().await?;
-        let root = DevAssetGraphRoot {
+        let client_root_asset = DevAssetGraphRoot {
             path: client_root.join(DEV_ASSET_GRAPH_ROOT)?,
             references: output.output_assets,
         }
         .cell();
+        let client_source =
+            AssetGraphContentSource::new_lazy(client_root, Vc::upcast(client_root_asset))
+                .to_resolved()
+                .await?;
 
-        return Ok(Vc::upcast(AssetGraphContentSource::new_lazy(
-            client_root,
-            Vc::upcast(root),
-        )));
+        // Copied files are output directly under dist_root rather than the
+        // virtual client_root used by compiled chunks. Give them their own
+        // lazy graph so they can be served on demand without forcing the
+        // complete development output to be written to disk.
+        let dist_root = project.dist_root().owned().await?;
+        let copy_root_asset = DevAssetGraphRoot {
+            path: dist_root.join(DEV_COPY_ASSET_GRAPH_ROOT)?,
+            references: project.copy_output_assets().to_resolved().await?,
+        }
+        .cell();
+        let copy_source = AssetGraphContentSource::new_lazy(dist_root, Vc::upcast(copy_root_asset))
+            .to_resolved()
+            .await?;
+
+        return Ok(Vc::upcast(CombinedContentSource::new(vec![
+            ResolvedVc::upcast(client_source),
+            ResolvedVc::upcast(copy_source),
+        ])));
     }
 
     Ok(Vc::upcast(CombinedContentSource::new(Vec::new())))
@@ -379,11 +398,18 @@ pub async fn project_prepare_dev_assets(
             } = &*entrypoints;
             let app_paths = collect_endpoint_output_paths(&entrypoints.apps).await?;
             let library_paths = collect_endpoint_output_paths(&entrypoints.libraries).await?;
-            let root = resolve_dev_asset(source, DEV_ASSET_GRAPH_ROOT.into()).await?;
+            let roots = futures_util::future::try_join_all(
+                [DEV_ASSET_GRAPH_ROOT, DEV_COPY_ASSET_GRAPH_ROOT]
+                    .into_iter()
+                    .map(|path| resolve_dev_asset(source, path.into())),
+            )
+            .await?;
             let mut all_issues = issues.iter().cloned().collect::<Vec<_>>();
-            for issue in root.issues.iter() {
-                if !all_issues.contains(issue) {
-                    all_issues.push(issue.clone());
+            for root in roots {
+                for issue in root.issues.iter() {
+                    if !all_issues.contains(issue) {
+                        all_issues.push(issue.clone());
+                    }
                 }
             }
             Ok((entrypoints.clone(), app_paths, library_paths, all_issues))

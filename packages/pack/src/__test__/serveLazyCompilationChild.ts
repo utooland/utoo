@@ -11,10 +11,13 @@ if (!projectPath || !portArg) {
 
 const port = Number(portArg);
 const srcDir = path.join(projectPath, "src");
+const publicDir = path.join(projectPath, "public");
 const distDir = path.join(projectPath, "dist");
 const marker = "__LAZY_COMPILATION_MARKER__";
 const markerV1 = `${marker}_V1`;
 const markerV2 = `${marker}_V2`;
+const copiedAssetMarker = "__COPIED_ASSET_MARKER__";
+const copiedAssetMarkerV2 = `${copiedAssetMarker}_V2`;
 
 function delay(duration: number) {
   return new Promise((resolve) => setTimeout(resolve, duration));
@@ -126,6 +129,7 @@ function directoryContainsMarker(directory: string): boolean {
 async function main() {
   fs.rmSync(projectPath, { recursive: true, force: true });
   fs.mkdirSync(srcDir, { recursive: true });
+  fs.mkdirSync(publicDir, { recursive: true });
   fs.writeFileSync(
     path.join(srcDir, "index.js"),
     'import("./lazy.js").then(({ default: value }) => console.log(value));\n',
@@ -134,6 +138,7 @@ async function main() {
     path.join(srcDir, "lazy.js"),
     `export default "${markerV1}";\n`,
   );
+  fs.writeFileSync(path.join(publicDir, "copied.txt"), copiedAssetMarker);
 
   let readyContext: DevServerReadyContext | undefined;
 
@@ -149,6 +154,7 @@ async function main() {
           clean: true,
           filename: "[name].js",
           chunkFilename: "[name].js",
+          copy: [{ from: "./public", to: "static" }],
         },
         sourceMaps: true,
         stats: false,
@@ -171,6 +177,28 @@ async function main() {
   }
 
   const lazyMaterializedAtReady = directoryContainsMarker(distDir);
+  const copiedAssetMaterializedAtReady = fs.existsSync(
+    path.join(distDir, "static", "copied.txt"),
+  );
+  const copiedAssetResponse = await fetch(
+    `http://${readyContext.hostname}:${readyContext.port}/static/copied.txt`,
+  );
+  const copiedAssetBody = await copiedAssetResponse.text();
+  fs.writeFileSync(path.join(publicDir, "copied.txt"), copiedAssetMarkerV2);
+  let copiedAssetUpdateObserved = false;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const response = await fetch(
+      `http://${readyContext.hostname}:${readyContext.port}/static/copied.txt`,
+    );
+    if (
+      response.status === 200 &&
+      (await response.text()) === copiedAssetMarkerV2
+    ) {
+      copiedAssetUpdateObserved = true;
+      break;
+    }
+    await delay(100);
+  }
   const pendingPaths = [...readyContext.clientPaths];
   const entryPaths = new Set(readyContext.clientPaths);
   let entryResponsesSucceeded = true;
@@ -302,6 +330,10 @@ async function main() {
 
   console.log(
     `__LAZY_COMPILATION_RESULT__${JSON.stringify({
+      copiedAssetMaterializedAtReady,
+      copiedAssetResponseContainsMarker: copiedAssetBody === copiedAssetMarker,
+      copiedAssetResponseStatus: copiedAssetResponse.status,
+      copiedAssetUpdateObserved,
       entryResponsesSucceeded,
       entryResponseContainsLazyMarker,
       expandedRoutesSurvivedEviction,

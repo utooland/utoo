@@ -211,14 +211,12 @@ export async function createHotReloader(
     ? "webpack stats are enabled"
     : bundleOptions.config.entry.some((entry) => Boolean(entry.library))
       ? "library entries require complete development output"
-      : bundleOptions.config.output?.copy?.length
-        ? "copied output assets require complete development output"
-        : /\bnode\b/i.test(bundleOptions.config.target ?? "")
-          ? "the Node.js target requires complete development output"
-          : bundleOptions.config.server?.entry ||
-              bundleOptions.config.server?.function
-            ? "server entries and Server Functions require complete development output"
-            : undefined;
+      : /\bnode\b/i.test(bundleOptions.config.target ?? "")
+        ? "the Node.js target requires complete development output"
+        : bundleOptions.config.server?.entry ||
+            bundleOptions.config.server?.function
+          ? "server entries and Server Functions require complete development output"
+          : undefined;
   const lazyCompilation =
     lazyCompilationRequested && !lazyCompilationFallbackReason;
 

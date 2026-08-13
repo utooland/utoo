@@ -92,8 +92,12 @@ function runLazyCompilationFixture() {
 }
 
 describe("serve lazy compilation", () => {
-  it("serves a dynamic chunk on demand and emits a partial HMR update", async () => {
+  it("serves copied and dynamic assets on demand with partial HMR", async () => {
     await expect(runLazyCompilationFixture()).resolves.toEqual({
+      copiedAssetMaterializedAtReady: false,
+      copiedAssetResponseContainsMarker: true,
+      copiedAssetResponseStatus: 200,
+      copiedAssetUpdateObserved: true,
       entryResponsesSucceeded: true,
       entryResponseContainsLazyMarker: false,
       expandedRoutesSurvivedEviction: true,
