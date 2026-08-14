@@ -64,6 +64,7 @@ jobs:
           # Build packages
           npm run build --workspace @utoo/pack-shared
           npm run build:local --workspace @utoo/pack
+          npm exec --workspace @utoo/pack -- vitest run src/__test__/serveLazyCompilation.test.ts
           npm run build --workspace @utoo/pack-cli
 
           # Verify examples

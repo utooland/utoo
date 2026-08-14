@@ -136,6 +136,7 @@ pub struct Entries(Vec<EntryOptions>);
 pub struct DevServer {
     pub hot: Option<bool>,
     pub dynamic_hmr_chunk_lists: Option<bool>,
+    pub lazy_compilation: Option<bool>,
 }
 
 /// Provider configuration item - can be a module name string or [module, export] tuple.

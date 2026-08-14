@@ -235,6 +235,12 @@ pub async fn get_client_module_options_context(
     pack_path: FileSystemPath,
 ) -> Result<Vc<ModuleOptionsContext>> {
     let mode_ref = mode.await?;
+    let lazy_compilation = mode_ref.is_development()
+        && config
+            .dev_server()
+            .await?
+            .lazy_compilation
+            .unwrap_or_default();
 
     // resolve context
     let resolve_options_context = get_client_resolve_options_context(
@@ -434,6 +440,7 @@ pub async fn get_client_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             ignore_dynamic_requests: true,
+            lazy_compilation,
             ..Default::default()
         },
         css: CssOptionsContext {
@@ -461,6 +468,7 @@ pub async fn get_client_module_options_context(
         ecmascript: EcmascriptOptionsContext {
             enable_typeof_window_inlining: None,
             enable_jsx: Some(jsx_transform_options),
+            lazy_compilation: false,
             ..module_options_context.ecmascript
         },
         enable_webpack_loaders: foreign_enable_webpack_loaders,
@@ -474,6 +482,7 @@ pub async fn get_client_module_options_context(
     let internal_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             enable_jsx: Some(JsxTransformOptions::default().resolved_cell()),
+            lazy_compilation: false,
             ..module_options_context.ecmascript.clone()
         },
         enable_postcss_transform: None,
@@ -710,15 +719,18 @@ pub async fn get_client_chunking_context(
     }
 
     if mode.is_development() {
+        let dev_server = config.dev_server().await?;
+        let lazy_compilation = dev_server.lazy_compilation.unwrap_or_default();
         builder = builder
             .hot_module_replacement()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
-            .dynamic_chunk_content_loading(true);
+            .dynamic_chunk_content_loading(true)
+            .manifest_chunks(lazy_compilation);
 
-        let dev_server = config.dev_server().await?;
         if matches!(runtime_type, RuntimeType::Development)
             && dev_server.hot.unwrap_or_default()
-            && dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+            && (dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+                || dev_server.lazy_compilation.unwrap_or_default())
         {
             builder = builder.dynamic_hmr_chunk_lists();
         }

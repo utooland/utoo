@@ -758,6 +758,9 @@ function compatDevServer(devServer: any): ConfigComplete["devServer"] {
   if (typeof devServer.dynamicHmrChunkLists !== "undefined") {
     result.dynamicHmrChunkLists = !!devServer.dynamicHmrChunkLists;
   }
+  if (typeof devServer.lazyCompilation !== "undefined") {
+    result.lazyCompilation = !!devServer.lazyCompilation;
+  }
   if (typeof devServer.port !== "undefined") {
     const p = Number(devServer.port);
     if (!Number.isNaN(p)) result.port = p;

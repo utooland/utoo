@@ -20,6 +20,7 @@ import {
 import type { HotReloaderInterface } from "../core/hmr";
 import { createHotReloader } from "../core/hmr";
 import { createHttpProxyMiddleware } from "../core/proxyHono";
+import type { DevAsset } from "../core/types";
 import { getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
 import { findRootDir } from "../utils/findRoot";
@@ -91,6 +92,58 @@ function isRuntimeResolvedPublicPath(publicPath: string | undefined): boolean {
   return publicPath === "runtime" || publicPath === "auto";
 }
 
+function createDevAssetResponse(asset: DevAsset, rangeHeader?: string) {
+  const headers = new Headers();
+  for (const { name, value } of asset.headers) {
+    headers.append(name, value);
+  }
+
+  let body = new Uint8Array(asset.body);
+  let status = asset.statusCode;
+
+  if (rangeHeader && status === 200) {
+    const range = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+    const size = body.byteLength;
+    let start = Number.NaN;
+    let end = Number.NaN;
+
+    if (range && (range[1] || range[2])) {
+      if (!range[1]) {
+        const suffixLength = Number(range[2]);
+        if (Number.isSafeInteger(suffixLength) && suffixLength > 0) {
+          start = Math.max(size - suffixLength, 0);
+          end = size - 1;
+        }
+      } else {
+        start = Number(range[1]);
+        end = range[2] ? Number(range[2]) : size - 1;
+      }
+    }
+
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      start >= size ||
+      end < start
+    ) {
+      headers.set("Accept-Ranges", "bytes");
+      headers.set("Content-Range", `bytes */${size}`);
+      headers.set("Content-Length", "0");
+      return new Response(null, { headers, status: 416 });
+    }
+
+    end = Math.min(end, size - 1);
+    body = body.subarray(start, end + 1);
+    status = 206;
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
+    headers.set("Content-Length", body.byteLength.toString());
+  }
+
+  return new Response(body, { headers, status });
+}
+
 // --- Public types (match dev.ts for index switch) ---
 
 export interface SelfSignedCertificate {
@@ -102,7 +155,7 @@ export interface SelfSignedCertificate {
 export interface DevServerReadyContext {
   port: number;
   hostname: string;
-  /** Initial client asset paths written for all configured endpoints. */
+  /** Initial client asset paths for all configured endpoints. */
   clientPaths: string[];
 }
 
@@ -113,7 +166,7 @@ export interface StartServerOptions {
   logServerInfo?: boolean;
   selfSignedCertificate?: SelfSignedCertificate;
   /**
-   * Called after the initial dev build has been written and the HTTP server is
+   * Called after the initial dev assets are ready and the HTTP server is
    * listening. Integrations can await this instead of polling the internal
    * server port.
    */
@@ -304,6 +357,21 @@ async function runDev(
   const proxyRules = bundleOptions.config?.devServer?.proxy;
   if (proxyRules && proxyRules.length > 0) {
     app.use("*", createHttpProxyMiddleware(proxyRules));
+  }
+
+  if (hotReloader.lazyCompilation) {
+    app.get("/*", async (c, next) => {
+      const requestPath = rewriteRequestPath(new URL(c.req.url).pathname);
+      const asset = await hotReloader.getDevAsset(requestPath);
+      if (!asset) {
+        return next();
+      }
+
+      return createDevAssetResponse(
+        asset,
+        c.req.method === "GET" ? c.req.header("range") : undefined,
+      );
+    });
   }
 
   // GET handles HEAD automatically in Hono; serveStatic serves both

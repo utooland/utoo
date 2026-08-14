@@ -8,6 +8,7 @@ use std::{
 };
 
 use crate::pack_api::{
+    dev_asset::DevAssetSourceInstance,
     endpoint::NapiWrittenEndpoint,
     turbopack_ctx::{
         NapiTurbopackCallbacks, NapiTurbopackCallbacksJsObject, RootTask, TurbopackContext,
@@ -354,6 +355,7 @@ impl From<NapiPartialProjectOptions> for PartialProjectOptions {
 pub struct ProjectInstance {
     pub turbopack_ctx: TurbopackContext,
     pub container: ResolvedVc<ProjectContainer>,
+    pub dev_asset_source: DevAssetSourceInstance,
     pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
 }
 
@@ -529,21 +531,31 @@ pub fn project_new(
                     .unwrap();
                 });
             }
+            let dev_asset_session_id: RcStr = options.build_id.clone().into();
             let options = ProjectOptions::from(options);
-            let container = turbo_tasks
+            let (container, dev_asset_source_operation) = turbo_tasks
                 .run(async move {
                     let container_op =
                         ProjectContainer::new_operation(rcstr!("utoopack"), options.dev);
                     ProjectContainer::initialize(container_op, options).await?;
-                    container_op.resolve().strongly_consistent().await
+                    let container = container_op.resolve().strongly_consistent().await?;
+                    let dev_asset_source_operation =
+                        DevAssetSourceInstance::operation_for_container(
+                            container,
+                            dev_asset_session_id,
+                        );
+                    Ok((container, dev_asset_source_operation))
                 })
                 .or_else(|e| turbopack_ctx.throw_turbopack_internal_result(&e.into()))
                 .await?;
+            let dev_asset_source =
+                DevAssetSourceInstance::new(turbopack_ctx.clone(), dev_asset_source_operation);
 
             Ok(External::new_with_size_hint(
                 ProjectInstance {
                     turbopack_ctx,
                     container,
+                    dev_asset_source,
                     exit_receiver: tokio::sync::Mutex::new(Some(exit_receiver)),
                 },
                 100,
@@ -609,7 +621,7 @@ pub struct NapiEntrypoints {
 }
 
 impl NapiEntrypoints {
-    fn from_entrypoints_op(
+    pub(crate) fn from_entrypoints_op(
         entrypoints: &EntrypointsOperation,
         turbopack_ctx: &TurbopackContext,
     ) -> Result<Self> {
@@ -638,7 +650,7 @@ impl NapiEntrypoints {
     }
 }
 
-async fn collect_endpoint_output_paths(
+pub(crate) async fn collect_endpoint_output_paths(
     endpoints: &[OperationVc<OptionEndpoint>],
 ) -> Result<Vec<EndpointOutputPaths>> {
     let mut paths = Vec::with_capacity(endpoints.len());

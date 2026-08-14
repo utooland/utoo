@@ -31,7 +31,12 @@ import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { projectFactory } from "./project";
-import { Endpoint, Project, Update as TurbopackUpdate } from "./types";
+import {
+  DevAsset,
+  Endpoint,
+  Project,
+  Update as TurbopackUpdate,
+} from "./types";
 
 const wsServer = new WebSocketServer({ noServer: true });
 
@@ -69,7 +74,9 @@ export interface WSLike {
 export interface HotReloaderInterface {
   turbopackProject?: Project;
   serverStats: WebpackStats | null;
+  lazyCompilation: boolean;
   getClientPaths(): string[];
+  getDevAsset(path: string): Promise<DevAsset | null>;
   setHmrServerError(error: Error | null): void;
   clearHmrServerError(): void;
   start(): Promise<void>;
@@ -197,6 +204,27 @@ export async function createHotReloader(
   ];
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
+  const lazyCompilationRequested = Boolean(
+    bundleOptions.config.devServer?.lazyCompilation,
+  );
+  const lazyCompilationFallbackReason = shouldCreateWebpackStats
+    ? "webpack stats are enabled"
+    : bundleOptions.config.entry.some((entry) => Boolean(entry.library))
+      ? "library entries require complete development output"
+      : /\bnode\b/i.test(bundleOptions.config.target ?? "")
+        ? "the Node.js target requires complete development output"
+        : bundleOptions.config.server?.entry ||
+            bundleOptions.config.server?.function
+          ? "server entries and Server Functions require complete development output"
+          : undefined;
+  const lazyCompilation =
+    lazyCompilationRequested && !lazyCompilationFallbackReason;
+
+  if (lazyCompilationRequested && lazyCompilationFallbackReason) {
+    console.warn(
+      `[utoopack] devServer.lazyCompilation is disabled because ${lazyCompilationFallbackReason}.`,
+    );
+  }
 
   let project: Project;
   try {
@@ -212,6 +240,10 @@ export async function createHotReloader(
         tracing: bundleOptions.tracing ?? true,
         config: {
           ...bundleOptions.config,
+          devServer: {
+            ...bundleOptions.config.devServer,
+            lazyCompilation,
+          },
           mode: "development",
           stats: shouldCreateWebpackStats,
           optimization: {
@@ -503,7 +535,9 @@ export async function createHotReloader(
       return;
     }
 
-    const subscription = project!.hmrEvents(id);
+    const subscription = lazyCompilation
+      ? project!.devAssetHmrEvents(id)
+      : project!.hmrEvents(id);
     state.subscriptions.set(id, subscription);
     const issueKey = getClientIssueKey(id);
 
@@ -540,7 +574,8 @@ export async function createHotReloader(
     }
 
     const subscription = state.subscriptions.get(id);
-    subscription?.return!();
+    state.subscriptions.delete(id);
+    subscription?.return?.();
     state.clientIssues.delete(getClientIssueKey(id));
   }
 
@@ -557,7 +592,12 @@ export async function createHotReloader(
         ...(entrypoints.apps ?? []),
         ...(entrypoints.libraries ?? []),
       ];
-      if (shouldCreateWebpackStats) {
+      if (lazyCompilation) {
+        const prepared = await project.prepareDevAssets();
+        processIssues(prepared, true, true);
+        updateWrittenEndpointPaths(entrypoints.apps, prepared.appPaths);
+        await regenerateHtml();
+      } else if (shouldCreateWebpackStats) {
         await writeAllEntrypointsToDisk();
       } else {
         await Promise.all(
@@ -579,6 +619,35 @@ export async function createHotReloader(
   const hotReloader: HotReloaderInterface = {
     turbopackProject: project,
     serverStats: null,
+    lazyCompilation,
+
+    getDevAsset(path) {
+      if (!lazyCompilation) {
+        return Promise.resolve(null);
+      }
+
+      return project.getDevAsset(path).then((result) => {
+        const issueKey = `dev-asset:${path}`;
+        processIssues(currentEntryIssues, issueKey, result, false, true);
+        if (currentEntryIssues.get(issueKey)?.size === 0) {
+          currentEntryIssues.delete(issueKey);
+        }
+        if (!result.asset && hasBlockingResultIssues(result)) {
+          return {
+            body: Buffer.from("Utoopack failed to compile this asset."),
+            headers: [
+              {
+                name: "content-type",
+                value: "text/plain; charset=utf-8",
+              },
+              { name: "cache-control", value: "no-store" },
+            ],
+            statusCode: 500,
+          };
+        }
+        return result.asset;
+      });
+    },
 
     getClientPaths() {
       return [
@@ -781,6 +850,10 @@ export async function createHotReloader(
       // Not implemented yet.
     },
     async start() {
+      if (lazyCompilation) {
+        return;
+      }
+
       if (backgroundWatchersStarted) {
         return;
       }
