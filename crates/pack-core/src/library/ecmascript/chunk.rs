@@ -14,6 +14,7 @@ use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     ident::AssetIdent,
+    module::Module,
     module_graph::ModuleGraph,
     output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
     source_map::{GenerateSourceMap, SourceMapAsset},
@@ -356,6 +357,26 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let runtime_type = this.chunking_context.await?.runtime_type();
 
+        // introduce async module detect in this commit https://github.com/vercel/next.js/commit/539efa8cad8608008dd2d55e1a9b2aeaf004b8e0
+        // TODO maybe refactor after sync a75ece16b52c6387e9866d552ebb694db7877351 from upstream
+        let has_async_modules = if matches!(runtime_type, RuntimeType::Production) {
+            let mut has_async_modules = !this.module_graph.async_module_info().await?.is_empty();
+
+            if !has_async_modules {
+                let evaluatable_assets = this.evaluatable_assets.await?;
+                for evaluatable_asset in &*evaluatable_assets {
+                    if *evaluatable_asset.is_self_async().await? {
+                        has_async_modules = true;
+                        break;
+                    }
+                }
+            }
+
+            has_async_modules
+        } else {
+            true
+        };
+
         // Get runtime code based on runtime type
         match runtime_type {
             RuntimeType::Development | RuntimeType::Production => {
@@ -369,6 +390,7 @@ impl EcmascriptLibraryEvaluateChunk {
                     Vc::cell(None),
                     Vc::cell(None),
                     runtime_type,
+                    has_async_modules,
                     output_root_to_root_path,
                     source_maps,
                     this.chunking_context.runtime_root(),

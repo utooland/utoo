@@ -262,7 +262,7 @@ options.insert = "head";
 options.singleton = false;
 var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"])([
     [
-        "style/inline_css/input/index.less.css",
+        "style/inline_css/input/index.less.css?modules",
         __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$inline_css$2f$input$2f$index$2e$less$2e$css$3f$modules__$5b$client$5d$__$28$css$2c$__inline__css__content$29$__["default"],
         undefined,
         undefined

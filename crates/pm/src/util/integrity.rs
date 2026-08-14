@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 
+use anyhow::{Context, Result, bail};
 use base64::Engine;
 // sha1 and sha2 re-export the same `digest::Digest` trait; one anonymous
 // import covers both hashers.
@@ -21,6 +22,47 @@ pub fn compute_shasum(data: &[u8]) -> String {
         let _ = write!(s, "{b:02x}");
         s
     })
+}
+
+/// Verify npm Subresource Integrity metadata against downloaded bytes.
+///
+/// Registries may provide several whitespace-separated digests. A match from
+/// any supported algorithm is sufficient, following SRI semantics.
+pub fn verify_integrity(data: &[u8], integrity: &str) -> Result<()> {
+    let mut supported = false;
+    for token in integrity.split_ascii_whitespace() {
+        let Some((algorithm, encoded)) = token.split_once('-') else {
+            continue;
+        };
+        let actual = match algorithm {
+            "sha1" => sha1::Sha1::digest(data).to_vec(),
+            "sha256" => sha2::Sha256::digest(data).to_vec(),
+            "sha384" => sha2::Sha384::digest(data).to_vec(),
+            "sha512" => sha2::Sha512::digest(data).to_vec(),
+            _ => continue,
+        };
+        supported = true;
+        let expected = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .with_context(|| format!("Invalid {algorithm} integrity digest"))?;
+        if actual == expected {
+            return Ok(());
+        }
+    }
+
+    if !supported {
+        bail!("No supported checksum in integrity metadata: {integrity}");
+    }
+    bail!("Downloaded archive failed integrity verification")
+}
+
+/// Verify npm's legacy hexadecimal SHA-1 `dist.shasum` field.
+pub fn verify_shasum(data: &[u8], shasum: &str) -> Result<()> {
+    if compute_shasum(data).eq_ignore_ascii_case(shasum) {
+        Ok(())
+    } else {
+        bail!("Downloaded archive failed shasum verification")
+    }
 }
 
 #[cfg(test)]
@@ -72,5 +114,15 @@ mod tests {
         let a = compute_shasum(b"test data");
         let b = compute_shasum(b"test data");
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn verifies_registry_sri_and_rejects_corruption() {
+        let data = b"release archive";
+        let sri = compute_integrity(data);
+
+        assert!(verify_integrity(data, &sri).is_ok());
+        assert!(verify_integrity(b"corrupted", &sri).is_err());
+        assert!(verify_integrity(data, "md5-unsupported").is_err());
     }
 }
