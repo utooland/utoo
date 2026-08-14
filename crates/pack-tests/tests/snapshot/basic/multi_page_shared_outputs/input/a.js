@@ -1,0 +1,1 @@
+globalThis.pageA = true;

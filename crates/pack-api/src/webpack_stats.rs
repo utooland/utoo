@@ -31,6 +31,9 @@ pub struct AssetIntermediateInfo {
     pub dev_chunk_list: Option<RcStr>,
 }
 
+#[turbo_tasks::value(transparent)]
+pub struct OutputAssetGroups(pub Vec<ResolvedVc<OutputAssets>>);
+
 fn normalize_stats_path(path: RcStr) -> RcStr {
     path.strip_prefix("./").map(Into::into).unwrap_or(path)
 }
@@ -381,6 +384,7 @@ pub async fn get_asset_intermediate_info(
 #[turbo_tasks::function]
 pub async fn generate_webpack_stats(
     entry_assets: Vc<OutputAssets>,
+    entry_asset_groups: Vc<OutputAssetGroups>,
     dist_root: Vc<FileSystemPath>,
 ) -> Result<Vc<WebpackStats>> {
     let mut assets = vec![];
@@ -402,10 +406,13 @@ pub async fn generate_webpack_stats(
         })
         .try_join()
         .await?;
+    let asset_info_by_asset: FxHashMap<_, _> = all_assets
+        .iter()
+        .copied()
+        .zip(asset_results.iter())
+        .collect();
 
-    let mut dev_chunk_lists: Vec<RcStr> = vec![];
-    for info in asset_results {
-        let info = info;
+    for info in &asset_results {
         if seen_asset_paths.insert(info.asset.name.clone()) {
             assets.push(info.asset.clone());
         }
@@ -424,17 +431,39 @@ pub async fn generate_webpack_stats(
                 modules.insert(module.id.clone(), module.clone());
             }
         }
-        if let Some(dev_chunk_list) = &info.dev_chunk_list {
-            dev_chunk_lists.push(dev_chunk_list.clone());
-        }
     }
 
-    for dev_chunk_list in dev_chunk_lists {
-        for entrypoint in entrypoints.values_mut() {
-            entrypoint.chunks.push(dev_chunk_list.clone());
-            entrypoint.assets.push(WebpackStatsEntrypointAssets {
-                name: dev_chunk_list.clone(),
-            });
+    // Endpoint output groups preserve which evaluate entry owns each development chunk list.
+    // Associating these lists after flattening all output assets made every entrypoint include
+    // every other page's HMR bootstrap in multi-page builds.
+    for group in entry_asset_groups.await?.iter().copied() {
+        let group = group.await?;
+        let group_entrypoints: FxIndexMap<_, _> = group
+            .iter()
+            .filter_map(|asset| asset_info_by_asset.get(asset))
+            .flat_map(|info| info.entrypoints.iter())
+            .map(|(name, _)| (name.clone(), ()))
+            .collect();
+        let group_chunk_lists: FxIndexMap<_, _> = group
+            .iter()
+            .filter_map(|asset| asset_info_by_asset.get(asset))
+            .filter_map(|info| info.dev_chunk_list.as_ref())
+            .map(|name| (name.clone(), ()))
+            .collect();
+
+        for entrypoint_name in group_entrypoints.keys() {
+            let Some(entrypoint) = entrypoints.get_mut(entrypoint_name) else {
+                continue;
+            };
+            for dev_chunk_list in group_chunk_lists.keys() {
+                if entrypoint.chunks.contains(dev_chunk_list) {
+                    continue;
+                }
+                entrypoint.chunks.push(dev_chunk_list.clone());
+                entrypoint.assets.push(WebpackStatsEntrypointAssets {
+                    name: dev_chunk_list.clone(),
+                });
+            }
         }
     }
 

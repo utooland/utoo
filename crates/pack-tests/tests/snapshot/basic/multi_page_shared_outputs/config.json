@@ -1,0 +1,37 @@
+{
+  "expectedAppEndpoints": 2,
+  "expectedIndividualAppOutputPaths": ["global.css", "server/index.js"],
+  "config": {
+    "entry": [
+      {
+        "import": "input/a.js",
+        "name": "a"
+      },
+      {
+        "import": "input/b.js",
+        "name": "b"
+      }
+    ],
+    "mode": "production",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "output": {
+      "copy": [
+        {
+          "from": "input/global.css",
+          "to": "global.css"
+        }
+      ],
+      "path": "output"
+    },
+    "server": {
+      "entry": "input/server.js",
+      "function": {
+        "clientProxy": "./input/transport.js",
+        "serverRegister": "./input/register.js"
+      }
+    }
+  }
+}

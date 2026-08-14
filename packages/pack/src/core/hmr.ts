@@ -1,7 +1,6 @@
 import {
   type CompilationError,
   type EntryIssuesMap,
-  type EntryOptions,
   formatIssue,
   type HMR_ACTION_TYPES,
   HMR_ACTIONS_SENT_TO_BROWSER,
@@ -16,7 +15,6 @@ import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
 import type { MemoryEvictionMode, NapiWrittenEndpoint } from "../binding";
 import { BundleOptions } from "../config/types";
-import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
 import {
@@ -24,15 +22,21 @@ import {
   isTruthyEnv,
   normalizeTurbopackMemoryEviction,
 } from "../utils/env";
-import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
+import { HtmlGenerationManager } from "../utils/HtmlGenerationManager";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
+import { isNodeTarget } from "../utils/target";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
-import { Endpoint, Project, Update as TurbopackUpdate } from "./types";
+import {
+  Endpoint,
+  Project,
+  RawEntrypoints,
+  Update as TurbopackUpdate,
+} from "./types";
 
 const wsServer = new WebSocketServer({ noServer: true });
 
@@ -170,7 +174,13 @@ export async function createHotReloader(
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
-  const createProject = projectFactory();
+  const createProject = projectFactory({
+    hasServerOutput: Boolean(
+      bundleOptions.config.server?.entry ||
+        bundleOptions.config.server?.function,
+    ),
+    nodeTarget: isNodeTarget(bundleOptions.config.target),
+  });
   const persistentCaching = isPersistentCachingEnabled(
     bundleOptions.config.persistentCaching,
   );
@@ -186,16 +196,11 @@ export async function createHotReloader(
     persistentCaching,
   );
 
-  const htmlConfigs = [
-    ...(Array.isArray((bundleOptions.config as any).html)
-      ? (bundleOptions.config as any).html
-      : (bundleOptions.config as any).html
-        ? [(bundleOptions.config as any).html]
-        : []),
-    ...bundleOptions.config.entry
-      .filter((e: EntryOptions) => !!e.html)
-      .map((e: EntryOptions) => e.html!),
-  ];
+  const htmlGenerationManager = new HtmlGenerationManager(
+    bundleOptions.config,
+    getOutputPath(bundleOptions.config, resolvedProjectPath),
+    bundleOptions.config.output?.publicPath,
+  );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
 
@@ -334,40 +339,36 @@ export async function createHotReloader(
       const written = paths[index];
       if (written) {
         writtenEndpointPaths.set(endpoint, written);
+        htmlGenerationManager.setWrittenEndpointPath(endpoint, written);
       }
     });
   }
 
-  async function regenerateHtml() {
-    if (htmlConfigs.length === 0) {
-      return;
-    }
-
-    const outputDir = getOutputPath(bundleOptions.config, resolvedProjectPath);
-    const publicPath = bundleOptions.config.output?.publicPath;
-    const assets = getInitialAssetsFromEndpointPaths([
-      ...writtenEndpointPaths.values(),
-    ]);
-
-    for (const config of htmlConfigs) {
-      const plugin = new HtmlPlugin(config);
-      await plugin.generate(outputDir, assets, publicPath);
-    }
+  function setEntrypoints(entrypoints: RawEntrypoints) {
+    writtenEndpointPaths.clear();
+    htmlGenerationManager.setEntrypoints(entrypoints);
+    updateWrittenEndpointPaths(entrypoints.apps, entrypoints.appPaths);
+    updateWrittenEndpointPaths(entrypoints.libraries, entrypoints.libraryPaths);
   }
 
   async function writeAllEntrypointsToDisk() {
     const result = await project.writeAllEntrypointsToDisk();
     processIssues(result, true, true);
-    updateWrittenEndpointPaths(result.apps, result.appPaths);
-    updateWrittenEndpointPaths(result.libraries, result.libraryPaths);
-    await regenerateHtml();
+    setEntrypoints(result);
+    await htmlGenerationManager.generateAll();
   }
 
-  async function writeEntrypointToDisk(entrypoint: Endpoint) {
+  async function writeEntrypointToDisk(
+    entrypoint: Endpoint,
+    generateHtml = true,
+  ) {
     const result = await entrypoint.writeToDisk();
     processIssues(result, true, true);
     writtenEndpointPaths.set(entrypoint, result);
-    await regenerateHtml();
+    htmlGenerationManager.setWrittenEndpointPath(entrypoint, result);
+    if (generateHtml) {
+      await htmlGenerationManager.generateForEndpoint(entrypoint);
+    }
   }
 
   async function writeOutputToDisk(entrypoint: Endpoint) {
@@ -560,14 +561,16 @@ export async function createHotReloader(
         ...(entrypoints.apps ?? []),
         ...(entrypoints.libraries ?? []),
       ];
+      setEntrypoints(entrypoints);
       if (shouldCreateWebpackStats) {
         await writeAllEntrypointsToDisk();
       } else {
         await Promise.all(
           currentWatchedEntrypoints.map((entrypoint) =>
-            writeEntrypointToDisk(entrypoint),
+            writeEntrypointToDisk(entrypoint, false),
           ),
         );
+        await htmlGenerationManager.generateAll();
       }
 
       if (backgroundWatchersStarted) {
