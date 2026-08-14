@@ -27,6 +27,7 @@ import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
+import { isNodeTarget } from "../utils/target";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
@@ -178,11 +179,7 @@ export async function createHotReloader(
       bundleOptions.config.server?.entry ||
         bundleOptions.config.server?.function,
     ),
-    // The Rust config treats the common `node`/`node <version>` forms as Node.
-    // Other browserslist queries remain Web targets.
-    nodeTarget: /^node(?:\s|$)/i.test(
-      bundleOptions.config.target?.trim() ?? "",
-    ),
+    nodeTarget: isNodeTarget(bundleOptions.config.target),
   });
   const persistentCaching = isPersistentCachingEnabled(
     bundleOptions.config.persistentCaching,
