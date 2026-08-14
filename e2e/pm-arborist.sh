@@ -49,6 +49,20 @@ clean_fixture() {
   find "$dir" -mindepth 2 -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true
 }
 
+# Lightweight check: generated lockfile must be valid JSON when present.
+# On failure, prints the fixture name via fail() and returns 1.
+assert_valid_package_lock() {
+  local name="$1"
+  if [ ! -f "package-lock.json" ]; then
+    return 0
+  fi
+  if ! node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8'))" 2>/dev/null; then
+    fail "$name (package-lock.json is not valid JSON)"
+    return 1
+  fi
+  return 0
+}
+
 # ----------------------------------------------------------------
 # Known-skip lists: features utoo PM does not yet support.
 # See e2e/pm/arborist/README.md for details.
@@ -178,11 +192,13 @@ test_install_success() {
 
   if utoo install $flags 2>&1; then
     if [ -d "node_modules" ] || [ -f "package-lock.json" ]; then
+      assert_valid_package_lock "$name" || return
       pass "$name"
     else
       local dep_count
       dep_count=$(node -e "const p=JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log(Object.keys(p.dependencies||{}).length + Object.keys(p.devDependencies||{}).length + Object.keys(p.optionalDependencies||{}).length)" 2>/dev/null || echo "0")
       if [ "$dep_count" = "0" ]; then
+        assert_valid_package_lock "$name" || return
         pass "$name (zero deps)"
       else
         fail "$name (no node_modules created)"
@@ -237,6 +253,7 @@ test_install_optional_graceful() {
   clean_fixture .
 
   if utoo install 2>&1; then
+    assert_valid_package_lock "$name" || return
     pass "$name ($desc)"
   else
     fail "$name (should succeed despite optional dep issue: $desc)"
@@ -310,6 +327,7 @@ if should_run "testing-peer-dep-conflict-chain" && [ -d "$ARBORIST_DIR/testing-p
       cd "$sub"
       clean_fixture .
       if utoo install 2>&1; then
+        assert_valid_package_lock "testing-peer-dep-conflict-chain/$subname" || continue
         pass "testing-peer-dep-conflict-chain/$subname"
       else
         fail "testing-peer-dep-conflict-chain/$subname"
@@ -710,6 +728,7 @@ for name in \
     elif [ -d "$dir/node_modules" ]; then
       cd "$dir"
       if utoo install 2>&1; then
+        assert_valid_package_lock "reinstall-$name" || continue
         pass "reinstall-$name"
       else
         fail "reinstall-$name (second install failed)"
