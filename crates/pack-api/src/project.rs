@@ -42,6 +42,9 @@ use turbopack_core::{
         BindingUsageInfo, OptionBindingUsageInfo, compute_binding_usage_info,
     },
 };
+use turbopack_ecmascript::async_chunk::proxy::{
+    activation_key_from_chunk_path, lazy_compilation_state,
+};
 
 use turbopack::evaluate_context::node_build_environment;
 
@@ -115,6 +118,25 @@ pub struct WatchOptions {
 
 pub fn default_ignored_paths() -> Vec<RcStr> {
     vec!["node_modules".into()]
+}
+
+/// Returns whether a requested path names a lazy dynamic-import manifest.
+pub fn is_lazy_chunk_path(chunk_path: &str) -> bool {
+    activation_key_from_chunk_path(chunk_path).is_some()
+}
+
+/// Activates the lazy dynamic import named by a requested manifest chunk.
+///
+/// The activation invalidates the proxy module so the persistent development
+/// asset source can materialize the real dynamic chunk on the same request.
+#[turbo_tasks::function(operation, root)]
+pub async fn activate_lazy_chunk_operation(chunk_path: RcStr) -> Result<Vc<bool>> {
+    let Some(key) = activation_key_from_chunk_path(&chunk_path) else {
+        return Ok(Vc::cell(false));
+    };
+
+    lazy_compilation_state(key).await?.activate();
+    Ok(Vc::cell(true))
 }
 
 fn trim_leading_path_separators(path: &str) -> &str {

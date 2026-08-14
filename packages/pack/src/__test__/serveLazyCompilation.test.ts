@@ -107,6 +107,7 @@ describe("serve lazy compilation", () => {
       headResponseStatus: 200,
       hmrPartialUpdateReceived: true,
       hmrReloadReceived: false,
+      lazyLoaderInvokedAtReady: false,
       lazyMaterializedAtReady: false,
       lazyResponseContainsMarker: true,
       lazyResponseStatus: 200,

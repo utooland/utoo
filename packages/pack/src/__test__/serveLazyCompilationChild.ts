@@ -18,6 +18,7 @@ const markerV1 = `${marker}_V1`;
 const markerV2 = `${marker}_V2`;
 const copiedAssetMarker = "__COPIED_ASSET_MARKER__";
 const copiedAssetMarkerV2 = `${copiedAssetMarker}_V2`;
+const loaderInvocationPath = path.join(projectPath, "lazy-loader-invoked.txt");
 
 function delay(duration: number) {
   return new Promise((resolve) => setTimeout(resolve, duration));
@@ -132,11 +133,18 @@ async function main() {
   fs.mkdirSync(publicDir, { recursive: true });
   fs.writeFileSync(
     path.join(srcDir, "index.js"),
-    'import("./lazy.js").then(({ default: value }) => console.log(value));\n',
+    'import("./lazy.lazy.js").then(({ default: value }) => console.log(value));\n',
   );
   fs.writeFileSync(
-    path.join(srcDir, "lazy.js"),
+    path.join(srcDir, "lazy.lazy.js"),
     `export default "${markerV1}";\n`,
+  );
+  const lazyLoaderPath = path.join(projectPath, "lazy-loader.cjs");
+  fs.writeFileSync(
+    lazyLoaderPath,
+    `const fs = require("fs");\nmodule.exports = function(source) { fs.writeFileSync(${JSON.stringify(
+      loaderInvocationPath,
+    )}, "invoked"); return source; };\n`,
   );
   fs.writeFileSync(path.join(publicDir, "copied.txt"), copiedAssetMarker);
 
@@ -149,6 +157,11 @@ async function main() {
           lazyCompilation: true,
         },
         entry: [{ import: "./src/index.js", name: "main" }],
+        module: {
+          rules: {
+            "*.lazy.js": [lazyLoaderPath],
+          },
+        },
         output: {
           path: "./dist",
           clean: true,
@@ -177,6 +190,7 @@ async function main() {
   }
 
   const lazyMaterializedAtReady = directoryContainsMarker(distDir);
+  const lazyLoaderInvokedAtReady = fs.existsSync(loaderInvocationPath);
   const copiedAssetMaterializedAtReady = fs.existsSync(
     path.join(distDir, "static", "copied.txt"),
   );
@@ -246,8 +260,10 @@ async function main() {
       entryPaths.has(responsePath) && body.includes(marker),
   );
   const lazyResponses = responses.filter(({ body }) => body.includes(markerV1));
-  const dynamicHmrResponse = responses.find(({ body }) =>
-    /source:\s*["']dynamic["']/.test(body),
+  const dynamicHmrResponse = responses.find(
+    ({ body }) =>
+      /source:\s*["']dynamic["']/.test(body) &&
+      lazyResponses.some(({ path: lazyPath }) => body.includes(lazyPath)),
   );
   if (!dynamicHmrResponse) {
     throw new Error(
@@ -320,7 +336,7 @@ async function main() {
     // server consumes the subscription's initial snapshot.
     await delay(1_000);
     fs.writeFileSync(
-      path.join(srcDir, "lazy.js"),
+      path.join(srcDir, "lazy.lazy.js"),
       `export default "${markerV2}";\n`,
     );
     hmrResult = await update;
@@ -345,6 +361,7 @@ async function main() {
       headResponseStatus: headResponse.status,
       ...hmrResult,
       lazyMaterializedAtReady,
+      lazyLoaderInvokedAtReady,
       lazyResponseContainsMarker: lazyResponses.some(({ body }) =>
         body.includes(markerV1),
       ),

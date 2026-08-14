@@ -10,7 +10,7 @@ use napi::{
 use pack_api::{
     endpoint::Endpoint,
     entrypoint::{EntrypointsWithIssues, get_entrypoints_with_issues_operation},
-    project::ProjectContainer,
+    project::{ProjectContainer, activate_lazy_chunk_operation, is_lazy_chunk_path},
     utils::{get_issues, strongly_consistent_catch_collectables},
 };
 use turbo_rcstr::RcStr;
@@ -349,11 +349,17 @@ pub async fn project_get_dev_asset(
 ) -> napi::Result<NapiDevAssetResponse> {
     let ctx = &project.turbopack_ctx;
     let source = project.dev_asset_source.operation();
+    let should_activate_lazy_chunk = is_lazy_chunk_path(&path);
     let request_path = path.clone();
 
     let (asset, issues) = ctx
         .turbo_tasks()
         .run(async move {
+            if should_activate_lazy_chunk {
+                activate_lazy_chunk_operation(path.clone().into())
+                    .read_strongly_consistent()
+                    .await?;
+            }
             let resolved = resolve_dev_asset(source, path.into()).await?;
             let asset = if let Some(result) = &resolved.result {
                 to_dev_asset_data(result, &request_path)?
