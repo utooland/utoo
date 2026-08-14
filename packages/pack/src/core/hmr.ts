@@ -307,12 +307,14 @@ export async function createHotReloader(
   }
   const sendEnqueuedMessagesDebounce = debounce(sendEnqueuedMessages, 2);
 
-  function sendTurbopackMessage(payload: TurbopackUpdate) {
-    payload.issues = [];
-
-    for (const client of clients) {
-      clientStates.get(client)?.turbopackUpdates.push(payload);
+  function sendTurbopackMessage(client: WSLike, payload: TurbopackUpdate) {
+    const state = clientStates.get(client);
+    if (!state) {
+      return;
     }
+
+    payload.issues = [];
+    state.turbopackUpdates.push(payload);
 
     markHmrEvent();
     sendEnqueuedMessagesDebounce();
@@ -517,7 +519,7 @@ export async function createHotReloader(
         subscription,
         (data) =>
           processIssues(state.clientIssues, issueKey, data, false, true),
-        sendTurbopackMessage,
+        (data) => sendTurbopackMessage(client, data),
       );
     } catch (e) {
       // The client might be using an HMR session from a previous server, tell them
