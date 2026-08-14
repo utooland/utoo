@@ -531,6 +531,7 @@ pub fn project_new(
                     .unwrap();
                 });
             }
+            let dev_asset_session_id: RcStr = options.build_id.clone().into();
             let options = ProjectOptions::from(options);
             let (container, dev_asset_source_operation) = turbo_tasks
                 .run(async move {
@@ -539,7 +540,10 @@ pub fn project_new(
                     ProjectContainer::initialize(container_op, options).await?;
                     let container = container_op.resolve().strongly_consistent().await?;
                     let dev_asset_source_operation =
-                        DevAssetSourceInstance::operation_for_container(container);
+                        DevAssetSourceInstance::operation_for_container(
+                            container,
+                            dev_asset_session_id,
+                        );
                     Ok((container, dev_asset_source_operation))
                 })
                 .or_else(|e| turbopack_ctx.throw_turbopack_internal_result(&e.into()))

@@ -84,8 +84,9 @@ impl Asset for DevAssetGraphRoot {
 impl DevAssetSourceInstance {
     pub fn operation_for_container(
         container: ResolvedVc<ProjectContainer>,
+        session_id: RcStr,
     ) -> OperationVc<Box<dyn ContentSource>> {
-        project_dev_asset_source_operation(container)
+        project_dev_asset_source_operation(container, session_id)
     }
 
     pub fn new(
@@ -105,7 +106,12 @@ impl DevAssetSourceInstance {
 #[turbo_tasks::function(operation, root)]
 async fn project_dev_asset_source_operation(
     container: ResolvedVc<ProjectContainer>,
+    session_id: RcStr,
 ) -> Result<Vc<Box<dyn ContentSource>>> {
+    // The source owns process-local expansion state. Keep its persistent task
+    // key scoped to this dev-server session so a later process cannot restore
+    // a cached source without replaying the root-expansion side effects.
+    let _ = session_id;
     let project = container.project().to_resolved().await?;
 
     if let Some(app_project) = *project.app_project().await? {
