@@ -30,6 +30,7 @@ import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { validateEntryPaths } from "../utils/validateEntry";
+import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
 import { Endpoint, Project, Update as TurbopackUpdate } from "./types";
 
@@ -497,27 +498,27 @@ export async function createHotReloader(
     );
   }
 
-  async function subscribeToHmrEvents(client: WSLike, id: string) {
+  async function subscribeToHmrEvents(
+    client: WSLike,
+    id: string,
+    expectedVersion?: string,
+  ) {
     const state = clientStates.get(client);
     if (!state || state.subscriptions.has(id)) {
       return;
     }
 
-    const subscription = project!.hmrEvents(id);
+    const subscription = project!.hmrEvents(id, expectedVersion);
     state.subscriptions.set(id, subscription);
     const issueKey = getClientIssueKey(id);
 
-    // The subscription will always emit once, which is the initial
-    // computation. This is not a change, so swallow it.
     try {
-      await subscription.next();
-
-      for await (const data of subscription) {
-        processIssues(state.clientIssues, issueKey, data, false, true);
-        if (data.type !== "issues") {
-          sendTurbopackMessage(data);
-        }
-      }
+      await consumeHmrSubscription(
+        subscription,
+        (data) =>
+          processIssues(state.clientIssues, issueKey, data, false, true),
+        sendTurbopackMessage,
+      );
     } catch (e) {
       // The client might be using an HMR session from a previous server, tell them
       // to fully reload the page to resolve the issue. We can't use
@@ -650,7 +651,13 @@ export async function createHotReloader(
           // Turbopack messages
           switch (parsedData.type) {
             case "turbopack-subscribe":
-              subscribeToHmrEvents(client, parsedData.path);
+              subscribeToHmrEvents(
+                client,
+                parsedData.path,
+                typeof parsedData.version === "string"
+                  ? parsedData.version
+                  : undefined,
+              );
               break;
 
             case "turbopack-unsubscribe":
@@ -755,7 +762,13 @@ export async function createHotReloader(
 
       switch (parsedData.type) {
         case "turbopack-subscribe":
-          subscribeToHmrEvents(ws, parsedData.path);
+          subscribeToHmrEvents(
+            ws,
+            parsedData.path,
+            typeof parsedData.version === "string"
+              ? parsedData.version
+              : undefined,
+          );
           break;
         case "turbopack-unsubscribe":
           unsubscribeFromHmrEvents(ws, parsedData.path);

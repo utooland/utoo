@@ -2,7 +2,10 @@ use std::{
     borrow::Cow,
     io::Write,
     path::PathBuf,
-    sync::LazyLock,
+    sync::{
+        Arc, LazyLock,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -54,7 +57,7 @@ use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME, SOURCE_URL_PROTOCOL,
     source_map::{SourceMap, Token},
-    version::{PartialUpdate, TotalUpdate, Update},
+    version::{PartialUpdate, TotalUpdate, Update, Version},
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, ResourceIdentifier};
 use turbopack_trace_utils::{
@@ -768,25 +771,43 @@ pub fn project_hmr_events(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
     identifier: RcStr,
     func: JsFunction,
+    expected_version: Option<RcStr>,
 ) -> napi::Result<External<RootTask>> {
     let turbopack_ctx = project.turbopack_ctx.clone();
     let project = project.container;
     let session = TransientInstance::new(());
+    let check_expected_version = Arc::new(AtomicBool::new(expected_version.is_some()));
+    let check_expected_version_after_emit = check_expected_version.clone();
     subscribe(
         turbopack_ctx,
         func,
         {
             let outer_identifier = identifier.clone();
             let session = session.clone();
+            let expected_version = expected_version.clone();
+            let check_expected_version = check_expected_version.clone();
             move || {
                 let identifier: RcStr = outer_identifier.clone();
                 let session = session.clone();
+                let expected_version = expected_version.clone();
+                let check_expected_version = check_expected_version.clone();
                 async move {
                     let project = project.project().to_resolved().await?;
                     let state = project
                         .hmr_version_state(identifier.clone(), session)
                         .to_resolved()
                         .await?;
+                    let should_check_expected_version =
+                        check_expected_version.load(Ordering::Acquire);
+                    let version_mismatch = if should_check_expected_version {
+                        if let Some(expected_version) = expected_version {
+                            state.get().id().owned().await? != expected_version
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
 
                     let update_op =
                         hmr_update_with_issues_operation(project, identifier.clone(), state);
@@ -807,12 +828,17 @@ pub fn project_hmr_events(
                             state.set(to.clone()).await?;
                         }
                     }
-                    Ok((Some(update.clone()), issues.clone()))
+                    Ok((
+                        Some(update.clone()),
+                        issues.clone(),
+                        version_mismatch,
+                        should_check_expected_version,
+                    ))
                 }
             }
         },
         move |ctx| {
-            let (update, issues) = ctx.value;
+            let (update, issues, version_mismatch, should_check_expected_version) = ctx.value;
 
             let napi_issues = issues
                 .iter()
@@ -828,6 +854,9 @@ pub fn project_hmr_events(
                 headers: None,
             };
             let update = match update.as_deref() {
+                _ if version_mismatch => {
+                    ClientUpdateInstruction::restart(&identifier, &update_issues)
+                }
                 None | Some(Update::Missing) | Some(Update::Total(_)) => {
                     ClientUpdateInstruction::restart(&identifier, &update_issues)
                 }
@@ -839,8 +868,13 @@ pub fn project_hmr_events(
                 Some(Update::None) => ClientUpdateInstruction::issues(&identifier, &update_issues),
             };
 
+            let result = ctx.env.to_js_value(&update)?;
+            if should_check_expected_version {
+                check_expected_version_after_emit.store(false, Ordering::Release);
+            }
+
             Ok(vec![TurbopackResult {
-                result: ctx.env.to_js_value(&update)?,
+                result,
                 issues: napi_issues,
             }])
         },
