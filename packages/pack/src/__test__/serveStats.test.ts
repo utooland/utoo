@@ -135,6 +135,17 @@ describe("serve stats", () => {
     `);
   }, 30_000);
 
+  it("keeps dev chunk lists scoped to their owning entrypoint", async () => {
+    await expect(
+      runServeStatsFixture("serveMultiClientStatsChild.ts"),
+    ).resolves.toEqual({
+      alphaHasOwnChunkLists: true,
+      alphaHasOnlyOwnChunkLists: true,
+      betaHasOwnChunkLists: true,
+      betaHasOnlyOwnChunkLists: true,
+    });
+  }, 30_000);
+
   it("keeps all named server entries after rebuilding one entry", async () => {
     await expect(
       runServeStatsFixture("serveMultiServerStatsChild.ts"),

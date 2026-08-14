@@ -39,7 +39,7 @@ use turbopack_core::{
 };
 
 use crate::{
-    endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths},
+    endpoint::{Endpoint, EndpointOutput, EndpointOutputPaths, Endpoints},
     paths::initial_paths_in_root,
     project::Project,
 };
@@ -47,6 +47,9 @@ use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 #[turbo_tasks::value(transparent)]
 pub struct AppEntrypoints(pub Vec<AppEntrypoint>);
+
+#[turbo_tasks::value(transparent)]
+pub struct ResolvedAppEntrypoints(pub Vec<ResolvedVc<AppEntrypoint>>);
 
 #[turbo_tasks::value]
 pub struct AppProject {
@@ -70,31 +73,187 @@ impl AppProject {
     }
 
     #[turbo_tasks::function]
-    pub async fn get_app_endpoint(self: Vc<Self>) -> Result<Vc<AppEndpoint>> {
+    pub fn project(&self) -> Vc<Project> {
+        *self.project
+    }
+
+    #[turbo_tasks::function]
+    pub async fn app_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(EvaluatableAssets::empty()),
+            Platform::Web => {
+                let watch = project.await?.watch.enable;
+                Ok(get_client_runtime_entries(
+                    project.project_path().owned().await?,
+                    project.mode(),
+                    project.config(),
+                    project.execution_context(),
+                    project.pack_path().owned().await?,
+                    Vc::cell(watch),
+                    project.client_hmr_enabled(),
+                )
+                .resolve_entries(Vc::upcast(self.app_module_context())))
+            }
+        }
+    }
+
+    #[turbo_tasks::function]
+    pub async fn app_module_context(self: Vc<Self>) -> Result<Vc<ModuleAssetContext>> {
+        let project = self.project();
+        let platform = &*project.platform().await?;
+
+        let layer = match platform {
+            Platform::Node => {
+                Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"))
+            }
+            Platform::Web => {
+                Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser"))
+            }
+        };
+
+        // Build transition options, registering "server-reference" when configured
+        let mut named_transitions: FxHashMap<
+            RcStr,
+            ResolvedVc<Box<dyn turbopack::transition::Transition>>,
+        > = FxHashMap::default();
+        let server_config = project.config().server().await?;
+        if server_config.function.is_some() {
+            let server_module_options_context = get_server_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.server_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+            )
+            .to_resolved()
+            .await?;
+            let server_resolve_options_context = get_server_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.config().server_externals_config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            )
+            .to_resolved()
+            .await?;
+            let transition = ServerReferenceTransition::new(
+                *project.server_compile_time_info().to_resolved().await?,
+                *server_module_options_context,
+                *server_resolve_options_context,
+            )
+            .to_resolved()
+            .await?;
+            named_transitions.insert(rcstr!("server-reference"), ResolvedVc::upcast(transition));
+        }
+
+        let transition_options = TransitionOptions {
+            named_transitions,
+            ..Default::default()
+        }
+        .cell();
+
+        Ok(ModuleAssetContext::new(
+            transition_options,
+            project.compile_time_info_for_platform(),
+            self.app_module_options_context(),
+            self.app_resolve_options_context(),
+            layer,
+        ))
+    }
+
+    #[turbo_tasks::function]
+    async fn app_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(get_server_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.server_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+            )),
+            Platform::Web => Ok(get_client_module_options_context(
+                project.project_path().owned().await?,
+                project.execution_context(),
+                project.client_compile_time_info().environment(),
+                project.mode(),
+                project.config(),
+                Vc::cell(project.await?.watch.enable),
+                project.pack_path().owned().await?,
+            )),
+        }
+    }
+
+    #[turbo_tasks::function]
+    async fn app_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
+        let project = self.project();
+        match &*project.platform().await? {
+            Platform::Node => Ok(get_server_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.config().externals_config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            )),
+            Platform::Web => Ok(get_client_resolve_options_context(
+                project.project_path().owned().await?,
+                project.mode(),
+                project.config(),
+                project.execution_context(),
+                project.pack_path().owned().await?,
+            )),
+        }
+    }
+
+    #[turbo_tasks::function]
+    pub async fn resolved_entrypoints(self: Vc<Self>) -> Result<Vc<ResolvedAppEntrypoints>> {
         let this = self.await?;
-
         let project = this.project;
-
         let entrypoints = this
             .apps
             .await?
             .iter()
-            .map(|a| async move {
+            .map(|entrypoint| async move {
                 AppEntrypoint {
                     project,
-                    name: a.name.clone(),
-                    import: a.import.clone(),
+                    name: entrypoint.name.clone(),
+                    import: entrypoint.import.clone(),
                 }
                 .resolved_cell()
             })
             .join()
             .await;
 
-        Ok(AppEndpoint {
-            project,
-            entrypoints,
-        }
-        .cell())
+        Ok(ResolvedAppEntrypoints(entrypoints).cell())
+    }
+
+    #[turbo_tasks::function]
+    pub async fn get_app_endpoints(self: Vc<Self>) -> Result<Vc<Endpoints>> {
+        let app_project = self.to_resolved().await?;
+        let this = self.await?;
+        let project = this.project;
+        let entrypoints = self.resolved_entrypoints().await?.to_vec();
+
+        let endpoints = entrypoints
+            .iter()
+            .map(|entrypoint| async move {
+                let endpoint: Vc<Box<dyn Endpoint>> = Vc::upcast(
+                    AppEndpoint {
+                        app_project,
+                        project,
+                        entrypoints: vec![*entrypoint],
+                    }
+                    .cell(),
+                );
+                endpoint.to_resolved().await
+            })
+            .try_join()
+            .await?;
+
+        Ok(Endpoints(endpoints).cell())
     }
 }
 
@@ -305,6 +464,7 @@ impl AppEntrypoint {
 
 #[turbo_tasks::value]
 pub struct AppEndpoint {
+    app_project: ResolvedVc<AppProject>,
     project: ResolvedVc<Project>,
     pub entrypoints: Vec<ResolvedVc<AppEntrypoint>>,
 }
@@ -315,137 +475,6 @@ impl AppEndpoint {
     pub fn project(&self) -> Vc<Project> {
         *self.project
     }
-
-    #[turbo_tasks::function]
-    pub async fn app_runtime_entries(self: Vc<Self>) -> Result<Vc<EvaluatableAssets>> {
-        let project = self.project();
-        match &*project.platform().await? {
-            Platform::Node => Ok(EvaluatableAssets::empty()),
-            Platform::Web => {
-                let watch = project.await?.watch.enable;
-                Ok(get_client_runtime_entries(
-                    project.project_path().owned().await?,
-                    project.mode(),
-                    project.config(),
-                    project.execution_context(),
-                    project.pack_path().owned().await?,
-                    Vc::cell(watch),
-                    project.client_hmr_enabled(),
-                )
-                .resolve_entries(Vc::upcast(self.app_module_context())))
-            }
-        }
-    }
-
-    #[turbo_tasks::function]
-    pub async fn app_module_context(self: Vc<Self>) -> Result<Vc<ModuleAssetContext>> {
-        let project = self.project();
-        let platform = &*project.platform().await?;
-
-        let layer = match platform {
-            Platform::Node => {
-                Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"))
-            }
-            Platform::Web => {
-                Layer::new_with_user_friendly_name(rcstr!("client"), rcstr!("Browser"))
-            }
-        };
-
-        // Build transition options, registering "server-reference" when configured
-        let mut named_transitions: FxHashMap<
-            RcStr,
-            ResolvedVc<Box<dyn turbopack::transition::Transition>>,
-        > = FxHashMap::default();
-        let server_config = project.config().server().await?;
-        if server_config.function.is_some() {
-            let server_module_options_context = get_server_module_options_context(
-                project.project_path().owned().await?,
-                project.execution_context(),
-                project.server_compile_time_info().environment(),
-                project.mode(),
-                project.config(),
-            )
-            .to_resolved()
-            .await?;
-            let server_resolve_options_context = get_server_resolve_options_context(
-                project.project_path().owned().await?,
-                project.mode(),
-                project.config(),
-                project.config().server_externals_config(),
-                project.execution_context(),
-                project.pack_path().owned().await?,
-            )
-            .to_resolved()
-            .await?;
-            let transition = ServerReferenceTransition::new(
-                *project.server_compile_time_info().to_resolved().await?,
-                *server_module_options_context,
-                *server_resolve_options_context,
-            )
-            .to_resolved()
-            .await?;
-            named_transitions.insert(rcstr!("server-reference"), ResolvedVc::upcast(transition));
-        }
-
-        let transition_options = TransitionOptions {
-            named_transitions,
-            ..Default::default()
-        }
-        .cell();
-
-        Ok(ModuleAssetContext::new(
-            transition_options,
-            project.compile_time_info_for_platform(),
-            self.app_module_options_context(),
-            self.app_resolve_options_context(),
-            layer,
-        ))
-    }
-
-    #[turbo_tasks::function]
-    async fn app_module_options_context(self: Vc<Self>) -> Result<Vc<ModuleOptionsContext>> {
-        let project = self.project();
-        match &*project.platform().await? {
-            Platform::Node => Ok(get_server_module_options_context(
-                project.project_path().owned().await?,
-                project.execution_context(),
-                project.server_compile_time_info().environment(),
-                project.mode(),
-                project.config(),
-            )),
-            Platform::Web => Ok(get_client_module_options_context(
-                project.project_path().owned().await?,
-                project.execution_context(),
-                project.client_compile_time_info().environment(),
-                project.mode(),
-                project.config(),
-                Vc::cell(project.await?.watch.enable),
-                project.pack_path().owned().await?,
-            )),
-        }
-    }
-
-    #[turbo_tasks::function]
-    async fn app_resolve_options_context(self: Vc<Self>) -> Result<Vc<ResolveOptionsContext>> {
-        let project = self.project();
-        match &*project.platform().await? {
-            Platform::Node => Ok(get_server_resolve_options_context(
-                project.project_path().owned().await?,
-                project.mode(),
-                project.config(),
-                project.config().externals_config(),
-                project.execution_context(),
-                project.pack_path().owned().await?,
-            )),
-            Platform::Web => Ok(get_client_resolve_options_context(
-                project.project_path().owned().await?,
-                project.mode(),
-                project.config(),
-                project.execution_context(),
-                project.pack_path().owned().await?,
-            )),
-        }
-    }
 }
 
 #[turbo_tasks::value_impl]
@@ -453,8 +482,8 @@ impl Endpoint for AppEndpoint {
     #[turbo_tasks::function]
     async fn entries(self: Vc<Self>) -> Result<Vc<GraphEntries>> {
         let this = self.await?;
-        let asset_context = self.app_module_context();
-        let runtime_entries = self.app_runtime_entries();
+        let asset_context = this.app_project.app_module_context();
+        let runtime_entries = this.app_project.app_runtime_entries();
 
         let entries = this
             .entrypoints
@@ -482,17 +511,18 @@ impl Endpoint for AppEndpoint {
     #[turbo_tasks::function]
     async fn output(self: Vc<Self>) -> Result<Vc<EndpointOutput>> {
         async move {
-            let asset_context = self.app_module_context();
-
-            let runtime_entries = self.app_runtime_entries();
-
             let this = self.await?;
-            let output_assets = {
+            let asset_context = this.app_project.app_module_context();
+            let runtime_entries = this.app_project.app_runtime_entries();
+            let client_output_assets = {
                 let mut vcs = this
                     .entrypoints
                     .iter()
                     .map(|e| e.output_assets_for_entry(Vc::upcast(asset_context), runtime_entries))
                     .collect::<Vec<_>>();
+                // Copy assets are project-level output. Include the shared task in every
+                // endpoint so writing any endpoint independently preserves the historical
+                // aggregated-endpoint behavior. The all-endpoints path deduplicates assets.
                 vcs.push(this.project.copy_output_assets());
                 OutputAssets::concat(vcs)
             };
@@ -505,20 +535,36 @@ impl Endpoint for AppEndpoint {
                     .as_ref()
                     .is_some_and(|entry| entry.has_entries())
             {
-                Some(
-                    self.server_reference_output_assets(Vc::upcast(asset_context), runtime_entries),
-                )
+                Some(this.app_project.server_output_assets())
             } else {
                 None
             };
 
             let dist_root_vc = this.project.dist_root();
+            let (client_paths, server_output) = futures::future::try_join(
+                async {
+                    Ok::<_, anyhow::Error>(
+                        initial_paths_in_root(client_output_assets, dist_root_vc)
+                            .await?
+                            .iter()
+                            .cloned()
+                            .collect(),
+                    )
+                },
+                async {
+                    match server_output {
+                        Some(server_output) => {
+                            // Drive the independent Server build concurrently with Client path
+                            // discovery while preserving the Vc for the final asset union.
+                            server_output.await?;
+                            Ok(Some(server_output))
+                        }
+                        None => Ok(None),
+                    }
+                },
+            )
+            .await?;
             let dist_root = dist_root_vc.await?;
-            let client_paths = initial_paths_in_root(output_assets, dist_root_vc)
-                .await?
-                .iter()
-                .cloned()
-                .collect();
 
             let written_endpoint = EndpointOutputPaths::NodeJs {
                 server_entry_path: dist_root.path.clone(),
@@ -526,7 +572,7 @@ impl Endpoint for AppEndpoint {
                 client_paths,
             };
 
-            let mut output_assets = output_assets;
+            let mut output_assets = client_output_assets;
 
             if let Some(server_output) = server_output {
                 output_assets = output_assets.concatenate(server_output);
@@ -545,6 +591,17 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn server_changed(self: Vc<Self>) -> Result<Vc<Completion>> {
+        let this = self.await?;
+        let server_config = this.project.config().server().await?;
+        if *this.project.platform().await? == Platform::Web
+            && server_config.function.is_none()
+            && !server_config
+                .entry
+                .as_ref()
+                .is_some_and(|entry| entry.has_entries())
+        {
+            return Ok(Completion::new());
+        }
         let EndpointOutput {
             output_assets,
             project,
@@ -555,6 +612,10 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn client_changed(self: Vc<Self>) -> Result<Vc<Completion>> {
+        let this = self.await?;
+        if *this.project.platform().await? == Platform::Node {
+            return Ok(Completion::new());
+        }
         let EndpointOutput {
             output_assets,
             project,
@@ -566,60 +627,65 @@ impl Endpoint for AppEndpoint {
 
 /// Server function build support
 #[turbo_tasks::value_impl]
-impl AppEndpoint {
+impl AppProject {
     /// Discovers `ServerReferenceModule`s in the client module graph and builds
     /// their inner server modules as Node.js chunks.
     #[turbo_tasks::function]
-    async fn server_reference_output_assets(
-        self: Vc<Self>,
-        asset_context: Vc<Box<dyn AssetContext>>,
-        runtime_entries: Vc<EvaluatableAssets>,
-    ) -> Result<Vc<OutputAssets>> {
+    async fn server_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
         let this = self.await?;
         let project = *this.project;
-
-        // Await all graphs simultaneously for better parallelization
-        let resolved_graphs = this
-            .entrypoints
-            .iter()
-            .map(|e| async {
-                e.module_graph_for_entry(asset_context, runtime_entries)
-                    .await
-            })
-            .try_join()
-            .await?;
-
-        // Walk all graphs to find ServerReferenceModule instances
-        let mut unique_server_modules = turbo_tasks::FxIndexSet::default();
-        for graph in &resolved_graphs {
-            for module in graph.iter_nodes() {
-                if let Some(server_ref) =
-                    ResolvedVc::try_downcast_type::<ServerReferenceModule>(module)
-                {
-                    let inner = server_ref.await?;
-                    unique_server_modules.insert(inner.server_module);
-                }
-            }
-        }
-
-        // Resolving VCs to strings for a deterministic sorting pass guarantees our
-        // AST chunk hashes remain tightly identical between runs, following Next.js's
-        // FxIndexMap/IndexSet pattern for chunking server routines.
-        let mut pairs = unique_server_modules
-            .into_iter()
-            .map(|m| async move { Ok((m.ident().to_string().await?, m)) })
-            .try_join()
-            .await?;
-
-        pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        let server_modules: Vec<_> = pairs.into_iter().map(|(_, m)| m).collect();
-
-        let server_function_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> = server_modules
-            .iter()
-            .filter_map(|m| ResolvedVc::try_sidecast::<Box<dyn EvaluatableAsset>>(*m))
-            .collect();
-
+        let entrypoints = self.resolved_entrypoints().await?.to_vec();
+        let asset_context = Vc::upcast(self.app_module_context());
+        let runtime_entries = self.app_runtime_entries();
         let server_config = project.config().server().await?;
+
+        let server_function_assets: Vec<ResolvedVc<Box<dyn EvaluatableAsset>>> =
+            if server_config.function.is_some() {
+                // Await all graphs simultaneously for better parallelization.
+                let resolved_graphs = entrypoints
+                    .iter()
+                    .map(|e| async {
+                        e.module_graph_for_entry(asset_context, runtime_entries)
+                            .await
+                    })
+                    .try_join()
+                    .await?;
+
+                // Walk all graphs to find ServerReferenceModule instances.
+                let mut unique_server_modules = turbo_tasks::FxIndexSet::default();
+                for graph in &resolved_graphs {
+                    for module in graph.iter_nodes() {
+                        if let Some(server_ref) =
+                            ResolvedVc::try_downcast_type::<ServerReferenceModule>(module)
+                        {
+                            let inner = server_ref.await?;
+                            unique_server_modules.insert(inner.server_module);
+                        }
+                    }
+                }
+
+                // Resolving VCs to strings for a deterministic sorting pass guarantees our
+                // AST chunk hashes remain tightly identical between runs, following Next.js's
+                // FxIndexMap/IndexSet pattern for chunking server routines.
+                let mut pairs = unique_server_modules
+                    .into_iter()
+                    .map(|m| async move { Ok((m.ident().to_string().await?, m)) })
+                    .try_join()
+                    .await?;
+
+                pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                let server_modules: Vec<_> = pairs.into_iter().map(|(_, m)| m).collect();
+
+                server_modules
+                    .iter()
+                    .filter_map(|m| ResolvedVc::try_sidecast::<Box<dyn EvaluatableAsset>>(*m))
+                    .collect()
+            } else {
+                // A plain server entry does not use the server-reference transition, so its
+                // build can start without waiting for every client module graph.
+                Vec::new()
+            };
+
         let mut entry_specs = Vec::new();
         if let Some(entry) = &server_config.entry {
             match entry {
