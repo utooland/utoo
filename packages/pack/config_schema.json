@@ -667,6 +667,17 @@
       "description": "Development server configuration",
       "type": "object",
       "properties": {
+        "client": {
+          "description": "Browser-side development client options",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaDevServerClient"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "dynamicHmrChunkLists": {
           "description": "Register HMR chunk lists as dynamic chunks are loaded",
           "type": [
@@ -679,6 +690,23 @@
           "type": [
             "boolean",
             "null"
+          ]
+        }
+      }
+    },
+    "SchemaDevServerClient": {
+      "description": "Browser-side development client options",
+      "type": "object",
+      "properties": {
+        "reconnect": {
+          "description": "Reconnect the HMR WebSocket. True retries indefinitely; a number limits attempts.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaHmrReconnect"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       }
@@ -973,6 +1001,19 @@
           ]
         }
       }
+    },
+    "SchemaHmrReconnect": {
+      "description": "HMR WebSocket reconnect policy",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      ]
     },
     "SchemaHtmlConfig": {
       "description": "HTML generation configuration",

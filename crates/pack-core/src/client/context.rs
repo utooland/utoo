@@ -48,8 +48,8 @@ use crate::{
         runtime_entry::RuntimeEntries,
     },
     config::{
-        Config, OptionCompressType, ProviderConfig, default_max_chunk_count_per_group,
-        default_max_merge_chunk_size, default_min_chunk_size,
+        Config, HmrReconnect, OptionCompressType, ProviderConfig,
+        default_max_chunk_count_per_group, default_max_merge_chunk_size, default_min_chunk_size,
     },
     embed_js::embed_file_path,
     import_map::get_postcss_package_mapping,
@@ -203,9 +203,20 @@ pub async fn get_client_runtime_entries(
                 .as_ref()
                 .map_or("TURBOPACK", RcStr::as_str),
         );
+        let dev_server = config.dev_server().await?;
+        let reconnect_argument = dev_server
+            .client
+            .as_ref()
+            .and_then(|client| client.reconnect.as_ref())
+            .map(|reconnect| match reconnect {
+                HmrReconnect::Enabled(enabled) => format!(", {enabled}"),
+                HmrReconnect::Attempts(attempts) => format!(", {attempts}"),
+            })
+            .unwrap_or_default();
         let hmr_bootstrap = format!(
-            "import {{ initHMR }} from {hmr_client_path:?};\n\ninitHMR({});\n",
+            "import {{ initHMR }} from {hmr_client_path:?};\n\ninitHMR({}{});\n",
             serde_json::to_string(&chunk_update_listeners_global)?,
+            reconnect_argument,
         );
 
         runtime_entries.push(

@@ -67,13 +67,22 @@ function getSocketUrl() {
 
 export interface HMROptions {
   path: string;
+  reconnect?: HMRReconnect;
 }
+
+export type HMRReconnect = boolean | number;
 
 let reloading = false;
 let serverSessionId: number | null = null;
-let hasConnected = false;
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+function getMaxReconnectAttempts(reconnect: HMRReconnect | undefined) {
+  if (reconnect === true) return Number.POSITIVE_INFINITY;
+  if (reconnect === false || reconnect === undefined) return 0;
+  if (!Number.isFinite(reconnect)) return 0;
+  return Math.max(0, Math.floor(reconnect));
+}
 
 // This is not used by Next.js, but it is used by the standalone turbopack-cli
 export function connectHMR(options: HMROptions) {
@@ -83,7 +92,6 @@ export function connectHMR(options: HMROptions) {
     console.log("[HMR] connecting...");
 
     function handleOnline() {
-      hasConnected = true;
       reconnectAttempt = 0;
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -171,13 +179,22 @@ export function connectHMR(options: HMROptions) {
 
       window.console.warn("[HMR] disconnected");
 
-      // Do not retry a socket that never connected. Some proxy tools cannot
-      // forward HMR and would otherwise receive repeated connection attempts.
-      if (!hasConnected || reconnectTimer) {
+      if (reconnectTimer) {
         return;
       }
 
-      const reconnectDelay = RECONNECT_DELAYS_MS[reconnectAttempt];
+      const maxReconnectAttempts = getMaxReconnectAttempts(options.reconnect);
+      if (reconnectAttempt >= maxReconnectAttempts) {
+        if (maxReconnectAttempts > 0) {
+          window.console.warn("[HMR] reconnect attempts exhausted");
+        }
+        return;
+      }
+
+      const reconnectDelay =
+        RECONNECT_DELAYS_MS[
+          Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
+        ];
       if (reconnectDelay === undefined) {
         window.console.warn("[HMR] reconnect attempts exhausted");
         return;

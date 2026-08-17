@@ -21,11 +21,11 @@ class FakeWebSocket {
   send() {}
 }
 
-async function connectHmr() {
+async function connectHmr(reconnect?: boolean | number) {
   const { connectHMR } = await import(
     "../../../../crates/pack-core/js/src/hmr/websocket"
   );
-  connectHMR({ path: "/turbopack-hmr" });
+  connectHMR({ path: "/turbopack-hmr", reconnect });
   return FakeWebSocket.instances[0];
 }
 
@@ -57,7 +57,7 @@ describe("HMR WebSocket reconnect", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not retry a socket that never connected", async () => {
+  it("does not reconnect by default", async () => {
     const socket = await connectHmr();
 
     socket.onerror?.({ target: socket } as unknown as Event);
@@ -66,38 +66,36 @@ describe("HMR WebSocket reconnect", () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
 
-  it("reconnects after an established socket disconnects", async () => {
-    const socket = await connectHmr();
-    socket.readyState = socket.OPEN;
-    socket.onopen?.();
+  it("reconnects only the configured number of times", async () => {
+    const socket = await connectHmr(2);
+    socket.onerror?.({ target: socket } as unknown as Event);
 
-    socket.onclose?.({ target: socket } as unknown as Event);
-    await vi.advanceTimersByTimeAsync(999);
-    expect(FakeWebSocket.instances).toHaveLength(1);
+    const retryDelays = [1_000, 2_000];
+    for (const delay of retryDelays) {
+      await vi.advanceTimersByTimeAsync(delay);
+      const current = FakeWebSocket.instances.at(-1)!;
+      current.onerror?.({ target: current } as unknown as Event);
+    }
 
-    await vi.advanceTimersByTimeAsync(1);
-    expect(FakeWebSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(FakeWebSocket.instances).toHaveLength(3);
     expect(FakeWebSocket.instances[1].url).toBe(
       "ws://localhost:3000/turbopack-hmr",
     );
   });
 
-  it("stops retrying after the bounded backoff is exhausted", async () => {
-    const socket = await connectHmr();
-    socket.readyState = socket.OPEN;
-    socket.onopen?.();
+  it("keeps reconnecting when explicitly enabled", async () => {
+    const socket = await connectHmr(true);
+    socket.onerror?.({ target: socket } as unknown as Event);
 
-    const retryDelays = [1_000, 2_000, 5_000, 10_000, 30_000];
+    const retryDelays = [1_000, 2_000, 5_000, 10_000, 30_000, 30_000];
     for (const delay of retryDelays) {
-      const current = FakeWebSocket.instances.at(-1)!;
-      current.onclose?.({ target: current } as unknown as Event);
       await vi.advanceTimersByTimeAsync(delay);
+      const current = FakeWebSocket.instances.at(-1)!;
+      current.onerror?.({ target: current } as unknown as Event);
     }
 
-    const finalAttempt = FakeWebSocket.instances.at(-1)!;
-    finalAttempt.onerror?.({ target: finalAttempt } as unknown as Event);
-    await vi.advanceTimersByTimeAsync(60_000);
-
-    expect(FakeWebSocket.instances).toHaveLength(6);
+    expect(FakeWebSocket.instances).toHaveLength(7);
   });
 });
