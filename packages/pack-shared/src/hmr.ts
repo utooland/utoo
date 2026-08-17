@@ -155,6 +155,7 @@ export type HMR_ACTION_TYPES =
 export interface TurbopackSubscribeMessage {
   type: "turbopack-subscribe";
   path: string;
+  version?: string;
 }
 
 export interface TurbopackUnsubscribeMessage {

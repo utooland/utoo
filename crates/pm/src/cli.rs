@@ -114,6 +114,27 @@ pub struct Cli {
     pub script_args: Vec<String>,
 }
 
+impl Cli {
+    /// Whether this invocation mutates or materializes the current project's
+    /// dependency state and should therefore honor its `packageManager` pin.
+    pub const fn uses_project_package_manager(&self) -> bool {
+        if self.script_name.is_some() {
+            return false;
+        }
+        match &self.command {
+            None => true,
+            Some(Commands::Install(args)) => !args.global,
+            Some(
+                Commands::Uninstall { .. }
+                | Commands::Rebuild
+                | Commands::Deps { .. }
+                | Commands::Update(_),
+            ) => true,
+            Some(_) => false,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub enum ConfigCommands {
     #[command(about = "Set a configuration value with the specified key")]
@@ -485,6 +506,39 @@ mod tests {
             result.is_ok(),
             "Should parse 'utoo install' as valid Install command"
         );
+    }
+
+    #[test]
+    fn project_package_manager_scope_only_covers_local_dependency_commands() {
+        for args in [
+            vec!["utoo"],
+            vec!["utoo", "install"],
+            vec!["utoo", "add", "lodash"],
+            vec!["utoo", "uninstall", "lodash"],
+            vec!["utoo", "update"],
+            vec!["utoo", "rebuild"],
+            vec!["utoo", "deps"],
+        ] {
+            let cli = Cli::try_parse_from(args.clone()).unwrap();
+            assert!(
+                cli.uses_project_package_manager(),
+                "expected {args:?} to use the project package manager"
+            );
+        }
+
+        for args in [
+            vec!["utoo", "install", "lodash", "--global"],
+            vec!["utoo", "run", "test"],
+            vec!["utoo", "x", "eslint"],
+            vec!["utoo", "view", "react"],
+            vec!["utoo", "test"],
+        ] {
+            let cli = Cli::try_parse_from(args.clone()).unwrap();
+            assert!(
+                !cli.uses_project_package_manager(),
+                "expected {args:?} to keep using the running utoo"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_page_shared_outputs/input/register.js"],"sourcesContent":["export function registerServerReference(action, id, name) {\n  globalThis.serverActions ??= new Map();\n  globalThis.serverActions.set(`${id}:${name}`, action);\n}\n"],"names":["registerServerReference","action","id","name","globalThis","serverActions","Map","set"],"mappings":";;;;AAAO,SAASA,wBAAwBC,MAAM,EAAEC,EAAE,EAAEC,IAAI;IACtDC,WAAWC,aAAa,KAAK,IAAIC;IACjCF,WAAWC,aAAa,CAACE,GAAG,CAAC,GAAGL,GAAG,CAAC,EAAEC,MAAM,EAAEF;AAChD"}},
+    {"offset": {"line": 20, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_page_shared_outputs/input/actions.js"],"sourcesContent":["\"use server\";\n\nexport async function pageBAction() {\n  return \"page-b\";\n}\n"],"names":["pageBAction"],"mappings":";;;;;AAAA;AAEO,eAAeA;IACpB,OAAO;AACT;;oLAFsBA"}},
+    {"offset": {"line": 34, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_page_shared_outputs/input/server.js"],"sourcesContent":["console.log(\"server\");\n"],"names":["console","log"],"mappings":"AAAAA,QAAQC,GAAG,CAAC"}}]
+}

@@ -1,0 +1,39 @@
+{
+  "runtimeType": "dummy",
+  "config": {
+    "entry": [
+      {
+        "name": "client",
+        "import": "input/client.ts"
+      }
+    ],
+    "resolve": {
+      "alias": {
+        "platform-alias": "./input/client-value.ts"
+      },
+      "extensions": [".client.ts", ".ts", ".tsx", ".js", ".jsx", ".json"]
+    },
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "entry": "input/server.ts",
+      "resolve": {
+        "alias": {
+          "platform-alias": "./input/server-value.ts",
+          "server-only-alias": "./input/server-only.ts"
+        },
+        "extensions": [".server.ts", ".ts", ".tsx", ".js", ".jsx", ".json"]
+      },
+      "output": {
+        "path": "output/server",
+        "filename": "index.js"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false
+  }
+}

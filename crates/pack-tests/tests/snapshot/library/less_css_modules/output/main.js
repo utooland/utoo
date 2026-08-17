@@ -241,7 +241,7 @@ options.insert = "head";
 options.singleton = false;
 var update = (0, __TURBOPACK__imported__module__15__["default"])([
     [
-        "library/less_css_modules/input/index.less.css",
+        "library/less_css_modules/input/index.less.css?modules",
         __TURBOPACK__imported__module__37__["default"],
         undefined,
         undefined

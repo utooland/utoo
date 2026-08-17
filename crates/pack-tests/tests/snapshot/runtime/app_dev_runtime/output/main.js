@@ -2207,7 +2207,8 @@ function registerChunk(registration) {
     BACKEND.registerChunk(chunkListPath);
     CHUNK_UPDATE_LISTENERS.push([
         chunkListPath,
-        handleApply.bind(null, chunkListPath)
+        handleApply.bind(null, chunkListPath),
+        chunkList.version
     ]);
     // Adding chunks to chunk lists and vice versa.
     const chunkPaths = new Set(chunkList.chunks.map(getChunkPath));

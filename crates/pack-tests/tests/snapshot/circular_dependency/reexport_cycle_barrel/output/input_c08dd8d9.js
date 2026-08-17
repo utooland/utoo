@@ -74,9 +74,9 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexp
 
 __turbopack_context__.s([
     "Base",
-    ()=>__TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$base$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"],
+    ()=>(__TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$base$2e$js__$5b$client$5d$__$28$ecmascript$29$__ ?? __turbopack_context__.i("[project]/circular_dependency/reexport_cycle_barrel/input/shape/base.js [client] (ecmascript)"))["default"],
     "Path",
-    ()=>__TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$path$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"]
+    ()=>(__TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$path$2e$js__$5b$client$5d$__$28$ecmascript$29$__ ?? __turbopack_context__.i("[project]/circular_dependency/reexport_cycle_barrel/input/shape/path.js [client] (ecmascript)"))["default"]
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/circular_dependency/reexport_cycle_barrel/input/shape/index.js [client] (ecmascript) <locals>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$base$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/circular_dependency/reexport_cycle_barrel/input/shape/base.js [client] (ecmascript)");

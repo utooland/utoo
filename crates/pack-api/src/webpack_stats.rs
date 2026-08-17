@@ -1,21 +1,23 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use bincode::{Decode, Encode};
 use pack_core::library::ecmascript::{EcmascriptLibraryChunk, EcmascriptLibraryEvaluateChunk};
 use qstring::QString;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{FxIndexMap, FxIndexSet, ResolvedVc, TryJoinIterExt, Vc};
+use turbo_tasks::{FxIndexMap, NonLocalValue, ResolvedVc, TryJoinIterExt, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_browser::ecmascript::{
     EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList,
 };
 use turbopack_core::{
     asset::Asset,
-    chunk::{Chunk, ChunkItem, ChunkableModule},
+    chunk::{ChunkItem, ChunkItemExt, ModuleId},
     output::{OutputAsset, OutputAssets},
     reference::all_assets_from_entries,
 };
 use turbopack_css::chunk::CssChunk;
+use turbopack_ecmascript::chunk::EcmascriptChunk;
 use turbopack_nodejs::{EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk};
 
 #[turbo_tasks::value]
@@ -25,8 +27,58 @@ pub struct AssetIntermediateInfo {
     pub asset: WebpackStatsAsset,
     pub chunks: Vec<WebpackStatsChunk>,
     pub entrypoints: Vec<(RcStr, WebpackStatsEntrypoint)>,
-    pub chunk_items: Vec<(ResolvedVc<Box<dyn ChunkItem>>, RcStr)>,
+    pub modules: Vec<WebpackStatsModule>,
     pub dev_chunk_list: Option<RcStr>,
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct OutputAssetGroups(pub Vec<ResolvedVc<OutputAssets>>);
+
+fn normalize_stats_path(path: RcStr) -> RcStr {
+    path.strip_prefix("./").map(Into::into).unwrap_or(path)
+}
+
+async fn get_chunk_modules(
+    chunk: ResolvedVc<EcmascriptChunk>,
+    chunk_id: RcStr,
+) -> Result<Vec<WebpackStatsModule>> {
+    let content = chunk.chunk_content();
+    let module_names = content
+        .included_chunk_items()
+        .await?
+        .iter()
+        .map(|chunk_item| {
+            let chunk_item = *chunk_item;
+            async move {
+                let id = chunk_item.id().await?;
+                let asset_ident = chunk_item.asset_ident().await?;
+                let name = normalize_stats_path(asset_ident.path.path.clone());
+                Ok::<_, anyhow::Error>((id, name))
+            }
+        })
+        .try_join()
+        .await?
+        .into_iter()
+        .collect::<FxHashMap<_, _>>();
+    let content = content.await?;
+    let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
+    let mut modules = Vec::new();
+
+    for item in chunk_items {
+        for (id, code, _) in &*item {
+            modules.push(WebpackStatsModule {
+                name: module_names
+                    .get(id)
+                    .cloned()
+                    .with_context(|| format!("missing source path for module {id}"))?,
+                id: id.into(),
+                chunks: vec![chunk_id.clone()],
+                size: code.source_code().len() as u64,
+            });
+        }
+    }
+
+    Ok(modules)
 }
 
 #[turbo_tasks::function]
@@ -40,12 +92,11 @@ pub async fn get_asset_intermediate_info(
         .await?
         .get_relative_path_to(&asset_path_full)
         .unwrap_or_else(|| asset_path_full.path.clone());
-    // Remove leading "./" prefix if present
-    let path: RcStr = path.strip_prefix("./").map(|s| s.into()).unwrap_or(path);
+    let path = normalize_stats_path(path);
 
     let mut local_chunks = vec![];
     let mut local_entrypoints = vec![];
-    let mut local_chunk_items = vec![];
+    let mut local_modules = vec![];
     let mut local_dev_chunk_list = None;
 
     if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserEvaluateChunk>(asset) {
@@ -54,27 +105,13 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&entry_path_full)
             .unwrap_or_else(|| entry_path_full.path.clone());
+        let entry_path = normalize_stats_path(entry_path);
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
             files: vec![entry_path.clone()],
             id: entry_path.clone(),
             ..Default::default()
         });
-
-        let evaluatable_assets = chunk.evaluatable_assets().await?;
-        let items: Vec<_> = evaluatable_assets
-            .iter()
-            .map(|&evaluatable_asset| {
-                let entry_path = entry_path.clone();
-                async move {
-                    let item = evaluatable_asset
-                        .as_chunk_item(chunk.module_graph(), chunk.chunking_context());
-                    Ok::<_, anyhow::Error>((item.to_resolved().await?, entry_path))
-                }
-            })
-            .try_join()
-            .await?;
-        local_chunk_items.extend(items);
 
         let entry_referenced_assets = chunk.chunks_data().await?;
         let futures: Vec<_> = entry_referenced_assets
@@ -83,7 +120,7 @@ pub async fn get_asset_intermediate_info(
                 let asset = *asset;
                 async move {
                     let chunk_data = asset.await?;
-                    let name: RcStr = chunk_data.path.as_str().into();
+                    let name = normalize_stats_path(chunk_data.path.as_str().into());
                     Ok::<_, anyhow::Error>((name.clone(), WebpackStatsEntrypointAssets { name }))
                 }
             })
@@ -125,6 +162,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&chunk_path_full)
             .unwrap_or_else(|| chunk_path_full.path.clone());
+        let chunk_ident = normalize_stats_path(chunk_ident);
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
             files: vec![chunk_ident.clone()],
@@ -132,9 +170,9 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
-        let chunk_items = chunk.chunk().chunk_items().await?;
-        for item in chunk_items.iter() {
-            local_chunk_items.push((*item, chunk_ident.clone()));
+        let chunk = chunk.chunk().to_resolved().await?;
+        if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
+            local_modules.extend(get_chunk_modules(chunk, chunk_ident).await?);
         }
     }
 
@@ -144,6 +182,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&chunk_path_full)
             .unwrap_or_else(|| chunk_path_full.path.clone());
+        let chunk_ident = normalize_stats_path(chunk_ident);
 
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
@@ -152,9 +191,9 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
-        let chunk_items = chunk.chunk().chunk_items().await?;
-        for item in chunk_items.iter() {
-            local_chunk_items.push((*item, chunk_ident.clone()));
+        let chunk = chunk.chunk().to_resolved().await?;
+        if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
+            local_modules.extend(get_chunk_modules(chunk, chunk_ident).await?);
         }
     }
 
@@ -164,6 +203,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&chunk_path_full)
             .unwrap_or_else(|| chunk_path_full.path.clone());
+        let chunk_ident = normalize_stats_path(chunk_ident);
 
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
@@ -172,10 +212,8 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
-        let chunk_items = chunk.chunk().chunk_items().await?;
-        for item in chunk_items.iter() {
-            local_chunk_items.push((*item, chunk_ident.clone()));
-        }
+        local_modules
+            .extend(get_chunk_modules(chunk.chunk().to_resolved().await?, chunk_ident).await?);
     }
 
     if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBuildNodeEntryChunk>(asset) {
@@ -184,6 +222,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&entry_path_full)
             .unwrap_or_else(|| entry_path_full.path.clone());
+        let entry_path = normalize_stats_path(entry_path);
 
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
@@ -192,21 +231,6 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
-        let evaluatable_assets = chunk.evaluatable_assets().await?;
-        let items: Vec<_> = evaluatable_assets
-            .iter()
-            .map(|&evaluatable_asset| {
-                let entry_path = entry_path.clone();
-                async move {
-                    let item = evaluatable_asset
-                        .as_chunk_item(chunk.module_graph(), chunk.chunking_context());
-                    Ok::<_, anyhow::Error>((item.to_resolved().await?, entry_path))
-                }
-            })
-            .try_join()
-            .await?;
-        local_chunk_items.extend(items);
-
         let entry_referenced_assets = chunk.chunks_data().await?;
         let futures: Vec<_> = entry_referenced_assets
             .iter()
@@ -214,7 +238,7 @@ pub async fn get_asset_intermediate_info(
                 let asset = *asset;
                 async move {
                     let chunk_data = asset.await?;
-                    let name: RcStr = chunk_data.path.as_str().into();
+                    let name = normalize_stats_path(chunk_data.path.as_str().into());
                     Ok::<_, anyhow::Error>((name.clone(), WebpackStatsEntrypointAssets { name }))
                 }
             })
@@ -252,6 +276,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&chunk_list_path_full)
             .unwrap_or_else(|| chunk_list_path_full.path.clone());
+        let chunk_list_ident = normalize_stats_path(chunk_list_ident);
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
             files: vec![chunk_list_ident.clone()],
@@ -268,6 +293,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&chunk_path_full)
             .unwrap_or_else(|| chunk_path_full.path.clone());
+        let chunk_ident = normalize_stats_path(chunk_ident);
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
             files: vec![chunk_ident.clone()],
@@ -282,6 +308,7 @@ pub async fn get_asset_intermediate_info(
             .await?
             .get_relative_path_to(&entry_path_full)
             .unwrap_or_else(|| entry_path_full.path.clone());
+        let entry_path = normalize_stats_path(entry_path);
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
             files: vec![entry_path.clone()],
@@ -289,20 +316,9 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
-        let evaluatable_assets = chunk.evaluatable_assets().await?;
-        let items: Vec<_> = evaluatable_assets
-            .iter()
-            .map(|&evaluatable_asset| {
-                let entry_path = entry_path.clone();
-                async move {
-                    let item = evaluatable_asset
-                        .as_chunk_item(chunk.module_graph(), chunk.chunking_context());
-                    Ok::<_, anyhow::Error>((item.to_resolved().await?, entry_path))
-                }
-            })
-            .try_join()
-            .await?;
-        local_chunk_items.extend(items);
+        local_modules.extend(
+            get_chunk_modules(chunk.chunk().to_resolved().await?, entry_path.clone()).await?,
+        );
 
         let entry_referenced_assets = chunk.chunks_data().await?;
         let futures: Vec<_> = entry_referenced_assets
@@ -311,7 +327,7 @@ pub async fn get_asset_intermediate_info(
                 let asset = *asset;
                 async move {
                     let chunk_data = asset.await?;
-                    let name: RcStr = chunk_data.path.as_str().into();
+                    let name = normalize_stats_path(chunk_data.path.as_str().into());
                     Ok::<_, anyhow::Error>((name.clone(), WebpackStatsEntrypointAssets { name }))
                 }
             })
@@ -359,7 +375,7 @@ pub async fn get_asset_intermediate_info(
         asset: local_asset,
         chunks: local_chunks,
         entrypoints: local_entrypoints,
-        chunk_items: local_chunk_items,
+        modules: local_modules,
         dev_chunk_list: local_dev_chunk_list,
     }
     .cell())
@@ -368,13 +384,13 @@ pub async fn get_asset_intermediate_info(
 #[turbo_tasks::function]
 pub async fn generate_webpack_stats(
     entry_assets: Vc<OutputAssets>,
+    entry_asset_groups: Vc<OutputAssetGroups>,
     dist_root: Vc<FileSystemPath>,
 ) -> Result<Vc<WebpackStats>> {
     let mut assets = vec![];
     let mut seen_asset_paths = FxHashSet::default();
     let mut chunks = vec![];
-    let mut chunk_items: FxIndexMap<Vc<Box<dyn ChunkItem>>, FxIndexSet<RcStr>> =
-        FxIndexMap::default();
+    let mut modules: FxIndexMap<WebpackStatsModuleId, WebpackStatsModule> = FxIndexMap::default();
     let mut entrypoints: FxIndexMap<RcStr, WebpackStatsEntrypoint> = FxIndexMap::default();
 
     // Reuse Turbopack's graph traversal so shared async chunk graphs are expanded once.
@@ -390,10 +406,13 @@ pub async fn generate_webpack_stats(
         })
         .try_join()
         .await?;
+    let asset_info_by_asset: FxHashMap<_, _> = all_assets
+        .iter()
+        .copied()
+        .zip(asset_results.iter())
+        .collect();
 
-    let mut dev_chunk_lists: Vec<RcStr> = vec![];
-    for info in asset_results {
-        let info = info;
+    for info in &asset_results {
         if seen_asset_paths.insert(info.asset.name.clone()) {
             assets.push(info.asset.clone());
         }
@@ -401,49 +420,54 @@ pub async fn generate_webpack_stats(
         for (name, ep) in info.entrypoints.iter() {
             entrypoints.insert(name.clone(), ep.clone());
         }
-        for (item, chunk_id) in info.chunk_items.iter() {
-            chunk_items
-                .entry(**item)
-                .or_default()
-                .insert(chunk_id.clone());
-        }
-        if let Some(dev_chunk_list) = &info.dev_chunk_list {
-            dev_chunk_lists.push(dev_chunk_list.clone());
-        }
-    }
-
-    for dev_chunk_list in dev_chunk_lists {
-        for entrypoint in entrypoints.values_mut() {
-            entrypoint.chunks.push(dev_chunk_list.clone());
-            entrypoint.assets.push(WebpackStatsEntrypointAssets {
-                name: dev_chunk_list.clone(),
-            });
+        for module in &info.modules {
+            if let Some(existing) = modules.get_mut(&module.id) {
+                for chunk in &module.chunks {
+                    if !existing.chunks.contains(chunk) {
+                        existing.chunks.push(chunk.clone());
+                    }
+                }
+            } else {
+                modules.insert(module.id.clone(), module.clone());
+            }
         }
     }
 
-    let modules = chunk_items
-        .into_iter()
-        .map(|(chunk_item, chunk_ids)| async move {
-            let content_ident = chunk_item.content_ident().await?;
-            let asset_path = chunk_item.asset_ident().await?.path.clone();
-            let size = content_ident
-                .path
-                .read()
-                .await
-                .ok()
-                .and_then(|file_content| {
-                    file_content.as_content().map(|f| f.content().len() as u64)
+    // Endpoint output groups preserve which evaluate entry owns each development chunk list.
+    // Associating these lists after flattening all output assets made every entrypoint include
+    // every other page's HMR bootstrap in multi-page builds.
+    for group in entry_asset_groups.await?.iter().copied() {
+        let group = group.await?;
+        let group_entrypoints: FxIndexMap<_, _> = group
+            .iter()
+            .filter_map(|asset| asset_info_by_asset.get(asset))
+            .flat_map(|info| info.entrypoints.iter())
+            .map(|(name, _)| (name.clone(), ()))
+            .collect();
+        let group_chunk_lists: FxIndexMap<_, _> = group
+            .iter()
+            .filter_map(|asset| asset_info_by_asset.get(asset))
+            .filter_map(|info| info.dev_chunk_list.as_ref())
+            .map(|name| (name.clone(), ()))
+            .collect();
+
+        for entrypoint_name in group_entrypoints.keys() {
+            let Some(entrypoint) = entrypoints.get_mut(entrypoint_name) else {
+                continue;
+            };
+            for dev_chunk_list in group_chunk_lists.keys() {
+                if entrypoint.chunks.contains(dev_chunk_list) {
+                    continue;
+                }
+                entrypoint.chunks.push(dev_chunk_list.clone());
+                entrypoint.assets.push(WebpackStatsEntrypointAssets {
+                    name: dev_chunk_list.clone(),
                 });
-            let path = asset_path.path.clone();
-            Ok::<_, anyhow::Error>(WebpackStatsModule {
-                name: path.clone(),
-                id: path.clone(),
-                chunks: chunk_ids.into_iter().collect(),
-                size,
-            })
-        })
-        .try_join()
-        .await?;
+            }
+        }
+    }
+
+    let modules = modules.into_values().collect::<Vec<_>>();
 
     #[cfg(feature = "test")]
     let modules = {
@@ -524,14 +548,44 @@ pub struct WebpackStatsChunk {
     pub files: Vec<RcStr>,
 }
 
+#[derive(
+    Serialize,
+    Deserialize,
+    Debug,
+    Clone,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    TraceRawVcs,
+    NonLocalValue,
+    Encode,
+    Decode,
+)]
+#[serde(untagged)]
+pub enum WebpackStatsModuleId {
+    Number(u64),
+    String(RcStr),
+}
+
+impl From<&ModuleId> for WebpackStatsModuleId {
+    fn from(id: &ModuleId) -> Self {
+        match id {
+            ModuleId::Number(id) => Self::Number(*id),
+            ModuleId::String(id) => Self::String(id.clone()),
+        }
+    }
+}
+
 #[turbo_tasks::value]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WebpackStatsModule {
     pub name: RcStr,
-    pub id: RcStr,
+    pub id: WebpackStatsModuleId,
     pub chunks: Vec<RcStr>,
-    pub size: Option<u64>,
+    pub size: u64,
 }
 
 #[turbo_tasks::value]

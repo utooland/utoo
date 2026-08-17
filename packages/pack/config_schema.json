@@ -52,7 +52,7 @@
       ]
     },
     "externals": {
-      "description": "External dependencies configuration",
+      "description": "External dependencies for client and Node-target builds, and the fallback for server builds",
       "type": [
         "object",
         "null"
@@ -667,6 +667,13 @@
       "description": "Development server configuration",
       "type": "object",
       "properties": {
+        "dynamicHmrChunkLists": {
+          "description": "Register HMR chunk lists as dynamic chunks are loaded",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hot": {
           "description": "Enable hot module replacement",
           "type": [
@@ -1736,6 +1743,16 @@
             }
           ]
         },
+        "externals": {
+          "description": "Server-specific externals. Replaces top-level externals for server entries and Server Functions when provided",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/SchemaExternalConfig"
+          }
+        },
         "function": {
           "description": "Configuration for Server Functions (RPC) boundaries",
           "anyOf": [
@@ -1752,6 +1769,17 @@
           "anyOf": [
             {
               "$ref": "#/definitions/SchemaServerOutputConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolve": {
+          "description": "Server-only resolution options. Alias entries override matching resolve.alias entries; extensions replace resolve.extensions when provided",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaResolveConfig"
             },
             {
               "type": "null"

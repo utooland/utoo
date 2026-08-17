@@ -80,6 +80,7 @@ pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 struct ExtractedEntry {
     path: PathBuf,
     data: Bytes,
+    #[cfg_attr(not(unix), allow(dead_code))]
     mode: u32,
 }
 

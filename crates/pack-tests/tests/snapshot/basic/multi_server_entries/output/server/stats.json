@@ -3,53 +3,53 @@
     "detail-server": {
       "name": "detail-server",
       "chunks": [
-        "./entries/detail-server.5d841f26.js",
-        "chunks/server-shared.fbcd5f75.js"
+        "chunks/server-shared.fbcd5f75.js",
+        "entries/detail-server.5d841f26.js"
       ],
       "assets": [
         {
-          "name": "./entries/detail-server.5d841f26.js"
+          "name": "chunks/server-shared.fbcd5f75.js"
         },
         {
-          "name": "chunks/server-shared.fbcd5f75.js"
+          "name": "entries/detail-server.5d841f26.js"
         }
       ]
     },
     "index-server": {
       "name": "index-server",
       "chunks": [
-        "./entries/index-server.5c83aa4e.js",
         "chunks/server-shared-0-1.1b081f62.js",
-        "chunks/server-shared.fbcd5f75.js"
+        "chunks/server-shared.fbcd5f75.js",
+        "entries/index-server.5c83aa4e.js"
       ],
       "assets": [
-        {
-          "name": "./entries/index-server.5c83aa4e.js"
-        },
         {
           "name": "chunks/server-shared-0-1.1b081f62.js"
         },
         {
           "name": "chunks/server-shared.fbcd5f75.js"
+        },
+        {
+          "name": "entries/index-server.5c83aa4e.js"
         }
       ]
     },
     "server": {
       "name": "server",
       "chunks": [
-        "./entries/server.5d80c3de.js",
         "chunks/server-shared-0-1.1b081f62.js",
-        "chunks/server-shared.fbcd5f75.js"
+        "chunks/server-shared.fbcd5f75.js",
+        "entries/server.5d80c3de.js"
       ],
       "assets": [
-        {
-          "name": "./entries/server.5d80c3de.js"
-        },
         {
           "name": "chunks/server-shared-0-1.1b081f62.js"
         },
         {
           "name": "chunks/server-shared.fbcd5f75.js"
+        },
+        {
+          "name": "entries/server.5d80c3de.js"
         }
       ]
     }
@@ -60,11 +60,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./chunks/server-shared-0-1.1b081f62.js",
+      "id": "chunks/server-shared-0-1.1b081f62.js",
       "size": 686,
       "hash": "",
       "files": [
-        "./chunks/server-shared-0-1.1b081f62.js"
+        "chunks/server-shared-0-1.1b081f62.js"
       ]
     },
     {
@@ -72,11 +72,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./chunks/server-shared.fbcd5f75.js",
+      "id": "chunks/server-shared.fbcd5f75.js",
       "size": 262,
       "hash": "",
       "files": [
-        "./chunks/server-shared.fbcd5f75.js"
+        "chunks/server-shared.fbcd5f75.js"
       ]
     },
     {
@@ -84,11 +84,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./entries/detail-server.5d841f26.js",
+      "id": "entries/detail-server.5d841f26.js",
       "size": 32581,
       "hash": "",
       "files": [
-        "./entries/detail-server.5d841f26.js"
+        "entries/detail-server.5d841f26.js"
       ]
     },
     {
@@ -96,11 +96,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./entries/index-server.5c83aa4e.js",
+      "id": "entries/index-server.5c83aa4e.js",
       "size": 32593,
       "hash": "",
       "files": [
-        "./entries/index-server.5c83aa4e.js"
+        "entries/index-server.5c83aa4e.js"
       ]
     },
     {
@@ -108,11 +108,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./entries/server.5d80c3de.js",
+      "id": "entries/server.5d80c3de.js",
       "size": 32560,
       "hash": "",
       "files": [
-        "./entries/server.5d80c3de.js"
+        "entries/server.5d80c3de.js"
       ]
     }
   ],
@@ -181,43 +181,43 @@
   "modules": [
     {
       "name": "basic/multi_server_entries/input/detail.server.ts",
-      "id": "basic/multi_server_entries/input/detail.server.ts",
+      "id": "[project]/basic/multi_server_entries/input/detail.server.ts [server] (ecmascript)",
       "chunks": [
-        "./entries/detail-server.5d841f26.js"
+        "entries/detail-server.5d841f26.js"
       ],
-      "size": 89
+      "size": 536
     },
     {
       "name": "basic/multi_server_entries/input/index.server.ts",
-      "id": "basic/multi_server_entries/input/index.server.ts",
+      "id": "[project]/basic/multi_server_entries/input/index.server.ts [server] (ecmascript)",
       "chunks": [
-        "./entries/index-server.5c83aa4e.js"
+        "entries/index-server.5c83aa4e.js"
       ],
-      "size": 78
+      "size": 514
     },
     {
       "name": "basic/multi_server_entries/input/server.ts",
-      "id": "basic/multi_server_entries/input/server.ts",
+      "id": "[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)",
       "chunks": [
-        "./entries/server.5d80c3de.js"
+        "entries/server.5d80c3de.js"
       ],
-      "size": 75
+      "size": 511
     },
     {
       "name": "basic/multi_server_entries/input/shared-all.ts",
-      "id": "basic/multi_server_entries/input/shared-all.ts",
+      "id": "[project]/basic/multi_server_entries/input/shared-all.ts [server] (ecmascript)",
       "chunks": [
-        "./chunks/server-shared.fbcd5f75.js"
+        "chunks/server-shared.fbcd5f75.js"
       ],
-      "size": 50
+      "size": 155
     },
     {
       "name": "basic/multi_server_entries/input/shared.ts",
-      "id": "basic/multi_server_entries/input/shared.ts",
+      "id": "[project]/basic/multi_server_entries/input/shared.ts [server] (ecmascript)",
       "chunks": [
-        "./chunks/server-shared-0-1.1b081f62.js"
+        "chunks/server-shared-0-1.1b081f62.js"
       ],
-      "size": 113
+      "size": 583
     }
   ]
 }

@@ -7,11 +7,12 @@ mod util;
 use anyhow::{Context, Result};
 use dunce::canonicalize;
 use pack_api::{
-    endpoint::get_written_endpoint_with_issues_operation,
+    endpoint::{Endpoint, OptionEndpoint, get_written_endpoint_with_issues_operation},
     entrypoint::{
         EntrypointsWithIssues, all_output_assets_operation,
         get_all_written_entrypoints_with_issues_operation, get_entrypoints_with_issues_operation,
     },
+    paths::all_paths_in_root,
     project::{ProjectContainer, ProjectOptions, WatchOptions},
 };
 use rustc_hash::FxHashSet;
@@ -42,6 +43,36 @@ static SNAPSHOT_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(())
 
 #[turbo_tasks::value(transparent)]
 struct SnapshotIgnorePrefixes(Vec<RcStr>);
+
+struct SnapshotProjectOptions {
+    project: ProjectOptions,
+    write_endpoints_individually: bool,
+    expected_app_endpoints: Option<usize>,
+    expected_individual_app_output_paths: Option<Vec<String>>,
+}
+
+struct SnapshotConfig {
+    user_config: serde_json::Value,
+    runtime_type_override: Option<String>,
+    watch_enabled: bool,
+    write_endpoints_individually: bool,
+    expected_app_endpoints: Option<usize>,
+    expected_individual_app_output_paths: Option<Vec<String>>,
+}
+
+#[turbo_tasks::function(operation, root)]
+async fn endpoint_all_output_paths_operation(
+    endpoint: OperationVc<OptionEndpoint>,
+) -> Result<Vc<Vec<RcStr>>> {
+    let Some(endpoint) = *endpoint.connect().await? else {
+        return Ok(Vc::cell(Vec::new()));
+    };
+    let output = endpoint.output().await?;
+    Ok(all_paths_in_root(
+        *output.output_assets,
+        output.project.dist_root(),
+    ))
+}
 
 fn snapshot_ignore_prefixes(resource: &Path) -> Result<Vec<RcStr>> {
     let ignore_path = resource.join(".snapshotignore");
@@ -172,12 +203,19 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let (project_options, write_endpoints_individually) =
-            project_options_from_resource(&resource)?;
+        let SnapshotProjectOptions {
+            project: project_options,
+            write_endpoints_individually,
+            expected_app_endpoints,
+            expected_individual_app_output_paths,
+        } = project_options_from_resource(&resource)?;
         let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
         ProjectContainer::initialize(container_op, project_options).await?;
 
-        if write_endpoints_individually {
+        if write_endpoints_individually
+            || expected_app_endpoints.is_some()
+            || expected_individual_app_output_paths.is_some()
+        {
             let project_container = container_op.resolve().strongly_consistent().await?;
             let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
                 get_entrypoints_with_issues_operation(project_container),
@@ -185,27 +223,68 @@ async fn run(resource: PathBuf) -> Result<()> {
             )
             .await?;
 
-            for endpoint in entrypoints_with_issues
-                .entrypoints
-                .apps
-                .iter()
-                .chain(&entrypoints_with_issues.entrypoints.libraries)
-            {
-                let written_endpoint = get_written_endpoint_with_issues_operation(*endpoint)
-                    .read_strongly_consistent()
-                    .await?;
-                let error_count = written_endpoint
-                    .issues
-                    .iter()
-                    .filter(|issue| issue.severity <= IssueSeverity::Error)
-                    .count();
+            if let Some(expected) = expected_app_endpoints {
                 anyhow::ensure!(
-                    error_count == 0,
-                    "writing an endpoint to disk produced {error_count} error issue(s)"
+                    entrypoints_with_issues.entrypoints.apps.len() == expected,
+                    "expected {expected} app endpoint(s), got {}",
+                    entrypoints_with_issues.entrypoints.apps.len()
                 );
             }
 
-            return Ok(());
+            if write_endpoints_individually || expected_individual_app_output_paths.is_some() {
+                for (index, endpoint) in entrypoints_with_issues.entrypoints.apps.iter().enumerate()
+                {
+                    let written_endpoint = get_written_endpoint_with_issues_operation(*endpoint)
+                        .read_strongly_consistent()
+                        .await?;
+                    let error_count = written_endpoint
+                        .issues
+                        .iter()
+                        .filter(|issue| issue.severity <= IssueSeverity::Error)
+                        .count();
+                    anyhow::ensure!(
+                        error_count == 0,
+                        "writing an endpoint to disk produced {error_count} error issue(s)"
+                    );
+
+                    if let Some(expected_paths) = &expected_individual_app_output_paths {
+                        let output_paths = endpoint_all_output_paths_operation(*endpoint)
+                            .read_strongly_consistent()
+                            .await?;
+                        for expected_path in expected_paths {
+                            anyhow::ensure!(
+                                output_paths.iter().any(|path| path == expected_path),
+                                "app endpoint {index} is missing expected path `{expected_path}`; \
+                                 got {output_paths:?}"
+                            );
+                        }
+                    }
+                }
+
+                if write_endpoints_individually {
+                    for endpoint in &entrypoints_with_issues.entrypoints.libraries {
+                        let written_endpoint =
+                            get_written_endpoint_with_issues_operation(*endpoint)
+                                .read_strongly_consistent()
+                                .await?;
+                        let error_count = written_endpoint
+                            .issues
+                            .iter()
+                            .filter(|issue| issue.severity <= IssueSeverity::Error)
+                            .count();
+                        anyhow::ensure!(
+                            error_count == 0,
+                            "writing an endpoint to disk produced {error_count} error issue(s)"
+                        );
+                    }
+                }
+
+                if write_endpoints_individually {
+                    return Ok(());
+                }
+                // Keep running the normal snapshot assertion after checking the
+                // output of each app endpoint in isolation.
+            }
         }
 
         #[turbo_tasks::function(operation, root)]
@@ -258,7 +337,7 @@ async fn run(resource: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, bool)> {
+fn project_options_from_resource(resource: &Path) -> Result<SnapshotProjectOptions> {
     let test_path = canonicalize(resource)?;
     assert!(test_path.exists(), "{} does not exist", resource.display());
     assert!(
@@ -288,13 +367,22 @@ fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, boo
     };
 
     // Parse config content and determine if it's in development or production mode
-    let (mut user_config, runtime_type_override, watch_enabled, write_endpoints_individually): (
-        serde_json::Value,
-        Option<String>,
-        bool,
-        bool,
-    ) = if config_content.trim().is_empty() {
-        (serde_json::from_str(&default_config())?, None, false, false)
+    let SnapshotConfig {
+        mut user_config,
+        runtime_type_override,
+        watch_enabled,
+        write_endpoints_individually,
+        expected_app_endpoints,
+        expected_individual_app_output_paths,
+    } = if config_content.trim().is_empty() {
+        SnapshotConfig {
+            user_config: serde_json::from_str(&default_config())?,
+            runtime_type_override: None,
+            watch_enabled: false,
+            write_endpoints_individually: false,
+            expected_app_endpoints: None,
+            expected_individual_app_output_paths: None,
+        }
     } else {
         let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
         let runtime_type_from_root = raw_root
@@ -309,16 +397,36 @@ fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, boo
             .get("writeEndpointsIndividually")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let expected_app_endpoints = raw_root
+            .get("expectedAppEndpoints")
+            .and_then(|v| v.as_u64())
+            .map(|value| value as usize);
+        let expected_individual_app_output_paths = raw_root
+            .get("expectedIndividualAppOutputPaths")
+            .and_then(|value| value.as_array())
+            .map(|paths| {
+                paths
+                    .iter()
+                    .map(|path| {
+                        path.as_str()
+                            .context("expectedIndividualAppOutputPaths must contain strings")
+                            .map(str::to_owned)
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
         let user_cfg = raw_root
             .get("config")
             .cloned()
             .expect("config.json must contain a top-level `config` object");
-        (
-            user_cfg,
-            runtime_type_from_root,
+        SnapshotConfig {
+            user_config: user_cfg,
+            runtime_type_override: runtime_type_from_root,
             watch_enabled,
             write_endpoints_individually,
-        )
+            expected_app_endpoints,
+            expected_individual_app_output_paths,
+        }
     };
 
     // Ensure default output configuration is present
@@ -403,7 +511,12 @@ fn project_options_from_resource(resource: &Path) -> Result<(ProjectOptions, boo
             .into(),
     };
 
-    Ok((project_options, write_endpoints_individually))
+    Ok(SnapshotProjectOptions {
+        project: project_options,
+        write_endpoints_individually,
+        expected_app_endpoints,
+        expected_individual_app_output_paths,
+    })
 }
 
 #[turbo_tasks::function(operation, root)]

@@ -20,6 +20,7 @@ pub async fn get_library_runtime_code(
     chunk_base_path: Vc<Option<RcStr>>,
     chunk_suffix_path: Vc<Option<RcStr>>,
     _runtime_type: RuntimeType,
+    has_async_modules: bool,
     output_root_to_root_path: Vc<RcStr>,
     generate_source_map: bool,
     runtime_root: Vc<Option<RcStr>>,
@@ -80,6 +81,20 @@ pub async fn get_library_runtime_code(
     )?;
 
     code.push_code(&*shared_runtime_utils_code.await?);
+
+    if has_async_modules {
+        let async_module_code = StaticEcmascriptCode::new(
+            asset_context,
+            embed_file_path("shared/runtime/async-module.ts".into())
+                .owned()
+                .await?,
+            generate_source_map,
+        )
+        .code();
+
+        code.push_code(&*async_module_code.await?);
+    }
+
     for runtime_code in runtime_base_code {
         code.push_code(
             &*embed_static_code(asset_context, runtime_code.into(), generate_source_map).await?,

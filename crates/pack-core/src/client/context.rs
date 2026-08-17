@@ -20,7 +20,10 @@ use turbopack_core::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
-    compile_time_info::CompileTimeInfo,
+    compile_time_info::{
+        CompileTimeDefineValue, CompileTimeInfo, DefinableNameSegment, FreeVarReference,
+        FreeVarReferences,
+    },
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
@@ -29,9 +32,10 @@ use turbopack_core::{
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{
-    TypeofWindow, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
+    TypeofWindow, chunk::EcmascriptChunkType, runtime_functions::TURBOPACK_MODULE,
+    transform::ReactCompilerTarget,
 };
-use turbopack_ecmascript_runtime::chunk_update_listeners_global_name;
+use turbopack_ecmascript_runtime::{RuntimeType, chunk_update_listeners_global_name};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransform, PostCssTransformOptions},
@@ -94,15 +98,33 @@ pub async fn get_client_compile_time_info(
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
     import_meta_env_base_url: RcStr,
+    hmr_enabled: Vc<bool>,
 ) -> Result<Vc<CompileTimeInfo>> {
+    let mode = mode.await?;
+    let hmr_enabled = *hmr_enabled.await?;
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
         "process.env.NODE_ENV".into(),
-        serde_json::to_string(mode.await?.node_env())
-            .unwrap()
-            .into(),
+        serde_json::to_string(mode.node_env()).unwrap().into(),
     )]);
     let define_env = Vc::cell(define_env);
+    let mut free_vars = (*free_vars(define_env, provider_config).await?).clone();
+    if hmr_enabled {
+        free_vars.insert(
+            vec![DefinableNameSegment::Name(rcstr!("module"))],
+            FreeVarReference::from(TURBOPACK_MODULE),
+        );
+    } else {
+        // Keep the documented `if (module.hot)` guard safe without changing
+        // unrelated CommonJS expressions such as `module.exports`.
+        free_vars.insert(
+            vec![
+                DefinableNameSegment::Name(rcstr!("module")),
+                DefinableNameSegment::Name(rcstr!("hot")),
+            ],
+            FreeVarReference::Value(CompileTimeDefineValue::Undefined),
+        );
+    }
     let environment = BrowserEnvironment {
         dom: true,
         web_worker: true,
@@ -117,8 +139,9 @@ pub async fn get_client_compile_time_info(
             .await?,
     )
     .defines(defines(define_env).to_resolved().await?)
-    .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .free_var_references(FreeVarReferences(free_vars).resolved_cell())
     .import_meta_env_base_url(import_meta_env_base_url)
+    .hot_module_replacement_enabled(hmr_enabled)
     .cell()
     .await
 }
@@ -609,7 +632,6 @@ pub async fn get_client_chunking_context(
     let runtime_type = {
         #[cfg(feature = "test")]
         {
-            use turbopack_ecmascript_runtime::RuntimeType;
             match config.runtime_type_str().await?.as_deref() {
                 Some(rt) if rt.eq_ignore_ascii_case("Development") => RuntimeType::Development,
                 Some(rt) if rt.eq_ignore_ascii_case("Production") => RuntimeType::Production,
@@ -692,6 +714,14 @@ pub async fn get_client_chunking_context(
             .hot_module_replacement()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
+
+        let dev_server = config.dev_server().await?;
+        if matches!(runtime_type, RuntimeType::Development)
+            && dev_server.hot.unwrap_or_default()
+            && dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+        {
+            builder = builder.dynamic_hmr_chunk_lists();
+        }
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;
