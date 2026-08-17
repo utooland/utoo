@@ -29,6 +29,7 @@ use crate::model::manifest::CoreVersionManifest;
 pub(crate) struct TarEntry {
     pub rel_path: PathBuf,
     pub content: Vec<u8>,
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub mode: u32,
     pub is_dir: bool,
 }

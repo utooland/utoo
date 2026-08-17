@@ -1489,12 +1489,7 @@ impl Project {
         let app_project = self.app_project().to_resolved().await?.await?;
         Ok(Entrypoints {
             apps: match *app_project {
-                Some(app) => Some(
-                    Endpoints(vec![ResolvedVc::upcast(
-                        app.get_app_endpoint().to_resolved().await?,
-                    )])
-                    .resolved_cell(),
-                ),
+                Some(app) => Some(app.get_app_endpoints().to_resolved().await?),
                 None => None,
             },
             libraries: match *library_project {
@@ -1963,10 +1958,11 @@ async fn all_assets_from_entries_operation(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::{
-        ProjectOptions, WatchOptions, normalize_project_options_paths, strip_root_prefix,
-        strip_root_prefix_for_file_system, to_file_system_path, update_project_option_paths,
+        ProjectOptions, WatchOptions, normalize_project_options_paths, update_project_option_paths,
     };
+    use super::{strip_root_prefix, strip_root_prefix_for_file_system, to_file_system_path};
     use turbo_unix_path::unix_to_sys;
 
     #[test]
