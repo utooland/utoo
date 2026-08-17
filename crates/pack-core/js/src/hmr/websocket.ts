@@ -12,6 +12,8 @@ type WebSocketMessage =
 let source: WebSocket | null = null;
 let eventCallbacks: Array<(event: WebSocketMessage) => void> = [];
 
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
+
 // Helper function to dispatch messages to all event callbacks
 function dispatchMessage(message: WebSocketMessage) {
   for (const eventCallback of eventCallbacks) {
@@ -69,6 +71,9 @@ export interface HMROptions {
 
 let reloading = false;
 let serverSessionId: number | null = null;
+let hasConnected = false;
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
 // This is not used by Next.js, but it is used by the standalone turbopack-cli
 export function connectHMR(options: HMROptions) {
@@ -78,6 +83,12 @@ export function connectHMR(options: HMROptions) {
     console.log("[HMR] connecting...");
 
     function handleOnline() {
+      hasConnected = true;
+      reconnectAttempt = 0;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
       window.console.log("[HMR] connected");
 
       // Send the turbopack-connected message to trigger handleSocketConnected
@@ -159,6 +170,24 @@ export function connectHMR(options: HMROptions) {
       }
 
       window.console.warn("[HMR] disconnected");
+
+      // Do not retry a socket that never connected. Some proxy tools cannot
+      // forward HMR and would otherwise receive repeated connection attempts.
+      if (!hasConnected || reconnectTimer) {
+        return;
+      }
+
+      const reconnectDelay = RECONNECT_DELAYS_MS[reconnectAttempt];
+      if (reconnectDelay === undefined) {
+        window.console.warn("[HMR] reconnect attempts exhausted");
+        return;
+      }
+
+      reconnectAttempt++;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        init();
+      }, reconnectDelay);
     }
 
     source = new WebSocket(`${getSocketUrl()}${options.path}`);
