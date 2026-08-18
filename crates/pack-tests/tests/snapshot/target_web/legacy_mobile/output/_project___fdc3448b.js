@@ -267,10 +267,10 @@ return __turbopack_context__.a(function(__turbopack_handle_async_dependencies__,
 }),
 "[project]/target_web/legacy_mobile/input/lazy.js [client] (ecmascript, async loader)", (function(__turbopack_context__){
 
-__turbopack_context__.v((parentImport) => {
+__turbopack_context__.v(function(parentImport) {
     return Promise.all([
   "input_lazy_456d4ef4.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
+].map(function(chunk) { return __turbopack_context__.l(chunk); })).then(function() {
         return parentImport("[project]/target_web/legacy_mobile/input/lazy.js [client] (ecmascript)");
     });
 });
