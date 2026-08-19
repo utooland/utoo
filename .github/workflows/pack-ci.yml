@@ -145,6 +145,9 @@ jobs:
         run: utoo install
       - name: Setup node x86
         uses: actions/setup-node@v4
+      - name: Verify NAPI release command
+        if: ${{ matrix.settings.target == 'x86_64-unknown-linux-gnu' }}
+        run: npm run artifacts --workspace=@utoo/pack -- --help
       - name: Test in docker
         if: ${{ matrix.settings.docker }}
         run: |
