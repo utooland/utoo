@@ -1,4 +1,10 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+96, ((__turbopack_context__) => {
+"use strict";
+
+;
+__turbopack_context__.s([]);
+}),
 90, ((__turbopack_context__) => {
 "use strict";
 
@@ -8,13 +14,6 @@ __turbopack_context__.s([
     0,
     runtimeValue
 ]);
-}),
-96, ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__90__ = __turbopack_context__.i(90);
-;
-__turbopack_context__.s([]);
 }),
 38, ((__turbopack_context__) => {
 "use strict";
@@ -28,4 +27,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=input_c211d37c.js.map
+//# sourceMappingURL=input_767f6bc7.js.map

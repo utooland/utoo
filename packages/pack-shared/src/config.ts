@@ -284,6 +284,11 @@ export interface ConfigComplete {
     /** Extract legal comments to `[file].LICENSE.txt` when minifying library output. */
     extractComments?: boolean;
     treeShaking?: boolean;
+    /**
+     * Infer side-effect-free modules from source code when package metadata does not
+     * declare side effects. Defaults to `true`, matching Next.js.
+     */
+    inferModuleSideEffects?: boolean;
     splitChunks?: Record<
       "js" | "css",
       {

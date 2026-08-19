@@ -433,6 +433,7 @@ pub async fn get_client_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
+            infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
         },
