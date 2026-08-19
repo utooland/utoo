@@ -1140,6 +1140,9 @@ impl Project {
                         source_maps
                     },
                 )
+                // Build-time transforms create independent module graphs that all emit the same
+                // runtime chunk, so no individual graph can safely omit optional runtime helpers.
+                .shared_runtime_chunk(true)
                 .build(),
             );
 
@@ -1337,6 +1340,8 @@ impl Project {
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
+            // Per-entry graphs cannot see which runtime helpers another entry may require.
+            shared_runtime_chunk: self.per_entry_module_graph(),
             debug_ids: Vc::cell(false),
             should_use_absolute_url_references: Vc::cell(false),
             config,
@@ -1371,6 +1376,8 @@ impl Project {
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
+            // Per-entry graphs cannot see which runtime helpers another entry may require.
+            shared_runtime_chunk: self.per_entry_module_graph(),
             debug_ids: Vc::cell(false),
         }))
     }

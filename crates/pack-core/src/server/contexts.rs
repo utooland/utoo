@@ -423,6 +423,7 @@ pub struct ServerChunkingContextOptions {
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
+    pub shared_runtime_chunk: Vc<bool>,
     pub debug_ids: Vc<bool>,
 }
 
@@ -447,6 +448,7 @@ pub async fn get_server_chunking_context(
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
+        shared_runtime_chunk,
         debug_ids,
     } = options;
     #[cfg(not(feature = "test"))]
@@ -490,7 +492,8 @@ pub async fn get_server_chunking_context(
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)
     .debug_ids(*debug_ids.await?)
-    .nested_async_availability(*nested_async_chunking.await?);
+    .nested_async_availability(*nested_async_chunking.await?)
+    .shared_runtime_chunk(*shared_runtime_chunk.await?);
 
     if mode.is_development() {
         builder = builder.source_map_source_type(SourceMapSourceType::AbsoluteFileUri);
