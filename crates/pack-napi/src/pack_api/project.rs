@@ -605,7 +605,9 @@ pub async fn project_shutdown(
 
 #[napi(object, object_from_js = false)]
 pub struct NapiEntrypoints {
+    #[napi(ts_type = "Array<{ __napiType: \"Endpoint\" }>")]
     pub apps: Option<Vec<External<ExternalEndpoint>>>,
+    #[napi(ts_type = "Array<{ __napiType: \"Endpoint\" }>")]
     pub libraries: Option<Vec<External<ExternalEndpoint>>>,
     pub app_paths: Option<Vec<NapiWrittenEndpoint>>,
     pub library_paths: Option<Vec<NapiWrittenEndpoint>>,
@@ -774,10 +776,10 @@ pub fn project_hmr_events(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     identifier: RcStr,
-    #[napi(ts_arg_type = "(err: Error, value: TurbopackResult) => void")] func: FunctionRef<
-        TurbopackResult<Unknown<'static>>,
-        (),
-    >,
+    #[napi(
+        ts_arg_type = "(err: Error, value: TurbopackResult<import(\"./core/types\").Update>) => void"
+    )]
+    func: FunctionRef<TurbopackResult<Unknown<'static>>, ()>,
     expected_version: Option<RcStr>,
 ) -> napi::Result<External<RootTask>> {
     let turbopack_ctx = project.turbopack_ctx.clone();
