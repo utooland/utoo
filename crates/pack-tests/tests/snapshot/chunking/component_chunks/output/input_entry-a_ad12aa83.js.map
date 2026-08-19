@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/chunking/component_chunks/input/entry-a.js"],"sourcesContent":["import { valueA } from \"./value-a.js\";\nimport { valueB } from \"./value-b.js\";\n\nconsole.log(\"entry-a\", valueA, valueB);\n"],"names":["console","log"],"mappings":"AAAA;AACA;;;AAEAA,QAAQC,GAAG,CAAC,WAAW,yJAAM,EAAE,yJAAM"}}]
+}

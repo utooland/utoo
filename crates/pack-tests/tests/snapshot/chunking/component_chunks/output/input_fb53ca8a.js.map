@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/chunking/component_chunks/input/value-a.js"],"sourcesContent":["export const valueA = \"component-a-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\";\n"],"names":["valueA"],"mappings":"AAAO,MAAMA,SAAS"}},
+    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/chunking/component_chunks/input/value-b.js"],"sourcesContent":["export const valueB = \"component-b-yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\";\n"],"names":["valueB"],"mappings":"AAAO,MAAMA,SAAS"}}]
+}

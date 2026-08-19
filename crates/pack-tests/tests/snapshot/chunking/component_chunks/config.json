@@ -1,0 +1,29 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/entry-a.js",
+        "name": "entry-a"
+      },
+      {
+        "import": "input/entry-b.js",
+        "name": "entry-b"
+      }
+    ],
+    "optimization": {
+      "moduleIds": "named",
+      "minify": false,
+      "splitChunks": {
+        "js": {
+          "minChunkSize": 1000000,
+          "maxChunkCountPerGroup": 1,
+          "maxMergeChunkSize": 1000000,
+          "firstPageLoadPriority": 0.8,
+          "requestCost": 1000,
+          "generateComponentChunks": true,
+          "minComponentChunkSize": 0
+        }
+      }
+    }
+  }
+}

@@ -1214,6 +1214,27 @@ pub struct SplitChunkConfig {
     /// This makes sure that code in big chunks is not duplicated in multiple chunks.
     #[serde(default = "default_max_merge_chunk_size")]
     pub max_merge_chunk_size: usize,
+
+    /// Weight the benefit of merging chunks for a single page load. Values are
+    /// accepted as `0.0..=1.0` and stored as an integer percentage.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_first_page_load_priority",
+        serialize_with = "serialize_first_page_load_priority"
+    )]
+    pub first_page_load_priority: Option<u32>,
+
+    /// Estimated cost of an additional request in bytes of uncompressed,
+    /// unminified code.
+    pub request_cost: Option<u64>,
+
+    /// Emit component chunks alongside merged production chunks.
+    #[serde(default)]
+    pub generate_component_chunks: bool,
+
+    /// Minimum size in bytes for a component chunk to be emitted independently.
+    #[serde(default = "default_min_component_chunk_size")]
+    pub min_component_chunk_size: usize,
 }
 
 impl From<&SplitChunkConfig> for ChunkingConfig {
@@ -1222,6 +1243,10 @@ impl From<&SplitChunkConfig> for ChunkingConfig {
             min_chunk_size: value.min_chunk_size,
             max_chunk_count_per_group: value.max_chunk_count_per_group,
             max_merge_chunk_size: value.max_merge_chunk_size,
+            first_page_load_priority: value.first_page_load_priority,
+            request_cost: value.request_cost,
+            generate_component_chunks: value.generate_component_chunks,
+            min_component_chunk_size: value.min_component_chunk_size,
             ..Default::default()
         }
     }
@@ -1237,6 +1262,30 @@ pub fn default_max_chunk_count_per_group() -> usize {
 
 pub fn default_max_merge_chunk_size() -> usize {
     200_000
+}
+
+pub fn default_min_component_chunk_size() -> usize {
+    20_000
+}
+
+fn deserialize_first_page_load_priority<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<f64>::deserialize(deserializer)?
+        .map(|priority| (priority.clamp(0.0, 1.0) * 100.0).round() as u32))
+}
+
+fn serialize_first_page_load_priority<S>(
+    value: &Option<u32>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    value
+        .map(|priority| priority as f64 / 100.0)
+        .serialize(serializer)
 }
 
 #[turbo_tasks::value(transparent)]
@@ -2097,6 +2146,31 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_chunk_config_maps_advanced_js_options() {
+        let config: SplitChunkConfig = serde_json::from_value(serde_json::json!({
+            "firstPageLoadPriority": 0.675,
+            "requestCost": 123_456,
+            "generateComponentChunks": true,
+            "minComponentChunkSize": 4096
+        }))
+        .unwrap();
+        let chunking_config = ChunkingConfig::from(&config);
+
+        assert_eq!(config.first_page_load_priority, Some(68));
+        assert_eq!(chunking_config.first_page_load_priority, Some(68));
+        assert_eq!(chunking_config.request_cost, Some(123_456));
+        assert!(chunking_config.generate_component_chunks);
+        assert_eq!(chunking_config.min_component_chunk_size, 4096);
+
+        let defaults: SplitChunkConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(!defaults.generate_component_chunks);
+        assert_eq!(
+            defaults.min_component_chunk_size,
+            default_min_component_chunk_size()
+        );
+    }
 
     #[test]
     fn test_server_entries_deserialization() {

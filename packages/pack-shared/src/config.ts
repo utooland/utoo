@@ -284,13 +284,32 @@ export interface ConfigComplete {
     /** Extract legal comments to `[file].LICENSE.txt` when minifying library output. */
     extractComments?: boolean;
     treeShaking?: boolean;
-    splitChunks?: Record<
-      "js" | "css",
-      {
-        minChunkSize?: number;
-        maxChunkCountPerGroup?: number;
-        maxMergeChunkSize?: number;
-      }
+    splitChunks?: Partial<
+      Record<
+        "js" | "css",
+        {
+          minChunkSize?: number;
+          maxChunkCountPerGroup?: number;
+          maxMergeChunkSize?: number;
+          /**
+           * Weight the benefit of merging chunks for a single page load, from 0 to 1.
+           * JavaScript chunks only.
+           */
+          firstPageLoadPriority?: number;
+          /**
+           * Estimated cost of an additional request in bytes of uncompressed,
+           * unminified code. JavaScript chunks only.
+           */
+          requestCost?: number;
+          /** Emit component chunks alongside merged production JavaScript chunks. */
+          generateComponentChunks?: boolean;
+          /**
+           * Minimum size in bytes for a component chunk to be emitted independently.
+           * JavaScript chunks only. Defaults to `20000`.
+           */
+          minComponentChunkSize?: number;
+        }
+      >
     >;
     cssChunking?: CssChunkingConfig;
     modularizeImports?: Record<
