@@ -82,7 +82,6 @@ __turbopack_context__.s([
 "[project]/optimization/remove_unused_imports_reexport_runtime_use/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$optimization$2f$remove_unused_imports_reexport_runtime_use$2f$input$2f$component$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$internal__part__0$3e$__ = __turbopack_context__.i("[project]/optimization/remove_unused_imports_reexport_runtime_use/input/component.js [client] (ecmascript) <internal part 0>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$optimization$2f$remove_unused_imports_reexport_runtime_use$2f$input$2f$component$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$internal__part__4$3e$__ = __turbopack_context__.i("[project]/optimization/remove_unused_imports_reexport_runtime_use/input/component.js [client] (ecmascript) <internal part 4>");
 var __TURBOPACK__imported__module__$5b$project$5d2f$optimization$2f$remove_unused_imports_reexport_runtime_use$2f$input$2f$component$2e$js__$5b$client$5d$__$28$ecmascript$29$__$3c$internal__part__3$3e$__ = __turbopack_context__.i("[project]/optimization/remove_unused_imports_reexport_runtime_use/input/component.js [client] (ecmascript) <internal part 3>");
 ;

@@ -254,6 +254,7 @@ pub async fn get_server_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             cjs_tree_shaking: module_fragments_enabled_for_user_code,
+            infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
         },
