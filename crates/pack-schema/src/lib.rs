@@ -586,6 +586,13 @@ pub struct SchemaOptimizationConfig {
     #[schemars(description = "Whether to enable tree shaking")]
     pub tree_shaking: Option<bool>,
 
+    /// Whether to infer module side effects from source code
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to infer side-effect-free modules from source code when package metadata does not declare side effects. Defaults to true."
+    )]
+    pub infer_module_side_effects: Option<bool>,
+
     /// Packages to optimize imports for
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Packages to optimize imports for")]
@@ -1323,6 +1330,7 @@ mod tests {
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
+        assert!(schema_str.contains("inferModuleSideEffects"));
         assert!(schema_str.contains("cssChunking"));
         assert!(schema_str.contains("html"));
         assert!(schema_str.contains("react"));

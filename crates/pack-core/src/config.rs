@@ -531,6 +531,9 @@ pub struct OptimizationConfig {
     /// Extract legal comments to a separate LICENSE file when minifying library output.
     pub extract_comments: Option<bool>,
     pub tree_shaking: Option<bool>,
+    /// Infer whether modules without explicit package metadata are side-effect free.
+    /// Defaults to true, matching Next.js.
+    pub infer_module_side_effects: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
     #[bincode(with = "option_indexmap")]
     pub modularize_imports: Option<FxIndexMap<String, ModularizeImportPackageConfig>>,
@@ -2024,6 +2027,16 @@ impl Config {
                 .map(|op| op.concatenate_modules.unwrap_or(false))
                 .unwrap_or(false),
         }))
+    }
+
+    #[turbo_tasks::function]
+    pub fn infer_module_side_effects(&self) -> Vc<bool> {
+        Vc::cell(
+            self.optimization
+                .as_ref()
+                .and_then(|op| op.infer_module_side_effects)
+                .unwrap_or(true),
+        )
     }
 
     #[turbo_tasks::function]
