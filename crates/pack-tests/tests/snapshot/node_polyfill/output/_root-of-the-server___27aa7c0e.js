@@ -6093,20 +6093,6 @@ __turbopack_context__.s([
     module.exports = i;
 })();
 }),
-"[project]/node_polyfill/input/empty.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-const child_process = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)");
-var net = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)"), tls = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)");
-const main = async ()=>{
-    const { createRequire } = await __turbopack_context__.A("[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript, async loader)");
-    createRequire('');
-};
-child_process;
-net;
-tls;
-__turbopack_context__.s([]);
-}),
 "[@utoo/pack-runtime]/node-polyfills/events/events.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 (function() {
@@ -11097,6 +11083,10 @@ __turbopack_context__.s([]);
     module.exports = r;
 })();
 }),
+"[@utoo/pack-runtime]/node-polyfills/empty/empty.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+module.exports = {};
+}),
 "[project]/node_polyfill/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -11105,7 +11095,6 @@ var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$po
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$browser$2d$polyfill$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/browser-polyfill/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$native$2d$url$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/native-url/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$node$2d$polyfills$2f$timers$2d$browserify$2f$main$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/node-polyfills/timers-browserify/main.js [client] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$node_polyfill$2f$input$2f$empty$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_polyfill/input/empty.ts [client] (ecmascript)");
 ;
 ;
 const stream = __turbopack_context__.r("[@utoo/pack-runtime]/node-polyfills/stream-browserify/index.js [client] (ecmascript)");
@@ -11124,4 +11113,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=_root-of-the-server___fe973b66.js.map
+//# sourceMappingURL=_root-of-the-server___27aa7c0e.js.map

@@ -17,13 +17,6 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__
 ]);
 }),
-"[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-/** @jsx jsx */ var a = 1;
-var __TURBOPACK__default__export__ = a;
-__turbopack_context__.s([]);
-}),
 "[project]/basic/foreign_jsx_transform/input/comp.tsx [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -41,7 +34,6 @@ __turbopack_context__.s([
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$foreign_jsx_transform$2f$node_modules$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/foreign_jsx_transform/node_modules/react/index.js [client] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$foreign_jsx_transform$2f$node_modules$2f$foreign$2d$jsx$2d$transform$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/foreign_jsx_transform/node_modules/foreign-jsx-transform/index.js [client] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$foreign_jsx_transform$2f$input$2f$comp$2e$tsx__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/foreign_jsx_transform/input/comp.tsx [client] (ecmascript)");
 ;
 ;
@@ -58,4 +50,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=_project__basic_foreign_jsx_transform_5da2b40c.js.map
+//# sourceMappingURL=_project__basic_foreign_jsx_transform_6480cd53.js.map

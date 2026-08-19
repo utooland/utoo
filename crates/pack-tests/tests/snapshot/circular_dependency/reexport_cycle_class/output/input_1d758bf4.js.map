@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
+    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/circular_dependency/reexport_cycle_class/input/base.js"],"sourcesContent":["export class Base {}\n"],"names":["Base"],"mappings":"AAAO,MAAMA;AAAM"}},
+    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/circular_dependency/reexport_cycle_class/input/child.js"],"sourcesContent":["import { Base } from './barrel.js';\n\nexport class Child extends Base {}\n"],"names":["Child"],"mappings":";;;;AAAA;;AAEO,MAAMA,cAAc,kKAAI;AAAE"}},
+    {"offset": {"line": 47, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/circular_dependency/reexport_cycle_class/input/index.js"],"sourcesContent":["import { Child } from './barrel.js';\n\nconsole.log(new Child() instanceof Child);\n"],"names":["console","log"],"mappings":"AAAA;;AAEAA,QAAQC,GAAG,CAAC,IAAI,mKAAK,cAAc,mKAAK"}}]
+}

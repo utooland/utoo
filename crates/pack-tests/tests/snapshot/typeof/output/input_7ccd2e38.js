@@ -22,13 +22,9 @@ console.log('typeof exports', ("TURBOPACK compile-time value", "object"));
 console.log(/*TURBOPACK member replacement*/ __turbopack_context__.t);
 require(/* turbopackIgnore: true */ '');
 }),
-"[project]/typeof/input/dep.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-
-}),
 "[project]/typeof/input/esm-automatic.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$typeof$2f$input$2f$dep$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/typeof/input/dep.js [client] (ecmascript)");
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
         return __turbopack_context__.F("input/esm-automatic.js");
@@ -88,4 +84,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=input_f1cf143d.js.map
+//# sourceMappingURL=input_7ccd2e38.js.map

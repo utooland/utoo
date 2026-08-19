@@ -1,4 +1,11 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+"[project]/circular_dependency/reexport_cycle_barrel/input/shape/index.js [client] (ecmascript) <locals>", ((__turbopack_context__) => {
+"use strict";
+
+;
+;
+__turbopack_context__.s([]);
+}),
 "[project]/circular_dependency/reexport_cycle_barrel/input/util/arrow.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -60,15 +67,6 @@ class Path extends __TURBOPACK__imported__module__$5b$project$5d2f$circular_depe
     }
 }
 }),
-"[project]/circular_dependency/reexport_cycle_barrel/input/shape/index.js [client] (ecmascript) <locals>", ((__turbopack_context__) => {
-"use strict";
-
-__turbopack_context__.s([]);
-var __TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$base$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/circular_dependency/reexport_cycle_barrel/input/shape/base.js [client] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$circular_dependency$2f$reexport_cycle_barrel$2f$input$2f$shape$2f$path$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/circular_dependency/reexport_cycle_barrel/input/shape/path.js [client] (ecmascript)");
-;
-;
-}),
 "[project]/circular_dependency/reexport_cycle_barrel/input/shape/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -92,4 +90,4 @@ __turbopack_context__.s([]);
 }),
 ]);
 
-//# sourceMappingURL=input_c08dd8d9.js.map
+//# sourceMappingURL=input_80cee4f7.js.map
