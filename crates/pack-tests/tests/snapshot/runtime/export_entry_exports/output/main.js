@@ -13,7 +13,10 @@
 }(typeof self !== 'undefined' ? self : this, function() {
 
 const __chunk__ = (() => {
-if (!Array.isArray(globalThis["utooChunk_export_entry_exports"])) {
+var chunksToRegister = globalThis["utooChunk_export_entry_exports"];
+if (chunksToRegister === undefined) {
+    chunksToRegister = [];
+} else if (!Array.isArray(chunksToRegister)) {
     return;
 }
 
@@ -610,6 +613,7 @@ function getRuntimeChunkBasePath(basePath = CHUNK_BASE_PATH) {
     return basePath;
 }
 const browserContextPrototype = Context.prototype;
+const RUNTIME_CHUNK_BASE_PATH = typeof TURBOPACK_CHUNK_BASE_PATH === 'string' ? TURBOPACK_CHUNK_BASE_PATH : CHUNK_BASE_PATH;
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 const availableModules = new Map();
@@ -811,7 +815,8 @@ function loadChunkByUrlInternal(sourceType, sourceData, chunkEntry) {
 // match the keys stored in `chunkComponents`.
 function chunkUrlToPath(chunkUrl) {
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    return src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    const runtimeBasePath = getRuntimeChunkBasePath(RUNTIME_CHUNK_BASE_PATH);
+    return src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
 }
 /**
  * When a merged chunk finishes registering (e.g. an initial-load `<script>`), mark its
@@ -903,14 +908,14 @@ browserContextPrototype.q = exportUrl;
  */ const CHUNK_PATH_NEEDS_ENCODING = /[^A-Za-z0-9\-_.!~*'()/]/;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
- */ function getChunkRelativeUrl(chunkPath, basePath = CHUNK_BASE_PATH) {
+ */ function getChunkRelativeUrl(chunkPath, basePath = RUNTIME_CHUNK_BASE_PATH) {
     // Most chunk paths need no escaping.
     const encodedPath = CHUNK_PATH_NEEDS_ENCODING.test(chunkPath) ? chunkPath.split('/').map(encodeURIComponent).join('/') : chunkPath;
     return `${getRuntimeChunkBasePath(basePath)}${encodedPath}${ASSET_SUFFIX}`;
 }
 // Shared runtime primitives consumed by the bundled `createWorker` helper,
 // exposed as `__turbopack_chunk_base_path__` and `__turbopack_chunk_asset_suffix__`.
-browserContextPrototype.b = CHUNK_BASE_PATH;
+browserContextPrototype.b = RUNTIME_CHUNK_BASE_PATH;
 browserContextPrototype.X = ASSET_SUFFIX;
 // Shared runtime primitive: build a chunk's URL. Used by the bundled worker
 // helper and the WASM helper, exposed as `__turbopack_chunk_relative_url__`.
@@ -921,7 +926,7 @@ function getPathFromScript(chunkScript) {
     }
     const chunkUrl = chunkScript.src;
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    const runtimeBasePath = getRuntimeChunkBasePath();
+    const runtimeBasePath = getRuntimeChunkBasePath(RUNTIME_CHUNK_BASE_PATH);
     let path = src.startsWith(runtimeBasePath) ? src.slice(runtimeBasePath.length) : src;
     if (path.startsWith('/')) {
         path = path.slice(1);
@@ -1303,7 +1308,6 @@ let BACKEND;
         return resolver.promise;
     }
 })();
-var chunksToRegister = globalThis["utooChunk_export_entry_exports"];
 globalThis["utooChunk_export_entry_exports"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 
