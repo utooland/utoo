@@ -187,7 +187,7 @@ jobs:
             /bin/sh /build/build_script.sh
       - name: Verify NAPI CLI version
         if: matrix.settings.musl_builder || matrix.settings.windows_builder
-        run: test "$(node -p 'require("@napi-rs/cli/package.json").version')" = "2.18.4"
+        run: test "$(node -p 'require("@napi-rs/cli/package.json").version')" = "3.8.6"
       - name: Build musl binding
         if: matrix.settings.musl_builder
         env:

@@ -599,14 +599,12 @@ export function projectFactory(endpointWatchOptions?: {
     }
 
     updateInfoSubscribe(aggregationMs: number) {
-      return subscribe<TurbopackResult<NapiUpdateMessage>>(
-        true,
-        async (callback) =>
-          binding.projectUpdateInfoSubscribe(
-            this._nativeProject,
-            aggregationMs,
-            callback,
-          ),
+      return subscribe<NapiUpdateMessage>(true, async (callback) =>
+        binding.projectUpdateInfoSubscribe(
+          this._nativeProject,
+          aggregationMs,
+          callback,
+        ),
       );
     }
 

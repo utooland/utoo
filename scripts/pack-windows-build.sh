@@ -27,9 +27,10 @@ export XWIN_VERSION=17
 export XWIN_SDK_VERSION=10.0.26100
 export XWIN_CRT_VERSION=14.44.17.14
 
-# napi-rs detects a Linux-to-Windows build and invokes cargo-xwin. cargo-xwin
-# resolves the repository's target rustflags and adds its SDK, CRT and lld-link
-# arguments without losing tokio_unstable or +crt-static.
+# NAPI CLI v3 requires --cross-compile to route a Linux-to-Windows MSVC build
+# through cargo-xwin. cargo-xwin resolves the repository's target rustflags and
+# adds its SDK, CRT and lld-link arguments without losing tokio_unstable or
+# +crt-static.
 rm -f "$OUTPUT"
 
 node --version
@@ -37,7 +38,7 @@ rustc --version
 cargo-xwin --version
 echo "Cross-compiling @utoo/pack for $TARGET"
 
-npm run build:binding --workspace=@utoo/pack -- --target "$TARGET"
+npm run build:binding --workspace=@utoo/pack -- --target "$TARGET" --cross-compile
 
 if [[ ! -s "$OUTPUT" ]]; then
   echo "expected N-API binary was not produced: $OUTPUT" >&2
