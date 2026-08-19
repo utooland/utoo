@@ -253,6 +253,7 @@ pub async fn get_server_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
+            cjs_tree_shaking: module_fragments_enabled_for_user_code,
             ignore_dynamic_requests: true,
             ..Default::default()
         },
