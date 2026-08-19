@@ -768,6 +768,34 @@ pub struct SchemaSplitChunkConfig {
     #[serde(default = "default_max_merge_chunk_size")]
     #[schemars(description = "Maximum merge chunk size")]
     pub max_merge_chunk_size: usize,
+
+    /// First-page-load priority for JavaScript chunks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "How heavily to weight merging chunks for a single page load, from 0 to 1. JavaScript chunks only."
+    )]
+    pub first_page_load_priority: Option<f64>,
+
+    /// Estimated request cost for JavaScript chunks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Estimated cost of an additional request in bytes of uncompressed, unminified code. JavaScript chunks only."
+    )]
+    pub request_cost: Option<u64>,
+
+    /// Whether to emit component chunks for JavaScript
+    #[serde(default)]
+    #[schemars(
+        description = "Whether to emit component chunks alongside merged production JavaScript chunks. Defaults to false."
+    )]
+    pub generate_component_chunks: bool,
+
+    /// Minimum component chunk size
+    #[serde(default = "default_min_component_chunk_size")]
+    #[schemars(
+        description = "Minimum size in bytes for a component chunk to be emitted independently. JavaScript chunks only. Defaults to 20000."
+    )]
+    pub min_component_chunk_size: usize,
 }
 
 /// CSS chunking configuration
@@ -815,6 +843,7 @@ pub struct SchemaCssChunkingGraphOptions {
 // Import defaults from pack-core
 pub use pack_core::config::{
     default_max_chunk_count_per_group, default_max_merge_chunk_size, default_min_chunk_size,
+    default_min_component_chunk_size,
 };
 
 // ---------------------------------------------------------------------------
@@ -1323,6 +1352,9 @@ mod tests {
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
+        assert!(schema_str.contains("generateComponentChunks"));
+        assert!(schema_str.contains("firstPageLoadPriority"));
+        assert!(schema_str.contains("requestCost"));
         assert!(schema_str.contains("cssChunking"));
         assert!(schema_str.contains("html"));
         assert!(schema_str.contains("react"));
