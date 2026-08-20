@@ -119,9 +119,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
 
       - name: Post PR Comment
-        # GitHub downgrades the pull_request token to read-only for fork PRs.
-        # The report remains available through the job summary and trace artifact.
-        if: steps.findPr.outputs.number && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        if: steps.findPr.outputs.number
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: utoopack-perf-report
