@@ -1,1 +1,1 @@
-{"version":3,"sources":["turbopack:///[project]/target_web/arrow_function_target/input/lazy.js"],"sourcesContent":["export const value = 42;\n"],"names":["value"],"mappings":"yOAAqB"}
+{"version":3,"sources":["turbopack:///[project]/target_web/arrow_function_target/input/lazy.js"],"sourcesContent":["export const value = 42;\n"],"names":["value"],"mappings":"6NAAqB"}

@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "ios >= 9",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "Dummy"
+}
