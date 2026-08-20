@@ -2,7 +2,14 @@ use napi::{Status, bindgen_prelude::Unknown, threadsafe_function::ThreadsafeFunc
 use napi_derive::napi;
 use turbopack_node::worker_pool::{NapiTaskMessage, NapiWorkerCreation, NapiWorkerTermination};
 
-type FatalThreadsafeFunction<T> = ThreadsafeFunction<T, Unknown<'static>, T, Status, false, true>;
+type FatalThreadsafeFunction<T> = ThreadsafeFunction<
+    T,
+    Unknown<'static>,
+    T,
+    Status,
+    /* CalleeHandled */ false,
+    /* Weak */ true,
+>;
 
 #[napi]
 pub fn register_worker_scheduler(
