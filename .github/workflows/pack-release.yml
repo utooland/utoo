@@ -269,6 +269,8 @@ jobs:
       id-token: write
     needs:
       - build
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -334,3 +336,56 @@ jobs:
           npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
+
+  ecosystem:
+    name: Ecosystem CI
+    needs:
+      - publish
+    permissions:
+      contents: read
+    uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@main
+    with:
+      candidate_mode: npm
+      pack_spec: ${{ needs.publish.outputs.version }}
+      suite: all
+      harness_repository: utooland/utoo-ecosystem-ci
+      harness_ref: main
+
+  notify_ecosystem_failure:
+    name: Notify ecosystem failure
+    if: >-
+      always() &&
+      needs.publish.result == 'success' &&
+      needs.ecosystem.result == 'failure'
+    needs:
+      - publish
+      - ecosystem
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create failure issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TAG_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          title="ci(pack): ecosystem CI failed for @utoo/pack@${VERSION}"
+          body_path="${RUNNER_TEMP}/ecosystem-failure.md"
+          printf '%s\n' \
+            "The post-publish ecosystem CI failed for @utoo/pack@${VERSION}." \
+            "" \
+            "- Release tag: [${GITHUB_REF_NAME}](${TAG_URL})" \
+            "- Workflow run: [${GITHUB_RUN_ID}](${RUN_URL})" \
+            "" \
+            "This issue was created automatically after consumer validation failed." \
+            > "${body_path}"
+
+          gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${title}" \
+            --body-file "${body_path}"
