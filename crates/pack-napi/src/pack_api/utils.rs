@@ -120,7 +120,7 @@ impl CompilationEvent for StartupCacheInvalidationEvent {
     }
 }
 
-#[napi]
+#[napi(async_runtime)]
 pub fn root_task_dispose(
     #[napi(ts_arg_type = "{ __napiType: \"RootTask\" }")] mut root_task: ExternalRef<RootTask>,
 ) -> napi::Result<()> {
