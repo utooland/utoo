@@ -242,6 +242,24 @@ pub struct SchemaDevServer {
     /// Register HMR chunk lists as dynamic chunks are loaded
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_hmr_chunk_lists: Option<bool>,
+
+    /// Forward browser console output to the development terminal
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub browser_to_terminal: Option<SchemaBrowserToTerminal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaBrowserToTerminal {
+    Enabled(bool),
+    Level(SchemaBrowserToTerminalLevel),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SchemaBrowserToTerminalLevel {
+    Error,
+    Warn,
 }
 
 // ---------------------------------------------------------------------------

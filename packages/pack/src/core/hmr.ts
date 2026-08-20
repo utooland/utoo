@@ -29,6 +29,7 @@ import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { isNodeTarget } from "../utils/target";
 import { validateEntryPaths } from "../utils/validateEntry";
+import { forwardBrowserLogs, isBrowserLogsMessage } from "./browserLogs";
 import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
 import {
@@ -170,6 +171,8 @@ export async function createHotReloader(
 ): Promise<HotReloaderInterface> {
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
+  const browserToTerminal =
+    bundleOptions.config.devServer?.browserToTerminal ?? false;
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
@@ -196,9 +199,13 @@ export async function createHotReloader(
     persistentCaching,
   );
 
+  const resolvedOutputPath = getOutputPath(
+    bundleOptions.config,
+    resolvedProjectPath,
+  );
   const htmlGenerationManager = new HtmlGenerationManager(
     bundleOptions.config,
-    getOutputPath(bundleOptions.config, resolvedProjectPath),
+    resolvedOutputPath,
     bundleOptions.config.output?.publicPath,
   );
   const shouldCreateWebpackStats =
@@ -619,12 +626,29 @@ export async function createHotReloader(
         });
 
         client.addEventListener("message", ({ data }) => {
-          const parsedData = JSON.parse(
-            typeof data !== "string" ? data.toString() : data,
-          );
+          const serializedData =
+            typeof data === "string" ? data : data.toString();
+          if (Buffer.byteLength(serializedData) > 1_000_000) {
+            client.close(1009, "HMR client message exceeds the 1 MB limit");
+            return;
+          }
+          const parsedData = JSON.parse(serializedData);
 
           // messages
           switch (parsedData.event) {
+            case "browser-logs":
+              if (isBrowserLogsMessage(parsedData)) {
+                void forwardBrowserLogs(
+                  parsedData,
+                  browserToTerminal,
+                  project,
+                  resolvedProjectPath,
+                  resolvedOutputPath,
+                ).catch((error) => {
+                  console.error("Unable to forward browser logs", error);
+                });
+              }
+              break;
             case "client-error": // { errorCount, clientId }
             case "client-warning": // { warningCount, clientId }
             case "client-success": // { clientId }
@@ -678,7 +702,7 @@ export async function createHotReloader(
 
         const turbopackConnected: TurbopackConnectedAction = {
           action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
-          data: { sessionId },
+          data: { sessionId, browserToTerminal },
         };
         sendToClient(client, turbopackConnected);
 
@@ -709,7 +733,7 @@ export async function createHotReloader(
 
       const turbopackConnected: TurbopackConnectedAction = {
         action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
-        data: { sessionId },
+        data: { sessionId, browserToTerminal },
       };
       sendToClient(ws, turbopackConnected);
 
@@ -735,9 +759,26 @@ export async function createHotReloader(
     },
 
     handleClientMessage(ws, data) {
+      if (Buffer.byteLength(data) > 1_000_000) {
+        ws.close(1009, "HMR client message exceeds the 1 MB limit");
+        return;
+      }
       const parsedData = JSON.parse(data);
 
       switch (parsedData.event) {
+        case "browser-logs":
+          if (isBrowserLogsMessage(parsedData)) {
+            void forwardBrowserLogs(
+              parsedData,
+              browserToTerminal,
+              project,
+              resolvedProjectPath,
+              resolvedOutputPath,
+            ).catch((error) => {
+              console.error("Unable to forward browser logs", error);
+            });
+          }
+          break;
         case "client-error":
         case "client-warning":
         case "client-success":

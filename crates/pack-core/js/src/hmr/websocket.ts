@@ -3,6 +3,7 @@
 type WebSocketMessage =
   | {
       type: "turbopack-connected";
+      browserToTerminal?: boolean | "error" | "warn";
     }
   | {
       type: "turbopack-message";
@@ -25,11 +26,13 @@ export function addMessageListener(
   eventCallbacks.push(callback);
 }
 
-export function sendMessage(data: any) {
+export function sendMessage(data: any): boolean {
   if (source && source.readyState === source.OPEN) {
     const message = typeof data === "string" ? data : JSON.stringify(data);
     source.send(message);
+    return true;
   }
+  return false;
 }
 
 function getSocketProtocol() {
@@ -107,7 +110,10 @@ export function connectHMR(options: HMROptions) {
           serverSessionId = msg.data.sessionId;
 
           // Convert to turbopack format and trigger handleSocketConnected
-          const connected: WebSocketMessage = { type: "turbopack-connected" };
+          const connected: WebSocketMessage = {
+            type: "turbopack-connected",
+            browserToTerminal: msg.data.browserToTerminal,
+          };
           dispatchMessage(connected);
           return;
         }

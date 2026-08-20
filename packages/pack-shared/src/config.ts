@@ -166,6 +166,9 @@ export interface ProxyRule {
 
 export type DevServerProxy = ProxyRule[];
 
+/** Browser console levels forwarded to the development terminal. */
+export type BrowserToTerminal = boolean | "error" | "warn";
+
 /** Object style proxy options without `context`. */
 export type ProxyOptions = Omit<ProxyRule, "context">;
 
@@ -215,6 +218,12 @@ export interface DevServerConfig {
   host?: string;
   /** Use HTTPS; when true without a certificate, a self-signed cert may be generated. */
   https?: boolean;
+  /**
+   * Forward browser console output to the terminal.
+   * `"error"` forwards errors, `"warn"` adds warnings, and `true` forwards all
+   * supported console output. Defaults to `false` when omitted.
+   */
+  browserToTerminal?: BrowserToTerminal;
   /** HTTP proxy rules for Hono dev server (HTTP only; no generic WS proxy in this layer). */
   proxy?: DevServerProxy;
 }
