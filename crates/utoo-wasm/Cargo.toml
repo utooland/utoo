@@ -16,7 +16,7 @@ flate2                   = "1.1.5"
 futures                  = { workspace = true }
 js-sys                   = "0.3.83"
 oneshot                  = "0.1.11"
-opfs-project             = "0.2.10"
+opfs-project             = "0.2.11"
 petgraph                 = "0.6"
 reqwest                  = { version = "0.12.22", default-features = false, features = ["json"] }
 rustc-hash               = { workspace = true }

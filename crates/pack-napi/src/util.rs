@@ -39,7 +39,7 @@ use std::{
 
 use crate::pack_api::turbopack_ctx::TurbopackContext;
 use anyhow::anyhow;
-use napi::bindgen_prelude::{External, Status};
+use napi::bindgen_prelude::{External, ExternalRef, Status};
 use owo_colors::OwoColorize;
 use tracing_chrome::{ChromeLayerBuilder, FlushGuard};
 use tracing_subscriber::{Layer, filter, prelude::*, util::SubscriberInitExt};
@@ -211,7 +211,7 @@ pub fn init_custom_trace_subscriber(
 /// This should be called when parent node.js process exits, otherwise generated
 /// trace may drop traces in the buffer.
 #[napi]
-pub fn teardown_trace_subscriber(guard_external: External<RefCell<Option<FlushGuard>>>) {
+pub fn teardown_trace_subscriber(guard_external: ExternalRef<RefCell<Option<FlushGuard>>>) {
     let guard_cell = &*guard_external;
 
     if let Some(guard) = guard_cell.take() {

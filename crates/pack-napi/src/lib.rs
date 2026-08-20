@@ -32,10 +32,6 @@ DEALINGS IN THE SOFTWARE.
 #![feature(arbitrary_self_types_pointers)]
 #![allow(unexpected_cfgs)]
 
-use std::cell::OnceCell;
-
-use tokio::runtime::Runtime;
-
 #[macro_use]
 extern crate napi_derive;
 
@@ -53,7 +49,7 @@ static ALLOC: turbo_tasks_malloc::TurboMalloc = turbo_tasks_malloc::TurboMalloc;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(not(target_arch = "wasm32"))]
-#[napi::module_init]
+#[napi_derive::module_init]
 fn init() {
     use std::{
         cell::RefCell,
@@ -91,14 +87,9 @@ fn init() {
         .disable_lifo_slot()
         .build()
         .unwrap();
-    create_custom_tokio_runtime(rt);
-}
+    napi::bindgen_prelude::create_custom_tokio_runtime(rt);
 
-static mut USER_DEFINED_RT: OnceCell<Option<Runtime>> = OnceCell::new();
-
-pub fn create_custom_tokio_runtime(rt: Runtime) {
-    unsafe {
-        #[allow(static_mut_refs)]
-        USER_DEFINED_RT.get_or_init(move || Some(rt));
-    }
+    let handle =
+        napi::bindgen_prelude::within_runtime_if_available(tokio::runtime::Handle::current);
+    std::mem::forget(Box::leak(Box::new(handle)).enter());
 }

@@ -386,6 +386,26 @@ mod tests {
         assert_eq!(json.edges[0], ["A".to_string(), "B".to_string()]);
     }
 
+    #[tokio::test]
+    async fn test_duplicate_workspace_names_fail_with_paths() {
+        let temp = tempdir().unwrap();
+        create_mock_workspace_with(
+            temp.path(),
+            r#"{"name":"duplicate"}"#,
+            r#"{"name":"duplicate"}"#,
+        );
+
+        let error = WorkspaceService::build_workspace_topology(temp.path())
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("EDUPLICATEWORKSPACE"));
+        assert!(error.contains("`duplicate`"));
+        assert!(error.contains("A/package.json"));
+        assert!(error.contains("B/package.json"));
+    }
+
     #[test]
     fn test_workspace_filter_from_flags() {
         assert!(matches!(

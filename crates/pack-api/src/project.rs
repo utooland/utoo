@@ -30,8 +30,8 @@ use turbo_tasks::{
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{
-    DirectoryContent, DirectoryEntry, DiskFileSystem, FileContent, FileSystem, FileSystemEntryType,
-    FileSystemPath, VirtualFileSystem, invalidation,
+    DirectoryContent, DirectoryEntry, DiskFileSystem, DiskWatcherConfig, FileContent, FileSystem,
+    FileSystemEntryType, FileSystemPath, VirtualFileSystem, invalidation,
 };
 use turbo_unix_path::{join_path, unix_to_sys};
 use turbopack::global_module_ids::get_global_module_id_strategy;
@@ -462,9 +462,7 @@ impl ProjectContainer {
                 .read_strongly_consistent()
                 .await?;
             if watch.enable {
-                project_fs
-                    .start_watching_with_invalidation_reason(watch.poll_interval)
-                    .await?;
+                project_fs.start_watching().await?;
             } else {
                 project_fs.invalidate_with_reason(|path| invalidation::Initialize {
                     // this path is just used for display purposes
@@ -564,9 +562,7 @@ impl ProjectContainer {
             if !ReadRef::ptr_eq(&prev_project_fs, &project_fs) {
                 if watch.enable {
                     // TODO stop watching: prev_project_fs.stop_watching()?;
-                    project_fs
-                        .start_watching_with_invalidation_reason(watch.poll_interval)
-                        .await?;
+                    project_fs.start_watching().await?;
                 } else {
                     project_fs.invalidate_with_reason(|path| invalidation::Initialize {
                         // this path is just used for display purposes
@@ -840,10 +836,15 @@ impl Project {
         // Get watched ignored paths from configuration
         let watched_ignored = self.watch.ignored.clone();
 
-        Ok(DiskFileSystem::new_with_denied_paths_and_watched_ignored(
+        Ok(DiskFileSystem::new_with_options_and_watched_ignored(
             PROJECT_FILESYSTEM_NAME,
             Vc::cell(self.root_path.clone()),
             denied_paths,
+            DiskWatcherConfig {
+                poll_interval: self.watch.poll_interval,
+                report_invalidation_reason: true,
+                ..Default::default()
+            },
             watched_ignored,
         ))
     }
@@ -1489,12 +1490,7 @@ impl Project {
         let app_project = self.app_project().to_resolved().await?.await?;
         Ok(Entrypoints {
             apps: match *app_project {
-                Some(app) => Some(
-                    Endpoints(vec![ResolvedVc::upcast(
-                        app.get_app_endpoint().to_resolved().await?,
-                    )])
-                    .resolved_cell(),
-                ),
+                Some(app) => Some(app.get_app_endpoints().to_resolved().await?),
                 None => None,
             },
             libraries: match *library_project {
@@ -1963,10 +1959,11 @@ async fn all_assets_from_entries_operation(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::{
-        ProjectOptions, WatchOptions, normalize_project_options_paths, strip_root_prefix,
-        strip_root_prefix_for_file_system, to_file_system_path, update_project_option_paths,
+        ProjectOptions, WatchOptions, normalize_project_options_paths, update_project_option_paths,
     };
+    use super::{strip_root_prefix, strip_root_prefix_for_file_system, to_file_system_path};
     use turbo_unix_path::unix_to_sys;
 
     #[test]

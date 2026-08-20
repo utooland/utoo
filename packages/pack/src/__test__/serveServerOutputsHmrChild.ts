@@ -94,7 +94,7 @@ async function main() {
     scenario === "dist-root"
       ? {
           entry: [{ import: "./src/index.js", name: "main" }],
-          target: "node",
+          target: "current node",
           output: { path: "./dist/node", clean: true },
         }
       : {

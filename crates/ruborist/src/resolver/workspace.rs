@@ -13,6 +13,7 @@
 //! Glob matching is delegated to the `Glob` trait, allowing each platform
 //! to provide its own implementation (native uses `glob` crate, WASM can use OPFS).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -52,6 +53,51 @@ pub struct WorkspacePackage {
 /// using platform-agnostic Glob trait for pattern matching.
 pub struct WorkspaceDiscovery<G> {
     glob: G,
+}
+
+fn ensure_unique_workspace_names(root_path: &Path, workspaces: &[WorkspacePackage]) -> Result<()> {
+    let mut paths_by_name: BTreeMap<&str, Vec<&Path>> = BTreeMap::new();
+    for workspace in workspaces {
+        let paths = paths_by_name.entry(&workspace.name).or_default();
+        if !paths.contains(&workspace.path.as_path()) {
+            paths.push(&workspace.path);
+        }
+    }
+
+    let mut duplicate_details = Vec::new();
+    for (name, paths) in paths_by_name {
+        if paths.len() < 2 {
+            continue;
+        }
+
+        let mut paths = paths
+            .into_iter()
+            .map(|path| {
+                path.strip_prefix(root_path)
+                    .unwrap_or(path)
+                    .join("package.json")
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+        paths.sort_unstable();
+        let paths = paths
+            .into_iter()
+            .map(|path| format!("    {path}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        duplicate_details.push(format!("  `{name}`:\n{paths}"));
+    }
+
+    if duplicate_details.is_empty() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "EDUPLICATEWORKSPACE: duplicate workspace package names detected:\n{}\n\
+         Workspace package names must be unique. Rename the packages in their package.json files.",
+        duplicate_details.join("\n")
+    )
 }
 
 impl<G: Glob> WorkspaceDiscovery<G> {
@@ -141,6 +187,8 @@ impl<G: Glob> WorkspaceDiscovery<G> {
                 });
             }
         }
+
+        ensure_unique_workspace_names(root_path, &workspaces)?;
 
         Ok(workspaces)
     }
@@ -257,6 +305,17 @@ mod tests {
     use crate::model::package_json::WorkspacesConfig;
     use crate::service::NoopGlob;
 
+    fn workspace(name: &str, path: &str) -> WorkspacePackage {
+        WorkspacePackage {
+            name: name.to_string(),
+            path: PathBuf::from(path),
+            package_json: PackageJson {
+                name: name.to_string(),
+                ..Default::default()
+            },
+        }
+    }
+
     #[test]
     fn test_name_from_folder() {
         // Plain folder → its own basename.
@@ -291,5 +350,33 @@ mod tests {
         assert!(!WorkspaceDiscovery::<NoopGlob>::is_workspace_root(
             &pkg_without_workspaces
         ));
+    }
+
+    #[test]
+    fn test_duplicate_workspace_names_report_sorted_paths() {
+        let workspaces = vec![
+            workspace("shared", "/repo/packages/z"),
+            workspace("other", "/repo/packages/other"),
+            workspace("shared", "/repo/packages/a"),
+        ];
+
+        let error = ensure_unique_workspace_names(Path::new("/repo"), &workspaces)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "EDUPLICATEWORKSPACE: duplicate workspace package names detected:\n  `shared`:\n    packages/a/package.json\n    packages/z/package.json\nWorkspace package names must be unique. Rename the packages in their package.json files."
+        );
+    }
+
+    #[test]
+    fn test_same_path_is_not_reported_as_duplicate() {
+        let workspaces = vec![
+            workspace("shared", "/repo/packages/a"),
+            workspace("shared", "/repo/packages/a"),
+        ];
+
+        assert!(ensure_unique_workspace_names(Path::new("/repo"), &workspaces).is_ok());
     }
 }

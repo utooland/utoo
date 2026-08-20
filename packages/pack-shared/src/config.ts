@@ -284,6 +284,11 @@ export interface ConfigComplete {
     /** Extract legal comments to `[file].LICENSE.txt` when minifying library output. */
     extractComments?: boolean;
     treeShaking?: boolean;
+    /**
+     * Infer side-effect-free modules from source code when package metadata does not
+     * declare side effects. Defaults to `true`, matching Next.js.
+     */
+    inferModuleSideEffects?: boolean;
     splitChunks?: Record<
       "js" | "css",
       {
@@ -374,6 +379,11 @@ export interface ConfigComplete {
   server?: {
     /** Entry point for the server runtime (e.g. "src/server.ts") */
     entry?: ServerEntry;
+    /**
+     * Server-only resolution options. Alias entries override matching
+     * `resolve.alias` entries; extensions replace `resolve.extensions` when set.
+     */
+    resolve?: ResolveOptions;
     /**
      * Server-specific externals. When omitted, top-level `externals` are used for
      * backwards compatibility. When provided, this replaces the top-level map for

@@ -21,19 +21,16 @@
     "config_schema.json"
   ],
   "napi": {
-    "name": "pack",
-    "triples": {
-      "defaults": false,
-      "additional": [
-        "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
-        "aarch64-unknown-linux-gnu",
-        "aarch64-unknown-linux-musl",
-        "x86_64-unknown-linux-gnu",
-        "x86_64-unknown-linux-musl",
-        "x86_64-pc-windows-msvc"
-      ]
-    }
+    "binaryName": "pack",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc"
+    ]
   },
   "license": "MIT",
   "dependencies": {
@@ -42,6 +39,7 @@
     "@hono/node-ws": "^1.3.0",
     "@swc/helpers": "0.5.15",
     "@utoo/pack-shared": "*",
+    "browserslist": "^4.28.5",
     "domparser-rs": "^0.0.7",
     "find-up": "4.1.0",
     "get-port": "5.1.1",
@@ -62,7 +60,7 @@
     "styled-jsx": "^5.1.6"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.0",
+    "@napi-rs/cli": "3.8.6",
     "@types/babel__code-frame": "7.0.2",
     "@types/mime": "^3.0.4",
     "@types/mime-types": "3.0.1",
@@ -81,12 +79,12 @@
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json --module commonjs --outDir cjs && cp src/*.d.ts cjs/",
     "build:esm": "rm -rf esm && tsc -p ./tsconfig.json --module esnext --outDir esm && cp src/*.d.ts esm/ && node ../../scripts/add-esm-extensions.cjs && node scripts/inject-esm-dirname.cjs",
     "build:local": "npm run build:binding:local && npx turbo run build --filter=@utoo/pack-shared && npm run build:cjs && npm run build:esm && cp src/*.node cjs/ && cp src/*.node esm/",
-    "artifacts": "napi artifacts --dir ./src --dist npm",
-    "build:binding": "napi build src --platform --release -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
-    "build:binding:local": "napi build src --platform --profile release-local -p pack-napi --cargo-cwd ../../ --cargo-name pack_napi --features plugin --js binding.js --dts binding.d.ts",
+    "artifacts": "napi artifacts --output-dir ./src --npm-dir npm",
+    "build:binding": "napi build --platform --release -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
+    "build:binding:local": "napi build --platform --profile release-local -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
     "test": "vitest run",
     "clean": "rm -rf cjs esm",
-    "prepublishOnly": "npm run build:js && napi prepublish -t npm --skip-gh-release",
+    "prepublishOnly": "npm run build:js && napi pre-publish -t npm --no-gh-release",
     "version": "napi version",
     "generate-features-list": "node ./scripts/generate-feature-list.js"
   },

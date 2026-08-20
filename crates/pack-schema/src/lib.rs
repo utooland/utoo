@@ -257,6 +257,13 @@ pub struct SchemaServerConfig {
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
     pub entry: Option<SchemaServerEntry>,
 
+    /// Server-only resolution options.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Server-only resolution options. Alias entries override matching resolve.alias entries; extensions replace resolve.extensions when provided"
+    )]
+    pub resolve: Option<SchemaResolveConfig>,
+
     /// Server-specific external dependencies. If omitted, top-level externals are used.
     /// If provided, this replaces the top-level map for server entries and Server Functions.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -578,6 +585,13 @@ pub struct SchemaOptimizationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Whether to enable tree shaking")]
     pub tree_shaking: Option<bool>,
+
+    /// Whether to infer module side effects from source code
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to infer side-effect-free modules from source code when package metadata does not declare side effects. Defaults to true."
+    )]
+    pub infer_module_side_effects: Option<bool>,
 
     /// Packages to optimize imports for
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1316,6 +1330,7 @@ mod tests {
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
+        assert!(schema_str.contains("inferModuleSideEffects"));
         assert!(schema_str.contains("cssChunking"));
         assert!(schema_str.contains("html"));
         assert!(schema_str.contains("react"));

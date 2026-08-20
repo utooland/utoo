@@ -253,6 +253,8 @@ pub async fn get_server_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
+            cjs_tree_shaking: module_fragments_enabled_for_user_code,
+            infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
         },
@@ -395,7 +397,7 @@ pub async fn get_server_resolve_options_context(
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
-        custom_extensions: config.resolve_extension().owned().await?,
+        custom_extensions: config.server_resolve_extension().owned().await?,
         rules: vec![(
             foreign_code_context_condition(config).await?,
             foreign_resolve_options.resolved_cell(),

@@ -161,6 +161,9 @@ pub struct ProviderConfig(
 pub struct ServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
     pub entry: Option<ServerEntry>,
+    /// Server-only resolution options. Alias entries override matching shared aliases;
+    /// extensions replace the shared extension list when configured.
+    pub resolve: Option<ResolveConfig>,
     /// Server-specific external dependencies. When omitted, the top-level `externals`
     /// configuration is used for backwards compatibility. When present, including an
     /// empty object, this completely replaces the top-level configuration for server
@@ -491,7 +494,7 @@ fn normalize_css_modules_pattern(pattern: &str) -> String {
 }
 
 #[turbo_tasks::value(eq = "manual")]
-#[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveConfig {
     #[serde(rename = "alias")]
@@ -528,6 +531,9 @@ pub struct OptimizationConfig {
     /// Extract legal comments to a separate LICENSE file when minifying library output.
     pub extract_comments: Option<bool>,
     pub tree_shaking: Option<bool>,
+    /// Infer whether modules without explicit package metadata are side-effect free.
+    /// Defaults to true, matching Next.js.
+    pub infer_module_side_effects: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
     #[bincode(with = "option_indexmap")]
     pub modularize_imports: Option<FxIndexMap<String, ModularizeImportPackageConfig>>,
@@ -1770,6 +1776,20 @@ impl Config {
     }
 
     #[turbo_tasks::function]
+    pub fn server_resolve_alias_options(&self) -> Result<Vc<ResolveAliasMap>> {
+        let Some(resolve_alias) = self
+            .server
+            .as_ref()
+            .and_then(|server| server.resolve.as_ref())
+            .and_then(|resolve| resolve.resolve_alias.as_ref())
+        else {
+            return Ok(ResolveAliasMap::cell(ResolveAliasMap::default()));
+        };
+        let alias_map: ResolveAliasMap = resolve_alias.try_into()?;
+        Ok(alias_map.cell())
+    }
+
+    #[turbo_tasks::function]
     pub fn resolve_extension(&self) -> Vc<ResolveExtensions> {
         let Some(resolve_extensions) = self
             .resolve
@@ -1779,6 +1799,21 @@ impl Config {
             return Vc::cell(None);
         };
         Vc::cell(Some(resolve_extensions.clone()))
+    }
+
+    #[turbo_tasks::function]
+    pub fn server_resolve_extension(&self) -> Vc<ResolveExtensions> {
+        let resolve_extensions = self
+            .server
+            .as_ref()
+            .and_then(|server| server.resolve.as_ref())
+            .and_then(|resolve| resolve.resolve_extensions.as_ref())
+            .or_else(|| {
+                self.resolve
+                    .as_ref()
+                    .and_then(|resolve| resolve.resolve_extensions.as_ref())
+            });
+        Vc::cell(resolve_extensions.cloned())
     }
 
     #[turbo_tasks::function]
@@ -1992,6 +2027,16 @@ impl Config {
                 .map(|op| op.concatenate_modules.unwrap_or(false))
                 .unwrap_or(false),
         }))
+    }
+
+    #[turbo_tasks::function]
+    pub fn infer_module_side_effects(&self) -> Vc<bool> {
+        Vc::cell(
+            self.optimization
+                .as_ref()
+                .and_then(|op| op.infer_module_side_effects)
+                .unwrap_or(true),
+        )
     }
 
     #[turbo_tasks::function]

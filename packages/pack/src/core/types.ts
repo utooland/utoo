@@ -66,7 +66,10 @@ export interface Project {
     TurbopackResult<RawEntrypoints>
   >;
 
-  hmrEvents(identifier: string): AsyncIterableIterator<TurbopackResult<Update>>;
+  hmrEvents(
+    identifier: string,
+    expectedVersion?: string,
+  ): AsyncIterableIterator<TurbopackResult<Update>>;
 
   hmrIdentifiersSubscribe(): AsyncIterableIterator<
     TurbopackResult<HmrIdentifiers>
@@ -84,7 +87,7 @@ export interface Project {
 
   updateInfoSubscribe(
     aggregationMs: number,
-  ): AsyncIterableIterator<TurbopackResult<NapiUpdateMessage>>;
+  ): AsyncIterableIterator<NapiUpdateMessage>;
 
   shutdown(): Promise<void>;
 

@@ -6,7 +6,10 @@ use std::{
 };
 
 use anyhow::Context;
-use napi::bindgen_prelude::External;
+use napi::{
+    Env,
+    bindgen_prelude::{External, ExternalRef, PromiseRaw},
+};
 use napi_derive::napi;
 
 type JsLockfile = Mutex<ManuallyDrop<Option<LockfileInner>>>;
@@ -95,28 +98,42 @@ pub async fn lockfile_try_acquire(
 
 #[napi]
 pub fn lockfile_unlock_sync(
-    #[napi(ts_arg_type = "{ __napiType: \"Lockfile\" }")] lockfile: External<JsLockfile>,
+    #[napi(ts_arg_type = "{ __napiType: \"Lockfile\" }")] lockfile: ExternalRef<JsLockfile>,
 ) {
-    let Some(inner): Option<LockfileInner> = lockfile
-        .lock()
-        .expect("poisoned: another thread panicked during lockfile_unlock_sync")
-        .take()
-    else {
+    let Some(inner) = take_lockfile_inner(&lockfile) else {
         return;
     };
 
+    unlock_inner(inner);
+}
+
+#[napi]
+pub fn lockfile_unlock<'env>(
+    env: &'env Env,
+    #[napi(ts_arg_type = "{ __napiType: \"Lockfile\" }")] lockfile: ExternalRef<JsLockfile>,
+) -> napi::Result<PromiseRaw<'env, ()>> {
+    let inner = take_lockfile_inner(&lockfile);
+    env.spawn_future(async move {
+        let Some(inner) = inner else {
+            return Ok(());
+        };
+        tokio::task::spawn_blocking(move || unlock_inner(inner))
+            .await
+            .context("panicked while attempting to unlock lockfile")?;
+        Ok(())
+    })
+}
+
+fn take_lockfile_inner(lockfile: &JsLockfile) -> Option<LockfileInner> {
+    lockfile
+        .lock()
+        .expect("poisoned: another thread panicked while unlocking this lockfile")
+        .take()
+}
+
+fn unlock_inner(inner: LockfileInner) {
     #[cfg(not(windows))]
     let _ = std::fs::remove_file(inner.path);
 
     drop(inner.file);
-}
-
-#[napi]
-pub async fn lockfile_unlock(
-    #[napi(ts_arg_type = "{ __napiType: \"Lockfile\" }")] lockfile: External<JsLockfile>,
-) -> napi::Result<()> {
-    tokio::task::spawn_blocking(move || lockfile_unlock_sync(lockfile))
-        .await
-        .context("panicked while attempting to unlock lockfile")?;
-    Ok(())
 }

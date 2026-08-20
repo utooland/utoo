@@ -49,6 +49,22 @@ clean_fixture() {
   find "$dir" -mindepth 2 -name "node_modules" -type d -exec rm -rf {} + 2>/dev/null || true
 }
 
+# Validate package-lock.json is well-formed JSON, if present.
+# Returns 0 when no lockfile exists or it parses; 1 + fail() on bad JSON.
+# On bad JSON, echoes the underlying parse error so the failing fixture is
+# easy to diagnose without re-running node manually.
+validate_lockfile() {
+  local name="$1"
+  [ -f "package-lock.json" ] || return 0
+
+  local err
+  if ! err=$(node -e "try{JSON.parse(require('fs').readFileSync('package-lock.json','utf8'))}catch(e){console.error('JSON.parse: '+e.message);process.exit(1)}" 2>&1); then
+    fail "$name (invalid package-lock.json)"
+    echo -e "      ${DIM}$err${NC}"
+    return 1
+  fi
+}
+
 # ----------------------------------------------------------------
 # Known-skip lists: features utoo PM does not yet support.
 # See e2e/pm/arborist/README.md for details.
@@ -105,11 +121,6 @@ SKIP_PLATFORM=(
   platform-specification
 )
 
-# [SKIP:workspace-duplicate] utoo does not detect duplicate workspace package names.
-SKIP_WORKSPACE_DUP=(
-  workspaces-duplicate
-)
-
 # [SKIP:dep-cycle-oom] infinite dep cycle causes OOM/timeout — CI runner kills
 # the whole job with SIGTERM once utoo goes into a recursive fetch loop.
 SKIP_DEP_CYCLE=(
@@ -143,7 +154,6 @@ _add_skip "file: resolver limitation"              "${SKIP_FILE_SEMANTIC[@]}"
 _add_skip "optional transitive"  "${SKIP_OPTIONAL_TRANSITIVE[@]}"
 _add_skip "strict peer deps"    "${SKIP_PEER_STRICT[@]}"
 _add_skip "platform reject"     "${SKIP_PLATFORM[@]}"
-_add_skip "workspace duplicate"  "${SKIP_WORKSPACE_DUP[@]}"
 _add_skip "dep cycle OOM"       "${SKIP_DEP_CYCLE[@]}"
 _add_skip "mock registry only"  "${SKIP_REGISTRY_ONLY[@]}"
 _add_skip "misc"                "${SKIP_MISC[@]}"
@@ -184,6 +194,7 @@ test_install_success() {
 
   if utoo install $flags 2>&1; then
     if [ -d "node_modules" ] || [ -f "package-lock.json" ]; then
+      validate_lockfile "$name" || return
       pass "$name"
     else
       local dep_count
@@ -243,6 +254,7 @@ test_install_optional_graceful() {
   clean_fixture .
 
   if utoo install 2>&1; then
+    validate_lockfile "$name" || return
     pass "$name ($desc)"
   else
     fail "$name (should succeed despite optional dep issue: $desc)"
@@ -316,6 +328,7 @@ if should_run "testing-peer-dep-conflict-chain" && [ -d "$ARBORIST_DIR/testing-p
       cd "$sub"
       clean_fixture .
       if utoo install 2>&1; then
+        validate_lockfile "testing-peer-dep-conflict-chain/$subname" || continue
         pass "testing-peer-dep-conflict-chain/$subname"
       else
         fail "testing-peer-dep-conflict-chain/$subname"
@@ -716,6 +729,7 @@ for name in \
     elif [ -d "$dir/node_modules" ]; then
       cd "$dir"
       if utoo install 2>&1; then
+        validate_lockfile "reinstall-$name" || continue
         pass "reinstall-$name"
       else
         fail "reinstall-$name (second install failed)"
