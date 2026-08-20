@@ -1,0 +1,43 @@
+name: utoopack-ecosystem
+
+on:
+  push:
+    branches: ["next"]
+  pull_request:
+    branches: ["next"]
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Ecosystem suite
+        required: true
+        type: choice
+        options:
+          - all
+          - umi
+          - ant-design-pro
+          - father
+          - dumi
+          - evjs
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  ecosystem:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pack)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pack)'))
+    uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@main
+    with:
+      candidate_mode: source
+      utoo_repository: >-
+        ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+      utoo_ref: >-
+        ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      suite: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.suite || 'all' }}
+      harness_repository: utooland/utoo-ecosystem-ci
+      harness_ref: main
