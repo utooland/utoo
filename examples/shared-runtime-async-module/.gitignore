@@ -1,0 +1,4 @@
+.turbopack
+dist
+node_modules
+regression-dist
