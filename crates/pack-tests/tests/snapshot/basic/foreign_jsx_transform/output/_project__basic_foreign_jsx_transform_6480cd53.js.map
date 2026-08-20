@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/node_modules/react/index.js"],"sourcesContent":["const React = {\n    createElement: function createElement() {},\n    Fragment: 'Fragment',\n    Component: function Component() {},\n};\n\nexport default React;\nexport const createElement = React.createElement;\nexport const Fragment = React.Fragment;\nexport const Component = React.Component;\n"],"names":["React","createElement","Fragment","Component"],"mappings":"AAAA,MAAMA,QAAQ;IACVC,eAAe,SAASA,iBAAiB;IACzCC,UAAU;IACVC,WAAW,SAASA,aAAa;AACrC;qCAEeH;AACR,MAAMC,gBAAgBD,MAAMC,aAAa;AACzC,MAAMC,WAAWF,MAAME,QAAQ;AAC/B,MAAMC,YAAYH,MAAMG,SAAS","ignoreList":[0]}},
+    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/input/comp.tsx"],"sourcesContent":["import React from 'react';\n\nconst Comp = () => <div>Comp</div>\n\nexport default Comp;"],"names":["Comp"],"mappings":"AAAA;;AAEA,MAAMA,OAAO,kBAAM,sLAAC,aAAI;qCAETA"}},
+    {"offset": {"line": 35, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/foreign_jsx_transform/input/index.tsx"],"sourcesContent":["import React from 'react';\nimport 'foreign-jsx-transform';\nimport Comp from './comp';\n\nconst App = () => {\n    return (\n        <div>\n            <Comp></Comp>\n        </div>\n    )\n}\n\nexport default App;"],"names":["App"],"mappings":"AAAA;AAEA;;;;AAEA,MAAMA,MAAM;IACR,qBACI,sLAAC,2BACG,sLAAC,uJAAI;AAGjB;qCAEeA"}}]
+}

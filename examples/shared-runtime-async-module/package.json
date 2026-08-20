@@ -1,0 +1,14 @@
+{
+  "name": "shared-runtime-async-module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "up build",
+    "test": "node run-regression.cjs"
+  },
+  "devDependencies": {
+    "@utoo/pack": "*",
+    "@utoo/pack-cli": "*",
+    "postcss": "8.5.26"
+  }
+}

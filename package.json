@@ -46,6 +46,7 @@
     "examples/with-tailwind",
     "examples/resolve",
     "examples/with-react",
+    "examples/shared-runtime-async-module",
     "examples/utooweb-demo",
     "examples/expose-entry-exports",
     "examples/pack-esm-api",
