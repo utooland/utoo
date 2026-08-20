@@ -66,6 +66,10 @@ jobs:
           npm run build:local --workspace @utoo/pack
           npm run build --workspace @utoo/pack-cli
 
+          # Regression coverage for independent PostCSS and loader evaluator graphs sharing one
+          # build-time runtime (utooland/utoo#3316).
+          npm test --workspace shared-runtime-async-module
+
           # Verify examples
           for dir in examples/*/; do
             if [ -f "${dir}package.json" ]; then
