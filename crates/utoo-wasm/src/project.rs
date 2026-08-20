@@ -112,7 +112,7 @@ impl Project {
         operations::cancel_all().await;
 
         #[cfg(feature = "utoopack")]
-        pack::dispose_pack_project().await;
+        pack::dispose_pack_project().await.map_err(to_js_error)?;
 
         OPFS_PROJECT.write().take();
         Ok(())
