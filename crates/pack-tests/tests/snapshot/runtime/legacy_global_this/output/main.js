@@ -1,5 +1,5 @@
 (self["TURBOPACK"] || (self["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["_project___fdc3448b.js"],"runtimeModuleIds":["[project]/target_web/legacy_mobile/input/index.js [client] (ecmascript)"]}
+    {"otherChunks":["input_index_21563eb3.js"],"runtimeModuleIds":["[project]/runtime/legacy_global_this/input/index.js [client] (ecmascript)"]}
 ]);
 // Dummy runtime
