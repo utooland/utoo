@@ -129,7 +129,7 @@ pub async fn endpoint_write_to_disk(
     })
 }
 
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn endpoint_server_changed_subscribe(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Endpoint\" }")] endpoint: &External<ExternalEndpoint>,
@@ -168,7 +168,7 @@ pub fn endpoint_server_changed_subscribe(
     )
 }
 
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn endpoint_client_changed_subscribe(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Endpoint\" }")] endpoint: &External<ExternalEndpoint>,

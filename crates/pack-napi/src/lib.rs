@@ -88,8 +88,4 @@ fn init() {
         .build()
         .unwrap();
     napi::bindgen_prelude::create_custom_tokio_runtime(rt);
-
-    let handle =
-        napi::bindgen_prelude::within_runtime_if_available(tokio::runtime::Handle::current);
-    std::mem::forget(Box::leak(Box::new(handle)).enter());
 }

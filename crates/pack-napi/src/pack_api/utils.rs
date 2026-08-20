@@ -264,6 +264,8 @@ impl<T: ToNapiValue> ToNapiValue for TurbopackResult<T> {
     }
 }
 
+/// Starts a TurboTasks root task immediately, so synchronous NAPI callers must use
+/// `#[napi(async_runtime)]` to enter the Tokio runtime before calling this helper.
 pub fn subscribe<
     T: 'static + Send + Sync,
     F: Future<Output = Result<T>> + Send,
