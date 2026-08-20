@@ -112,6 +112,8 @@ pub fn lockfile_unlock<'env>(
     env: &'env Env,
     #[napi(ts_arg_type = "{ __napiType: \"Lockfile\" }")] lockfile: ExternalRef<JsLockfile>,
 ) -> napi::Result<PromiseRaw<'env, ()>> {
+    // Take the owned inner out on the JS thread (the `ExternalRef` is `!Send`), then release the
+    // lock on the blocking pool so the unlink and close don't stall the Node.js event loop.
     let inner = take_lockfile_inner(&lockfile);
     env.spawn_future(async move {
         let Some(inner) = inner else {
