@@ -120,11 +120,21 @@ pub fn create_turbo_tasks() -> Result<UtooTurboTasks> {
     )))
 }
 
-pub async fn dispose_pack_project() {
-    let project = GLOBAL_PACK_PROJECT.write().take();
-    if let Some(project) = project {
-        project.turbo_tasks.stop_and_wait().await;
-    }
+pub async fn dispose_pack_project() -> Result<()> {
+    let Some(project) = GLOBAL_PACK_PROJECT.write().take() else {
+        return Ok(());
+    };
+
+    // `stop_and_wait` performs synchronous parallel cleanup that expects a current Tokio handle.
+    // Keep both shutdown and the final `PackProject` drop off the browser's local executor.
+    runtime()
+        .spawn(async move {
+            project.turbo_tasks.stop_and_wait().await;
+        })
+        .await
+        .context("failed to dispose pack project")?;
+
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -267,7 +277,7 @@ pub async fn init_pack_project(config: Option<String>, dev: bool) -> Result<()> 
         }
     }
 
-    dispose_pack_project().await;
+    dispose_pack_project().await?;
 
     let cwd = crate::pm::with_project(|p| p.cwd().to_string_lossy().to_string());
     let project_root = if cwd.starts_with('/') {
@@ -354,7 +364,9 @@ pub async fn build(options: BuildOptions) -> std::result::Result<JsValue, wasm_b
 
     if options.cleanup {
         tracing::info!("cleanup: disposing existing pack project");
-        dispose_pack_project().await;
+        dispose_pack_project()
+            .await
+            .map_err(|e| JsError::new(&PrettyPrintError(&e).to_string()))?;
     }
 
     init_pack_project(options.config_string(), false)
