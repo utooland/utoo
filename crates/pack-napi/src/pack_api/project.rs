@@ -726,7 +726,7 @@ pub async fn project_write_all_entrypoints_to_disk(
     })
 }
 
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_entrypoints_subscribe(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
@@ -771,7 +771,7 @@ pub fn project_entrypoints_subscribe(
 }
 
 #[tracing::instrument(level = "debug", name = "get HMR events", skip(env, project, func))]
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_hmr_events(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
@@ -891,12 +891,12 @@ pub fn project_hmr_events(
     )
 }
 
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct HmrIdentifiers {
     pub identifiers: Vec<String>,
 }
 
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_hmr_identifiers_subscribe(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
@@ -949,9 +949,9 @@ pub enum UpdateMessage {
     End(UpdateInfo),
 }
 
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct NapiUpdateMessage {
-    pub update_type: String,
+    pub update_type: &'static str,
     pub value: Option<NapiUpdateInfo>,
 }
 
@@ -959,18 +959,18 @@ impl From<UpdateMessage> for NapiUpdateMessage {
     fn from(update_message: UpdateMessage) -> Self {
         match update_message {
             UpdateMessage::Start => NapiUpdateMessage {
-                update_type: "start".to_string(),
+                update_type: "start",
                 value: None,
             },
             UpdateMessage::End(info) => NapiUpdateMessage {
-                update_type: "end".to_string(),
+                update_type: "end",
                 value: Some(info.into()),
             },
         }
     }
 }
 
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct NapiUpdateInfo {
     pub duration: u32,
     pub tasks: u32,
@@ -996,7 +996,7 @@ impl From<UpdateInfo> for NapiUpdateInfo {
 /// the number of tasks that were executed.
 ///
 /// The signature of the `func` is `(update_message: UpdateMessage) => void`.
-#[napi]
+#[napi(async_runtime)]
 pub fn project_update_info_subscribe(
     env: Env,
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,

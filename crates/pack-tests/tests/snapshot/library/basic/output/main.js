@@ -32,23 +32,6 @@ let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = 
 
 __turbopack_context__.v(mod);
 }),
-486, ((__turbopack_context__) => {
-"use strict";
-
-function jsx() {
-    return 'purposefully empty stub for @emotion/react/index.js';
-}
-function css() {
-    return 'purposefully empty stub for @emotion/react/index.js';
-}
-function Global() {
-    return 'purposefully empty stub for @emotion/react/index.js';
-}
-function keyframes() {
-    return 'purposefully empty stub for @emotion/react/index.js';
-}
-__turbopack_context__.s([]);
-}),
 132, ((__turbopack_context__) => {
 "use strict";
 
@@ -74,7 +57,6 @@ var __TURBOPACK__imported__module__861__ = __turbopack_context__.i(861);
 var __TURBOPACK__imported__module__571__ = __turbopack_context__.i(571);
 // @ts-ignore
 var __TURBOPACK__imported__module__611__ = __turbopack_context__.i(611);
-/** @jsxImportSource @emotion/react */ var __TURBOPACK__imported__module__486__ = __turbopack_context__.i(486);
 var __TURBOPACK__imported__module__132__ = __turbopack_context__.i(132);
 var __TURBOPACK__imported__module__481__ = __turbopack_context__.i(481);
 ;

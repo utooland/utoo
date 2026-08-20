@@ -37,13 +37,16 @@ pub struct NapiTurbopackCallbacks {
     // to all of our async entrypoints, and would be complicated by `FunctionRef` being `!Send` (I
     // think it could be `Send`, as long as `napi::Env` is checked at call-time, which it should be
     // anyways).
+    //
+    // `Weak = true` so this ThreadsafeFunction doesn't keep the Node.js event loop alive after
+    // shutdown.
     throw_turbopack_internal_error: ThreadsafeFunction<
         TurbopackInternalErrorOpts,
         (),
         TurbopackInternalErrorOpts,
         Status,
-        true,
-        true,
+        /* CalleeHandled */ true,
+        /* Weak */ true,
     >,
 }
 

@@ -1,4 +1,4 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(self["TURBOPACK"] || (self["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 "[project]/node_modules/@swc/helpers/_/_async_to_generator.js [client] (ecmascript)", (function(__turbopack_context__){
 "use strict";
 

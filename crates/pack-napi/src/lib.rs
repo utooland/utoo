@@ -58,7 +58,7 @@ fn init() {
     };
 
     use tokio::runtime::Builder;
-    use turbo_tasks::panic_hooks::handle_panic;
+    use turbo_tasks::{panic_hooks::handle_panic, parallel::available_parallelism};
     use turbo_tasks_malloc::TurboMalloc;
 
     let prev_hook = take_hook();
@@ -70,6 +70,8 @@ fn init() {
     thread_local! {
         static LAST_SWC_ATOM_GC_TIME: RefCell<Option<Instant>> = const { RefCell::new(None) };
     }
+
+    let worker_threads = available_parallelism().map(|n| n.get()).unwrap_or(1);
 
     let rt = Builder::new_multi_thread()
         .enable_all()
@@ -83,12 +85,25 @@ fn init() {
                     *cell = Some(Instant::now());
                 }
             });
+            TurboMalloc::thread_park();
         })
+        .worker_threads(worker_threads)
+        // Avoid a limit on threads to avoid deadlocks due to usage of block_in_place
+        .max_blocking_threads(usize::MAX - worker_threads)
+        // Avoid the extra lifo slot to avoid stalling tasks when doing cpu-heavy work
         .disable_lifo_slot()
         .build()
         .unwrap();
     napi::bindgen_prelude::create_custom_tokio_runtime(rt);
 
+    // napi v2 permanently entered its tokio runtime context on the addon's main thread. Both
+    // these bindings and turbo-tasks (e.g. `PriorityRunner`) schedule tokio work from
+    // synchronous N-API calls and rely on that ambient context. napi v3 no longer provides it,
+    // so restore it: capture the runtime handle (this also forces napi to adopt the custom
+    // runtime registered above) and enter it for the lifetime of this thread.
+    //
+    // TODO: Leaking the guard keeps the runtime alive for the whole process, so tokio never shuts
+    // down. Fix the callers that rely on an ambient runtime handle so that this can be dropped.
     let handle =
         napi::bindgen_prelude::within_runtime_if_available(tokio::runtime::Handle::current);
     std::mem::forget(Box::leak(Box::new(handle)).enter());

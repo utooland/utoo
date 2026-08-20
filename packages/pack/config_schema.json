@@ -1302,6 +1302,13 @@
             "null"
           ]
         },
+        "inferModuleSideEffects": {
+          "description": "Whether to infer side-effect-free modules from source code when package metadata does not declare side effects. Defaults to true.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "minify": {
           "description": "Whether to minify the output",
           "type": [
