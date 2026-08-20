@@ -54,7 +54,7 @@ const collectConsoleMessages = (page: Page) => {
   return messages;
 };
 
-test("builds the utooweb demo and previews dist/index.html", async ({
+test("builds and rebuilds the utooweb demo and previews dist/index.html", async ({
   page,
 }) => {
   const consoleMessages = collectConsoleMessages(page);
@@ -82,15 +82,17 @@ test("builds the utooweb demo and previews dist/index.html", async ({
   const buildButton = page.getByTestId("build-project-button");
   await expect(buildButton).toBeEnabled();
 
-  const buildStartIndex = consoleMessages.length;
-  await buildButton.click();
-  await waitForConsoleMessage(
-    consoleMessages,
-    BUILD_DONE_PATTERN,
-    buildStartIndex,
-    5 * 60 * 1000,
-  );
-  await expect(buildButton).toBeEnabled({ timeout: 60 * 1000 });
+  for (let buildNumber = 0; buildNumber < 2; buildNumber++) {
+    const buildStartIndex = consoleMessages.length;
+    await buildButton.click();
+    await waitForConsoleMessage(
+      consoleMessages,
+      BUILD_DONE_PATTERN,
+      buildStartIndex,
+      5 * 60 * 1000,
+    );
+    await expect(buildButton).toBeEnabled({ timeout: 60 * 1000 });
+  }
 
   await expandDirectory(page.getByTestId("file-tree-directory-root"));
   await expandDirectory(page.getByTestId("file-tree-directory-dist"));
