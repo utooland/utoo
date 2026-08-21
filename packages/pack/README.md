@@ -115,6 +115,8 @@ The bundler can be configured via a `utoopack.json` or through the programmatic 
 - **`externals`**: Exclude specific dependencies from the bundle.
 - **`server.externals`**: Replace top-level externals for server entries and Server Functions. If
   omitted, server builds continue to use top-level `externals`.
+- **`devServer.browserToTerminal`**: Forward browser console output to the development terminal.
+  Use `"error"`, `"warn"`, `true`, or `false`; standalone Utoopack defaults to `false`.
 - **`mode`**: `development` or `production`.
 
 For a full list of options, see the [Configuration Schema](./config_schema.json).

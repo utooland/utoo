@@ -29,6 +29,7 @@ import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { isNodeTarget } from "../utils/target";
 import { validateEntryPaths } from "../utils/validateEntry";
+import { forwardBrowserLogs, isBrowserLogsMessage } from "./browserLogs";
 import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
 import {
@@ -41,6 +42,64 @@ import {
 const wsServer = new WebSocketServer({ noServer: true });
 
 const sessionId = Math.floor(Number.MAX_SAFE_INTEGER * Math.random());
+
+export const HMR_CLIENT_MESSAGE_MAX_BYTES = 1_000_000;
+
+export type ParsedHmrClientMessage =
+  | { status: "ok"; value: Record<string, unknown> }
+  | { status: "malformed" }
+  | { status: "too-large" };
+
+/** Normalize and validate messages shared by the legacy and current HMR transports. */
+export function parseHmrClientMessage(data: unknown): ParsedHmrClientMessage {
+  let serializedData: string;
+  if (typeof data === "string") {
+    serializedData = data;
+  } else if (Buffer.isBuffer(data)) {
+    if (data.byteLength > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+      return { status: "too-large" };
+    }
+    serializedData = data.toString("utf8");
+  } else if (Array.isArray(data) && data.every(Buffer.isBuffer)) {
+    if (
+      data.reduce((total, chunk) => total + chunk.byteLength, 0) >
+      HMR_CLIENT_MESSAGE_MAX_BYTES
+    ) {
+      return { status: "too-large" };
+    }
+    serializedData = Buffer.concat(data).toString("utf8");
+  } else if (data instanceof ArrayBuffer) {
+    if (data.byteLength > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+      return { status: "too-large" };
+    }
+    serializedData = Buffer.from(data).toString("utf8");
+  } else if (ArrayBuffer.isView(data)) {
+    if (data.byteLength > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+      return { status: "too-large" };
+    }
+    serializedData = Buffer.from(
+      data.buffer,
+      data.byteOffset,
+      data.byteLength,
+    ).toString("utf8");
+  } else {
+    return { status: "malformed" };
+  }
+
+  if (Buffer.byteLength(serializedData) > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+    return { status: "too-large" };
+  }
+
+  try {
+    const value: unknown = JSON.parse(serializedData);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { status: "malformed" };
+    }
+    return { status: "ok", value: value as Record<string, unknown> };
+  } catch {
+    return { status: "malformed" };
+  }
+}
 
 // Re-export HMR types from pack-shared for backward compatibility
 export {
@@ -170,6 +229,8 @@ export async function createHotReloader(
 ): Promise<HotReloaderInterface> {
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
+  const browserToTerminal =
+    bundleOptions.config.devServer?.browserToTerminal ?? false;
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
@@ -196,9 +257,13 @@ export async function createHotReloader(
     persistentCaching,
   );
 
+  const resolvedOutputPath = getOutputPath(
+    bundleOptions.config,
+    resolvedProjectPath,
+  );
   const htmlGenerationManager = new HtmlGenerationManager(
     bundleOptions.config,
-    getOutputPath(bundleOptions.config, resolvedProjectPath),
+    resolvedOutputPath,
     bundleOptions.config.output?.publicPath,
   );
   const shouldCreateWebpackStats =
@@ -619,12 +684,29 @@ export async function createHotReloader(
         });
 
         client.addEventListener("message", ({ data }) => {
-          const parsedData = JSON.parse(
-            typeof data !== "string" ? data.toString() : data,
-          );
+          const result = parseHmrClientMessage(data);
+          if (result.status === "too-large") {
+            client.close(1009, "HMR client message exceeds the 1 MB limit");
+            return;
+          }
+          if (result.status === "malformed") return;
+          const parsedData = result.value;
 
           // messages
           switch (parsedData.event) {
+            case "browser-logs":
+              if (isBrowserLogsMessage(parsedData)) {
+                void forwardBrowserLogs(
+                  parsedData,
+                  browserToTerminal,
+                  project,
+                  resolvedProjectPath,
+                  resolvedOutputPath,
+                ).catch((error) => {
+                  console.error("Unable to forward browser logs", error);
+                });
+              }
+              break;
             case "client-error": // { errorCount, clientId }
             case "client-warning": // { warningCount, clientId }
             case "client-success": // { clientId }
@@ -656,17 +738,21 @@ export async function createHotReloader(
           // Turbopack messages
           switch (parsedData.type) {
             case "turbopack-subscribe":
-              subscribeToHmrEvents(
-                client,
-                parsedData.path,
-                typeof parsedData.version === "string"
-                  ? parsedData.version
-                  : undefined,
-              );
+              if (typeof parsedData.path === "string") {
+                subscribeToHmrEvents(
+                  client,
+                  parsedData.path,
+                  typeof parsedData.version === "string"
+                    ? parsedData.version
+                    : undefined,
+                );
+              }
               break;
 
             case "turbopack-unsubscribe":
-              unsubscribeFromHmrEvents(client, parsedData.path);
+              if (typeof parsedData.path === "string") {
+                unsubscribeFromHmrEvents(client, parsedData.path);
+              }
               break;
 
             default:
@@ -678,7 +764,7 @@ export async function createHotReloader(
 
         const turbopackConnected: TurbopackConnectedAction = {
           action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
-          data: { sessionId },
+          data: { sessionId, browserToTerminal },
         };
         sendToClient(client, turbopackConnected);
 
@@ -709,7 +795,7 @@ export async function createHotReloader(
 
       const turbopackConnected: TurbopackConnectedAction = {
         action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
-        data: { sessionId },
+        data: { sessionId, browserToTerminal },
       };
       sendToClient(ws, turbopackConnected);
 
@@ -735,9 +821,28 @@ export async function createHotReloader(
     },
 
     handleClientMessage(ws, data) {
-      const parsedData = JSON.parse(data);
+      const result = parseHmrClientMessage(data);
+      if (result.status === "too-large") {
+        ws.close(1009, "HMR client message exceeds the 1 MB limit");
+        return;
+      }
+      if (result.status === "malformed") return;
+      const parsedData = result.value;
 
       switch (parsedData.event) {
+        case "browser-logs":
+          if (isBrowserLogsMessage(parsedData)) {
+            void forwardBrowserLogs(
+              parsedData,
+              browserToTerminal,
+              project,
+              resolvedProjectPath,
+              resolvedOutputPath,
+            ).catch((error) => {
+              console.error("Unable to forward browser logs", error);
+            });
+          }
+          break;
         case "client-error":
         case "client-warning":
         case "client-success":
@@ -767,16 +872,20 @@ export async function createHotReloader(
 
       switch (parsedData.type) {
         case "turbopack-subscribe":
-          subscribeToHmrEvents(
-            ws,
-            parsedData.path,
-            typeof parsedData.version === "string"
-              ? parsedData.version
-              : undefined,
-          );
+          if (typeof parsedData.path === "string") {
+            subscribeToHmrEvents(
+              ws,
+              parsedData.path,
+              typeof parsedData.version === "string"
+                ? parsedData.version
+                : undefined,
+            );
+          }
           break;
         case "turbopack-unsubscribe":
-          unsubscribeFromHmrEvents(ws, parsedData.path);
+          if (typeof parsedData.path === "string") {
+            unsubscribeFromHmrEvents(ws, parsedData.path);
+          }
           break;
         default:
           if (!parsedData.event) {
