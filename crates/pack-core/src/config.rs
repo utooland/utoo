@@ -136,6 +136,22 @@ pub struct Entries(Vec<EntryOptions>);
 pub struct DevServer {
     pub hot: Option<bool>,
     pub dynamic_hmr_chunk_lists: Option<bool>,
+    pub client: Option<DevServerClient>,
+}
+
+#[turbo_tasks::value(eq = "manual")]
+#[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct DevServerClient {
+    pub reconnect: Option<HmrReconnect>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Deserialize, OperationValue)]
+#[serde(untagged)]
+pub enum HmrReconnect {
+    Enabled(bool),
+    Attempts(u32),
 }
 
 /// Provider configuration item - can be a module name string or [module, export] tuple.
@@ -2110,6 +2126,35 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_hmr_reconnect_deserialization() {
+        let enabled: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "devServer": { "client": { "reconnect": true } }
+        }))
+        .unwrap();
+        assert!(matches!(
+            enabled
+                .dev_server
+                .and_then(|dev_server| dev_server.client)
+                .and_then(|client| client.reconnect),
+            Some(HmrReconnect::Enabled(true))
+        ));
+
+        let limited: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "devServer": { "client": { "reconnect": 5 } }
+        }))
+        .unwrap();
+        assert!(matches!(
+            limited
+                .dev_server
+                .and_then(|dev_server| dev_server.client)
+                .and_then(|client| client.reconnect),
+            Some(HmrReconnect::Attempts(5))
+        ));
+    }
 
     #[test]
     fn test_server_entries_deserialization() {

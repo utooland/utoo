@@ -12,6 +12,8 @@ type WebSocketMessage =
 let source: WebSocket | null = null;
 let eventCallbacks: Array<(event: WebSocketMessage) => void> = [];
 
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
+
 // Helper function to dispatch messages to all event callbacks
 function dispatchMessage(message: WebSocketMessage) {
   for (const eventCallback of eventCallbacks) {
@@ -65,10 +67,22 @@ function getSocketUrl() {
 
 export interface HMROptions {
   path: string;
+  reconnect?: HMRReconnect;
 }
+
+export type HMRReconnect = boolean | number;
 
 let reloading = false;
 let serverSessionId: number | null = null;
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+function getMaxReconnectAttempts(reconnect: HMRReconnect | undefined) {
+  if (reconnect === true) return Number.POSITIVE_INFINITY;
+  if (reconnect === false || reconnect === undefined) return 0;
+  if (!Number.isFinite(reconnect)) return 0;
+  return Math.max(0, Math.floor(reconnect));
+}
 
 // This is not used by Next.js, but it is used by the standalone turbopack-cli
 export function connectHMR(options: HMROptions) {
@@ -78,6 +92,11 @@ export function connectHMR(options: HMROptions) {
     console.log("[HMR] connecting...");
 
     function handleOnline() {
+      reconnectAttempt = 0;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+      }
       window.console.log("[HMR] connected");
 
       // Send the turbopack-connected message to trigger handleSocketConnected
@@ -159,6 +178,33 @@ export function connectHMR(options: HMROptions) {
       }
 
       window.console.warn("[HMR] disconnected");
+
+      if (reconnectTimer) {
+        return;
+      }
+
+      const maxReconnectAttempts = getMaxReconnectAttempts(options.reconnect);
+      if (reconnectAttempt >= maxReconnectAttempts) {
+        if (maxReconnectAttempts > 0) {
+          window.console.warn("[HMR] reconnect attempts exhausted");
+        }
+        return;
+      }
+
+      const reconnectDelay =
+        RECONNECT_DELAYS_MS[
+          Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)
+        ];
+      if (reconnectDelay === undefined) {
+        window.console.warn("[HMR] reconnect attempts exhausted");
+        return;
+      }
+
+      reconnectAttempt++;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        init();
+      }, reconnectDelay);
     }
 
     source = new WebSocket(`${getSocketUrl()}${options.path}`);

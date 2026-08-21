@@ -200,6 +200,15 @@ export type ExternalConfig = string | ExternalAdvanced;
  */
 export type ProviderConfig = Record<string, string | [string, string]>;
 
+export interface DevServerClientConfig {
+  /**
+   * Reconnect the HMR WebSocket after it disconnects.
+   * `true` retries indefinitely, a number limits the retry count, and the
+   * default `false` preserves the current no-reconnect behavior.
+   */
+  reconnect?: boolean | number;
+}
+
 /**
  * Development server options (port, host, HTTPS, HMR).
  * Used by the dev server and by config resolution for startup options.
@@ -209,6 +218,8 @@ export interface DevServerConfig {
   hot?: boolean;
   /** Register HMR chunk lists as dynamic chunks are loaded. */
   dynamicHmrChunkLists?: boolean;
+  /** Browser-side development client options. */
+  client?: DevServerClientConfig;
   /** Port to listen on. */
   port?: number;
   /** Host to bind (e.g. localhost, 0.0.0.0). */

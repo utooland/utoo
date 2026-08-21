@@ -242,6 +242,27 @@ pub struct SchemaDevServer {
     /// Register HMR chunk lists as dynamic chunks are loaded
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_hmr_chunk_lists: Option<bool>,
+
+    /// Browser-side development client options
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<SchemaDevServerClient>,
+}
+
+/// Browser-side development client options
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaDevServerClient {
+    /// Reconnect the HMR WebSocket. True retries indefinitely; a number limits attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reconnect: Option<SchemaHmrReconnect>,
+}
+
+/// HMR WebSocket reconnect policy
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaHmrReconnect {
+    Enabled(bool),
+    Attempts(u32),
 }
 
 // ---------------------------------------------------------------------------
