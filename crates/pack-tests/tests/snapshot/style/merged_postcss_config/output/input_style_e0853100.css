@@ -1,0 +1,8 @@
+/* [project]/style/merged_postcss_config/input/style.css [client] (css) */
+.merged-postcss {
+  width: 2rem;
+}
+
+.merged-postcss .child {
+  height: 1rem;
+}

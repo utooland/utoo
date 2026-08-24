@@ -1,0 +1,7 @@
+.merged-postcss {
+  width: 32px;
+
+  .child {
+    height: 16px;
+  }
+}
