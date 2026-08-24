@@ -1186,9 +1186,12 @@ pub struct SchemaStyleConfig {
     #[schemars(description = "CSS Modules configuration")]
     pub css_modules: Option<SchemaCssModulesConfig>,
 
-    /// Inline PostCSS configuration passed directly to the PostCSS transform
+    /// Inline PostCSS configuration. Its plugins run after plugins from a discovered config file
+    /// in the same PostCSS pass.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Inline PostCSS configuration")]
+    #[schemars(
+        description = "Inline PostCSS configuration appended after a discovered config file"
+    )]
     pub postcss: Option<serde_json::Value>,
 
     /// Sass configuration

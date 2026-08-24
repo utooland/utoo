@@ -1960,7 +1960,7 @@
           "description": "Less configuration"
         },
         "postcss": {
-          "description": "Inline PostCSS configuration"
+          "description": "Inline PostCSS configuration appended after a discovered config file"
         },
         "sass": {
           "description": "Sass configuration"

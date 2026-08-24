@@ -337,6 +337,10 @@ export interface ConfigComplete {
       localIdentName?: string;
     };
     emotion?: boolean | EmotionOptions;
+    /**
+     * Inline PostCSS configuration. Its plugins run after plugins from a
+     * discovered postcss.config.* file in the same PostCSS pass.
+     */
     postcss?: JSONValue;
     less?: {
       loader?: string;

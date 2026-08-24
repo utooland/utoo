@@ -15,6 +15,7 @@
     "@types/react-dom": "^18.2.0",
     "@utoo/pack-cli": "*",
     "postcss": "^8.4.31",
+    "postcss-nested": "^6.2.0",
     "postcss-plugin-px2rem": "^0.8.1"
   }
 }
