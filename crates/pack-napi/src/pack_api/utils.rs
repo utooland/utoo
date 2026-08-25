@@ -17,8 +17,8 @@ use turbo_tasks::{
     message_queue::{CompilationEvent, Severity},
 };
 use turbo_tasks_backend::{
-    BackendOptions, EvictionMode, GitVersionInfo, StartupCacheState, StorageMode,
-    TurboTasksBackend, db_invalidation::invalidation_reasons, noop_backing_storage,
+    BackendOptions, BackingStorageOptions, EvictionMode, GitVersionInfo, StartupCacheState,
+    StorageMode, TurboTasksBackend, db_invalidation::invalidation_reasons, noop_backing_storage,
     turbo_backing_storage,
 };
 use turbo_tasks_fs::FileContent;
@@ -48,9 +48,11 @@ pub fn create_turbo_tasks(
         let (backing_storage, cache_state) = turbo_backing_storage(
             &output_path.join(".turbopack/.cache"),
             &version_info,
-            is_ci,
-            is_short_session,
-            false,
+            BackingStorageOptions {
+                is_ci,
+                is_short_session,
+                skip_compaction: false,
+            },
         )?;
         let tt = TurboTasks::new(TurboTasksBackend::new(
             BackendOptions {
