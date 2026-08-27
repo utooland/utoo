@@ -15,6 +15,8 @@ NC='\033[0m' # No Color
 # Arguments
 REGISTRY_MODE=${1:-both}
 PM_LIST=${2:-utoo,bun}
+PNPM_BIN=${PNPM_BIN:-pnpm}
+PNPM12_BIN=${PNPM12_BIN:-pnpm12}
 
 # Run counts (configurable via env, default 3)
 BENCH_COLD_RUNS=${BENCH_COLD_RUNS:-3}
@@ -39,10 +41,12 @@ fi
 # Check for required commands (skip utoo-npm/utoo-next — they're paths, not in $PATH)
 REQUIRED_CMDS=(git node hyperfine /usr/bin/time)
 for pm in "${PACKAGE_MANAGERS[@]}"; do
-  if [[ "$pm" == "utoo-npm" || "$pm" == "utoo-next" ]]; then
-    continue
-  fi
-  REQUIRED_CMDS+=("$pm")
+  case "$pm" in
+    utoo-npm|utoo-next) ;;
+    pnpm) REQUIRED_CMDS+=("$PNPM_BIN") ;;
+    pnpm12) REQUIRED_CMDS+=("$PNPM12_BIN") ;;
+    *) REQUIRED_CMDS+=("$pm") ;;
+  esac
 done
 
 for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -81,7 +85,8 @@ echo ""
 
 # Cache path configuration
 UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
-PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
+PNPM_STORE_DIR="${PNPM_STORE_DIR:-/tmp/pnpm-bench-store}"
+PNPM12_STORE_DIR="${PNPM12_STORE_DIR:-/tmp/pnpm12-bench-store}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
 # aube: store = tarball CAS ($XDG_DATA_HOME/aube/store/v1/files),
 #       cache = packument/manifest + global-links ($XDG_CACHE_HOME/aube)
@@ -100,7 +105,10 @@ cat > "$PREPARE_SCRIPT" << 'PREPARE_EOF'
 set -e
 PROJECT_DIR="$1"; PM="$2"; COLD="$3"
 UTOO_CACHE_DIR="${UTOO_CACHE_DIR:-$HOME/.cache/nm}"
-PNPM_STORE_DIR="${PNPM_STORE_DIR:-$(pnpm store path 2>/dev/null || echo "$HOME/.pnpm-store")}"
+PNPM_BIN="${PNPM_BIN:-pnpm}"
+PNPM12_BIN="${PNPM12_BIN:-pnpm12}"
+PNPM_STORE_DIR="${PNPM_STORE_DIR:-/tmp/pnpm-bench-store}"
+PNPM12_STORE_DIR="${PNPM12_STORE_DIR:-/tmp/pnpm12-bench-store}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-$HOME/.bun/install}"
 AUBE_STORE_DIR="${AUBE_STORE_DIR:-$HOME/.local/share/aube}"
 AUBE_CACHE_DIR="${AUBE_CACHE_DIR:-$HOME/.cache/aube}"
@@ -111,13 +119,14 @@ if [ "$COLD" = "--cold" ]; then
   case "$PM" in
     utoo|utoo-npm|utoo-next) rm -rf "$UTOO_CACHE_DIR" ;;
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
-    pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
+    pnpm) rm -rf "$PNPM_STORE_DIR" ;;
+    pnpm12) rm -rf "$PNPM12_STORE_DIR" ;;
     bun)  rm -rf "$BUN_INSTALL_DIR"; bun pm cache rm 2>/dev/null || true ;;
     aube) rm -rf "$AUBE_STORE_DIR" "$AUBE_CACHE_DIR" ;;
   esac
 fi
 
-if [ "$PM" = "pnpm" ] || [ "$PM" = "aube" ]; then
+if [ "$PM" = "pnpm" ] || [ "$PM" = "pnpm12" ] || [ "$PM" = "aube" ]; then
   cd "$PROJECT_DIR"
   if [ -f "package.json" ] && grep -q '"workspaces"' package.json; then
     node -e "
@@ -222,8 +231,8 @@ clone_projects() {
   fi
 
   for pm in "${PACKAGE_MANAGERS[@]}"; do
-    if [ "$pm" = "pnpm" ] || [ "$pm" = "aube" ]; then
-      echo -e "${YELLOW}Setting up pnpm-workspace.yaml (shared by pnpm/aube)...${NC}"
+    if [ "$pm" = "pnpm" ] || [ "$pm" = "pnpm12" ] || [ "$pm" = "aube" ]; then
+      echo -e "${YELLOW}Setting up pnpm-workspace.yaml (shared by pnpm/pnpm12/aube)...${NC}"
       setup_pnpm_workspace "$BENCH_DIR/ant-design"
       setup_pnpm_workspace "$BENCH_DIR/ant-design-x"
       break
@@ -254,7 +263,10 @@ get_install_cmd() {
       echo "yarn install --ignore-scripts --registry $registry"
       ;;
     pnpm)
-      echo "npm_config_package_manager_strict=false pnpm install --ignore-scripts --registry $registry"
+      echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM_BIN install --ignore-scripts --registry $registry --store-dir=$PNPM_STORE_DIR"
+      ;;
+    pnpm12)
+      echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM12_BIN install --ignore-scripts --registry $registry --store-dir=$PNPM12_STORE_DIR"
       ;;
     bun)
       if [ "$cold" = "true" ]; then
@@ -319,7 +331,7 @@ run_warm_benchmarks() {
     local prepop_log="$LOG_DIR/${project}_${reg_short}_prepopulate_${pm}.log"
     cd "$project_dir"
     git clean -dfx
-    if [ "$pm" = "pnpm" ] || [ "$pm" = "aube" ]; then
+    if [ "$pm" = "pnpm" ] || [ "$pm" = "pnpm12" ] || [ "$pm" = "aube" ]; then
       setup_pnpm_workspace "$project_dir"
     fi
     echo -e "    ${CYAN}Pre-populating $pm cache...${NC}"

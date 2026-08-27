@@ -10,7 +10,7 @@ name: utoopm-e2e-bench
 #   pull_request / push with `(pm)` in title/msg → e2e jobs
 #   pull_request labeled `benchmark` → bench-phases (utoo / utoo-npm / bun)
 #   workflow_dispatch with `target` choice → manual one-off runs
-#     (pm-bench-all = full PM shootout vs pnpm/yarn/bun/aube;
+#     (pm-bench-all = full PM shootout vs pnpm/pnpm12/yarn/bun/aube;
 #      pm-bench-phases = same as the labeled trigger but ad-hoc;
 #      pm-bench-pcap = tcpdump capture for resolve phase)
 #
@@ -40,7 +40,7 @@ on:
         type: choice
         options: [both, npmjs, npmmirror]
       pm_list:
-        description: '[pm-bench-all] Comma-separated PMs (e.g. utoo,bun); "all" → utoo,pnpm,yarn,bun,aube'
+        description: '[pm-bench-all] Comma-separated PMs (e.g. utoo,bun); "all" → utoo,pnpm,pnpm12,yarn,bun,aube'
         required: false
         default: 'utoo,bun'
         type: string
@@ -544,13 +544,34 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install pnpm 12
+        id: pnpm12
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm12')
+        uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
+        with:
+          version: next-12
+          dest: ~/setup-pnpm12
+          install: false
+      - name: Expose pnpm 12 binary
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm12')
+        run: echo "PNPM12_BIN=${{ steps.pnpm12.outputs.dest }}/pnpm" >> "$GITHUB_ENV"
+      - name: Install pnpm
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install aube
+        if: contains(github.event.inputs.phases_pm_list, 'aube')
+        run: npm install -g @endevco/aube@1.29.1
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: linux
       # utoo-npm (last published release) only changes on releases — bench it
       # on manual dispatch only; label-triggered PR runs compare against
       # utoo-next, which is the signal that can actually change per PR.
-      - if: github.event_name == 'workflow_dispatch'
+      - if: github.event_name == 'workflow_dispatch' && contains(github.event.inputs.phases_pm_list, 'utoo-npm')
         uses: ./.github/actions/install-utoo-npm-baseline
       # The utoo-next binary is built upstream by build-linux's
       # "Build next branch utoo (bench baseline)" step. Just download.
@@ -572,6 +593,9 @@ jobs:
           if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           "$UTOO_NEXT_BIN" --version
           bun --version
+          if command -v pnpm >/dev/null; then env npm_config_package_manager_strict=false npm_config_manage_package_manager_versions=false pnpm --version; fi
+          if [ -n "${PNPM12_BIN:-}" ]; then env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version; fi
+          if command -v aube >/dev/null; then aube --version; fi
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
@@ -579,6 +603,8 @@ jobs:
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache \
                  /tmp/utoo-next-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
+                 /tmp/pnpm-bench-store /tmp/pnpm12-bench-store \
+                 /tmp/aube-bench-data /tmp/aube-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -664,22 +690,49 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install pnpm 12
+        id: pnpm12
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm12')
+        uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
+        with:
+          version: next-12
+          dest: ~/setup-pnpm12
+          install: false
+      - name: Expose pnpm 12 binary
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm12')
+        run: echo "PNPM12_BIN=${{ steps.pnpm12.outputs.dest }}/pnpm" >> "$GITHUB_ENV"
+      - name: Install pnpm
+        if: contains(github.event.inputs.phases_pm_list, 'pnpm')
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install aube
+        if: contains(github.event.inputs.phases_pm_list, 'aube')
+        run: npm install -g @endevco/aube@1.29.1
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: mac
-      - uses: ./.github/actions/install-utoo-npm-baseline
+      - if: contains(github.event.inputs.phases_pm_list, 'utoo-npm')
+        uses: ./.github/actions/install-utoo-npm-baseline
       - name: Verify tools
         run: |
           hyperfine --version
           utoo --version
-          "$UTOO_NPM_BIN" --version
+          if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           bun --version
+          if command -v pnpm >/dev/null; then env npm_config_package_manager_strict=false npm_config_manage_package_manager_versions=false pnpm --version; fi
+          if [ -n "${PNPM12_BIN:-}" ]; then env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version; fi
+          if command -v aube >/dev/null; then aube --version; fi
       - name: Define cache wipe function
         run: |
           cat > /tmp/wipe-bench-state.sh <<'WIPE'
           #!/usr/bin/env bash
           rm -rf /tmp/pm-bench /tmp/pm-bench-results /tmp/pm-bench-output \
                  /tmp/utoo-bench-cache /tmp/utoo-npm-bench-cache /tmp/utoo-alt-bench-cache /tmp/bun-bench-cache \
+                 /tmp/pnpm-bench-store /tmp/pnpm12-bench-store \
+                 /tmp/aube-bench-data /tmp/aube-bench-cache \
                  ~/.bun/install/cache ~/.cache/nm 2>/dev/null || true
           mkdir -p /tmp/pm-bench-output
           WIPE
@@ -740,7 +793,7 @@ jobs:
   # ============================================================
   # PM-BENCH-ALL (manual full PM shootout)
   # workflow_dispatch with target=pm-bench-all only — comparing utoo
-  # against pnpm/yarn/bun/aube on cold + warm installs across
+  # against pnpm/pnpm12/yarn/bun/aube on cold + warm installs across
   # configurable registries is slow, so it's never auto-triggered.
   # ============================================================
 
@@ -777,9 +830,22 @@ jobs:
         run: |
           PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
           if [ "$PM_LIST" = "all" ]; then
-            PM_LIST="utoo,pnpm,yarn,bun,aube"
+            PM_LIST="utoo,pnpm,pnpm12,yarn,bun,aube"
           fi
           echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+      - name: Install pnpm 12
+        id: pnpm12
+        if: contains(steps.pm.outputs.list, 'pnpm12')
+        uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
+        with:
+          version: next-12
+          dest: ~/setup-pnpm12
+          install: false
+      - name: Expose pnpm 12 binary
+        if: contains(steps.pm.outputs.list, 'pnpm12')
+        run: echo "PNPM12_BIN=${{ steps.pnpm12.outputs.dest }}/pnpm" >> "$GITHUB_ENV"
       - name: Install pnpm
         if: contains(steps.pm.outputs.list, 'pnpm')
         uses: pnpm/action-setup@v4
@@ -803,7 +869,11 @@ jobs:
           hyperfine --version
           IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
           for pm in "${PMS[@]}"; do
-            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+            if [ "$pm" = "pnpm12" ]; then
+              echo "$pm: $(env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version 2>&1 || echo 'not installed')"
+            else
+              echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+            fi
           done
       - name: Run benchmark
         run: |
@@ -843,9 +913,22 @@ jobs:
         run: |
           PM_LIST="${{ github.event.inputs.pm_list || 'utoo,bun' }}"
           if [ "$PM_LIST" = "all" ]; then
-            PM_LIST="utoo,pnpm,yarn,bun,aube"
+            PM_LIST="utoo,pnpm,pnpm12,yarn,bun,aube"
           fi
           echo "list=$PM_LIST" >> $GITHUB_OUTPUT
+      - name: Install pnpm 12
+        id: pnpm12
+        if: contains(steps.pm.outputs.list, 'pnpm12')
+        uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
+        with:
+          version: next-12
+          dest: ~/setup-pnpm12
+          install: false
+      - name: Expose pnpm 12 binary
+        if: contains(steps.pm.outputs.list, 'pnpm12')
+        run: echo "PNPM12_BIN=${{ steps.pnpm12.outputs.dest }}/pnpm" >> "$GITHUB_ENV"
       - name: Install pnpm
         if: contains(steps.pm.outputs.list, 'pnpm')
         uses: pnpm/action-setup@v4
@@ -869,7 +952,11 @@ jobs:
           hyperfine --version
           IFS=',' read -ra PMS <<< "${{ steps.pm.outputs.list }}"
           for pm in "${PMS[@]}"; do
-            echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+            if [ "$pm" = "pnpm12" ]; then
+              echo "$pm: $(env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version 2>&1 || echo 'not installed')"
+            else
+              echo "$pm: $($pm --version 2>&1 || echo 'not installed')"
+            fi
           done
       - name: Run benchmark
         run: |
