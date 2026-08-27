@@ -313,7 +313,7 @@ async fn async_main() -> Result<()> {
     crate::initialize(InitializeOptions {
         registry: cli.registry,
         cache_dir: cli.cache_dir.map(Into::into),
-        legacy_peer_deps: cli.legacy_peer_deps,
+        legacy_peer_deps: legacy_peer_deps_override(cli.legacy_peer_deps),
         manifests_concurrency_limit: cli.manifests_concurrency_limit,
         script_concurrency_limit: cli.script_concurrency_limit,
     })
@@ -496,6 +496,14 @@ fn has_flag_before_delimiter(args: &[String], flag: &str) -> bool {
         .any(|arg| arg == flag)
 }
 
+// `ArgAction::SetTrue` materializes an absent flag as `Some(false)`. The CLI
+// historically treated that as no override so the configured/default peer
+// policy remains in effect; embedders can still pass `Some(false)` directly to
+// `initialize` when they intentionally want to include peer dependencies.
+fn legacy_peer_deps_override(value: Option<bool>) -> Option<bool> {
+    value.filter(|enabled| *enabled)
+}
+
 fn detect_help_target(args: &[String]) -> Option<HelpTarget> {
     let command = detect_command(args)?;
     (command != "help" && command != "version").then(|| HelpTarget {
@@ -610,4 +618,25 @@ fn dependency_failure_details(error: &anyhow::Error) -> Option<ErrorDetails> {
             })
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn absent_legacy_peer_flag_does_not_override_the_default() {
+        let absent = Cli::try_parse_from(["utoo"]).expect("bare CLI should parse");
+        assert_eq!(absent.legacy_peer_deps, Some(false));
+        assert_eq!(legacy_peer_deps_override(absent.legacy_peer_deps), None);
+
+        let present = Cli::try_parse_from(["utoo", "--legacy-peer-deps"])
+            .expect("legacy peer flag should parse");
+        assert_eq!(
+            legacy_peer_deps_override(present.legacy_peer_deps),
+            Some(true)
+        );
+    }
 }
