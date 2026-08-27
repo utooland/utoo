@@ -3,6 +3,8 @@
  * Used by both NAPI (Node.js) and browser-based implementations.
  */
 
+import type { BrowserToTerminal } from "./config";
+
 // ============================================================================
 // Resource and Issue Types
 // ============================================================================
@@ -104,7 +106,37 @@ export interface TurbopackMessageAction {
 
 export interface TurbopackConnectedAction {
   action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED;
-  data: { sessionId: number };
+  data: {
+    sessionId: number;
+    browserToTerminal?: BrowserToTerminal;
+  };
+}
+
+export type BrowserLogMethod =
+  | "assert"
+  | "debug"
+  | "dir"
+  | "dirxml"
+  | "error"
+  | "group"
+  | "groupCollapsed"
+  | "groupEnd"
+  | "info"
+  | "log"
+  | "table"
+  | "trace"
+  | "warn";
+
+export interface BrowserLogEntry {
+  method: BrowserLogMethod;
+  kind: "console" | "uncaught-error" | "unhandled-rejection";
+  args: string[];
+  stack?: string;
+}
+
+export interface BrowserLogsMessage {
+  event: "browser-logs";
+  entries: BrowserLogEntry[];
 }
 
 export interface BuildingAction {
@@ -155,6 +187,7 @@ export type HMR_ACTION_TYPES =
 export interface TurbopackSubscribeMessage {
   type: "turbopack-subscribe";
   path: string;
+  version?: string;
 }
 
 export interface TurbopackUnsubscribeMessage {
@@ -165,6 +198,7 @@ export interface TurbopackUnsubscribeMessage {
 export type HmrClientMessage =
   | TurbopackSubscribeMessage
   | TurbopackUnsubscribeMessage
+  | BrowserLogsMessage
   | { event: string; [key: string]: unknown };
 
 // ============================================================================

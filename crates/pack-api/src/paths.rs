@@ -6,7 +6,7 @@ use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::HashAlgorithm;
 use turbopack_browser::ecmascript::{EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList};
 use turbopack_core::{
-    asset::Asset,
+    asset::{Asset, no_hash_salt},
     output::{OutputAsset, OutputAssets},
     reference::all_assets_from_entries,
 };
@@ -46,7 +46,10 @@ pub async fn all_server_paths(
                     Ok(
                         if let Some(path) = node_root.get_path_to(&*asset.path().await?) {
                             let content_hash = ReadRef::into_owned(
-                                asset.content().hash(HashAlgorithm::Xxh3Hash64Hex).await?,
+                                asset
+                                    .content()
+                                    .hash(no_hash_salt(), HashAlgorithm::Xxh3Hash64Hex)
+                                    .await?,
                             );
                             Some(ServerPath {
                                 path: path.to_string(),

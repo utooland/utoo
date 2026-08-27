@@ -9,15 +9,17 @@ use crate::cmd::deps::build_deps;
 use crate::fs;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::lock::{
-    Package, UpdatePackageJsonOptions, extract_package_name, format_save_spec, group_by_depth,
-    is_pkg_lock_outdated, resolve_package_spec, save_package_lock, update_package_json,
+    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
+    resolve_package_spec_details, save_package_lock, update_package_json,
 };
 use crate::helper::ruborist_context::Context;
 use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
 use crate::service::rebuild::RebuildService;
-use crate::util::cli_enum::{OmitType, PackageAction, SaveType};
+use crate::service::script::ScriptOutput;
+use crate::util::cli_enum::{OmitType, PackageAction, ReifyMode, SaveType};
+use crate::util::cloner::ClonePolicy;
 use crate::util::install_progress;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
@@ -25,10 +27,12 @@ use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
 use crate::util::proxy_env::print_proxy_env_hint_once;
+use utoo_ruborist::builder::DevDeps;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
+use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::progress::PackageTarballInfo;
 
-use super::binary::update_package_binary;
+use super::binary::{requires_private_copy, update_package_binary};
 use super::clean::clean_deps;
 
 /// Check if a package should be omitted based on omit config
@@ -95,25 +99,46 @@ async fn install_packages(
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    mode: ReifyMode,
 ) -> Result<()> {
     // Surface the clean step in the spinner — it doesn't move `pos`, so
     // without a message the bar looks frozen on large trees.
     log_progress("validating node_modules");
     clean_deps(groups, cwd).await?;
-    reify_packages(groups, cwd, omit, scheduler).await
+    reify_packages(groups, cwd, omit, scheduler, mode).await
+}
+
+async fn prepare_reify_target(target: &Path, mode: ReifyMode) -> Result<()> {
+    if mode != ReifyMode::Force {
+        return Ok(());
+    }
+
+    let Ok(metadata) = fs::symlink_metadata(target).await else {
+        return Ok(());
+    };
+    let result = if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(target).await
+    } else {
+        fs::remove_dir_all(target).await
+    };
+    result.with_context(|| format!("Failed to force-replace {}", target.display()))
+}
+
+fn is_node_modules_path(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .any(|component| component.as_os_str() == "node_modules")
 }
 
 /// Clone/link every package in `groups` into `<cwd>/node_modules`, level by
 /// level, WITHOUT pruning extraneous entries (no `clean_deps`). Within each
-/// level, tasks run concurrently. Global installs (`utoo install -g`, `utoo x`)
-/// reify additively into a shared global `node_modules` so previously-installed
-/// tools survive — and there is no synthetic root `package.json` on disk for
-/// `clean_deps` / `find_workspaces` to read.
+/// level, tasks run concurrently.
 async fn reify_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
     scheduler: &super::install_scheduler::InstallScheduler,
+    mode: ReifyMode,
 ) -> Result<()> {
     log_progress("linking packages");
 
@@ -138,6 +163,13 @@ async fn reify_packages(
                 // name/version/resolved/target_path it actually needs, so
                 // skipped/linked entries never pay for a LockPackage copy.
                 if let Some(ref resolved) = package.resolved {
+                    if mode == ReifyMode::Force && !is_node_modules_path(path) {
+                        anyhow::bail!(
+                            "Refusing to force-replace path outside node_modules: {path}"
+                        );
+                    }
+                    let target_path = cwd.join(path);
+                    prepare_reify_target(&target_path, mode).await?;
                     // Lockfile stores `file:` URLs root-relative (npm format).
                     // Cloner only understands absolute URLs — re-absolutize
                     // here so the cloner/downloader stays unaware of project
@@ -181,15 +213,28 @@ async fn reify_packages(
                         .version
                         .clone()
                         .ok_or_else(|| anyhow::anyhow!("package {name} missing version"))?;
-                    let target_path = cwd.join(path);
                     let scheduler = scheduler.clone();
+                    // Packages with lifecycle scripts and packages patched by
+                    // the binary-mirror pass are both mutated after cloning.
+                    // Keep them private instead of hardlinking from cache.
+                    let policy = if package.has_install_scripts() || requires_private_copy(&name) {
+                        ClonePolicy::Private
+                    } else {
+                        ClonePolicy::Shared
+                    };
 
                     // Check if this is an optional dependency
                     let is_optional = package.is_optional();
 
                     clone_tasks.push(async move {
                         if let Err(e) = scheduler
-                            .ensure_clone(name.clone(), version, resolved, target_path.clone())
+                            .ensure_clone(
+                                name.clone(),
+                                version,
+                                resolved,
+                                target_path.clone(),
+                                policy,
+                            )
                             .await
                         {
                             if is_optional {
@@ -238,6 +283,10 @@ async fn resolve_package_lock_with_scheduler(
 
 pub struct InstallService;
 
+fn global_install_root(prefix: Option<&str>, name: &str) -> Result<std::path::PathBuf> {
+    Ok(get_global_package_dir(prefix)?.join(name))
+}
+
 impl InstallService {
     pub async fn update_packages(
         action: PackageAction,
@@ -246,6 +295,7 @@ impl InstallService {
         scripts: ScriptPolicy,
         save_type: SaveType,
         omit: &HashSet<OmitType>,
+        output: ScriptOutput,
     ) -> Result<()> {
         tracing::debug!(
             "update packages: {:?} {:?} {:?} {:?}",
@@ -280,7 +330,7 @@ impl InstallService {
             .await
             .context("Failed to build package-lock.json")?;
 
-        Self::install(scripts, &root_path, omit)
+        Self::install(scripts, &root_path, omit, output)
             .await
             .context("Failed to install packages")?;
 
@@ -291,6 +341,17 @@ impl InstallService {
         scripts: ScriptPolicy,
         root_path: &Path,
         omit: &HashSet<OmitType>,
+        output: ScriptOutput,
+    ) -> Result<()> {
+        Self::install_with_mode(scripts, root_path, omit, ReifyMode::Incremental, output).await
+    }
+
+    pub async fn install_with_mode(
+        scripts: ScriptPolicy,
+        root_path: &Path,
+        omit: &HashSet<OmitType>,
+        mode: ReifyMode,
+        output: ScriptOutput,
     ) -> Result<()> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
@@ -370,7 +431,7 @@ impl InstallService {
         }
 
         let link_start = Instant::now();
-        let install_result = install_packages(&groups, root_path, omit, &scheduler)
+        let install_result = install_packages(&groups, root_path, omit, &scheduler, mode)
             .await
             .context("Failed to install packages");
 
@@ -379,99 +440,144 @@ impl InstallService {
         let clone_elapsed = link_start.elapsed();
         finish_progress_bar("node_modules cloned", Some(clone_elapsed));
 
-        RebuildService::rebuild(&package_lock, root_path, scripts).await?;
+        RebuildService::rebuild(&package_lock, root_path, scripts, output).await?;
 
         print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }
 
-    /// Install a package globally (`utoo install -g`, `utoo x`).
+    /// Install one tool beneath an npm-style prefix.
     ///
-    /// The tool is installed as a **production dependency** of an in-memory
-    /// synthetic root — never as a root project — so it runs the install
-    /// lifecycle (`preinstall`/`install`/`postinstall` + bin) but never
-    /// `prepare`/`prepublish`, and its `devDependencies` are not installed
-    /// (matching `npm install -g` and bun). No wrapper `package.json` is written:
-    /// the global `node_modules` is the source of truth, reified **additively**
-    /// so previously-installed globals survive.
-    pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+    /// `utoo install -g` passes the user's global prefix; `utoo x` passes its
+    /// per-name/version cache prefix. Both produce the same isolated layout:
+    ///
+    /// ```text
+    /// <prefix>/
+    /// ├── bin/<command> -> ../lib/node_modules/<name>/<bin-entry>
+    /// └── lib/node_modules/<name>/
+    ///     ├── package.json
+    ///     └── node_modules/          # this tool's production dependencies
+    /// ```
+    ///
+    /// The installed tool is the dependency-resolution root, so transitive
+    /// packages cannot be hoisted beside other global tools. It participates in
+    /// dependency lifecycle hooks (`preinstall`/`install`/`postinstall`) but not
+    /// project-only hooks (`prepare`/`prepublish`) or root dev dependencies.
+    pub async fn install_global_package(
+        npm_spec: &str,
+        prefix: Option<&str>,
+        output: ScriptOutput,
+    ) -> Result<()> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
-        let (name, resolved_version, version_spec) = resolve_package_spec(npm_spec).await?;
-        // Resolvable spec for the synthetic dependency: registry ranges pinned to
-        // the resolved version; git/file/url specs kept as-is.
-        let dep_spec = format_save_spec(&version_spec, &resolved_version);
-
-        // Shared global `node_modules` base (`<prefix>/lib/node_modules`); reify
-        // from its parent so the tool lands at `<root>/node_modules/<name>`.
+        let resolved = resolve_package_spec_details(npm_spec).await?;
         let global_node_modules = get_global_package_dir(prefix)?;
-        let root_path = global_node_modules
-            .parent()
-            .context("global node_modules has no parent directory")?
-            .to_path_buf();
-        fs::create_dir_all(&root_path).await?;
-
-        // Synthetic private root: `{ private, dependencies: { <name>: <spec> } }`.
-        // Lives only in memory — fed straight to the resolver.
-        let mut pkg = utoo_ruborist::manifest::PackageJson::new("utoo-global", "0.0.0");
-        pkg.private = Some(true);
-        pkg.dependencies = Some(HashMap::from([(name.clone(), dep_spec)]));
+        let root_path = global_install_root(prefix, &resolved.name)?;
+        fs::create_dir_all(&global_node_modules).await?;
 
         tracing::debug!(
-            "Installing global package {name} into {}",
+            "Installing global package {} into {}",
+            resolved.name,
             root_path.display()
         );
-
-        // Production install: never pull devDependencies.
-        let omit = HashSet::from([OmitType::Dev]);
 
         let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
-        // Resolve the tool + its prod deps from the synthetic root. Resolver
-        // events drive the download pipeline (same head start a cold install gets).
-        start_progress_bar();
-        let resolve_start = Instant::now();
-        let options = Context::install_deps_options(root_path.clone(), scheduler.clone()).await;
-        let lock = match utoo_ruborist::service::build_deps(options, pkg).await {
-            Ok(lock) => lock,
-            Err(e) => {
-                scheduler_handle.shutdown().await;
-                return Err(e).context("Failed to resolve global package");
+        let install_result: Result<_> = async {
+            // This entry point is overwrite-oriented. `ut x` skips it on a
+            // cache hit; an explicit global install replaces only the requested
+            // tool and never touches siblings in the shared node_modules.
+            if fs::try_exists(&root_path).await.unwrap_or(false) {
+                fs::remove_dir_all(&root_path)
+                    .await
+                    .with_context(|| format!("Failed to replace {}", root_path.display()))?;
             }
-        };
-        finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
 
-        // Reify ADDITIVELY (no clean_deps) into the shared global node_modules.
-        let groups = group_by_depth(&lock.packages);
-        if !lock.packages.is_empty() {
+            scheduler
+                .ensure_clone(
+                    resolved.name.clone(),
+                    resolved.version.clone(),
+                    resolved.tarball_url.clone(),
+                    root_path.clone(),
+                    ClonePolicy::Private,
+                )
+                .await
+                .context("Failed to materialize global package")?;
+            update_package_binary(&root_path, &resolved.name).await?;
+
+            let mut pkg: PackageJson = crate::util::json::load_package_json(&root_path)
+                .await
+                .context("Failed to load installed global tool")?;
+            // Published packages are installed as dependencies, never as
+            // workspace roots. Keep package.json intact; only the in-memory
+            // resolution view suppresses workspace discovery.
+            pkg.workspaces = None;
+
+            // Resolve production dependencies with the package itself as the
+            // real root. Resolver paths therefore land below
+            // `<prefix>/lib/node_modules/<name>/node_modules`, not beside it.
             start_progress_bar();
-            PROGRESS_BAR.set_length(lock.packages.len() as u64);
-        }
-        let link_start = Instant::now();
-        let reify = reify_packages(&groups, &root_path, &omit, &scheduler).await;
-        let counts = scheduler_handle.shutdown().await;
-        reify.context("Failed to install global package")?;
-        let clone_elapsed = link_start.elapsed();
-        finish_progress_bar("node_modules cloned", Some(clone_elapsed));
+            let resolve_start = Instant::now();
+            let mut options =
+                Context::install_deps_options(root_path.clone(), scheduler.clone()).await;
+            // A package tarball may contain its publisher's lockfile. It does
+            // not govern consumers, so never seed a global install from it.
+            options.baseline = None;
+            let lock = utoo_ruborist::service::build_deps_with_root_dev_deps(
+                options,
+                pkg,
+                DevDeps::Exclude,
+            )
+            .await
+            .context("Failed to resolve global package")?;
+            finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
 
-        // Dependency lifecycle only — preinstall/install/postinstall + bin
-        // linking for the tool and its deps. No project/workspace hooks, so no
-        // `prepare`/`prepublish`, and no disk root `package.json` is required.
-        let packages =
+            // The root was freshly materialized above. Reify only this tool's
+            // lock beneath its own node_modules; sibling global tools are
+            // outside `root_path` and cannot be pruned or overwritten.
+            let groups = group_by_depth(&lock.packages);
+            if !lock.packages.is_empty() {
+                start_progress_bar();
+                PROGRESS_BAR.set_length(lock.packages.len() as u64);
+            }
+            let link_start = Instant::now();
+            reify_packages(
+                &groups,
+                &root_path,
+                &HashSet::new(),
+                &scheduler,
+                ReifyMode::Incremental,
+            )
+            .await
+            .context("Failed to install global package")?;
+            finish_progress_bar("node_modules cloned", Some(link_start.elapsed()));
+            Ok(lock)
+        }
+        .await;
+        let counts = scheduler_handle.shutdown().await;
+        let lock = install_result?;
+
+        // Dependency lifecycle only: the shared queue knows only
+        // preinstall/install/postinstall. Add the root package explicitly
+        // because roots are not dependency entries in the lock, but leave its
+        // bins for the prefix-level link step below.
+        let package_info = PackageInfo::from_path(&root_path)
+            .await
+            .context("Failed to load installed global tool")?;
+        let mut root_lifecycle = package_info.clone();
+        root_lifecycle.bin_files.clear();
+        let mut packages =
             PackageService::collect_packages_from_lock(&lock, &root_path, ScriptPolicy::Run)
                 .await?;
+        packages.push((root_lifecycle, false));
         if !packages.is_empty() {
             let queues =
                 PackageService::create_execution_queues_with_options(packages, ScriptPolicy::Run)?;
-            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run).await?;
+            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run, output).await?;
         }
 
         // Link the tool's own bin into the global bin dir.
-        let tool_dir = global_node_modules.join(&name);
-        let package_info = PackageInfo::from_path(&tool_dir)
-            .await
-            .context("Failed to load installed global tool")?;
         let target_bin_dir =
             get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
         package_info
@@ -487,6 +593,125 @@ impl InstallService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::package::{LifecycleScripts, PackageInfo};
+    use crate::util::platform_const::GLOBAL_NODE_MODULES;
+    use tempfile::tempdir;
+
+    #[test]
+    fn global_install_root_is_the_package_isolation_boundary() {
+        let temp = tempdir().unwrap();
+        let prefix = temp.path().to_string_lossy();
+        let root = global_install_root(Some(&prefix), "@scope/tool").unwrap();
+
+        assert_eq!(
+            root,
+            temp.path()
+                .join(GLOBAL_NODE_MODULES)
+                .join("@scope")
+                .join("tool")
+        );
+        assert_eq!(
+            root.join("node_modules"),
+            temp.path()
+                .join(GLOBAL_NODE_MODULES)
+                .join("@scope")
+                .join("tool")
+                .join("node_modules")
+        );
+    }
+
+    #[test]
+    fn global_tool_queues_dependency_lifecycle_only() {
+        let package = PackageInfo {
+            path: "/global/tool".into(),
+            bin_files: vec![],
+            scripts: Default::default(),
+            lifecycle_scripts: LifecycleScripts::from_scripts(&HashMap::from([
+                ("preinstall".into(), "echo preinstall".into()),
+                ("install".into(), "echo install".into()),
+                ("postinstall".into(), "echo postinstall".into()),
+                ("prepare".into(), "echo prepare".into()),
+            ])),
+            name: "tool".into(),
+        };
+
+        let queues = PackageService::create_execution_queues_with_options(
+            vec![(package, false)],
+            ScriptPolicy::Run,
+        )
+        .unwrap();
+
+        assert_eq!(queues.preinstall.len(), 1);
+        assert_eq!(queues.install.len(), 1);
+        assert_eq!(queues.postinstall.len(), 1);
+        assert!(queues.bin_linking.is_empty());
+    }
+
+    #[tokio::test]
+    async fn force_reify_removes_existing_package_target() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("node_modules").join("pkg");
+        fs::create_dir_all(&target).await.unwrap();
+        fs::write(
+            target.join("package.json"),
+            br#"{"name":"pkg","version":"1.0.0"}"#,
+        )
+        .await
+        .unwrap();
+        fs::write(target.join("locally-modified.js"), b"modified")
+            .await
+            .unwrap();
+
+        prepare_reify_target(&target, ReifyMode::Force)
+            .await
+            .unwrap();
+
+        assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn force_reify_removes_link_without_touching_source() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("workspace");
+        let target = temp.path().join("node_modules").join("workspace");
+        fs::create_dir_all(&source).await.unwrap();
+        fs::create_dir_all(target.parent().unwrap()).await.unwrap();
+        std::os::unix::fs::symlink(&source, &target).unwrap();
+
+        prepare_reify_target(&target, ReifyMode::Force)
+            .await
+            .unwrap();
+
+        assert!(source.exists());
+        assert!(!target.exists());
+    }
+
+    #[tokio::test]
+    async fn incremental_reify_preserves_existing_package_target() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("node_modules").join("pkg");
+        fs::create_dir_all(&target).await.unwrap();
+        fs::write(target.join("locally-modified.js"), b"modified")
+            .await
+            .unwrap();
+
+        prepare_reify_target(&target, ReifyMode::Incremental)
+            .await
+            .unwrap();
+
+        assert!(target.join("locally-modified.js").exists());
+    }
+
+    #[test]
+    fn force_reify_is_limited_to_node_modules_paths() {
+        assert!(!is_node_modules_path(""));
+        assert!(!is_node_modules_path("packages/app"));
+        assert!(is_node_modules_path("node_modules/pkg"));
+        assert!(is_node_modules_path(
+            "node_modules/parent/node_modules/child"
+        ));
+    }
 
     #[test]
     fn test_extract_package_name_from_path() {

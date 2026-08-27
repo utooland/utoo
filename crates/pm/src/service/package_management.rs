@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::install::InstallService;
+use super::script::ScriptOutput;
 use crate::helper::lock::resolve_package_spec;
 
 /// Package management service for handling package installation and caching
@@ -17,14 +18,24 @@ impl PackageManagementService {
 
     /// Install a package to the utoo cache directory using utoo's own installation logic.
     /// Delegates to `InstallService::install_global_package` with a per-tool prefix
-    /// (`~/.utoo/utx/<name>/<version>`), so the tool is installed as a dependency.
+    /// (`~/.utoo/utx/<name>/<version>`), producing the same npm-style isolated
+    /// prefix layout as a persistent global install:
+    ///
+    /// ```text
+    /// <cache-prefix>/
+    /// ├── bin/<command>
+    /// └── lib/node_modules/<name>/node_modules/<dependency>
+    /// ```
     ///
     /// The prefix uses the same `<name>/<version>` two-segment layout as the
     /// package store (`~/.cache/nm`): a scoped name nests naturally
     /// (`@scope/pkg` → `@scope/pkg/<version>`) so no name escaping is needed.
     /// The directory is purely an internal addressing key — nothing parses it
     /// back (see `execute.rs`, which only searches under the returned path).
-    pub async fn install_package_to_cache(package_name: &str) -> Result<PathBuf> {
+    pub async fn install_package_to_cache(
+        package_name: &str,
+        output: ScriptOutput,
+    ) -> Result<PathBuf> {
         let (name, version, _) = resolve_package_spec(package_name).await?;
 
         let cache_dir = Self::get_utoo_cache_dir()?;
@@ -44,6 +55,7 @@ impl PackageManagementService {
         InstallService::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
+            output,
         )
         .await?;
         tracing::debug!("Package {name} installed successfully");

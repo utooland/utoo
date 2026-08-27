@@ -73,14 +73,6 @@ utoo does not check `os` / `cpu` / `libc` fields against the current platform fo
 
 ---
 
-### Duplicate workspace name detection
-
-**Fixtures (1):** `workspaces-duplicate`
-
-utoo does not detect when multiple workspace packages declare the same `name` in their package.json (should error with `EDUPLICATEWORKSPACE`).
-
----
-
 ### Dependency cycle OOM
 
 **Fixtures (1):** `pathological-dep-nesting-cycle`
@@ -141,7 +133,7 @@ npm/cli's arborist tests use multi-layered assertions:
 - Add expected version checks for 15–20 key fixtures (peer-deps, dedup,
   workspace variants) using `node -e "require('./node_modules/pkg/package.json').version"`
 - Verify expected packages exist (and unexpected ones don't) in `node_modules/`
-- Validate `package-lock.json` is valid JSON
+- Validate generated `package-lock.json` is valid JSON (implemented in `e2e/pm-arborist.sh`)
 
 **Phase 2 — tree snapshots & error validation:**
 - Snapshot `utoo ls --json` output and compare against baselines

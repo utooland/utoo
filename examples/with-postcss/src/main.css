@@ -51,10 +51,12 @@ code {
   text-transform: uppercase;
 }
 
-.hero-card h1 {
-  margin: 0 0 16px;
-  font-size: 40px;
-  line-height: 48px;
+.hero-card {
+  h1 {
+    margin: 0 0 16px;
+    font-size: 40px;
+    line-height: 48px;
+  }
 }
 
 .lede {
@@ -110,9 +112,11 @@ code {
     padding: 24px;
   }
 
-  .hero-card h1 {
-    font-size: 32px;
-    line-height: 38px;
+  .hero-card {
+    h1 {
+      font-size: 32px;
+      line-height: 38px;
+    }
   }
 
   .stats-row {

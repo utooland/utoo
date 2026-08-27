@@ -29,7 +29,7 @@ use turbopack_nodejs::NodeJsChunkingContext;
 use turbopack_resolve::resolve_options_context::ResolveOptionsContext;
 
 use crate::{
-    config::{Config, OptionCompressType, ProviderConfig},
+    config::{Config, ExternalsConfig, OptionCompressType, ProviderConfig},
     import_map::get_postcss_package_mapping,
     mode::Mode,
     server::{
@@ -64,6 +64,7 @@ pub async fn get_server_compile_time_info(
     define_env: Vc<EnvMap>,
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
+    import_meta_env_base_url: RcStr,
 ) -> Result<Vc<CompileTimeInfo>> {
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
@@ -109,6 +110,7 @@ pub async fn get_server_compile_time_info(
     )
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .import_meta_env_base_url(import_meta_env_base_url)
     .cell()
     .await
 }
@@ -150,11 +152,11 @@ pub async fn get_server_module_options_context(
     let enable_webpack_loaders =
         *webpack_loader_options(project_path.clone(), config, loader_conditions).await?;
 
-    let tree_shaking_mode_for_user_code = *config
-        .tree_shaking_mode_for_user_code(mode_ref.is_development())
+    let module_fragments_enabled_for_user_code = *config
+        .module_fragments_enabled_for_user_code(mode_ref.is_development())
         .await?;
-    let tree_shaking_mode_for_foreign_code = *config
-        .tree_shaking_mode_for_foreign_code(mode_ref.is_development())
+    let module_fragments_enabled_for_foreign_code = *config
+        .module_fragments_enabled_for_foreign_code(mode_ref.is_development())
         .await?;
     let target_browsers = env.runtime_versions();
 
@@ -251,6 +253,8 @@ pub async fn get_server_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
+            cjs_tree_shaking: module_fragments_enabled_for_user_code,
+            infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
         },
@@ -262,7 +266,8 @@ pub async fn get_server_module_options_context(
         },
         environment: Some(env),
         execution_context: Some(execution_context),
-        tree_shaking_mode: tree_shaking_mode_for_user_code,
+        follow_reexports: true,
+        module_fragments_enabled: module_fragments_enabled_for_user_code,
         enable_postcss_transform,
         side_effect_free_packages: Some(
             side_effect_free_packages_glob(config.optimize_package_imports())
@@ -283,7 +288,8 @@ pub async fn get_server_module_options_context(
         enable_webpack_loaders: foreign_enable_webpack_loaders,
         enable_postcss_transform: enable_foreign_postcss_transform,
         module_rules: foreign_server_rules,
-        tree_shaking_mode: tree_shaking_mode_for_foreign_code,
+        follow_reexports: true,
+        module_fragments_enabled: module_fragments_enabled_for_foreign_code,
         ..module_options_context.clone()
     };
 
@@ -333,6 +339,7 @@ pub async fn get_server_resolve_options_context(
     project_path: FileSystemPath,
     mode: Vc<Mode>,
     config: Vc<Config>,
+    externals_config: Vc<ExternalsConfig>,
     execution_context: Vc<ExecutionContext>,
     pack_path: FileSystemPath,
 ) -> Result<Vc<ResolveOptionsContext>> {
@@ -342,7 +349,7 @@ pub async fn get_server_resolve_options_context(
             .await?;
     let server_fallback_import_map = get_server_fallback_import_map().to_resolved().await?;
 
-    let external_config = *config.externals_config().to_resolved().await?;
+    let external_config = *externals_config.to_resolved().await?;
 
     let externals_plugin = ExternalsPlugin::new(
         project_path.clone(),
@@ -390,7 +397,7 @@ pub async fn get_server_resolve_options_context(
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
-        custom_extensions: config.resolve_extension().owned().await?,
+        custom_extensions: config.server_resolve_extension().owned().await?,
         rules: vec![(
             foreign_code_context_condition(config).await?,
             foreign_resolve_options.resolved_cell(),
@@ -418,6 +425,7 @@ pub struct ServerChunkingContextOptions {
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
+    pub shared_runtime_chunk: Vc<bool>,
     pub debug_ids: Vc<bool>,
 }
 
@@ -442,6 +450,7 @@ pub async fn get_server_chunking_context(
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
+        shared_runtime_chunk,
         debug_ids,
     } = options;
     #[cfg(not(feature = "test"))]
@@ -485,7 +494,8 @@ pub async fn get_server_chunking_context(
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)
     .debug_ids(*debug_ids.await?)
-    .nested_async_availability(*nested_async_chunking.await?);
+    .nested_async_availability(*nested_async_chunking.await?)
+    .shared_runtime_chunk(*shared_runtime_chunk.await?);
 
     if mode.is_development() {
         builder = builder.source_map_source_type(SourceMapSourceType::AbsoluteFileUri);

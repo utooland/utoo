@@ -8,72 +8,60 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PACK_NATIVE_BUILDER_IMAGE: utoo-pack-native-builder:release
+  PACK_WINDOWS_BUILDER_IMAGE: utoo-pack-windows-builder:release
 
 jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'utoopack-v')
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
       matrix:
         settings:
           - host: macos-latest
             target: aarch64-apple-darwin
+            binding: pack.darwin-arm64.node
             build: |
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
+            binding: pack.darwin-x64.node
             build: |
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            binding: pack.linux-arm64-gnu.node
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
             build: |
               apt-get update && apt-get install -y libc6-dev-arm64-cross libgcc-s1-arm64-cross &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
+              rustup install nightly-2026-07-29 &&
+              rustup default nightly-2026-07-29 &&
               rustup target add aarch64-unknown-linux-gnu &&
               npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            # Note: export RUSTFLAGS for musl need inject especially: https://github.com/utooland/utoo/pull/1980
-            build: |
-              set -ex &&
-              rm /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
-              apk update &&
-              apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
-              rustup target add aarch64-unknown-linux-musl &&
-              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Zunstable-options -Csymbol-mangling-version=v0 -Clinker-flavor=gnu-lld-cc -Clink-self-contained=+linker' &&
-              npm run build:binding --workspace=@utoo/pack -- --target aarch64-unknown-linux-musl
+            binding: pack.linux-arm64-musl.node
+            elf_machine: AArch64
+            file_arch_pattern: ARM aarch64|aarch64
+            musl_builder: true
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            binding: pack.linux-x64-gnu.node
             docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
             build: |
               apt-get update &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
+              rustup install nightly-2026-07-29 &&
+              rustup default nightly-2026-07-29 &&
               rustup target add x86_64-unknown-linux-gnu &&
               npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-            # Note: export RUSTFLAGS for musl need inject especially: https://github.com/utooland/utoo/pull/1980
-            build: |
-              set -ex &&
-              rm /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
-              apk update &&
-              apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
-              rustup install nightly-2026-05-15 &&
-              rustup default nightly-2026-05-15 &&
-              rustup target add x86_64-unknown-linux-musl &&
-              export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-unknown-linux-musl
+            binding: pack.linux-x64-musl.node
+            elf_machine: Advanced Micro Devices X86-64
+            file_arch_pattern: x86-64
+            musl_builder: true
           # swc_plugin_runner not supported on aarch64 windows now
           # - host: windows-latest
           #   target: aarch64-pc-windows-msvc
@@ -81,17 +69,17 @@ jobs:
           #     git config --system core.longpaths true &&
           #     rustup target add aarch64-pc-windows-msvc &&
           #     npm run build:binding --workspace=@utoo/pack -- --target aarch64-pc-windows-msvc
-          - host: windows-latest
-            build: |
-              git config --system core.longpaths true &&
-              npm run build:binding --workspace=@utoo/pack -- --target x86_64-pc-windows-msvc
+          - host: ubuntu-latest
+            binding: pack.win32-x64-msvc.node
+            windows_builder: true
             target: x86_64-pc-windows-msvc
     name: utoopack-release-${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v6
-      - name: Init git submodules
-        run: git submodule update --init --recursive --depth 1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 100
+          persist-credentials: false
       - name: Free disk space
         if: matrix.settings.host == 'ubuntu-latest'
         run: |
@@ -103,31 +91,68 @@ jobs:
           sudo rm -rf /usr/local/share/powershell
           sudo rm -rf /usr/share/miniconda
           sudo docker image prune --all --force
+      - name: Set up Docker Buildx
+        if: matrix.settings.musl_builder || matrix.settings.windows_builder
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          # Buildx requires this daemon-side entitlement for its isolated
+          # container driver. The build command deliberately does not grant it.
+          buildkitd-flags: --allow-insecure-entitlement=network.host
+          driver-opts: image=moby/buildkit@sha256:63db51c9b30208a7c2b1c40392c7ebb9ce2f85ba238a18a85420f8f5ea2d4684
+      # Build before the large submodule and node_modules exist so they never
+      # enter the Docker build context.
+      - name: Build native builder image
+        if: matrix.settings.musl_builder
+        run: |
+          docker buildx build \
+            --load \
+            --provenance=false \
+            --tag "$PACK_NATIVE_BUILDER_IMAGE" \
+            --file scripts/pack-native-builder.Dockerfile \
+            .
+      - name: Build Windows builder image
+        if: matrix.settings.windows_builder
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.0.0
+        env:
+          # The publish job downloads every artifact as a platform binding.
+          DOCKER_BUILD_RECORD_UPLOAD: "false"
+        with:
+          context: .
+          file: scripts/pack-windows-builder.Dockerfile
+          load: true
+          provenance: false
+          tags: ${{ env.PACK_WINDOWS_BUILDER_IMAGE }}
+          cache-from: type=gha,scope=utoo-pack-windows-builder-v1
+      - name: Init git submodules
+        run: git submodule update --init --recursive --depth 1
       - name: Set up QEMU
         if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          cache-image: false
+          image: docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
       - name: Setup node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         if: ${{ !matrix.settings.docker }}
         with:
           node-version: 22.14.0
           package-manager-cache: false
       - name: Install
-        uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        if: ${{ !matrix.settings.docker && !matrix.settings.musl_builder && !matrix.settings.windows_builder }}
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
           targets: ${{ matrix.settings.target }}
       # - name: Cache cargo
       #   uses: Swatinem/rust-cache@v2
       #   with:
       #     shared-key: pack-release-${{ matrix.settings.target }}
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
       - name: Setup Utoo
-        uses: utooland/setup-utoo@v1
+        uses: utooland/setup-utoo@e7aa4d726a17f79f68aed736476ea5bd68f8ba52 # v1
+        with:
+          cache-utoo: false
+          utoo-version: 1.1.7
 
       - name: Clear install-node for musl builds
         if: ${{ contains(matrix.settings.target, 'musl') }}
@@ -142,7 +167,7 @@ jobs:
       - name: Install dependencies
         run: utoo install
       - name: Setup node x86
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           package-manager-cache: false
       - name: Build in docker
@@ -160,15 +185,79 @@ jobs:
             -w /build \
             ${{ matrix.settings.docker }} \
             /bin/sh /build/build_script.sh
+      - name: Verify NAPI CLI version
+        if: matrix.settings.musl_builder || matrix.settings.windows_builder
+        run: test "$(node -p 'require("@napi-rs/cli/package.json").version')" = "3.8.6"
+      - name: Build musl binding
+        if: matrix.settings.musl_builder
+        env:
+          BINDING: packages/pack/src/${{ matrix.settings.binding }}
+          TARGET: ${{ matrix.settings.target }}
+        run: |
+          rm -f "$BINDING"
+          docker run --rm \
+            --env CI=1 \
+            --env CARGO_INCREMENTAL=0 \
+            --env CARGO_TERM_COLOR=always \
+            --env RUST_BACKTRACE=1 \
+            --env TARGET \
+            --volume "$GITHUB_WORKSPACE:/build" \
+            --workdir /build \
+            "$PACK_NATIVE_BUILDER_IMAGE" \
+            /bin/bash /build/scripts/pack-native-build.sh
+      - name: Check generated binding files
+        if: matrix.settings.musl_builder
+        run: git diff --exit-code -- packages/pack/src/binding.js packages/pack/src/binding.d.ts
+      - name: Verify musl ELF target and loader
+        if: matrix.settings.musl_builder
+        env:
+          BINDING: packages/pack/src/${{ matrix.settings.binding }}
+          EXPECTED_ELF_MACHINE: ${{ matrix.settings.elf_machine }}
+          EXPECTED_FILE_ARCH: ${{ matrix.settings.file_arch_pattern }}
+        run: |
+          set -euo pipefail
+          test -s "$BINDING"
+
+          file_output=$(file --brief "$BINDING")
+          echo "$file_output"
+          grep -Eq "ELF 64-bit LSB shared object.*(${EXPECTED_FILE_ARCH})" <<<"$file_output"
+
+          machine=$(readelf --file-header "$BINDING" | sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p')
+          test "$machine" = "$EXPECTED_ELF_MACHINE"
+
+          dynamic_section=$(readelf --dynamic "$BINDING")
+          echo "$dynamic_section"
+          ! grep -q 'libc\.so\.6' <<<"$dynamic_section"
+
+          program_headers=$(readelf --program-headers "$BINDING")
+          ! grep -Eq '/lib(64)?/(ld-linux|ld64)|ld-linux-' <<<"$program_headers"
       - name: Build
         run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
+        if: ${{ !matrix.settings.docker && !matrix.settings.musl_builder && !matrix.settings.windows_builder }}
         shell: bash
+      - name: Build Windows binding
+        if: matrix.settings.windows_builder
+        env:
+          TARGET: ${{ matrix.settings.target }}
+        run: |
+          docker run --rm \
+            --env CI=1 \
+            --env CARGO_INCREMENTAL=0 \
+            --env CARGO_TERM_COLOR=always \
+            --env RUST_BACKTRACE=1 \
+            --env TARGET \
+            --volume "$GITHUB_WORKSPACE:/build" \
+            --workdir /build \
+            "$PACK_WINDOWS_BUILDER_IMAGE" \
+            /bin/bash /build/scripts/pack-windows-build.sh
+      - name: Check generated Windows binding files
+        if: matrix.settings.windows_builder
+        run: git diff --exit-code -- packages/pack/src/binding.js packages/pack/src/binding.d.ts
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pack-${{ matrix.settings.target }}
-          path: ./packages/pack/src/pack.*.node
+          path: ./packages/pack/src/${{ matrix.settings.binding }}
           if-no-files-found: error
   publish:
     if: github.event_name == 'push' && startsWith(github.ref_name, 'utoopack-v')
@@ -180,23 +269,29 @@ jobs:
       id-token: write
     needs:
       - build
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          persist-credentials: false
           ref: ${{ github.ref_name }}
       - name: Setup node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22.14.0
           package-manager-cache: false
           registry-url: "https://registry.npmjs.org"
       - name: Setup Utoo
-        uses: utooland/setup-utoo@v1
+        uses: utooland/setup-utoo@e7aa4d726a17f79f68aed736476ea5bd68f8ba52 # v1
+        with:
+          cache-utoo: false
+          utoo-version: 1.1.7
 
       - name: Install dependencies
         run: utoo install
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ./packages/pack/src
       - name: Move artifacts
@@ -241,3 +336,56 @@ jobs:
           npm publish --workspace=@utoo/pack-cli --access public --tag "${TAG}"
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
+
+  ecosystem:
+    name: Ecosystem CI
+    needs:
+      - publish
+    permissions:
+      contents: read
+    uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@main
+    with:
+      candidate_mode: npm
+      pack_spec: ${{ needs.publish.outputs.version }}
+      suite: all
+      harness_repository: utooland/utoo-ecosystem-ci
+      harness_ref: main
+
+  notify_ecosystem_failure:
+    name: Notify ecosystem failure
+    if: >-
+      always() &&
+      needs.publish.result == 'success' &&
+      needs.ecosystem.result == 'failure'
+    needs:
+      - publish
+      - ecosystem
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create failure issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TAG_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          title="ci(pack): ecosystem CI failed for @utoo/pack@${VERSION}"
+          body_path="${RUNNER_TEMP}/ecosystem-failure.md"
+          printf '%s\n' \
+            "The post-publish ecosystem CI failed for @utoo/pack@${VERSION}." \
+            "" \
+            "- Release tag: [${GITHUB_REF_NAME}](${TAG_URL})" \
+            "- Workflow run: [${GITHUB_RUN_ID}](${RUN_URL})" \
+            "" \
+            "This issue was created automatically after consumer validation failed." \
+            > "${body_path}"
+
+          gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${title}" \
+            --body-file "${body_path}"

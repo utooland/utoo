@@ -132,6 +132,12 @@ pub async fn internal_assets_conditions() -> Result<ContextCondition> {
                 .owned()
                 .await?,
         ),
+        ContextCondition::InPath(
+            turbopack_ecmascript::embed_js::embed_fs()
+                .root()
+                .owned()
+                .await?,
+        ),
         ContextCondition::InPath(turbopack_node::embed_js::embed_fs().root().owned().await?),
     ]))
 }

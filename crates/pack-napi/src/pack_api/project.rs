@@ -2,7 +2,10 @@ use std::{
     borrow::Cow,
     io::Write,
     path::PathBuf,
-    sync::LazyLock,
+    sync::{
+        Arc, LazyLock,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -17,8 +20,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use bincode::{Decode, Encode};
 use futures_util::TryFutureExt;
 use napi::{
-    Env, JsFunction, JsObject, Status,
-    bindgen_prelude::{External, within_runtime_if_available},
+    Env, Status, Unknown,
+    bindgen_prelude::{External, FunctionRef, PromiseRaw, within_runtime_if_available},
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{
@@ -48,12 +51,13 @@ use turbo_tasks::{
     OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TransientInstance,
     TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects, trace::TraceRawVcs,
 };
+use turbo_tasks_backend::EvictionMode;
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
 use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME, SOURCE_URL_PROTOCOL,
     source_map::{SourceMap, Token},
-    version::{PartialUpdate, TotalUpdate, Update},
+    version::{PartialUpdate, TotalUpdate, Update, Version},
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, ResourceIdentifier};
 use turbopack_trace_utils::{
@@ -186,6 +190,9 @@ pub struct NapiTurboEngineOptions {
 pub enum MemoryEvictionMode {
     /// Never evict.
     Off,
+    /// Evict after a snapshot only once enough memory has been allocated since
+    /// the last eviction to justify restoring evicted tasks on demand.
+    Auto,
     /// After every snapshot, evict all evictable tasks from memory, reloading
     /// them from disk on demand.
     Full,
@@ -193,14 +200,26 @@ pub enum MemoryEvictionMode {
 
 impl MemoryEvictionMode {
     fn from_env_or_default() -> Self {
-        match std::env::var("TURBO_ENGINE_EVICT_AFTER_SNAPSHOT") {
-            Ok(value) if value != "1" && value != "true" => Self::Off,
-            _ => Self::Full,
-        }
+        let value = std::env::var("TURBO_ENGINE_EVICT_AFTER_SNAPSHOT").ok();
+        Self::from_legacy_env(value.as_deref())
     }
 
-    pub(crate) fn evicts_after_snapshot(self) -> bool {
-        matches!(self, Self::Full)
+    fn from_legacy_env(value: Option<&str>) -> Self {
+        match value {
+            None => Self::Auto,
+            Some("1" | "true") => Self::Full,
+            Some(_) => Self::Off,
+        }
+    }
+}
+
+impl From<MemoryEvictionMode> for EvictionMode {
+    fn from(mode: MemoryEvictionMode) -> Self {
+        match mode {
+            MemoryEvictionMode::Off => EvictionMode::Off,
+            MemoryEvictionMode::Auto => EvictionMode::Auto,
+            MemoryEvictionMode::Full => EvictionMode::Full,
+        }
     }
 }
 
@@ -257,6 +276,47 @@ mod watch_options_tests {
     }
 }
 
+#[cfg(test)]
+mod memory_eviction_tests {
+    use super::{EvictionMode, MemoryEvictionMode};
+
+    #[test]
+    fn defaults_to_auto_without_a_legacy_environment_override() {
+        assert_eq!(
+            MemoryEvictionMode::from_legacy_env(None),
+            MemoryEvictionMode::Auto
+        );
+    }
+
+    #[test]
+    fn preserves_legacy_environment_overrides() {
+        assert_eq!(
+            MemoryEvictionMode::from_legacy_env(Some("true")),
+            MemoryEvictionMode::Full
+        );
+        assert_eq!(
+            MemoryEvictionMode::from_legacy_env(Some("0")),
+            MemoryEvictionMode::Off
+        );
+    }
+
+    #[test]
+    fn maps_all_napi_modes_to_the_backend() {
+        assert_eq!(
+            EvictionMode::from(MemoryEvictionMode::Off),
+            EvictionMode::Off
+        );
+        assert_eq!(
+            EvictionMode::from(MemoryEvictionMode::Auto),
+            EvictionMode::Auto
+        );
+        assert_eq!(
+            EvictionMode::from(MemoryEvictionMode::Full),
+            EvictionMode::Full
+        );
+    }
+}
+
 impl From<NapiProjectOptions> for ProjectOptions {
     fn from(val: NapiProjectOptions) -> Self {
         ProjectOptions {
@@ -301,13 +361,13 @@ pub struct ProjectInstance {
 }
 
 #[napi(ts_return_type = "Promise<{ __napiType: \"Project\" }>")]
-pub fn project_new(
-    env: Env,
+pub fn project_new<'env>(
+    env: &'env Env,
     options: NapiProjectOptions,
     turbo_engine_options: NapiTurboEngineOptions,
     napi_callbacks: NapiTurbopackCallbacksJsObject,
-) -> napi::Result<JsObject> {
-    let napi_callbacks = NapiTurbopackCallbacks::from_js(&env, napi_callbacks)?;
+) -> napi::Result<PromiseRaw<'env, External<ProjectInstance>>> {
+    let napi_callbacks = NapiTurbopackCallbacks::from_js(env, napi_callbacks)?;
     let (exit, exit_receiver) = ExitHandler::new_receiver();
 
     if let Some(dhat_profiler) = DhatProfilerGuard::try_init() {
@@ -452,7 +512,7 @@ pub fn project_new(
                 memory_limit,
                 dependency_tracking,
                 is_short_session,
-                turbopack_memory_eviction.evicts_after_snapshot(),
+                turbopack_memory_eviction.into(),
                 small_preallocation,
             )?;
             let turbopack_ctx = TurbopackContext::new(turbo_tasks.clone(), napi_callbacks);
@@ -498,7 +558,7 @@ pub fn project_new(
 
 #[napi]
 pub async fn project_update(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     options: NapiPartialProjectOptions,
 ) -> napi::Result<()> {
     let ctx = &project.turbopack_ctx;
@@ -517,9 +577,9 @@ pub async fn project_update(
 /// one.
 #[napi]
 pub async fn project_on_exit(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
 ) {
-    project_on_exit_internal(&project).await
+    project_on_exit_internal(project).await
 }
 
 async fn project_on_exit_internal(project: &ProjectInstance) {
@@ -537,15 +597,17 @@ async fn project_on_exit_internal(project: &ProjectInstance) {
 /// where we prioritize fast exit and user responsiveness over all else.
 #[napi]
 pub async fn project_shutdown(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
 ) {
     project.turbopack_ctx.turbo_tasks().stop_and_wait().await;
-    project_on_exit_internal(&project).await;
+    project_on_exit_internal(project).await;
 }
 
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct NapiEntrypoints {
+    #[napi(ts_type = "Array<{ __napiType: \"Endpoint\" }>")]
     pub apps: Option<Vec<External<ExternalEndpoint>>>,
+    #[napi(ts_type = "Array<{ __napiType: \"Endpoint\" }>")]
     pub libraries: Option<Vec<External<ExternalEndpoint>>>,
     pub app_paths: Option<Vec<NapiWrittenEndpoint>>,
     pub library_paths: Option<Vec<NapiWrittenEndpoint>>,
@@ -604,7 +666,7 @@ async fn collect_endpoint_output_paths(
 #[tracing::instrument(level = "info", name = "write all entrypoints to disk", skip_all)]
 #[napi]
 pub async fn project_write_all_entrypoints_to_disk(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
 ) -> napi::Result<TurbopackResult<NapiEntrypoints>> {
     let start = Instant::now();
     let ctx = &project.turbopack_ctx;
@@ -664,16 +726,19 @@ pub async fn project_write_all_entrypoints_to_disk(
     })
 }
 
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_entrypoints_subscribe(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
-    func: JsFunction,
+    env: Env,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+    #[napi(ts_arg_type = "(err: Error, value: TurbopackResult<NapiEntrypoints>) => void")]
+    func: FunctionRef<TurbopackResult<NapiEntrypoints>, ()>,
 ) -> napi::Result<External<RootTask>> {
     let turbopack_ctx = project.turbopack_ctx.clone();
     let container = project.container;
     subscribe(
         turbopack_ctx.clone(),
-        func,
+        &env,
+        &func,
         move || {
             async move {
                 let entrypoints_with_issues_op = get_entrypoints_with_issues_operation(container);
@@ -694,42 +759,65 @@ pub fn project_entrypoints_subscribe(
         move |ctx| {
             let (entrypoints, issues) = ctx.value;
 
-            Ok(vec![TurbopackResult {
+            Ok(TurbopackResult {
                 result: NapiEntrypoints::from_entrypoints_op(&entrypoints, &turbopack_ctx)?,
                 issues: issues
                     .iter()
                     .map(|issue| NapiIssue::from(&**issue))
                     .collect(),
-            }])
+            })
         },
     )
 }
 
-#[tracing::instrument(level = "debug", name = "get HMR events", skip(project, func))]
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[tracing::instrument(level = "debug", name = "get HMR events", skip(env, project, func))]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_hmr_events(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    env: Env,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     identifier: RcStr,
-    func: JsFunction,
+    #[napi(
+        ts_arg_type = "(err: Error, value: TurbopackResult<import(\"./core/types\").Update>) => void"
+    )]
+    func: FunctionRef<TurbopackResult<Unknown<'static>>, ()>,
+    expected_version: Option<RcStr>,
 ) -> napi::Result<External<RootTask>> {
     let turbopack_ctx = project.turbopack_ctx.clone();
     let project = project.container;
     let session = TransientInstance::new(());
+    let check_expected_version = Arc::new(AtomicBool::new(expected_version.is_some()));
+    let check_expected_version_after_emit = check_expected_version.clone();
     subscribe(
         turbopack_ctx,
-        func,
+        &env,
+        &func,
         {
             let outer_identifier = identifier.clone();
             let session = session.clone();
+            let expected_version = expected_version.clone();
+            let check_expected_version = check_expected_version.clone();
             move || {
                 let identifier: RcStr = outer_identifier.clone();
                 let session = session.clone();
+                let expected_version = expected_version.clone();
+                let check_expected_version = check_expected_version.clone();
                 async move {
                     let project = project.project().to_resolved().await?;
                     let state = project
                         .hmr_version_state(identifier.clone(), session)
                         .to_resolved()
                         .await?;
+                    let should_check_expected_version =
+                        check_expected_version.load(Ordering::Acquire);
+                    let version_mismatch = if should_check_expected_version {
+                        if let Some(expected_version) = expected_version {
+                            state.get().id().owned().await? != expected_version
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
 
                     let update_op =
                         hmr_update_with_issues_operation(project, identifier.clone(), state);
@@ -750,12 +838,17 @@ pub fn project_hmr_events(
                             state.set(to.clone()).await?;
                         }
                     }
-                    Ok((Some(update.clone()), issues.clone()))
+                    Ok((
+                        Some(update.clone()),
+                        issues.clone(),
+                        version_mismatch,
+                        should_check_expected_version,
+                    ))
                 }
             }
         },
         move |ctx| {
-            let (update, issues) = ctx.value;
+            let (update, issues, version_mismatch, should_check_expected_version) = ctx.value;
 
             let napi_issues = issues
                 .iter()
@@ -771,6 +864,9 @@ pub fn project_hmr_events(
                 headers: None,
             };
             let update = match update.as_deref() {
+                _ if version_mismatch => {
+                    ClientUpdateInstruction::restart(&identifier, &update_issues)
+                }
                 None | Some(Update::Missing) | Some(Update::Total(_)) => {
                     ClientUpdateInstruction::restart(&identifier, &update_issues)
                 }
@@ -782,29 +878,37 @@ pub fn project_hmr_events(
                 Some(Update::None) => ClientUpdateInstruction::issues(&identifier, &update_issues),
             };
 
-            Ok(vec![TurbopackResult {
-                result: ctx.env.to_js_value(&update)?,
+            let result = ctx.env.to_js_value(&update)?;
+            if should_check_expected_version {
+                check_expected_version_after_emit.store(false, Ordering::Release);
+            }
+
+            Ok(TurbopackResult {
+                result,
                 issues: napi_issues,
-            }])
+            })
         },
     )
 }
 
-#[napi(object)]
-struct HmrIdentifiers {
+#[napi(object, object_from_js = false)]
+pub struct HmrIdentifiers {
     pub identifiers: Vec<String>,
 }
 
-#[napi(ts_return_type = "{ __napiType: \"RootTask\" }")]
+#[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_hmr_identifiers_subscribe(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
-    func: JsFunction,
+    env: Env,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+    #[napi(ts_arg_type = "(err: Error, value: TurbopackResult<HmrIdentifiers>) => void")]
+    func: FunctionRef<TurbopackResult<HmrIdentifiers>, ()>,
 ) -> napi::Result<External<RootTask>> {
     let turbopack_ctx = project.turbopack_ctx.clone();
     let container = project.container;
     subscribe(
         turbopack_ctx,
-        func,
+        &env,
+        &func,
         move || async move {
             let hmr_identifiers_with_issues_op =
                 get_hmr_identifiers_with_issues_operation(container);
@@ -824,7 +928,7 @@ pub fn project_hmr_identifiers_subscribe(
         move |ctx| {
             let (identifiers, issues) = ctx.value;
 
-            Ok(vec![TurbopackResult {
+            Ok(TurbopackResult {
                 result: HmrIdentifiers {
                     identifiers: identifiers
                         .iter()
@@ -835,7 +939,7 @@ pub fn project_hmr_identifiers_subscribe(
                     .iter()
                     .map(|issue| NapiIssue::from(&**issue))
                     .collect(),
-            }])
+            })
         },
     )
 }
@@ -845,9 +949,9 @@ pub enum UpdateMessage {
     End(UpdateInfo),
 }
 
-#[napi(object)]
-struct NapiUpdateMessage {
-    pub update_type: String,
+#[napi(object, object_from_js = false)]
+pub struct NapiUpdateMessage {
+    pub update_type: &'static str,
     pub value: Option<NapiUpdateInfo>,
 }
 
@@ -855,19 +959,19 @@ impl From<UpdateMessage> for NapiUpdateMessage {
     fn from(update_message: UpdateMessage) -> Self {
         match update_message {
             UpdateMessage::Start => NapiUpdateMessage {
-                update_type: "start".to_string(),
+                update_type: "start",
                 value: None,
             },
             UpdateMessage::End(info) => NapiUpdateMessage {
-                update_type: "end".to_string(),
+                update_type: "end",
                 value: Some(info.into()),
             },
         }
     }
 }
 
-#[napi(object)]
-struct NapiUpdateInfo {
+#[napi(object, object_from_js = false)]
+pub struct NapiUpdateInfo {
     pub duration: u32,
     pub tasks: u32,
 }
@@ -892,16 +996,21 @@ impl From<UpdateInfo> for NapiUpdateInfo {
 /// the number of tasks that were executed.
 ///
 /// The signature of the `func` is `(update_message: UpdateMessage) => void`.
-#[napi]
+#[napi(async_runtime)]
 pub fn project_update_info_subscribe(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    env: Env,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     aggregation_ms: u32,
-    func: JsFunction,
+    #[napi(ts_arg_type = "(err: Error, value: NapiUpdateMessage) => void")] func: FunctionRef<
+        NapiUpdateMessage,
+        (),
+    >,
 ) -> napi::Result<()> {
-    let func: ThreadsafeFunction<UpdateMessage> = func.create_threadsafe_function(0, |ctx| {
-        let message = ctx.value;
-        Ok(vec![NapiUpdateMessage::from(message)])
-    })?;
+    let func: ThreadsafeFunction<UpdateMessage, (), NapiUpdateMessage, Status, true> = func
+        .borrow_back(&env)?
+        .build_threadsafe_function::<UpdateMessage>()
+        .callee_handled::<true>()
+        .build_callback(|ctx| Ok(NapiUpdateMessage::from(ctx.value)))?;
     let turbo_tasks = project.turbopack_ctx.turbo_tasks().clone();
     tokio::spawn(async move {
         loop {
@@ -1053,7 +1162,7 @@ pub async fn project_trace_source_operation(
 
 #[napi]
 pub async fn project_trace_source(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     frame: StackFrame,
     current_directory_file_url: String,
 ) -> napi::Result<Option<StackFrame>> {
@@ -1076,14 +1185,14 @@ pub async fn project_trace_source(
 
 #[napi]
 pub async fn project_get_source_for_asset(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     file_path: String,
 ) -> napi::Result<Option<String>> {
     let turbo_tasks = project.turbopack_ctx.turbo_tasks().clone();
+    let container = project.container;
     let source = turbo_tasks
         .run(async move {
-            let source_content = &*project
-                .container
+            let source_content = &*container
                 .project()
                 .project_path()
                 .await?
@@ -1108,7 +1217,7 @@ pub async fn project_get_source_for_asset(
 
 #[napi]
 pub async fn project_get_source_map(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     file_path: RcStr,
 ) -> napi::Result<Option<String>> {
     let turbo_tasks = project.turbopack_ctx.turbo_tasks().clone();
@@ -1140,7 +1249,7 @@ pub fn get_source_map_rope_operation(
 
 #[napi]
 pub fn project_get_source_map_sync(
-    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: External<ProjectInstance>,
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
     file_path: RcStr,
 ) -> napi::Result<Option<String>> {
     within_runtime_if_available(|| {

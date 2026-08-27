@@ -6,13 +6,13 @@ function App() {
   return (
     <main className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow">PostCSS Inline Config</span>
-        <h1>px2rem Example</h1>
+        <span className="eyebrow">PostCSS Merged Config</span>
+        <h1>postcss-nested + px2rem</h1>
         <p className="lede">
-          This example uses <code>styles.postcss.plugins</code> in
-          <code>utoopack.json</code> to pass the{" "}
-          <code>postcss-plugin-px2rem</code>
-          plugin directly into utoopack.
+          This example loads <code>postcss-nested</code> from
+          <code>postcss.config.js</code>, then appends
+          <code>postcss-plugin-px2rem</code> from
+          <code>styles.postcss.plugins</code>.
         </p>
 
         <div className="stats-row">

@@ -52,7 +52,7 @@
       ]
     },
     "externals": {
-      "description": "External dependencies configuration",
+      "description": "External dependencies for client and Node-target builds, and the fallback for server builds",
       "type": [
         "object",
         "null"
@@ -236,6 +236,23 @@
     }
   },
   "definitions": {
+    "SchemaBrowserToTerminal": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/SchemaBrowserToTerminalLevel"
+        }
+      ]
+    },
+    "SchemaBrowserToTerminalLevel": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warn"
+      ]
+    },
     "SchemaCompressConfig": {
       "description": "Compress configuration (boolean or options object)",
       "anyOf": [
@@ -667,6 +684,24 @@
       "description": "Development server configuration",
       "type": "object",
       "properties": {
+        "browserToTerminal": {
+          "description": "Forward browser console output to the development terminal",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaBrowserToTerminal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dynamicHmrChunkLists": {
+          "description": "Register HMR chunk lists as dynamic chunks are loaded",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "hot": {
           "description": "Enable hot module replacement",
           "type": [
@@ -1295,6 +1330,13 @@
             "null"
           ]
         },
+        "inferModuleSideEffects": {
+          "description": "Whether to infer side-effect-free modules from source code when package metadata does not declare side effects. Defaults to true.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "minify": {
           "description": "Whether to minify the output",
           "type": [
@@ -1727,10 +1769,24 @@
       "properties": {
         "entry": {
           "description": "Entry point for the server runtime (e.g. \"src/server.ts\")",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaServerEntry"
+            },
+            {
+              "type": "null"
+            }
           ]
+        },
+        "externals": {
+          "description": "Server-specific externals. Replaces top-level externals for server entries and Server Functions when provided",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/SchemaExternalConfig"
+          }
         },
         "function": {
           "description": "Configuration for Server Functions (RPC) boundaries",
@@ -1742,6 +1798,56 @@
               "type": "null"
             }
           ]
+        },
+        "output": {
+          "description": "Server output configuration.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaServerOutputConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolve": {
+          "description": "Server-only resolution options. Alias entries override matching resolve.alias entries; extensions replace resolve.extensions when provided",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaResolveConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SchemaServerEntry": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaServerEntryOptions"
+          }
+        }
+      ]
+    },
+    "SchemaServerEntryOptions": {
+      "type": "object",
+      "required": [
+        "import",
+        "name"
+      ],
+      "properties": {
+        "import": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
         }
       }
     },
@@ -1757,6 +1863,29 @@
         },
         "serverRegister": {
           "description": "Module that exports registerServerReference(action, actionId, name) for the server bundle",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SchemaServerOutputConfig": {
+      "type": "object",
+      "properties": {
+        "chunkFilename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filename": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
           "type": [
             "string",
             "null"
@@ -1831,7 +1960,7 @@
           "description": "Less configuration"
         },
         "postcss": {
-          "description": "Inline PostCSS configuration"
+          "description": "Inline PostCSS configuration appended after a discovered config file"
         },
         "sass": {
           "description": "Sass configuration"
@@ -1881,6 +2010,7 @@
     "SchemaTurbopackMemoryEvictionMode": {
       "type": "string",
       "enum": [
+        "auto",
         "full"
       ]
     },

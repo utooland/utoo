@@ -25,7 +25,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await __turbopack_context__.y("bar");
 
-__turbopack_context__.n(mod);
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -37,7 +37,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
 try {
 var mod = await __turbopack_context__.y("bar_import2");
 
-__turbopack_context__.n(mod);
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -62,10 +62,7 @@ var mod = await (async () => {
   throw error;
 })();
 
-var ns = Object.create(null);
-for (var key in mod) ns[key] = mod[key];
-ns.default = mod;
-__turbopack_context__.n(ns);
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);
@@ -90,10 +87,7 @@ var mod = await (async () => {
   throw error;
 })();
 
-var ns = Object.create(null);
-for (var key in mod) ns[key] = mod[key];
-ns.default = mod;
-__turbopack_context__.n(ns);
+__turbopack_context__.n(__turbopack_context__.N(mod));
 __turbopack_async_result__();
 } catch(e) { __turbopack_async_result__(e); }
 }, true);

@@ -16,12 +16,14 @@ use std::path::{Path, PathBuf, absolute};
 //   PATH (`/usr/local/bin/utoo`, a Homebrew Cellar, CI's `dist/utoo`, …). Global
 //   executables go right next to it (its own dir) and packages one level up, so
 //   they share that PATH entry. This does NOT assume the dir is named `bin`.
-// * **npm-style global** — utoo itself was installed as a package, so the real
-//   binary is at `<prefix>/lib/node_modules/utoo/bin/ut` and the on-PATH
-//   `<prefix>/bin/ut` is just a symlink. On Linux `current_exe()` resolves the
-//   symlink to that deep path, so we climb back out past `lib/node_modules/<pkg>`
-//   (and any scope dir) to recover `<prefix>`. Otherwise bins and globals would
-//   be written under utoo's own package dir instead of the real prefix.
+// * **npm-style global** — utoo itself was installed as a package. Native npm
+//   releases run from a nested optional platform package, so their launcher
+//   passes `UTOO_MANAGED_PACKAGE_ROOT`. We infer from that public package root;
+//   older releases fall back to `current_exe()`. In either case we climb back
+//   out past `lib/node_modules/<pkg>` (and any scope dir) to recover `<prefix>`.
+//   Otherwise bins and globals would be written under utoo's own package dir.
+
+const MANAGED_PACKAGE_ROOT_ENV: &str = "UTOO_MANAGED_PACKAGE_ROOT";
 
 /// Global bin directory (where global executables are linked / found on PATH).
 ///
@@ -32,7 +34,7 @@ pub fn get_global_bin_dir(prefix: Option<&str>) -> Result<PathBuf> {
     match prefix {
         Some(prefix) => Ok(prefixed_bin_dir(&to_absolute(PathBuf::from(prefix)))),
         None => {
-            let exe = env::current_exe().context("Failed to get current executable path")?;
+            let exe = executable_path_for_inference()?;
             Ok(bin_dir_from_exe(&exe))
         }
     }
@@ -43,10 +45,24 @@ pub fn get_global_package_dir(prefix: Option<&str>) -> Result<PathBuf> {
     match prefix {
         Some(prefix) => Ok(to_absolute(PathBuf::from(prefix)).join(GLOBAL_NODE_MODULES)),
         None => {
-            let exe = env::current_exe().context("Failed to get current executable path")?;
+            let exe = executable_path_for_inference()?;
             Ok(package_dir_from_exe(&exe))
         }
     }
+}
+
+/// Path used for npm-style prefix inference.
+///
+/// The npm launcher lives in the public `utoo` package while the native binary
+/// lives in `utoo`'s optional platform dependency. Inferring from
+/// `current_exe()` would therefore stop at the nested package's `node_modules`.
+/// The launcher supplies its real package root so inference retains the same
+/// behavior as releases where the native binary lived directly in `utoo/bin`.
+fn executable_path_for_inference() -> Result<PathBuf> {
+    if let Some(root) = env::var_os(MANAGED_PACKAGE_ROOT_ENV).filter(|root| !root.is_empty()) {
+        return Ok(PathBuf::from(root).join("bin").join("utoo.js"));
+    }
+    env::current_exe().context("Failed to get current executable path")
 }
 
 /// `<prefix>/bin` on Unix, `<prefix>` on Windows — npm's global-shim location.
@@ -214,6 +230,20 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn test_npm_launcher_package_root_unix() {
+        let launcher = PathBuf::from("/home/admin/.local/lib/node_modules/utoo/bin/utoo.js");
+        assert_eq!(
+            bin_dir_from_exe(&launcher),
+            PathBuf::from("/home/admin/.local/bin")
+        );
+        assert_eq!(
+            package_dir_from_exe(&launcher),
+            PathBuf::from("/home/admin/.local/lib/node_modules")
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn test_npm_style_windows() {
@@ -224,6 +254,17 @@ mod tests {
         assert_eq!(bin_dir_from_exe(&exe), PathBuf::from("C:\\npm"));
         assert_eq!(
             package_dir_from_exe(&exe),
+            PathBuf::from("C:\\npm").join(GLOBAL_NODE_MODULES)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_npm_launcher_package_root_windows() {
+        let launcher = PathBuf::from("C:\\npm\\node_modules\\utoo\\bin\\utoo.js");
+        assert_eq!(bin_dir_from_exe(&launcher), PathBuf::from("C:\\npm"));
+        assert_eq!(
+            package_dir_from_exe(&launcher),
             PathBuf::from("C:\\npm").join(GLOBAL_NODE_MODULES)
         );
     }

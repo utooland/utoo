@@ -32,8 +32,7 @@ impl Source for InlineCssFileSource {
             .ident()
             .owned()
             .await?
-            .with_modifier(rcstr!("inline css"))
-            .rename_as("*.js");
+            .with_modifier(rcstr!("inline css"));
 
         Ok(ident.into_vc())
     }
@@ -50,7 +49,9 @@ impl Asset for InlineCssFileSource {
     #[turbo_tasks::function]
     async fn content(&self) -> Result<Vc<AssetContent>> {
         let ident = self.css.ident().await?;
-        let ident_str = ident.path.to_string();
+        let mut ident_str = ident.path.to_string();
+        // Keep global and CSS Modules imports of the same file as distinct runtime styles.
+        ident_str.push_str(&ident.query);
         let content_import = StringifyJs(INLINE_CSS_CONTENT);
         let insert_js = StringifyJs(&*self.insert);
         let id_js = StringifyJs(&*ident_str);

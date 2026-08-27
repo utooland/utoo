@@ -16,7 +16,7 @@ flate2                   = "1.1.5"
 futures                  = { workspace = true }
 js-sys                   = "0.3.83"
 oneshot                  = "0.1.11"
-opfs-project             = "0.2.10"
+opfs-project             = "0.2.11"
 petgraph                 = "0.6"
 reqwest                  = { version = "0.12.22", default-features = false, features = ["json"] }
 rustc-hash               = { workspace = true }
@@ -24,7 +24,7 @@ serde                    = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen       = "0.6.5"
 serde_json               = { workspace = true }
 tar                      = "0.4.45"
-tokio                    = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }
+tokio                    = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "time"] }
 tokio-fs-ext             = { workspace = true, features = ["opfs_offload", "opfs_tracing", "opfs_watch"] }
 tracing                  = { workspace = true }
 tracing-subscriber       = { workspace = true }

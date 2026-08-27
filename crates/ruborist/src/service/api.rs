@@ -95,17 +95,33 @@ impl<G, R> BuildDepsOptions<G, R> {
 
 /// Build dependency tree from an **in-memory root manifest** `pkg` and return the
 /// resolved `package-lock.json`. `options.cwd` is the resolution root, already
-/// resolved by the caller — a normal install reads it via [`read_root_manifest`];
-/// a global install (`utoo install -g`, `utoo x`) synthesizes a private root
-/// `{ dependencies: { <tool>: <spec> } }` so the tool resolves as a *dependency*
-/// (no `prepare`/`prepublish`, no `devDependencies`). It:
+/// resolved by the caller — both project installs and global-tool installs read
+/// their actual root manifest before calling this function. It:
 /// 1. Injects runtime dependencies (node-bin packages from engines.install-node)
 /// 2. Builds the graph and adds root + workspace edges
 /// 3. Resolves all dependencies using the registry
 /// 4. Returns the package lock
 pub async fn build_deps<G, R>(
     options: BuildDepsOptions<G, R>,
+    pkg: PackageJson,
+) -> Result<PackageLock>
+where
+    G: Glob + Clone,
+    R: EventReceiver,
+{
+    build_deps_with_root_dev_deps(options, pkg, DevDeps::Include).await
+}
+
+/// Resolve a root manifest with an explicit root-dev-dependency policy.
+///
+/// Package-manager project installs use [`build_deps`] and include root dev
+/// dependencies. A tool installed globally is itself the resolution root but
+/// must behave like a regular dependency, so its caller passes
+/// [`DevDeps::Exclude`].
+pub async fn build_deps_with_root_dev_deps<G, R>(
+    options: BuildDepsOptions<G, R>,
     mut pkg: PackageJson,
+    dev_deps: DevDeps,
 ) -> Result<PackageLock>
 where
     G: Glob + Clone,
@@ -171,11 +187,12 @@ where
         //    resolved at edge creation).
         let mut graph = DependencyGraph::from_package_json(root_path.clone(), pkg.clone());
         let root_index = graph.root_index;
-        let edge_ctx = EdgeContext::new(peer_deps, DevDeps::Include).with_catalogs(&catalogs);
+        let edge_ctx = EdgeContext::new(peer_deps, dev_deps).with_catalogs(&catalogs);
         add_edges_from(&mut graph, root_index, &pkg, &edge_ctx);
 
-        // 3. Discover and add workspace packages. A synthetic global-install root
-        //    has no `workspaces` field, so this returns immediately without disk.
+        // 3. Discover and add workspace packages. Callers resolving a published
+        //    package as a dependency root clear `workspaces` in their in-memory
+        //    view, so this returns immediately without scanning package contents.
         let discovery = WorkspaceDiscovery::new(glob.clone());
         let workspaces = discovery.find_workspaces_from_pkg(&root_path, &pkg).await?;
         for workspace in workspaces {
@@ -247,7 +264,6 @@ where
 /// Resolve the workspace root for `cwd` and read its `package.json`. The
 /// disk-side counterpart to [`build_deps`]: a normal install calls this to get
 /// the `(root_path, manifest)` pair, then passes the manifest to `build_deps`.
-/// (Global installs skip this and synthesize the manifest in memory.)
 pub async fn read_root_manifest<G: Glob + Clone>(
     cwd: &Path,
     glob: G,
@@ -294,10 +310,8 @@ mod tests {
         );
     }
 
-    /// `build_deps` resolves an **in-memory** synthetic root (no disk
-    /// package.json, no workspace discovery) — the path global installs use. A
-    /// root with no dependencies resolves offline to a lock with only the root
-    /// entry.
+    /// `build_deps` can resolve an in-memory root without touching disk. A root
+    /// with no dependencies resolves offline to a lock with only the root entry.
     #[tokio::test]
     async fn test_build_deps_in_memory_root_no_deps() {
         let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
@@ -318,8 +332,35 @@ mod tests {
 
         let lock = build_deps(options, pkg)
             .await
-            .expect("in-memory synthetic root should resolve offline");
+            .expect("in-memory root should resolve offline");
         assert!(lock.packages.contains_key(""), "root entry present");
         assert_eq!(lock.packages.len(), 1, "no deps → only the root");
+    }
+
+    #[tokio::test]
+    async fn test_build_deps_can_exclude_root_dev_dependencies() {
+        let options: BuildDepsOptions<NoopGlob, NoopReceiver> = BuildDepsOptions {
+            cwd: PathBuf::from("/global/tool"),
+            registry: UnifiedRegistry::builder()
+                .registry("https://registry.invalid")
+                .build(),
+            cache_dir: None,
+            concurrency: 20,
+            peer_deps: PeerDeps::Skip,
+            glob: NoopGlob,
+            receiver: NoopReceiver,
+            catalogs: HashMap::new(),
+            baseline: None,
+        };
+        let mut pkg = PackageJson::new("tool", "1.0.0");
+        pkg.dev_dependencies = Some(HashMap::from([(
+            "must-not-resolve".to_string(),
+            "1.0.0".to_string(),
+        )]));
+
+        let lock = build_deps_with_root_dev_deps(options, pkg, DevDeps::Exclude)
+            .await
+            .expect("excluded root dev dependency must not hit the registry");
+        assert_eq!(lock.packages.len(), 1, "only the root should remain");
     }
 }

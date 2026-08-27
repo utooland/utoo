@@ -14,6 +14,40 @@ permissions:
   contents: read
 
 jobs:
+  npm-launcher-package-managers:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+    name: npm-launcher-${{ matrix.host }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Setup Yarn Plug'n'Play
+        run: |
+          corepack enable
+          corepack prepare yarn@4.9.2 --activate
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Test package-manager installs without lifecycle scripts
+        run: node e2e/npm-launcher-package-managers.mjs
+
   binary-size:
     if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     name: utoopm-binary-size
@@ -27,7 +61,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
           targets: x86_64-unknown-linux-gnu
 
       - name: Assert release dependency trim
@@ -141,7 +175,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
           targets: ${{ matrix.settings.target }}
       
       # - name: Cache cargo
@@ -158,8 +192,8 @@ jobs:
         run: sh e2e/postinstall-os-detect.sh
         shell: bash
 
-      - name: Placeholder self-heal e2e
-        run: sh e2e/placeholder-self-heal.sh
+      - name: Immutable npm launcher e2e
+        run: sh e2e/npm-launcher.sh
         shell: bash
 
       - name: Setup Utoo
@@ -189,11 +223,12 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - npm-launcher-package-managers
       - test
     steps:
       - name: Check success
         run: |
-          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ]; then
+          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ] || [ "${{ needs.npm-launcher-package-managers.result }}" == "failure" ] || [ "${{ needs.npm-launcher-package-managers.result }}" == "cancelled" ]; then
             echo "Tests failed or were cancelled"
             exit 1
           else

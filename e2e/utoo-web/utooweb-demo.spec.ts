@@ -31,7 +31,9 @@ const waitForConsoleMessage = async (
 const expandDirectory = async (directory: Locator) => {
   await expect(directory).toBeVisible();
   if ((await directory.getAttribute("aria-expanded")) !== "true") {
-    await directory.click();
+    // The directory row grows action buttons on hover that intentionally stop
+    // click propagation. Click the stable disclosure indicator instead.
+    await directory.locator(":scope > span").first().click();
   }
   await expect(directory).toHaveAttribute("aria-expanded", "true");
 };
@@ -52,7 +54,7 @@ const collectConsoleMessages = (page: Page) => {
   return messages;
 };
 
-test("builds the utooweb demo and previews dist/index.html", async ({
+test("builds and rebuilds the utooweb demo and previews dist/index.html", async ({
   page,
 }) => {
   const consoleMessages = collectConsoleMessages(page);
@@ -80,15 +82,17 @@ test("builds the utooweb demo and previews dist/index.html", async ({
   const buildButton = page.getByTestId("build-project-button");
   await expect(buildButton).toBeEnabled();
 
-  const buildStartIndex = consoleMessages.length;
-  await buildButton.click();
-  await waitForConsoleMessage(
-    consoleMessages,
-    BUILD_DONE_PATTERN,
-    buildStartIndex,
-    5 * 60 * 1000,
-  );
-  await expect(buildButton).toBeEnabled({ timeout: 60 * 1000 });
+  for (let buildNumber = 0; buildNumber < 2; buildNumber++) {
+    const buildStartIndex = consoleMessages.length;
+    await buildButton.click();
+    await waitForConsoleMessage(
+      consoleMessages,
+      BUILD_DONE_PATTERN,
+      buildStartIndex,
+      5 * 60 * 1000,
+    );
+    await expect(buildButton).toBeEnabled({ timeout: 60 * 1000 });
+  }
 
   await expandDirectory(page.getByTestId("file-tree-directory-root"));
   await expandDirectory(page.getByTestId("file-tree-directory-dist"));

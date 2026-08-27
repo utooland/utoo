@@ -3,12 +3,18 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::cmd::install::install;
+use crate::error::{CliError, classify};
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::workspace::update_cwd_to_project;
+use crate::model::cli_output::{
+    LinkDirection, LinkEntry, LinkPartialResult, LinkResult, PartialResult,
+};
 use crate::model::package::PackageInfo;
 use crate::util::cli_enum::ScriptPolicy;
+use crate::util::invocation;
 use crate::util::linker::link;
 use crate::util::logger::log_time_end;
+use crate::util::presenter::emit;
 use crate::util::user_config::resolve_global_prefix;
 
 /// Entry point for the `link` command.
@@ -17,21 +23,45 @@ pub async fn run(packages: Option<Vec<String>>, prefix: Option<String>) -> Resul
     match packages {
         None => {
             // Link current package to global
-            let package_name = link_current_to_global(&cwd, prefix.as_deref()).await?;
-            log_time_end(&format!("{package_name} linked"));
+            let link = link_current_to_global(&cwd, prefix.as_deref()).await?;
+            log_time_end(&format!("{} linked", link.package));
+            emit(
+                "link",
+                &LinkResult {
+                    direction: LinkDirection::LocalToGlobal,
+                    links: vec![link],
+                },
+                || Ok(()),
+            )
         }
         Some(packages) => {
+            let mut links = Vec::with_capacity(packages.len());
             for package in packages.iter() {
-                link_global_to_local(&cwd, package, prefix.as_deref()).await?;
+                match link_global_to_local(&cwd, package, prefix.as_deref()).await {
+                    Ok(link) => links.push(link),
+                    Err(error) if invocation::json() && !links.is_empty() => {
+                        return Err(CliError::new(classify(&error), format!("{error:#}"))
+                            .with_partial_result(PartialResult::Link(LinkPartialResult { links }))
+                            .into());
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             log_time_end(&format!("'{}' linked to local", packages.join(", ")));
+            emit(
+                "link",
+                &LinkResult {
+                    direction: LinkDirection::GlobalToLocal,
+                    links,
+                },
+                || Ok(()),
+            )
         }
     }
-    Ok(())
 }
 
 /// Link current package to global (equivalent to npm link without args)
-pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<String> {
+pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<LinkEntry> {
     // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
     let prefix = resolve_global_prefix(prefix).await;
     let prefix = prefix.as_deref();
@@ -77,7 +107,12 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
             })?;
     }
 
-    Ok(package_info.name)
+    Ok(LinkEntry {
+        package: package_info.name,
+        source: project_path.to_string_lossy().into_owned(),
+        target: global_package_path.to_string_lossy().into_owned(),
+        bins: package_info.bin_files.len() as u64,
+    })
 }
 
 /// Link a global package to local node_modules (equivalent to npm link pkg_name)
@@ -85,7 +120,7 @@ pub async fn link_global_to_local(
     cwd: &Path,
     package_name: &str,
     prefix: Option<&str>,
-) -> Result<()> {
+) -> Result<LinkEntry> {
     // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
     let prefix = resolve_global_prefix(prefix).await;
     let prefix = prefix.as_deref();
@@ -135,7 +170,12 @@ pub async fn link_global_to_local(
             })?;
     }
 
-    Ok(())
+    Ok(LinkEntry {
+        package: package_info.name,
+        source: global_package_path.to_string_lossy().into_owned(),
+        target: local_link_path.to_string_lossy().into_owned(),
+        bins: package_info.bin_files.len() as u64,
+    })
 }
 
 #[cfg(test)]

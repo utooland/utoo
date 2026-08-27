@@ -1,0 +1,21 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "PromiseLibrary"
+        }
+      }
+    ],
+    "externals": {
+      "external-value": "promise Promise.resolve({ marker: \"external value\" })"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "Production"
+}

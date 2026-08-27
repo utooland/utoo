@@ -46,7 +46,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
 
       # Resolve the ruborist version for this release:
       #
@@ -77,9 +77,21 @@ jobs:
           fi
 
           CUR=$(grep -E '^version[[:space:]]*=' crates/ruborist/Cargo.toml | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
-          LATEST=$(curl -fsSL "https://crates.io/api/v1/crates/utoo-ruborist" \
-            | jq -r '.crate.max_stable_version // .crate.max_version // empty' 2>/dev/null || true)
-          [ "$LATEST" = "null" ] && LATEST=""
+          # crates.io rejects anonymous API clients without a descriptive
+          # User-Agent. Keep this lookup fail-closed: treating an HTTP error as
+          # "never published" makes the next step try to republish CUR.
+          CRATE_META=$(curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 4 \
+            --retry-all-errors \
+            --retry-delay 2 \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --user-agent "utoo-cargo-publish/1.0 (https://github.com/utooland/utoo)" \
+            "https://crates.io/api/v1/crates/utoo-ruborist")
+          LATEST=$(jq -er '.crate.max_stable_version // .crate.max_version' <<< "$CRATE_META")
 
           echo "current_in_repo=$CUR"
           echo "latest_on_crates_io=${LATEST:-<none>}"

@@ -186,22 +186,48 @@ pub fn format_save_spec(version_spec: &str, resolved_version: &str) -> String {
     }
 }
 
-pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
+/// Fully resolved identity and source needed to materialize a requested package.
+pub struct ResolvedPackageSpec {
+    pub name: String,
+    pub version: String,
+    pub version_spec: String,
+    pub tarball_url: String,
+    pub integrity: Option<String>,
+    pub shasum: Option<String>,
+}
+
+pub async fn resolve_package_spec_details(spec: &str) -> Result<ResolvedPackageSpec> {
     let parsed = PackageSpec::from(spec);
     match parsed {
         PackageSpec::Registry { name, version_spec } => {
             let resolved = resolve_package(&Context::registry().await, &name, &version_spec)
                 .await
                 .context("Failed to resolve package")?;
-            Ok((name, resolved.version, version_spec))
+            let tarball_url = resolved
+                .manifest
+                .dist
+                .tarball
+                .clone()
+                .context("Resolved package has no tarball URL")?;
+            Ok(ResolvedPackageSpec {
+                name,
+                version: resolved.version,
+                version_spec,
+                tarball_url,
+                integrity: resolved.manifest.dist.integrity.clone(),
+                shasum: resolved.manifest.dist.shasum.clone(),
+            })
         }
         PackageSpec::Git { url, commit_ish } => {
             let resolved = resolve_git_spec(&url, commit_ish.as_deref(), None).await?;
-            Ok((
-                resolved.name.clone(),
-                resolved.version.clone(),
-                resolved.resolved_url.clone(),
-            ))
+            Ok(ResolvedPackageSpec {
+                name: resolved.name.clone(),
+                version: resolved.version.clone(),
+                version_spec: resolved.resolved_url.clone(),
+                tarball_url: resolved.resolved_url.clone(),
+                integrity: None,
+                shasum: None,
+            })
         }
         PackageSpec::GitHub {
             owner,
@@ -209,11 +235,14 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
             commit_ish,
         } => {
             let resolved = resolve_github_spec(&owner, &repo, commit_ish.as_deref()).await?;
-            Ok((
-                resolved.name.clone(),
-                resolved.version.clone(),
-                resolved.resolved_url.clone(),
-            ))
+            Ok(ResolvedPackageSpec {
+                name: resolved.name.clone(),
+                version: resolved.version.clone(),
+                version_spec: resolved.resolved_url.clone(),
+                tarball_url: resolved.resolved_url.clone(),
+                integrity: None,
+                shasum: None,
+            })
         }
         PackageSpec::Local { protocol, .. } => {
             anyhow::bail!("Local spec ({protocol}:) not supported in this context")
@@ -222,6 +251,11 @@ pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)
             anyhow::bail!("HTTP tarball spec ({url}) not supported in this context")
         }
     }
+}
+
+pub async fn resolve_package_spec(spec: &str) -> Result<(String, String, String)> {
+    let resolved = resolve_package_spec_details(spec).await?;
+    Ok((resolved.name, resolved.version, resolved.version_spec))
 }
 
 /// Root-entry optionalDependencies as the lock will have them: user's own

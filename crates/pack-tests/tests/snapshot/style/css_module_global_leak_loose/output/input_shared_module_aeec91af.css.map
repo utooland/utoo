@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_loose/input/shared.module.css"],"sourcesContent":[".shared {\n  padding: 1rem;\n}\n"],"names":[],"mappings":"AAAA"}}]
+}

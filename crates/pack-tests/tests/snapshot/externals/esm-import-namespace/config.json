@@ -1,0 +1,13 @@
+{
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.ts",
+                "name": "main"
+            }
+        ],
+        "externals": {
+            "native-esm": "esm native-esm"
+        }
+    }
+}

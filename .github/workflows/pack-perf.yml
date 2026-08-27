@@ -45,7 +45,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-05-15
+          toolchain: nightly-2026-07-29
           components: rustfmt, clippy
 
       # - name: Cache cargo
@@ -119,7 +119,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
 
       - name: Post PR Comment
-        if: steps.findPr.outputs.number
+        # Fork pull requests receive a read-only GITHUB_TOKEN, so keep the
+        # report in the job summary and artifact instead of attempting a write.
+        if: >
+          steps.findPr.outputs.number &&
+          (github.event_name != 'pull_request' ||
+            github.event.pull_request.head.repo.full_name == github.repository)
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: utoopack-perf-report

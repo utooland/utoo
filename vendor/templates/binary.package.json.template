@@ -2,13 +2,11 @@
   "name": "@utoo/{{name}}-{{os}}-{{cpu}}",
   "version": "{{version}}",
   "description": "Utoo CLI tool - {{name}}-{{os}}-{{cpu}}",
-  "bin": {
-    "{{name}}": "bin/{{name}}"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/utooland/utoo.git"
   },
-  "os": "{{os}}",
-  "cpu": "{{cpu}}"
+  "preferUnplugged": true,
+  "os": ["{{os}}"],
+  "cpu": [{{cpu_values}}]
 }

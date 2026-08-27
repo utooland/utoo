@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "optimization": {
+      "moduleIds": "named",
+      "minify": false,
+      "removeUnusedExports": true,
+      "treeShaking": true
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+    "watch": true,
+    "writeEndpointsIndividually": true,
+    "config": {
+        "entry": [
+            {
+                "import": "input/index.js",
+                "name": "main"
+            }
+        ],
+        "mode": "development",
+        "optimization": {
+            "minify": false
+        }
+    }
+}

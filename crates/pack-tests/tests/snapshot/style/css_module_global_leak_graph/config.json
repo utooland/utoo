@@ -1,0 +1,22 @@
+{
+  "expectedAppEndpoints": 2,
+  "config": {
+    "entry": [
+      {
+        "import": "input/a.js",
+        "name": "a"
+      },
+      {
+        "import": "input/b.js",
+        "name": "b"
+      }
+    ],
+    "mode": "production",
+    "optimization": {
+      "cssChunking": "graph",
+      "minify": false,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "dummy"
+}

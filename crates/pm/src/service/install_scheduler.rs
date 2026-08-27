@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
 
 use crate::service::auth;
-use crate::util::cloner::{PackageClone, clone_package_sync};
+use crate::util::cloner::{ClonePolicy, PackageClone, clone_package_sync};
 use crate::util::downloader::download_bytes;
 use crate::util::package_cache::{
     CachePlan, ExtractOutcome, extract_non_registry_to_target, extract_to_cache,
@@ -63,6 +63,7 @@ struct CloneSpec {
     package: PackageRef,
     target: PathBuf,
     parent: Option<PathBuf>,
+    policy: ClonePolicy,
 }
 
 struct ReadyClone {
@@ -205,6 +206,7 @@ impl InstallScheduler {
         version: String,
         tarball_url: String,
         target: PathBuf,
+        policy: ClonePolicy,
     ) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -217,6 +219,7 @@ impl InstallScheduler {
                     },
                     target,
                     parent: None,
+                    policy,
                 },
                 tx,
             ))
@@ -524,6 +527,7 @@ impl SchedulerState {
                         tarball_url: &job.spec.package.tarball_url,
                         cache: &job.cache_path,
                         target: &job.spec.target,
+                        policy: job.spec.policy,
                     })
                     .map_err(|e| format!("{e:#}"))
                 }))
@@ -710,6 +714,7 @@ mod tests {
             package: package(name, version),
             target: PathBuf::from(target),
             parent: None,
+            policy: ClonePolicy::Shared,
         }
     }
 

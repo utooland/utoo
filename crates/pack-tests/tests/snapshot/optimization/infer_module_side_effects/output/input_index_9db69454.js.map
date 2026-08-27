@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/optimization/infer_module_side_effects/input/index.js"],"sourcesContent":["import \"./pure.js\";\n\nconsole.log(\"entry\");\n"],"names":["console","log"],"mappings":";AAEAA,QAAQC,GAAG,CAAC"}}]
+}

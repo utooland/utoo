@@ -1,13 +1,13 @@
 {
   "entrypoints": {
-    "./main": {
-      "name": "./main",
+    "main": {
+      "name": "main",
       "chunks": [
-        "./main.js"
+        "main.js"
       ],
       "assets": [
         {
-          "name": "./main.js"
+          "name": "main.js"
         }
       ]
     }
@@ -18,11 +18,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "./main.js",
-      "size": 2957,
+      "id": "main.js",
+      "size": 2413,
       "hash": "",
       "files": [
-        "./main.js"
+        "main.js"
       ]
     }
   ],
@@ -31,7 +31,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 2957,
+      "size": 2413,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -43,7 +43,7 @@
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 2517,
+      "size": 1800,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -54,12 +54,52 @@
   ],
   "modules": [
     {
-      "name": "library/basic/input/index.tsx",
-      "id": "library/basic/input/index.tsx",
+      "name": "root EmotionStyled commonjs emotion-styled",
+      "id": 132,
       "chunks": [
-        "./main.js"
+        "main.js"
       ],
-      "size": 518
+      "size": 279
+    },
+    {
+      "name": "library/basic/input/a.ts",
+      "id": 481,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 116
+    },
+    {
+      "name": "root React commonjs react",
+      "id": 571,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 253
+    },
+    {
+      "name": "root ReactDOM commonjs react-dom",
+      "id": 611,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 264
+    },
+    {
+      "name": "library/basic/input/index.tsx",
+      "id": 620,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 1018
+    },
+    {
+      "name": "node_modules/@emotion/react/jsx-runtime.js",
+      "id": 861,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 286
     }
   ]
 }

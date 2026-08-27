@@ -32,10 +32,15 @@ use utoo_ruborist::tar::{
     commit_cache_dir_atomic, gzip_decompress, is_safe_tar_entry_path, normalize_entry_mode,
 };
 
+use super::process_lock::{lock_exclusive, sibling_lock_path};
+
 /// Extract gzip tarball bytes and atomically commit them to `dest`.
 ///
 /// Skips if the `_resolved` marker already exists (warm cache).
 pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    let lock_path = sibling_lock_path(dest, ".lock")?;
+    let _lock = lock_exclusive(&lock_path).await?;
+
     // Check if already resolved (warm cache scenario)
     let resolved_path = dest.join("_resolved");
     if crate::fs::try_exists(&resolved_path).await? {
@@ -75,6 +80,7 @@ pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
 struct ExtractedEntry {
     path: PathBuf,
     data: Bytes,
+    #[cfg_attr(not(unix), allow(dead_code))]
     mode: u32,
 }
 
@@ -314,12 +320,11 @@ mod tests {
 
         assert!(extract_and_write(truncated, &dest).await.is_err());
         assert!(!dest.exists());
-        let leftovers = if parent.exists() {
-            std::fs::read_dir(&parent).unwrap().count()
-        } else {
-            0
-        };
-        assert_eq!(leftovers, 0, "staging dir leaked into the cache parent");
+        let leftovers: Vec<_> = std::fs::read_dir(&parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from(".1.0.0.lock")]);
     }
 
     /// A pre-staging-protocol slot (files present, no `_resolved`) is
@@ -337,5 +342,24 @@ mod tests {
         assert!(dest.join("_resolved").exists());
         assert!(dest.join("package").join("index.js").exists());
         assert!(!dest.join("stale.js").exists());
+    }
+
+    #[tokio::test]
+    async fn concurrent_extracts_share_one_complete_slot() {
+        let tmp = TempDir::new().unwrap();
+        let dest = tmp.path().join("pkg").join("1.0.0");
+        let first = gzip(&make_tar(&[("package/index.js", b"first")]));
+        let second = gzip(&make_tar(&[("package/index.js", b"second")]));
+
+        let (first_result, second_result) = tokio::join!(
+            extract_and_write(first, &dest),
+            extract_and_write(second, &dest)
+        );
+
+        first_result.unwrap();
+        second_result.unwrap();
+        assert!(dest.join("_resolved").exists());
+        let content = std::fs::read(dest.join("package/index.js")).unwrap();
+        assert!(content == b"first" || content == b"second");
     }
 }

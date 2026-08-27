@@ -4,9 +4,11 @@ use std::{future::Future, path::PathBuf, sync::Arc};
 use crate::pack_api::turbopack_ctx::{RootTask, TurbopackContext};
 use anyhow::{Result, anyhow};
 use napi::{
-    JsFunction, JsObject, JsUnknown, NapiRaw, NapiValue, Status,
-    bindgen_prelude::{External, ToNapiValue},
-    threadsafe_function::{ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
+    Env, Status, Unknown,
+    bindgen_prelude::{
+        External, ExternalRef, FunctionRef, JsObjectValue, JsValue, Object, ToNapiValue,
+    },
+    threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{turbo_tasks::UtooTurboTasks, utils::StyledStringSerialize};
 use serde::Serialize;
@@ -15,8 +17,9 @@ use turbo_tasks::{
     message_queue::{CompilationEvent, Severity},
 };
 use turbo_tasks_backend::{
-    BackendOptions, GitVersionInfo, StartupCacheState, StorageMode, TurboTasksBackend,
-    db_invalidation::invalidation_reasons, noop_backing_storage, turbo_backing_storage,
+    BackendOptions, BackingStorageOptions, EvictionMode, GitVersionInfo, StartupCacheState,
+    StorageMode, TurboTasksBackend, db_invalidation::invalidation_reasons, noop_backing_storage,
+    turbo_backing_storage,
 };
 use turbo_tasks_fs::FileContent;
 use turbopack_core::{
@@ -30,7 +33,7 @@ pub fn create_turbo_tasks(
     _memory_limit: usize,
     dependency_tracking: bool,
     is_short_session: bool,
-    evict_after_snapshot: bool,
+    eviction_mode: EvictionMode,
     small_preallocation: bool,
 ) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
@@ -45,9 +48,11 @@ pub fn create_turbo_tasks(
         let (backing_storage, cache_state) = turbo_backing_storage(
             &output_path.join(".turbopack/.cache"),
             &version_info,
-            is_ci,
-            is_short_session,
-            false,
+            BackingStorageOptions {
+                is_ci,
+                is_short_session,
+                skip_compaction: false,
+            },
         )?;
         let tt = TurboTasks::new(TurboTasksBackend::new(
             BackendOptions {
@@ -60,7 +65,7 @@ pub fn create_turbo_tasks(
                 }),
                 dependency_tracking,
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
-                evict_after_snapshot,
+                eviction_mode,
                 small_preallocation,
                 ..Default::default()
             },
@@ -76,6 +81,7 @@ pub fn create_turbo_tasks(
             BackendOptions {
                 storage_mode: None,
                 dependency_tracking,
+                eviction_mode: EvictionMode::Off,
                 ..Default::default()
             },
             noop_backing_storage(),
@@ -116,9 +122,9 @@ impl CompilationEvent for StartupCacheInvalidationEvent {
     }
 }
 
-#[napi]
+#[napi(async_runtime)]
 pub fn root_task_dispose(
-    #[napi(ts_arg_type = "{ __napiType: \"RootTask\" }")] mut root_task: External<RootTask>,
+    #[napi(ts_arg_type = "{ __napiType: \"RootTask\" }")] mut root_task: ExternalRef<RootTask>,
 ) -> napi::Result<()> {
     if let Some(task) = root_task.task_id.take() {
         root_task
@@ -245,33 +251,40 @@ impl<T: ToNapiValue> ToNapiValue for TurbopackResult<T> {
         env: napi::sys::napi_env,
         val: Self,
     ) -> napi::Result<napi::sys::napi_value> {
-        let mut obj = unsafe { napi::Env::from_raw(env).create_object() }?;
+        let result_raw = unsafe { T::to_napi_value(env, val.result)? };
+        let result = unsafe { Unknown::from_raw_unchecked(env, result_raw) };
 
-        let result = unsafe { T::to_napi_value(env, val.result) }?;
-        let result = unsafe { JsUnknown::from_raw(env, result) }?;
-        if matches!(result.get_type()?, napi::ValueType::Object) {
-            // SAFETY: We know that result is an object, so we can cast it to a JsObject
-            let result = unsafe { result.cast::<JsObject>() };
-
-            for key in JsObject::keys(&result)? {
-                let value: JsUnknown = result.get_named_property(&key)?;
-                obj.set_named_property(&key, value)?;
-            }
-        }
+        let mut obj = if matches!(result.get_type()?, napi::ValueType::Object) {
+            Object::from_raw(env, result_raw)
+        } else {
+            Object::new(&Env::from_raw(env))?
+        };
 
         obj.set_named_property("issues", val.issues)?;
 
-        Ok(unsafe { obj.raw() })
+        Ok(obj.raw())
     }
 }
 
-pub fn subscribe<T: 'static + Send + Sync, F: Future<Output = Result<T>> + Send, V: ToNapiValue>(
+/// Starts a TurboTasks root task immediately, so synchronous NAPI callers must use
+/// `#[napi(async_runtime)]` to enter the Tokio runtime before calling this helper.
+pub fn subscribe<
+    T: 'static + Send + Sync,
+    F: Future<Output = Result<T>> + Send,
+    V: 'static + ToNapiValue,
+>(
     ctx: TurbopackContext,
-    func: JsFunction,
+    env: &Env,
+    func: &FunctionRef<V, ()>,
     handler: impl 'static + Sync + Send + Clone + Fn() -> F,
-    mapper: impl 'static + Sync + Send + FnMut(ThreadSafeCallContext<T>) -> napi::Result<Vec<V>>,
+    mapper: impl 'static + Sync + Send + FnMut(ThreadsafeCallContext<T>) -> napi::Result<V>,
 ) -> napi::Result<External<RootTask>> {
-    let func: ThreadsafeFunction<T> = func.create_threadsafe_function(0, mapper)?;
+    let js_func = func.borrow_back(env)?;
+    let func: ThreadsafeFunction<T, (), V, Status, true> = js_func
+        .build_threadsafe_function::<T>()
+        .callee_handled::<true>()
+        .build_callback(mapper)?;
+    let func = Arc::new(func);
     let task_id = ctx.turbo_tasks().spawn_root_task({
         let ctx = ctx.clone();
         move || {

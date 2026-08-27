@@ -7,15 +7,15 @@ import { describe, expect, it } from "vitest";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(testDir, "../..");
 const repoRoot = path.resolve(packageRoot, "../..");
-const childScript = path.join(testDir, "serveStatsChild.ts");
 const viteNode = path.join(repoRoot, "node_modules/vite-node/vite-node.mjs");
 
-function runServeStatsFixture() {
+function runServeStatsFixture(childScriptName = "serveStatsChild.ts") {
   return new Promise<unknown>((resolve, reject) => {
     const projectPath = fs.mkdtempSync(
       path.join(repoRoot, "target/serve-stats-"),
     );
     const port = 43_200 + Math.floor(Math.random() * 1000);
+    const childScript = path.join(testDir, childScriptName);
     const child = spawn(
       process.execPath,
       [viteNode, childScript, projectPath, `${port}`],
@@ -133,5 +133,30 @@ describe("serve stats", () => {
         "htmlGenerated": true,
       }
     `);
+  }, 30_000);
+
+  it("keeps dev chunk lists scoped to their owning entrypoint", async () => {
+    await expect(
+      runServeStatsFixture("serveMultiClientStatsChild.ts"),
+    ).resolves.toEqual({
+      alphaHasOwnChunkLists: true,
+      alphaHasOnlyOwnChunkLists: true,
+      betaHasOwnChunkLists: true,
+      betaHasOnlyOwnChunkLists: true,
+    });
+  }, 30_000);
+
+  it("keeps all named server entries after rebuilding one entry", async () => {
+    await expect(
+      runServeStatsFixture("serveMultiServerStatsChild.ts"),
+    ).resolves.toEqual({
+      changedEntry: true,
+      initialEntries: ["detail-server", "index-server", "server"],
+      preservedSharedAssets: true,
+      preservedEntries: true,
+      rebuiltEntries: ["detail-server", "index-server", "server"],
+      sharedChangeInvalidatedAffectedEntries: true,
+      sharedChangePreservedUnaffectedEntry: true,
+    });
   }, 30_000);
 });

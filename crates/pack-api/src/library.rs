@@ -184,6 +184,7 @@ impl LibraryEndpoint {
                 project.project_path().owned().await?,
                 project.mode(),
                 project.config(),
+                project.config().externals_config(),
                 project.execution_context(),
                 project.pack_path().owned().await?,
             )),
@@ -294,6 +295,10 @@ impl LibraryEndpoint {
         Ok(get_library_chunking_context(
             LibraryChunkingContextOptions {
                 name: Vc::cell(Some(self.await?.name.clone())),
+                preserve_entry_name: false,
+                shared_chunks: false,
+                filename_override: None,
+                chunk_filename_override: None,
                 mode: project.mode(),
                 root_path: project.project_path().owned().await?,
                 output_root: project.dist_root().owned().await?,

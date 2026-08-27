@@ -143,12 +143,11 @@
   "modules": [
     {
       "name": "basic/copy/input/index.js",
-      "id": "basic/copy/input/index.js",
+      "id": "[project]/basic/copy/input/index.js [client] (ecmascript)",
       "chunks": [
-        "input_index_d913cfd2.js",
-        "main.js"
+        "input_index_d913cfd2.js"
       ],
-      "size": 28
+      "size": 79
     }
   ]
 }

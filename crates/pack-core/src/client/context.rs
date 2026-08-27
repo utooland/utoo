@@ -5,7 +5,7 @@ use bincode::{Decode, Encode};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
 use turbo_tasks_env::EnvMap;
-use turbo_tasks_fs::FileSystemPath;
+use turbo_tasks_fs::{File, FileContent, FileSystemPath};
 use turbopack::{
     evaluate_context::{config_tracing_module_context, node_evaluate_asset_context},
     module_options::{
@@ -15,21 +15,27 @@ use turbopack::{
 };
 use turbopack_browser::{BrowserChunkingContext, CurrentChunkMethod};
 use turbopack_core::{
+    asset::AssetContent,
     chunk::{
         ChunkingConfig, ChunkingContext, MangleType, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
-    compile_time_info::CompileTimeInfo,
+    compile_time_info::{
+        CompileTimeDefineValue, CompileTimeInfo, DefinableNameSegment, FreeVarReference,
+        FreeVarReferences,
+    },
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
-    file_source::FileSource,
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
     resolve::options::{ImportMap, ImportMapping},
+    virtual_source::VirtualSource,
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{
-    TypeofWindow, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
+    TypeofWindow, chunk::EcmascriptChunkType, runtime_functions::TURBOPACK_MODULE,
+    transform::ReactCompilerTarget,
 };
+use turbopack_ecmascript_runtime::{RuntimeType, chunk_update_listeners_global_name};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransform, PostCssTransformOptions},
@@ -91,15 +97,34 @@ pub async fn get_client_compile_time_info(
     define_env: Vc<EnvMap>,
     mode: Vc<Mode>,
     provider_config: Vc<ProviderConfig>,
+    import_meta_env_base_url: RcStr,
+    hmr_enabled: Vc<bool>,
 ) -> Result<Vc<CompileTimeInfo>> {
+    let mode = mode.await?;
+    let hmr_enabled = *hmr_enabled.await?;
     let mut define_env = (*define_env.await?).clone();
     define_env.extend([(
         "process.env.NODE_ENV".into(),
-        serde_json::to_string(mode.await?.node_env())
-            .unwrap()
-            .into(),
+        serde_json::to_string(mode.node_env()).unwrap().into(),
     )]);
     let define_env = Vc::cell(define_env);
+    let mut free_vars = (*free_vars(define_env, provider_config).await?).clone();
+    if hmr_enabled {
+        free_vars.insert(
+            vec![DefinableNameSegment::Name(rcstr!("module"))],
+            FreeVarReference::from(TURBOPACK_MODULE),
+        );
+    } else {
+        // Keep the documented `if (module.hot)` guard safe without changing
+        // unrelated CommonJS expressions such as `module.exports`.
+        free_vars.insert(
+            vec![
+                DefinableNameSegment::Name(rcstr!("module")),
+                DefinableNameSegment::Name(rcstr!("hot")),
+            ],
+            FreeVarReference::Value(CompileTimeDefineValue::Undefined),
+        );
+    }
     let environment = BrowserEnvironment {
         dom: true,
         web_worker: true,
@@ -114,7 +139,9 @@ pub async fn get_client_compile_time_info(
             .await?,
     )
     .defines(defines(define_env).to_resolved().await?)
-    .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
+    .free_var_references(FreeVarReferences(free_vars).resolved_cell())
+    .import_meta_env_base_url(import_meta_env_base_url)
+    .hot_module_replacement_enabled(hmr_enabled)
     .cell()
     .await
 }
@@ -161,15 +188,34 @@ pub async fn get_client_runtime_entries(
 
     if is_development && watch && hot {
         #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-        let hmr_bootstrap_path = rcstr!("hmr/bootstrap-messageport.ts");
+        let (hmr_bootstrap_path, hmr_client_path) = (
+            rcstr!("hmr/bootstrap-messageport.ts"),
+            "./client-messageport",
+        );
         #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-        let hmr_bootstrap_path = rcstr!("hmr/bootstrap.ts");
+        let (hmr_bootstrap_path, hmr_client_path) = (rcstr!("hmr/bootstrap.ts"), "./client");
+
+        let chunk_loading_global = config
+            .client_chunk_loading_global(project_root.clone())
+            .await?;
+        let chunk_update_listeners_global = chunk_update_listeners_global_name(
+            chunk_loading_global
+                .as_ref()
+                .map_or("TURBOPACK", RcStr::as_str),
+        );
+        let hmr_bootstrap = format!(
+            "import {{ initHMR }} from {hmr_client_path:?};\n\ninitHMR({});\n",
+            serde_json::to_string(&chunk_update_listeners_global)?,
+        );
 
         runtime_entries.push(
             RuntimeEntry::Source(ResolvedVc::upcast(
-                FileSource::new(embed_file_path(hmr_bootstrap_path).owned().await?)
-                    .to_resolved()
-                    .await?,
+                VirtualSource::new(
+                    embed_file_path(hmr_bootstrap_path).owned().await?,
+                    AssetContent::file(FileContent::Content(File::from(hmr_bootstrap)).cell()),
+                )
+                .to_resolved()
+                .await?,
             ))
             .resolved_cell(),
         );
@@ -234,11 +280,11 @@ pub async fn get_client_module_options_context(
     let enable_webpack_loaders =
         *webpack_loader_options(project_path.clone(), config, loader_conditions).await?;
 
-    let tree_shaking_mode_for_user_code = *config
-        .tree_shaking_mode_for_user_code(mode_ref.is_development())
+    let module_fragments_enabled_for_user_code = *config
+        .module_fragments_enabled_for_user_code(mode_ref.is_development())
         .await?;
-    let tree_shaking_mode_for_foreign_code = *config
-        .tree_shaking_mode_for_foreign_code(mode_ref.is_development())
+    let module_fragments_enabled_for_foreign_code = *config
+        .module_fragments_enabled_for_foreign_code(mode_ref.is_development())
         .await?;
     let target_browsers = env.runtime_versions();
 
@@ -387,6 +433,8 @@ pub async fn get_client_module_options_context(
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
+            cjs_tree_shaking: module_fragments_enabled_for_user_code,
+            infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
         },
@@ -398,7 +446,8 @@ pub async fn get_client_module_options_context(
         },
         environment: Some(env),
         execution_context: Some(execution_context),
-        tree_shaking_mode: tree_shaking_mode_for_user_code,
+        follow_reexports: true,
+        module_fragments_enabled: module_fragments_enabled_for_user_code,
         enable_postcss_transform,
         side_effect_free_packages: Some(
             side_effect_free_packages_glob(config.optimize_package_imports())
@@ -419,7 +468,8 @@ pub async fn get_client_module_options_context(
         enable_webpack_loaders: foreign_enable_webpack_loaders,
         enable_postcss_transform: enable_foreign_postcss_transform,
         module_rules: foreign_client_rules,
-        tree_shaking_mode: tree_shaking_mode_for_foreign_code,
+        follow_reexports: true,
+        module_fragments_enabled: module_fragments_enabled_for_foreign_code,
         ..module_options_context.clone()
     };
 
@@ -548,6 +598,7 @@ pub struct ClientChunkingContextOptions {
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
+    pub shared_runtime_chunk: Vc<bool>,
     pub debug_ids: Vc<bool>,
     pub should_use_absolute_url_references: Vc<bool>,
     pub config: Vc<Config>,
@@ -573,6 +624,7 @@ pub async fn get_client_chunking_context(
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
+        shared_runtime_chunk,
         debug_ids,
         should_use_absolute_url_references,
         config,
@@ -584,7 +636,6 @@ pub async fn get_client_chunking_context(
     let runtime_type = {
         #[cfg(feature = "test")]
         {
-            use turbopack_ecmascript_runtime::RuntimeType;
             match config.runtime_type_str().await?.as_deref() {
                 Some(rt) if rt.eq_ignore_ascii_case("Development") => RuntimeType::Development,
                 Some(rt) if rt.eq_ignore_ascii_case("Production") => RuntimeType::Production,
@@ -624,7 +675,8 @@ pub async fn get_client_chunking_context(
     .unused_references(unused_references.to_resolved().await?)
     .debug_ids(*debug_ids.await?)
     .should_use_absolute_url_references(*should_use_absolute_url_references.await?)
-    .nested_async_availability(*nested_async_chunking.await?);
+    .nested_async_availability(*nested_async_chunking.await?)
+    .shared_runtime_chunk(*shared_runtime_chunk.await?);
 
     if let Some(chunk_loading_global) = &*config
         .client_chunk_loading_global(root_path.clone())
@@ -667,6 +719,14 @@ pub async fn get_client_chunking_context(
             .hot_module_replacement()
             .source_map_source_type(SourceMapSourceType::AbsoluteFileUri)
             .dynamic_chunk_content_loading(true);
+
+        let dev_server = config.dev_server().await?;
+        if matches!(runtime_type, RuntimeType::Development)
+            && dev_server.hot.unwrap_or_default()
+            && dev_server.dynamic_hmr_chunk_lists.unwrap_or_default()
+        {
+            builder = builder.dynamic_hmr_chunk_lists();
+        }
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;

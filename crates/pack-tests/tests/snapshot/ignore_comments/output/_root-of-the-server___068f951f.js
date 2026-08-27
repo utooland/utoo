@@ -37,7 +37,7 @@ __turbopack_context__.v((parentImport) => {
  * which module chunks to load and which module to run as the entry point.
  *
  * The params are a JSON array of the following structure:
- * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, ...workerForwardedGlobals values]`
+ * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, WORKER_CHUNK_BASE_PATH, ...workerForwardedGlobals values]`
  *
  * @param WorkerConstructor The Worker or SharedWorker constructor
  * @param entrypoint path to the worker entrypoint chunk
@@ -50,10 +50,11 @@ __turbopack_context__.v((parentImport) => {
     // other when `CHUNK_BASE_PATH` (= `assetPrefix`) is a cross-origin CDN.
     // `null` falls back; an empty string is treated as a literal empty prefix.
     const workerBasePath = null ?? /*TURBOPACK member replacement*/ __turbopack_context__.b;
-    const chunkUrls = moduleChunks.map((chunk)=>/*TURBOPACK member replacement*/ __turbopack_context__.h(chunk, workerBasePath)).reverse();
+    const chunkUrls = moduleChunks.map((chunk)=>/*TURBOPACK member replacement*/ __turbopack_context__.h(typeof chunk === 'string' ? chunk : chunk.path, workerBasePath)).reverse();
     const params = [
         chunkUrls,
-        /*TURBOPACK member replacement*/ __turbopack_context__.X
+        /*TURBOPACK member replacement*/ __turbopack_context__.X,
+        workerBasePath
     ];
     const globals = [];
     for(let i = 0; i < globals.length; i++){
@@ -95,6 +96,13 @@ __turbopack_context__.q("/ignore-worker.4e0cf842.cjs");}),
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
         return __turbopack_context__.F("input/index.js");
+    },
+    env: {
+        DEV: false,
+        PROD: true,
+        MODE: "production",
+        BASE_URL: "/",
+        SSR: false
     }
 };
 __turbopack_context__.A("[project]/ignore_comments/input/vercel.mjs [client] (ecmascript, async loader)").then(console.log);

@@ -11,7 +11,7 @@ use pack_api::project::{ProjectContainer, ProjectOptions, WatchOptions};
 use serde::Deserialize;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, TurboTasks};
-use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
+use turbo_tasks_backend::{BackendOptions, EvictionMode, TurboTasksBackend, noop_backing_storage};
 
 pub mod build;
 pub mod serve;
@@ -71,6 +71,7 @@ pub async fn initialize_project_container(
         BackendOptions {
             dependency_tracking: dev,
             storage_mode: None,
+            eviction_mode: EvictionMode::Off,
             ..Default::default()
         },
         noop_backing_storage(),

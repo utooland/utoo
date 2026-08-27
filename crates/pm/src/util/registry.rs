@@ -5,6 +5,7 @@
 use colored::Colorize;
 
 use super::http::client_builder;
+use super::invocation;
 
 /// Default registries for auto-selection
 pub const REGISTRY_NPMMIRROR: &str = "https://registry.npmmirror.com";
@@ -77,17 +78,19 @@ pub async fn select_fastest_registry() -> String {
         }
     };
 
-    eprintln!(
-        "{} {} ({})",
-        "Registry:".dimmed(),
-        registry.cyan(),
-        latency_info
-    );
-    eprintln!(
-        "{} {}",
-        "Tip:".dimmed(),
-        format!("ut config set registry {} --global", registry).yellow()
-    );
+    if !invocation::quiet() {
+        eprintln!(
+            "{} {} ({})",
+            "Registry:".dimmed(),
+            registry.cyan(),
+            latency_info
+        );
+        eprintln!(
+            "{} {}",
+            "Tip:".dimmed(),
+            format!("ut config set registry {} --global", registry).yellow()
+        );
+    }
 
     registry
 }

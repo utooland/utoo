@@ -152,7 +152,7 @@ export class HmrServer {
 
   private handleClientEvent(
     _client: HmrClient,
-    message: { event: string; [key: string]: unknown },
+    message: { event: string; hadRuntimeError?: unknown },
   ) {
     switch (message.event) {
       case "client-error":

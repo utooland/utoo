@@ -1,0 +1,9 @@
+# This fixture exercises server outputs only. The client entry exists solely to
+# drive the app build that emits the configured server entries.
+client/
+
+# All named entries share the same generated Node runtime. Keep the primary
+# entry as the representative runtime snapshot; stats and dev assertions still
+# cover the additional entries.
+server/entries/detail-server.
+server/entries/index-server.

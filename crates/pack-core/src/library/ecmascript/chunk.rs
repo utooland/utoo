@@ -14,6 +14,7 @@ use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::{EdgeWorkerEnvironment, Environment, ExecutionEnvironment, NodeJsVersion},
     ident::AssetIdent,
+    module::Module,
     module_graph::ModuleGraph,
     output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
     source_map::{GenerateSourceMap, SourceMapAsset},
@@ -42,6 +43,230 @@ pub struct EcmascriptLibraryEvaluateChunk {
 struct EcmascriptLibraryChunkCode {
     code: ResolvedVc<Code>,
     license_comments: Option<RcStr>,
+}
+
+/// A non-entry JavaScript chunk for Node.js library builds. It exports the
+/// compressed module factory array consumed synchronously by the entry runtime.
+#[turbo_tasks::value(shared)]
+pub struct EcmascriptLibraryChunk {
+    chunking_context: ResolvedVc<LibraryChunkingContext>,
+    ident: ResolvedVc<AssetIdent>,
+    chunk: ResolvedVc<EcmascriptChunk>,
+}
+
+#[turbo_tasks::value_impl]
+impl EcmascriptLibraryChunk {
+    #[turbo_tasks::function]
+    pub fn new(
+        chunking_context: ResolvedVc<LibraryChunkingContext>,
+        ident: ResolvedVc<AssetIdent>,
+        chunk: ResolvedVc<EcmascriptChunk>,
+    ) -> Vc<Self> {
+        Self {
+            chunking_context,
+            ident,
+            chunk,
+        }
+        .cell()
+    }
+
+    #[turbo_tasks::function]
+    async fn processed_code(self: Vc<Self>) -> Result<Vc<EcmascriptLibraryChunkCode>> {
+        let this = self.await?;
+        let source_maps = *this
+            .chunking_context
+            .reference_chunk_source_maps(*ResolvedVc::upcast(self.to_resolved().await?))
+            .await?;
+        let content = this.chunk.chunk_content().await?;
+        let mut chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
+        chunk_items.sort_by(|a, b| {
+            a.first()
+                .map(|(id, _, path)| (path, id))
+                .cmp(&b.first().map(|(id, _, path)| (path, id)))
+        });
+
+        let mut code = CodeBuilder::default();
+        writeln!(code, "module.exports = [")?;
+        for item in &chunk_items {
+            for (id, item_code, _) in &**item {
+                write!(code, "\n{}, ", StringifyJs(id))?;
+                code.push_code(item_code);
+                write!(code, ",")?;
+            }
+        }
+        writeln!(code, "\n];")?;
+
+        let mut code = code.build();
+        let mut license_comments = None;
+        if let MinifyType::Minify { mangle, compress } = this.chunking_context.await?.minify_type()
+        {
+            let compress_options = get_compress_options(compress, mangle);
+            if this.chunking_context.await?.extract_comments() {
+                let (minified_code, comments) =
+                    minify_with_legal_comments(code, source_maps, mangle, compress_options)?;
+                code = minified_code;
+
+                if !comments.is_empty() {
+                    let license_filename =
+                        format!("{}.LICENSE.txt", self.path().await?.file_name());
+                    let mut code_with_banner = CodeBuilder::default();
+                    writeln!(
+                        code_with_banner,
+                        "/*! For license information please see {license_filename} */"
+                    )?;
+                    code_with_banner.push_code(&code);
+                    code = code_with_banner.build();
+                    license_comments = Some(format!("{}\n", comments.join("\n\n")).into());
+                }
+            } else {
+                code = minify(code, source_maps, mangle, compress_options)?;
+            }
+        }
+
+        Ok(EcmascriptLibraryChunkCode {
+            code: code.resolved_cell(),
+            license_comments,
+        }
+        .cell())
+    }
+
+    #[turbo_tasks::function]
+    async fn code(self: Vc<Self>) -> Result<Vc<Code>> {
+        Ok(*self.processed_code().await?.code)
+    }
+
+    #[turbo_tasks::function]
+    async fn license_asset(self: Vc<Self>) -> Result<Vc<VirtualOutputAsset>> {
+        let processed_code = self.processed_code().await?;
+        let Some(license_comments) = processed_code.license_comments.as_ref() else {
+            bail!("license asset requested without extracted license comments")
+        };
+        let license_path = self.path().await?.append(".LICENSE.txt")?;
+
+        Ok(VirtualOutputAsset::new(
+            license_path,
+            AssetContent::file(
+                FileContent::Content(File::from(license_comments.to_string())).cell(),
+            ),
+        ))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn ident(&self) -> Result<Vc<AssetIdent>> {
+        Ok(self
+            .ident
+            .owned()
+            .await?
+            .with_modifier(rcstr!("ecmascript library chunk"))
+            .into_vc())
+    }
+
+    #[turbo_tasks::function]
+    async fn source_map(self: Vc<Self>) -> Result<Vc<SourceMapAsset>> {
+        let this = self.await?;
+        Ok(SourceMapAsset::new(
+            Vc::upcast(*this.chunking_context),
+            self.ident(),
+            Vc::upcast(self),
+        ))
+    }
+
+    #[turbo_tasks::function]
+    pub fn chunk(&self) -> Vc<EcmascriptChunk> {
+        *self.chunk
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl ValueToString for EcmascriptLibraryChunk {
+    #[turbo_tasks::function]
+    fn to_string(&self) -> Vc<RcStr> {
+        Vc::cell("Ecmascript Library Chunk".into())
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl OutputAsset for EcmascriptLibraryChunk {
+    #[turbo_tasks::function]
+    async fn path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
+        let this = self.await?;
+        Ok(this.chunking_context.chunk_path(
+            Some(Vc::upcast(self)),
+            self.ident(),
+            None,
+            ".js".into(),
+        ))
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl OutputAssetsReference for EcmascriptLibraryChunk {
+    #[turbo_tasks::function]
+    async fn references(self: Vc<Self>) -> Result<Vc<OutputAssetsWithReferenced>> {
+        let this = self.await?;
+        let chunk_references = this.chunk.references().await?;
+        let include_source_map = *this
+            .chunking_context
+            .reference_chunk_source_maps(Vc::upcast(self))
+            .await?;
+        let include_license = self.processed_code().await?.license_comments.is_some();
+        let ref_assets = chunk_references.assets.await?;
+        let mut assets = Vec::with_capacity(
+            ref_assets.len()
+                + if include_source_map { 1 } else { 0 }
+                + if include_license { 1 } else { 0 },
+        );
+        assets.extend(ref_assets.iter().copied());
+
+        if include_source_map {
+            assets.push(ResolvedVc::upcast(self.source_map().to_resolved().await?));
+        }
+        if include_license {
+            assets.push(ResolvedVc::upcast(
+                self.license_asset().to_resolved().await?,
+            ));
+        }
+
+        Ok(OutputAssetsWithReferenced {
+            assets: ResolvedVc::cell(assets),
+            referenced_assets: chunk_references.referenced_assets,
+            references: chunk_references.references,
+        }
+        .cell())
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl Asset for EcmascriptLibraryChunk {
+    #[turbo_tasks::function]
+    async fn content(self: Vc<Self>) -> Result<Vc<AssetContent>> {
+        let code = self.code().await?;
+        let rope = if code.has_source_map() {
+            let mut rope_builder = RopeBuilder::default();
+            rope_builder.concat(code.source_code());
+            let source_map_path = self.source_map().path().await?;
+            write!(
+                rope_builder,
+                "\n\n//# sourceMappingURL={}",
+                urlencoding::encode(source_map_path.file_name())
+            )?;
+            rope_builder.build()
+        } else {
+            code.source_code().clone()
+        };
+
+        Ok(AssetContent::file(
+            FileContent::Content(File::from(rope)).cell(),
+        ))
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl GenerateSourceMap for EcmascriptLibraryChunk {
+    #[turbo_tasks::function]
+    fn generate_source_map(self: Vc<Self>) -> Vc<FileContent> {
+        self.code().generate_source_map()
+    }
 }
 
 #[turbo_tasks::value_impl]
@@ -132,6 +357,26 @@ impl EcmascriptLibraryEvaluateChunk {
 
         let runtime_type = this.chunking_context.await?.runtime_type();
 
+        // introduce async module detect in this commit https://github.com/vercel/next.js/commit/539efa8cad8608008dd2d55e1a9b2aeaf004b8e0
+        // TODO maybe refactor after sync a75ece16b52c6387e9866d552ebb694db7877351 from upstream
+        let has_async_modules = if matches!(runtime_type, RuntimeType::Production) {
+            let mut has_async_modules = !this.module_graph.async_module_info().await?.is_empty();
+
+            if !has_async_modules {
+                let evaluatable_assets = this.evaluatable_assets.await?;
+                for evaluatable_asset in &*evaluatable_assets {
+                    if *evaluatable_asset.is_self_async().await? {
+                        has_async_modules = true;
+                        break;
+                    }
+                }
+            }
+
+            has_async_modules
+        } else {
+            true
+        };
+
         // Get runtime code based on runtime type
         match runtime_type {
             RuntimeType::Development | RuntimeType::Production => {
@@ -145,6 +390,7 @@ impl EcmascriptLibraryEvaluateChunk {
                     Vc::cell(None),
                     Vc::cell(None),
                     runtime_type,
+                    has_async_modules,
                     output_root_to_root_path,
                     source_maps,
                     this.chunking_context.runtime_root(),
@@ -310,6 +556,11 @@ impl EcmascriptLibraryEvaluateChunk {
     pub fn chunking_context(&self) -> Vc<Box<dyn ChunkingContext>> {
         Vc::upcast(*self.chunking_context)
     }
+
+    #[turbo_tasks::function]
+    pub fn chunk(&self) -> Vc<EcmascriptChunk> {
+        *self.chunk
+    }
 }
 
 #[turbo_tasks::value_impl]
@@ -344,13 +595,16 @@ impl OutputAssetsReference for EcmascriptLibraryEvaluateChunk {
             .await?;
         let include_license = self.processed_code().await?.license_comments.is_some();
         let ref_assets = chunk_references.assets.await?;
+        let other_chunks = this.other_chunks.await?;
         let mut assets = Vec::with_capacity(
             ref_assets.len()
+                + other_chunks.len()
                 + if include_source_map { 1 } else { 0 }
                 + if include_license { 1 } else { 0 },
         );
 
         assets.extend(ref_assets.iter().copied());
+        assets.extend(other_chunks.iter().copied());
 
         if include_source_map {
             assets.push(ResolvedVc::upcast(self.source_map().to_resolved().await?));

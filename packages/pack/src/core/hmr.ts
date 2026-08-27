@@ -1,7 +1,6 @@
 import {
   type CompilationError,
   type EntryIssuesMap,
-  type EntryOptions,
   formatIssue,
   type HMR_ACTION_TYPES,
   HMR_ACTIONS_SENT_TO_BROWSER,
@@ -16,22 +15,91 @@ import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
 import type { MemoryEvictionMode, NapiWrittenEndpoint } from "../binding";
 import { BundleOptions } from "../config/types";
-import { HtmlPlugin } from "../plugins/HtmlPlugin";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
-import { isTruthyEnv, normalizeTurbopackMemoryEviction } from "../utils/env";
-import { getInitialAssetsFromEndpointPaths } from "../utils/getInitialAssets";
+import {
+  isPersistentCachingEnabled,
+  isTruthyEnv,
+  normalizeTurbopackMemoryEviction,
+} from "../utils/env";
+import { HtmlGenerationManager } from "../utils/HtmlGenerationManager";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
+import { isNodeTarget } from "../utils/target";
 import { validateEntryPaths } from "../utils/validateEntry";
+import { forwardBrowserLogs, isBrowserLogsMessage } from "./browserLogs";
+import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
-import { Endpoint, Project, Update as TurbopackUpdate } from "./types";
+import {
+  Endpoint,
+  Project,
+  RawEntrypoints,
+  Update as TurbopackUpdate,
+} from "./types";
 
 const wsServer = new WebSocketServer({ noServer: true });
 
 const sessionId = Math.floor(Number.MAX_SAFE_INTEGER * Math.random());
+
+export const HMR_CLIENT_MESSAGE_MAX_BYTES = 1_000_000;
+
+export type ParsedHmrClientMessage =
+  | { status: "ok"; value: Record<string, unknown> }
+  | { status: "malformed" }
+  | { status: "too-large" };
+
+/** Normalize and validate messages shared by the legacy and current HMR transports. */
+export function parseHmrClientMessage(data: unknown): ParsedHmrClientMessage {
+  let serializedData: string;
+  if (typeof data === "string") {
+    serializedData = data;
+  } else if (Buffer.isBuffer(data)) {
+    if (data.byteLength > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+      return { status: "too-large" };
+    }
+    serializedData = data.toString("utf8");
+  } else if (Array.isArray(data) && data.every(Buffer.isBuffer)) {
+    if (
+      data.reduce((total, chunk) => total + chunk.byteLength, 0) >
+      HMR_CLIENT_MESSAGE_MAX_BYTES
+    ) {
+      return { status: "too-large" };
+    }
+    serializedData = Buffer.concat(data).toString("utf8");
+  } else if (data instanceof ArrayBuffer) {
+    if (data.byteLength > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+      return { status: "too-large" };
+    }
+    serializedData = Buffer.from(data).toString("utf8");
+  } else if (ArrayBuffer.isView(data)) {
+    if (data.byteLength > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+      return { status: "too-large" };
+    }
+    serializedData = Buffer.from(
+      data.buffer,
+      data.byteOffset,
+      data.byteLength,
+    ).toString("utf8");
+  } else {
+    return { status: "malformed" };
+  }
+
+  if (Buffer.byteLength(serializedData) > HMR_CLIENT_MESSAGE_MAX_BYTES) {
+    return { status: "too-large" };
+  }
+
+  try {
+    const value: unknown = JSON.parse(serializedData);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { status: "malformed" };
+    }
+    return { status: "ok", value: value as Record<string, unknown> };
+  } catch {
+    return { status: "malformed" };
+  }
+}
 
 // Re-export HMR types from pack-shared for backward compatibility
 export {
@@ -161,12 +229,22 @@ export async function createHotReloader(
 ): Promise<HotReloaderInterface> {
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
+  const browserToTerminal =
+    bundleOptions.config.devServer?.browserToTerminal ?? false;
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
-  const createProject = projectFactory();
-  const persistentCaching = bundleOptions.config.persistentCaching ?? true;
+  const createProject = projectFactory({
+    hasServerOutput: Boolean(
+      bundleOptions.config.server?.entry ||
+        bundleOptions.config.server?.function,
+    ),
+    nodeTarget: isNodeTarget(bundleOptions.config.target),
+  });
+  const persistentCaching = isPersistentCachingEnabled(
+    bundleOptions.config.persistentCaching,
+  );
   const turbopackMemoryEviction = normalizeTurbopackMemoryEviction(
     bundleOptions.config.turbopackMemoryEviction,
   ) as MemoryEvictionMode;
@@ -179,16 +257,15 @@ export async function createHotReloader(
     persistentCaching,
   );
 
-  const htmlConfigs = [
-    ...(Array.isArray((bundleOptions.config as any).html)
-      ? (bundleOptions.config as any).html
-      : (bundleOptions.config as any).html
-        ? [(bundleOptions.config as any).html]
-        : []),
-    ...bundleOptions.config.entry
-      .filter((e: EntryOptions) => !!e.html)
-      .map((e: EntryOptions) => e.html!),
-  ];
+  const resolvedOutputPath = getOutputPath(
+    bundleOptions.config,
+    resolvedProjectPath,
+  );
+  const htmlGenerationManager = new HtmlGenerationManager(
+    bundleOptions.config,
+    resolvedOutputPath,
+    bundleOptions.config.output?.publicPath,
+  );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
 
@@ -213,7 +290,7 @@ export async function createHotReloader(
             minify: false,
             moduleIds: "named",
           },
-          persistentCaching: bundleOptions?.config?.persistentCaching ?? true,
+          persistentCaching,
           pluginRuntimeStrategy:
             bundleOptions?.config?.pluginRuntimeStrategy ??
             (useWorkerThreads() ? "workerThreads" : "childProcesses"),
@@ -258,6 +335,13 @@ export async function createHotReloader(
   let closed = false;
   let closePromise: Promise<void> | undefined;
 
+  function markHmrEvent() {
+    if (!hmrEventHappened) {
+      console.log("Compiling...");
+      hmrEventHappened = true;
+    }
+  }
+
   function sendToClient(client: WSLike, payload: HMR_ACTION_TYPES) {
     client.send(JSON.stringify(payload));
   }
@@ -293,14 +377,16 @@ export async function createHotReloader(
   }
   const sendEnqueuedMessagesDebounce = debounce(sendEnqueuedMessages, 2);
 
-  function sendTurbopackMessage(payload: TurbopackUpdate) {
-    payload.issues = [];
-
-    for (const client of clients) {
-      clientStates.get(client)?.turbopackUpdates.push(payload);
+  function sendTurbopackMessage(client: WSLike, payload: TurbopackUpdate) {
+    const state = clientStates.get(client);
+    if (!state) {
+      return;
     }
 
-    hmrEventHappened = true;
+    payload.issues = [];
+    state.turbopackUpdates.push(payload);
+
+    markHmrEvent();
     sendEnqueuedMessagesDebounce();
   }
 
@@ -318,40 +404,36 @@ export async function createHotReloader(
       const written = paths[index];
       if (written) {
         writtenEndpointPaths.set(endpoint, written);
+        htmlGenerationManager.setWrittenEndpointPath(endpoint, written);
       }
     });
   }
 
-  async function regenerateHtml() {
-    if (htmlConfigs.length === 0) {
-      return;
-    }
-
-    const outputDir = getOutputPath(bundleOptions.config, resolvedProjectPath);
-    const publicPath = bundleOptions.config.output?.publicPath;
-    const assets = getInitialAssetsFromEndpointPaths([
-      ...writtenEndpointPaths.values(),
-    ]);
-
-    for (const config of htmlConfigs) {
-      const plugin = new HtmlPlugin(config);
-      await plugin.generate(outputDir, assets, publicPath);
-    }
+  function setEntrypoints(entrypoints: RawEntrypoints) {
+    writtenEndpointPaths.clear();
+    htmlGenerationManager.setEntrypoints(entrypoints);
+    updateWrittenEndpointPaths(entrypoints.apps, entrypoints.appPaths);
+    updateWrittenEndpointPaths(entrypoints.libraries, entrypoints.libraryPaths);
   }
 
   async function writeAllEntrypointsToDisk() {
     const result = await project.writeAllEntrypointsToDisk();
     processIssues(result, true, true);
-    updateWrittenEndpointPaths(result.apps, result.appPaths);
-    updateWrittenEndpointPaths(result.libraries, result.libraryPaths);
-    await regenerateHtml();
+    setEntrypoints(result);
+    await htmlGenerationManager.generateAll();
   }
 
-  async function writeEntrypointToDisk(entrypoint: Endpoint) {
+  async function writeEntrypointToDisk(
+    entrypoint: Endpoint,
+    generateHtml = true,
+  ) {
     const result = await entrypoint.writeToDisk();
     processIssues(result, true, true);
     writtenEndpointPaths.set(entrypoint, result);
-    await regenerateHtml();
+    htmlGenerationManager.setWrittenEndpointPath(entrypoint, result);
+    if (generateHtml) {
+      await htmlGenerationManager.generateForEndpoint(entrypoint);
+    }
   }
 
   async function writeOutputToDisk(entrypoint: Endpoint) {
@@ -393,8 +475,8 @@ export async function createHotReloader(
           return;
         }
 
+        markHmrEvent();
         await writeOutputToDisk(entrypoint);
-        hmrEventHappened = true;
       })
       .finally(() => {
         if (shouldCreateWebpackStats) {
@@ -453,7 +535,7 @@ export async function createHotReloader(
               processIssues(currentEntryIssues, issueKey, data, false, true);
 
               if (hasBlockingResultIssues(data)) {
-                hmrEventHappened = true;
+                markHmrEvent();
                 sendEnqueuedMessagesDebounce();
                 continue;
               }
@@ -484,27 +566,27 @@ export async function createHotReloader(
     );
   }
 
-  async function subscribeToHmrEvents(client: WSLike, id: string) {
+  async function subscribeToHmrEvents(
+    client: WSLike,
+    id: string,
+    expectedVersion?: string,
+  ) {
     const state = clientStates.get(client);
     if (!state || state.subscriptions.has(id)) {
       return;
     }
 
-    const subscription = project!.hmrEvents(id);
+    const subscription = project!.hmrEvents(id, expectedVersion);
     state.subscriptions.set(id, subscription);
     const issueKey = getClientIssueKey(id);
 
-    // The subscription will always emit once, which is the initial
-    // computation. This is not a change, so swallow it.
     try {
-      await subscription.next();
-
-      for await (const data of subscription) {
-        processIssues(state.clientIssues, issueKey, data, false, true);
-        if (data.type !== "issues") {
-          sendTurbopackMessage(data);
-        }
-      }
+      await consumeHmrSubscription(
+        subscription,
+        (data) =>
+          processIssues(state.clientIssues, issueKey, data, false, true),
+        (data) => sendTurbopackMessage(client, data),
+      );
     } catch (e) {
       // The client might be using an HMR session from a previous server, tell them
       // to fully reload the page to resolve the issue. We can't use
@@ -544,14 +626,16 @@ export async function createHotReloader(
         ...(entrypoints.apps ?? []),
         ...(entrypoints.libraries ?? []),
       ];
+      setEntrypoints(entrypoints);
       if (shouldCreateWebpackStats) {
         await writeAllEntrypointsToDisk();
       } else {
         await Promise.all(
           currentWatchedEntrypoints.map((entrypoint) =>
-            writeEntrypointToDisk(entrypoint),
+            writeEntrypointToDisk(entrypoint, false),
           ),
         );
+        await htmlGenerationManager.generateAll();
       }
 
       if (backgroundWatchersStarted) {
@@ -600,12 +684,29 @@ export async function createHotReloader(
         });
 
         client.addEventListener("message", ({ data }) => {
-          const parsedData = JSON.parse(
-            typeof data !== "string" ? data.toString() : data,
-          );
+          const result = parseHmrClientMessage(data);
+          if (result.status === "too-large") {
+            client.close(1009, "HMR client message exceeds the 1 MB limit");
+            return;
+          }
+          if (result.status === "malformed") return;
+          const parsedData = result.value;
 
           // messages
           switch (parsedData.event) {
+            case "browser-logs":
+              if (isBrowserLogsMessage(parsedData)) {
+                void forwardBrowserLogs(
+                  parsedData,
+                  browserToTerminal,
+                  project,
+                  resolvedProjectPath,
+                  resolvedOutputPath,
+                ).catch((error) => {
+                  console.error("Unable to forward browser logs", error);
+                });
+              }
+              break;
             case "client-error": // { errorCount, clientId }
             case "client-warning": // { warningCount, clientId }
             case "client-success": // { clientId }
@@ -637,11 +738,21 @@ export async function createHotReloader(
           // Turbopack messages
           switch (parsedData.type) {
             case "turbopack-subscribe":
-              subscribeToHmrEvents(client, parsedData.path);
+              if (typeof parsedData.path === "string") {
+                subscribeToHmrEvents(
+                  client,
+                  parsedData.path,
+                  typeof parsedData.version === "string"
+                    ? parsedData.version
+                    : undefined,
+                );
+              }
               break;
 
             case "turbopack-unsubscribe":
-              unsubscribeFromHmrEvents(client, parsedData.path);
+              if (typeof parsedData.path === "string") {
+                unsubscribeFromHmrEvents(client, parsedData.path);
+              }
               break;
 
             default:
@@ -653,7 +764,7 @@ export async function createHotReloader(
 
         const turbopackConnected: TurbopackConnectedAction = {
           action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
-          data: { sessionId },
+          data: { sessionId, browserToTerminal },
         };
         sendToClient(client, turbopackConnected);
 
@@ -684,7 +795,7 @@ export async function createHotReloader(
 
       const turbopackConnected: TurbopackConnectedAction = {
         action: HMR_ACTIONS_SENT_TO_BROWSER.TURBOPACK_CONNECTED,
-        data: { sessionId },
+        data: { sessionId, browserToTerminal },
       };
       sendToClient(ws, turbopackConnected);
 
@@ -710,9 +821,28 @@ export async function createHotReloader(
     },
 
     handleClientMessage(ws, data) {
-      const parsedData = JSON.parse(data);
+      const result = parseHmrClientMessage(data);
+      if (result.status === "too-large") {
+        ws.close(1009, "HMR client message exceeds the 1 MB limit");
+        return;
+      }
+      if (result.status === "malformed") return;
+      const parsedData = result.value;
 
       switch (parsedData.event) {
+        case "browser-logs":
+          if (isBrowserLogsMessage(parsedData)) {
+            void forwardBrowserLogs(
+              parsedData,
+              browserToTerminal,
+              project,
+              resolvedProjectPath,
+              resolvedOutputPath,
+            ).catch((error) => {
+              console.error("Unable to forward browser logs", error);
+            });
+          }
+          break;
         case "client-error":
         case "client-warning":
         case "client-success":
@@ -742,10 +872,20 @@ export async function createHotReloader(
 
       switch (parsedData.type) {
         case "turbopack-subscribe":
-          subscribeToHmrEvents(ws, parsedData.path);
+          if (typeof parsedData.path === "string") {
+            subscribeToHmrEvents(
+              ws,
+              parsedData.path,
+              typeof parsedData.version === "string"
+                ? parsedData.version
+                : undefined,
+            );
+          }
           break;
         case "turbopack-unsubscribe":
-          unsubscribeFromHmrEvents(ws, parsedData.path);
+          if (typeof parsedData.path === "string") {
+            unsubscribeFromHmrEvents(ws, parsedData.path);
+          }
           break;
         default:
           if (!parsedData.event) {
@@ -784,9 +924,7 @@ export async function createHotReloader(
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
       closePromise ??= (
-        bundleOptions.config.persistentCaching
-          ? project.shutdown()
-          : project.onExit()
+        persistentCaching ? project.shutdown() : project.onExit()
       )
         .catch((err) => {
           console.error(err);
@@ -817,7 +955,6 @@ export async function createHotReloader(
       switch (updateMessage.updateType) {
         case "start": {
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });
-          console.log("Compiling...");
           break;
         }
         case "end": {

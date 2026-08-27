@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_page_shared_outputs/input/transport.js"],"sourcesContent":["export function createServerReference(id, name) {\n  return (...args) => ({ args, id, name });\n}\n"],"names":["createServerReference","id","name","args"],"mappings":"AAAO,SAASA,sBAAsBC,EAAE,EAAEC,IAAI;IAC5C,OAAO,CAAC,GAAGC,OAAS,CAAC;YAAEA;YAAMF;YAAIC;QAAK,CAAC;AACzC"}},
+    {"offset": {"line": 23, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
+    {"offset": {"line": 37, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_page_shared_outputs/input/b.js"],"sourcesContent":["import { pageBAction } from \"./actions\";\n\nglobalThis.pageB = true;\npageBAction();\n"],"names":["globalThis","pageB"],"mappings":"AAAA;;AAEAA,WAAWC,KAAK,GAAG;AACnB,IAAA,iKAAW"}}]
+}

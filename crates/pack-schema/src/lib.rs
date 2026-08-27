@@ -29,7 +29,9 @@ pub struct CompleteConfig {
 
     /// External dependencies configuration
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "External dependencies configuration")]
+    #[schemars(
+        description = "External dependencies for client and Node-target builds, and the fallback for server builds"
+    )]
     pub externals: Option<HashMap<String, SchemaExternalConfig>>,
 
     /// Output configuration
@@ -184,6 +186,7 @@ pub enum SchemaTurbopackMemoryEviction {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum SchemaTurbopackMemoryEvictionMode {
+    Auto,
     Full,
 }
 
@@ -235,6 +238,28 @@ pub struct SchemaDevServer {
     /// Enable hot module replacement
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hot: Option<bool>,
+
+    /// Register HMR chunk lists as dynamic chunks are loaded
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dynamic_hmr_chunk_lists: Option<bool>,
+
+    /// Forward browser console output to the development terminal
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub browser_to_terminal: Option<SchemaBrowserToTerminal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaBrowserToTerminal {
+    Enabled(bool),
+    Level(SchemaBrowserToTerminalLevel),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SchemaBrowserToTerminalLevel {
+    Error,
+    Warn,
 }
 
 // ---------------------------------------------------------------------------
@@ -248,12 +273,56 @@ pub struct SchemaServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Entry point for the server runtime (e.g. \"src/server.ts\")")]
-    pub entry: Option<String>,
+    pub entry: Option<SchemaServerEntry>,
+
+    /// Server-only resolution options.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Server-only resolution options. Alias entries override matching resolve.alias entries; extensions replace resolve.extensions when provided"
+    )]
+    pub resolve: Option<SchemaResolveConfig>,
+
+    /// Server-specific external dependencies. If omitted, top-level externals are used.
+    /// If provided, this replaces the top-level map for server entries and Server Functions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Server-specific externals. Replaces top-level externals for server entries and Server Functions when provided"
+    )]
+    pub externals: Option<HashMap<String, SchemaExternalConfig>>,
 
     /// Configuration for Server Functions (RPC)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Configuration for Server Functions (RPC) boundaries")]
     pub function: Option<SchemaServerFunctionConfig>,
+
+    /// Server output configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<SchemaServerOutputConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SchemaServerEntry {
+    Import(String),
+    Entries(Vec<SchemaServerEntryOptions>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerEntryOptions {
+    pub name: String,
+    pub import: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaServerOutputConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunk_filename: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -534,6 +603,13 @@ pub struct SchemaOptimizationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Whether to enable tree shaking")]
     pub tree_shaking: Option<bool>,
+
+    /// Whether to infer module side effects from source code
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Whether to infer side-effect-free modules from source code when package metadata does not declare side effects. Defaults to true."
+    )]
+    pub infer_module_side_effects: Option<bool>,
 
     /// Packages to optimize imports for
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1110,9 +1186,12 @@ pub struct SchemaStyleConfig {
     #[schemars(description = "CSS Modules configuration")]
     pub css_modules: Option<SchemaCssModulesConfig>,
 
-    /// Inline PostCSS configuration passed directly to the PostCSS transform
+    /// Inline PostCSS configuration. Its plugins run after plugins from a discovered config file
+    /// in the same PostCSS pass.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Inline PostCSS configuration")]
+    #[schemars(
+        description = "Inline PostCSS configuration appended after a discovered config file"
+    )]
     pub postcss: Option<serde_json::Value>,
 
     /// Sass configuration
@@ -1272,6 +1351,7 @@ mod tests {
         assert!(schema_str.contains("externals"));
         assert!(schema_str.contains("optimization"));
         assert!(schema_str.contains("concatenateModules"));
+        assert!(schema_str.contains("inferModuleSideEffects"));
         assert!(schema_str.contains("cssChunking"));
         assert!(schema_str.contains("html"));
         assert!(schema_str.contains("react"));
@@ -1281,6 +1361,22 @@ mod tests {
         assert!(schema_str.contains("crossOriginLoading"));
         assert!(schema_str.contains("cssFilename"));
         assert!(schema_str.contains("assetModuleFilename"));
+    }
+
+    #[test]
+    fn test_memory_eviction_schema_accepts_auto() {
+        let mode = serde_json::from_str::<SchemaTurbopackMemoryEviction>(r#""auto""#).unwrap();
+        let schema = generate_schema();
+        let generated_modes = schema
+            .pointer("/definitions/SchemaTurbopackMemoryEvictionMode/enum")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
+
+        assert!(matches!(
+            mode,
+            SchemaTurbopackMemoryEviction::Mode(SchemaTurbopackMemoryEvictionMode::Auto)
+        ));
+        assert!(generated_modes.contains(&serde_json::Value::String("auto".into())));
     }
 
     #[test]
@@ -1530,5 +1626,55 @@ mod tests {
             .unwrap();
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].0, "@swc/plugin-emotion");
+    }
+
+    #[test]
+    fn test_server_entries_deserialization() {
+        let config: CompleteConfig = serde_json::from_str(
+            r#"{
+              "server": {
+                "entry": [
+                  { "name": "server", "import": "./src/server.ts" },
+                  { "name": "index-server", "import": "./src/pages/index.server.ts" }
+                ],
+                "externals": {
+                  "server-only": "commonjs server-only"
+                },
+                "output": {
+                  "path": "dist/server",
+                  "filename": "[name].[contenthash:8].js"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let server = config.server.unwrap();
+        assert!(matches!(
+            server.entry.as_ref(),
+            Some(SchemaServerEntry::Entries(entries))
+                if matches!(entries.as_slice(), [
+                    SchemaServerEntryOptions { name: server_name, import: server_import },
+                    SchemaServerEntryOptions { name: page_name, import: page_import }
+                ] if server_name == "server"
+                    && server_import == "./src/server.ts"
+                    && page_name == "index-server"
+                    && page_import == "./src/pages/index.server.ts")
+        ));
+        assert!(matches!(
+            server
+                .externals
+                .as_ref()
+                .and_then(|externals| externals.get("server-only")),
+            Some(SchemaExternalConfig::Basic(name)) if name == "commonjs server-only"
+        ));
+        assert_eq!(server.output.unwrap().path.as_deref(), Some("dist/server"));
+
+        let legacy: CompleteConfig =
+            serde_json::from_str(r#"{ "server": { "entry": "./src/server.ts" } }"#).unwrap();
+        assert!(matches!(
+            legacy.server.unwrap().entry,
+            Some(SchemaServerEntry::Import(import)) if import == "./src/server.ts"
+        ));
     }
 }

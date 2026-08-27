@@ -3,12 +3,12 @@
     "main": {
       "name": "main",
       "chunks": [
-        "input_86dfc83f.js",
+        "input_489a6048.js",
         "main.js"
       ],
       "assets": [
         {
-          "name": "input_86dfc83f.js"
+          "name": "input_489a6048.js"
         },
         {
           "name": "main.js"
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_86dfc83f.js",
-      "size": 1045,
+      "id": "input_489a6048.js",
+      "size": 885,
       "hash": "",
       "files": [
-        "input_86dfc83f.js"
+        "input_489a6048.js"
       ]
     },
     {
@@ -34,11 +34,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_97190704.js",
-      "size": 795,
+      "id": "input_5038173c.js",
+      "size": 711,
       "hash": "",
       "files": [
-        "input_97190704.js"
+        "input_5038173c.js"
       ]
     },
     {
@@ -47,7 +47,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 260,
+      "size": 259,
       "hash": "",
       "files": [
         "main.js"
@@ -57,57 +57,57 @@
   "assets": [
     {
       "type": "asset",
-      "name": "input_86dfc83f.js",
+      "name": "input_489a6048.js",
       "info": {},
-      "size": 1045,
+      "size": 885,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_86dfc83f.js"
+        "input_489a6048.js"
       ]
     },
     {
       "type": "asset",
-      "name": "input_86dfc83f.js.map",
+      "name": "input_489a6048.js.map",
       "info": {},
-      "size": 1010,
+      "size": 798,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_86dfc83f.js.map"
+        "input_489a6048.js.map"
       ]
     },
     {
       "type": "asset",
-      "name": "input_97190704.js",
+      "name": "input_5038173c.js",
       "info": {},
-      "size": 795,
+      "size": 711,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_97190704.js"
+        "input_5038173c.js"
       ]
     },
     {
       "type": "asset",
-      "name": "input_97190704.js.map",
+      "name": "input_5038173c.js.map",
       "info": {},
-      "size": 736,
+      "size": 731,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_97190704.js.map"
+        "input_5038173c.js.map"
       ]
     },
     {
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 260,
+      "size": 259,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -130,53 +130,44 @@
   ],
   "modules": [
     {
-      "name": "async_chunk/input/import.js",
-      "id": "async_chunk/input/import.js",
-      "chunks": [
-        "input_97190704.js"
-      ],
-      "size": 91
-    },
-    {
-      "name": "async_chunk/input/import.js",
-      "id": "async_chunk/input/import.js",
-      "chunks": [
-        "input_86dfc83f.js"
-      ],
-      "size": 91
-    },
-    {
-      "name": "async_chunk/input/index.js",
-      "id": "async_chunk/input/index.js",
-      "chunks": [
-        "input_86dfc83f.js",
-        "main.js"
-      ],
-      "size": 110
-    },
-    {
       "name": "async_chunk/input/node_modules/bar/index.js",
-      "id": "async_chunk/input/node_modules/bar/index.js",
+      "id": 2,
       "chunks": [
-        "input_86dfc83f.js"
+        "input_489a6048.js"
       ],
-      "size": 56
+      "size": 154
     },
     {
       "name": "async_chunk/input/node_modules/foo/index.js",
-      "id": "async_chunk/input/node_modules/foo/index.js",
+      "id": 26,
       "chunks": [
-        "input_97190704.js"
+        "input_5038173c.js"
       ],
-      "size": 56
+      "size": 154
     },
     {
-      "name": "async_chunk/input/shared.js",
-      "id": "async_chunk/input/shared.js",
+      "name": "async_chunk/input/index.js",
+      "id": 45,
       "chunks": [
-        "input_86dfc83f.js"
+        "input_489a6048.js"
       ],
-      "size": 18
+      "size": 268
+    },
+    {
+      "name": "async_chunk/input/import.js",
+      "id": 76,
+      "chunks": [
+        "input_5038173c.js"
+      ],
+      "size": 331
+    },
+    {
+      "name": "async_chunk/input/import.js",
+      "id": 92,
+      "chunks": [
+        "input_489a6048.js"
+      ],
+      "size": 232
     }
   ]
 }

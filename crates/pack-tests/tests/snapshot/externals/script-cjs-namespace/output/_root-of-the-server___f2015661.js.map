@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/script-cjs-namespace/input/index.ts"],"sourcesContent":["const load = async () => {\n    const jszip = await import('jszip');\n    console.log(jszip.default, jszip.version);\n};\n\nload();\n"],"names":["load","jszip","console","log","default","version"],"mappings":"AAAA,MAAMA,OAAO;IACT,MAAMC,QAAQ;IACdC,QAAQC,GAAG,CAACF,MAAMG,OAAO,EAAEH,MAAMI,OAAO;AAC5C;AAEAL"}}]
+}

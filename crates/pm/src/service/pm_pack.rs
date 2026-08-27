@@ -44,20 +44,14 @@ impl PackResult {
     }
 }
 
-pub async fn pack(package_root: &Path) -> Result<PackResult> {
+pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResult> {
     let pkg = get_or_load_package_json(package_root).await?;
     let package_info = PackageInfo::from_package_json(package_root, &pkg)?;
     if pkg.version.is_empty() {
         anyhow::bail!("Missing 'version' field in package.json");
     }
 
-    ScriptService::execute_script(
-        &package_info,
-        LifecycleHook::Prepack,
-        ScriptOutput::Verbose,
-        None,
-    )
-    .await?;
+    ScriptService::execute_script(&package_info, LifecycleHook::Prepack, output, None).await?;
 
     // npm/pnpm pack the post-`prepack` manifest, and the script may have
     // rewritten package.json (version bump, stripped fields). The `pkg` above
@@ -103,13 +97,7 @@ pub async fn pack(package_root: &Path) -> Result<PackResult> {
     let integrity = compute_integrity(&tar_data);
     let packed_size = tar_data.len() as u64;
 
-    ScriptService::execute_script(
-        &package_info,
-        LifecycleHook::Postpack,
-        ScriptOutput::Verbose,
-        None,
-    )
-    .await?;
+    ScriptService::execute_script(&package_info, LifecycleHook::Postpack, output, None).await?;
 
     Ok(PackResult {
         tarball_data: tar_data,

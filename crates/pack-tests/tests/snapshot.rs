@@ -7,10 +7,12 @@ mod util;
 use anyhow::{Context, Result};
 use dunce::canonicalize;
 use pack_api::{
+    endpoint::{Endpoint, OptionEndpoint, get_written_endpoint_with_issues_operation},
     entrypoint::{
         EntrypointsWithIssues, all_output_assets_operation,
-        get_all_written_entrypoints_with_issues_operation,
+        get_all_written_entrypoints_with_issues_operation, get_entrypoints_with_issues_operation,
     },
+    paths::all_paths_in_root,
     project::{ProjectContainer, ProjectOptions, WatchOptions},
 };
 use rustc_hash::FxHashSet;
@@ -21,16 +23,16 @@ use std::{
     process::Command,
     sync::{LazyLock, Mutex},
 };
-use turbo_rcstr::rcstr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     Effects, OperationVc, ResolvedVc, TurboTasks, ValueToString, Vc,
     read_strongly_consistent_and_apply_effects, take_effects,
 };
-use turbo_tasks_backend::{BackendOptions, TurboTasksBackend, noop_backing_storage};
+use turbo_tasks_backend::{BackendOptions, EvictionMode, TurboTasksBackend, noop_backing_storage};
 use turbo_tasks_fs::{DirectoryContent, DirectoryEntry, FileSystemPath};
 use turbopack_core::{
     asset::Asset,
-    issue::{CollectibleIssuesExt, IssueFilter},
+    issue::{CollectibleIssuesExt, IssueFilter, IssueSeverity},
     output::{OutputAsset, OutputAssetsReference},
 };
 use turbopack_test_utils::snapshot::{UPDATE, diff, matches_expected, snapshot_issues};
@@ -38,6 +40,53 @@ use turbopack_test_utils::snapshot::{UPDATE, diff, matches_expected, snapshot_is
 use crate::util::REPO_ROOT;
 
 static SNAPSHOT_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+#[turbo_tasks::value(transparent)]
+struct SnapshotIgnorePrefixes(Vec<RcStr>);
+
+struct SnapshotProjectOptions {
+    project: ProjectOptions,
+    write_endpoints_individually: bool,
+    expected_app_endpoints: Option<usize>,
+    expected_individual_app_output_paths: Option<Vec<String>>,
+}
+
+struct SnapshotConfig {
+    user_config: serde_json::Value,
+    runtime_type_override: Option<String>,
+    watch_enabled: bool,
+    write_endpoints_individually: bool,
+    expected_app_endpoints: Option<usize>,
+    expected_individual_app_output_paths: Option<Vec<String>>,
+}
+
+#[turbo_tasks::function(operation, root)]
+async fn endpoint_all_output_paths_operation(
+    endpoint: OperationVc<OptionEndpoint>,
+) -> Result<Vc<Vec<RcStr>>> {
+    let Some(endpoint) = *endpoint.connect().await? else {
+        return Ok(Vc::cell(Vec::new()));
+    };
+    let output = endpoint.output().await?;
+    Ok(all_paths_in_root(
+        *output.output_assets,
+        output.project.dist_root(),
+    ))
+}
+
+fn snapshot_ignore_prefixes(resource: &Path) -> Result<Vec<RcStr>> {
+    let ignore_path = resource.join(".snapshotignore");
+    if !ignore_path.try_exists()? {
+        return Ok(Vec::new());
+    }
+
+    Ok(fs::read_to_string(ignore_path)?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.trim_start_matches("./").replace('\\', "/").into())
+        .collect())
+}
 
 fn default_config() -> String {
     r#"{
@@ -141,20 +190,102 @@ fn run_assertion(resource: &Path) -> Result<()> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn run(resource: PathBuf) -> Result<()> {
+    let snapshot_ignore_prefixes = snapshot_ignore_prefixes(&resource)?;
     let tt = TurboTasks::new(TurboTasksBackend::new(
         BackendOptions {
             storage_mode: None,
             // Enable dependency tracking when we are running under UPDATE=1 to ensure file writes
             // don't crash the test.
             dependency_tracking: *UPDATE,
+            eviction_mode: EvictionMode::Off,
             ..Default::default()
         },
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let project_options = project_options_from_resource(&resource)?;
+        let SnapshotProjectOptions {
+            project: project_options,
+            write_endpoints_individually,
+            expected_app_endpoints,
+            expected_individual_app_output_paths,
+        } = project_options_from_resource(&resource)?;
         let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
         ProjectContainer::initialize(container_op, project_options).await?;
+
+        if write_endpoints_individually
+            || expected_app_endpoints.is_some()
+            || expected_individual_app_output_paths.is_some()
+        {
+            let project_container = container_op.resolve().strongly_consistent().await?;
+            let entrypoints_with_issues = read_strongly_consistent_and_apply_effects(
+                get_entrypoints_with_issues_operation(project_container),
+                |value| &value.effects,
+            )
+            .await?;
+
+            if let Some(expected) = expected_app_endpoints {
+                anyhow::ensure!(
+                    entrypoints_with_issues.entrypoints.apps.len() == expected,
+                    "expected {expected} app endpoint(s), got {}",
+                    entrypoints_with_issues.entrypoints.apps.len()
+                );
+            }
+
+            if write_endpoints_individually || expected_individual_app_output_paths.is_some() {
+                for (index, endpoint) in entrypoints_with_issues.entrypoints.apps.iter().enumerate()
+                {
+                    let written_endpoint = get_written_endpoint_with_issues_operation(*endpoint)
+                        .read_strongly_consistent()
+                        .await?;
+                    let error_count = written_endpoint
+                        .issues
+                        .iter()
+                        .filter(|issue| issue.severity <= IssueSeverity::Error)
+                        .count();
+                    anyhow::ensure!(
+                        error_count == 0,
+                        "writing an endpoint to disk produced {error_count} error issue(s)"
+                    );
+
+                    if let Some(expected_paths) = &expected_individual_app_output_paths {
+                        let output_paths = endpoint_all_output_paths_operation(*endpoint)
+                            .read_strongly_consistent()
+                            .await?;
+                        for expected_path in expected_paths {
+                            anyhow::ensure!(
+                                output_paths.iter().any(|path| path == expected_path),
+                                "app endpoint {index} is missing expected path `{expected_path}`; \
+                                 got {output_paths:?}"
+                            );
+                        }
+                    }
+                }
+
+                if write_endpoints_individually {
+                    for endpoint in &entrypoints_with_issues.entrypoints.libraries {
+                        let written_endpoint =
+                            get_written_endpoint_with_issues_operation(*endpoint)
+                                .read_strongly_consistent()
+                                .await?;
+                        let error_count = written_endpoint
+                            .issues
+                            .iter()
+                            .filter(|issue| issue.severity <= IssueSeverity::Error)
+                            .count();
+                        anyhow::ensure!(
+                            error_count == 0,
+                            "writing an endpoint to disk produced {error_count} error issue(s)"
+                        );
+                    }
+                }
+
+                if write_endpoints_individually {
+                    return Ok(());
+                }
+                // Keep running the normal snapshot assertion after checking the
+                // output of each app endpoint in isolation.
+            }
+        }
 
         #[turbo_tasks::function(operation, root)]
         async fn snapshot_issues_operation(out_op: OperationVc<FileSystemPath>) -> Result<Vc<()>> {
@@ -191,7 +322,10 @@ async fn run(resource: PathBuf) -> Result<()> {
             Ok(take_effects(out_op).await?.cell())
         }
 
-        let out_op = run_test_operation(container_op);
+        let snapshot_ignore_prefixes = Vc::<SnapshotIgnorePrefixes>::cell(snapshot_ignore_prefixes)
+            .to_resolved()
+            .await?;
+        let out_op = run_test_operation(container_op, snapshot_ignore_prefixes);
         read_strongly_consistent_and_apply_effects(snapshot_effects_operation(out_op), |e| e)
             .await?;
         read_strongly_consistent_and_apply_effects(output_effects_operation(out_op), |e| e).await?;
@@ -203,7 +337,7 @@ async fn run(resource: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
+fn project_options_from_resource(resource: &Path) -> Result<SnapshotProjectOptions> {
     let test_path = canonicalize(resource)?;
     assert!(test_path.exists(), "{} does not exist", resource.display());
     assert!(
@@ -233,21 +367,67 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
     };
 
     // Parse config content and determine if it's in development or production mode
-    let (mut user_config, runtime_type_override): (serde_json::Value, Option<String>) =
-        if config_content.trim().is_empty() {
-            (serde_json::from_str(&default_config())?, None)
-        } else {
-            let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
-            let runtime_type_from_root = raw_root
-                .get("runtimeType")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let user_cfg = raw_root
-                .get("config")
-                .cloned()
-                .expect("config.json must contain a top-level `config` object");
-            (user_cfg, runtime_type_from_root)
-        };
+    let SnapshotConfig {
+        mut user_config,
+        runtime_type_override,
+        watch_enabled,
+        write_endpoints_individually,
+        expected_app_endpoints,
+        expected_individual_app_output_paths,
+    } = if config_content.trim().is_empty() {
+        SnapshotConfig {
+            user_config: serde_json::from_str(&default_config())?,
+            runtime_type_override: None,
+            watch_enabled: false,
+            write_endpoints_individually: false,
+            expected_app_endpoints: None,
+            expected_individual_app_output_paths: None,
+        }
+    } else {
+        let raw_root: serde_json::Value = serde_json::from_str(&config_content)?;
+        let runtime_type_from_root = raw_root
+            .get("runtimeType")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let watch_enabled = raw_root
+            .get("watch")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let write_endpoints_individually = raw_root
+            .get("writeEndpointsIndividually")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let expected_app_endpoints = raw_root
+            .get("expectedAppEndpoints")
+            .and_then(|v| v.as_u64())
+            .map(|value| value as usize);
+        let expected_individual_app_output_paths = raw_root
+            .get("expectedIndividualAppOutputPaths")
+            .and_then(|value| value.as_array())
+            .map(|paths| {
+                paths
+                    .iter()
+                    .map(|path| {
+                        path.as_str()
+                            .context("expectedIndividualAppOutputPaths must contain strings")
+                            .map(str::to_owned)
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
+        let user_cfg = raw_root
+            .get("config")
+            .cloned()
+            .expect("config.json must contain a top-level `config` object");
+        SnapshotConfig {
+            user_config: user_cfg,
+            runtime_type_override: runtime_type_from_root,
+            watch_enabled,
+            write_endpoints_individually,
+            expected_app_endpoints,
+            expected_individual_app_output_paths,
+        }
+    };
 
     // Ensure default output configuration is present
     if user_config.get("output").is_none() {
@@ -298,7 +478,7 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
     // Convert the merged inner bundler config back to string for ProjectOptions
     let final_config_content = serde_json::to_string_pretty(&user_config)?;
 
-    Ok(ProjectOptions {
+    let project_options = ProjectOptions {
         root_path: Path::new(&*REPO_ROOT)
             .join("crates/pack-tests/tests/snapshot")
             .to_string_lossy()
@@ -318,7 +498,10 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
             ("TURBOPACK".into(), "1".into()),
         ],
 
-        watch: WatchOptions::default(),
+        watch: WatchOptions {
+            enable: watch_enabled,
+            ..Default::default()
+        },
         dev: !is_production,
         build_id: "test".into(),
         pack_path: Path::new(&*REPO_ROOT)
@@ -326,12 +509,20 @@ fn project_options_from_resource(resource: &Path) -> Result<ProjectOptions> {
             .to_string_lossy()
             .to_string()
             .into(),
+    };
+
+    Ok(SnapshotProjectOptions {
+        project: project_options,
+        write_endpoints_individually,
+        expected_app_endpoints,
+        expected_individual_app_output_paths,
     })
 }
 
 #[turbo_tasks::function(operation, root)]
 async fn run_test_operation(
     container_op: OperationVc<ProjectContainer>,
+    snapshot_ignore_prefixes: ResolvedVc<SnapshotIgnorePrefixes>,
 ) -> Result<Vc<FileSystemPath>> {
     let project_container = container_op.resolve().strongly_consistent().await?;
 
@@ -360,6 +551,7 @@ async fn run_test_operation(
     } else {
         dist_root.parent()
     };
+    let snapshot_ignore_prefixes = snapshot_ignore_prefixes.await?;
 
     // Get expected output files from the output directory (recursive)
     let expected_paths = expected_recursive(output_path.clone()).await?;
@@ -379,12 +571,19 @@ async fn run_test_operation(
 
     // Process all assets
     while let Some(asset) = queue.pop_front() {
-        walk_asset(asset, &output_path, &dist_root, &mut seen, &mut queue)
-            .await
-            .context(format!(
-                "Failed to walk asset {}",
-                asset.path().to_string().await.context("to_string failed")?
-            ))?;
+        walk_asset(
+            asset,
+            &output_path,
+            &dist_root,
+            &snapshot_ignore_prefixes,
+            &mut seen,
+            &mut queue,
+        )
+        .await
+        .context(format!(
+            "Failed to walk asset {}",
+            asset.path().to_string().await.context("to_string failed")?
+        ))?;
     }
 
     // Verify that actual assets match expected assets
@@ -421,6 +620,7 @@ async fn walk_asset(
     asset: ResolvedVc<Box<dyn OutputAsset>>,
     output_path: &FileSystemPath,
     dist_root: &FileSystemPath,
+    snapshot_ignore_prefixes: &[RcStr],
     seen: &mut FxHashSet<FileSystemPath>,
     queue: &mut VecDeque<ResolvedVc<Box<dyn OutputAsset>>>,
 ) -> Result<()> {
@@ -444,9 +644,18 @@ async fn walk_asset(
         }
     };
 
-    // Add the full path to seen set
-    seen.insert(full_path.clone());
-    diff(full_path, asset.content()).await?;
+    let relative_path = output_path
+        .get_path_to(&full_path)
+        .expect("snapshot output is rebased inside the comparison root");
+    let ignored = snapshot_ignore_prefixes
+        .iter()
+        .any(|prefix| relative_path.starts_with(prefix.as_str()));
+
+    if !ignored {
+        // Add the full path to seen set
+        seen.insert(full_path.clone());
+        diff(full_path, asset.content()).await?;
+    }
 
     queue.extend(asset.references().all_assets().await?.iter().copied());
 

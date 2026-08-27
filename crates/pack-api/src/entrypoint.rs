@@ -14,7 +14,7 @@ use crate::{
     operation::EntrypointsOperation,
     project::ProjectContainer,
     utils::get_issues,
-    webpack_stats::generate_webpack_stats,
+    webpack_stats::{OutputAssetGroups, generate_webpack_stats},
 };
 
 #[turbo_tasks::value(shared)]
@@ -59,15 +59,19 @@ pub async fn all_output_assets_operation(
 ) -> Result<Vc<OutputAssets>> {
     let project = container.project();
 
-    let endpoint_assets = project
+    let endpoint_asset_groups = project
         .get_all_endpoints()
         .await?
         .iter()
-        .map(|endpoint| async move { endpoint.output().await?.output_assets.await })
+        .map(|endpoint| async move { Ok(endpoint.output().await?.output_assets) })
         .try_join()
         .await?;
 
-    let output_assets: FxIndexSet<ResolvedVc<Box<dyn OutputAsset>>> = endpoint_assets
+    let output_assets: FxIndexSet<ResolvedVc<Box<dyn OutputAsset>>> = endpoint_asset_groups
+        .iter()
+        .map(|assets| async move { assets.await })
+        .try_join()
+        .await?
         .iter()
         .flat_map(|assets| assets.iter().copied())
         .collect();
@@ -80,17 +84,40 @@ pub async fn all_output_assets_operation(
 
     let dist_root = container.project().dist_root();
     let server_config = container.project().config().server().await?;
-    let has_server = server_config.entry.is_some() || server_config.function.is_some();
+    let has_server = server_config
+        .entry
+        .as_ref()
+        .is_some_and(|entry| entry.has_entries())
+        || server_config.function.is_some();
 
     let mut stats_outputs: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
 
     if !has_server {
-        stats_outputs.push(make_stats_output(output_assets, dist_root).await?);
+        stats_outputs.push(
+            make_stats_output(
+                output_assets,
+                Vc::<OutputAssetGroups>::cell(endpoint_asset_groups),
+                dist_root,
+            )
+            .await?,
+        );
     } else {
         let server_dist_root_vc = container.project().server_dist_root();
         let server_dist_root_read = server_dist_root_vc.await?;
         let mut client: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
         let mut server: Vec<ResolvedVc<Box<dyn OutputAsset>>> = Vec::new();
+        let mut client_groups = Vec::with_capacity(endpoint_asset_groups.len());
+        for assets in endpoint_asset_groups {
+            let mut group = Vec::new();
+            for asset in assets.await?.iter().copied() {
+                if !asset.path().await?.is_inside_ref(&server_dist_root_read) {
+                    group.push(asset);
+                }
+            }
+            if !group.is_empty() {
+                client_groups.push(ResolvedVc::cell(group));
+            }
+        }
         for asset in output_assets.await?.iter().copied() {
             if asset.path().await?.is_inside_ref(&server_dist_root_read) {
                 server.push(asset);
@@ -98,9 +125,24 @@ pub async fn all_output_assets_operation(
                 client.push(asset);
             }
         }
-        stats_outputs.push(make_stats_output(Vc::cell(client), dist_root).await?);
+        stats_outputs.push(
+            make_stats_output(
+                Vc::cell(client),
+                Vc::<OutputAssetGroups>::cell(client_groups),
+                dist_root,
+            )
+            .await?,
+        );
         if !server.is_empty() {
-            stats_outputs.push(make_stats_output(Vc::cell(server), server_dist_root_vc).await?);
+            let server_assets = ResolvedVc::cell(server);
+            stats_outputs.push(
+                make_stats_output(
+                    *server_assets,
+                    Vc::<OutputAssetGroups>::cell(vec![server_assets]),
+                    server_dist_root_vc,
+                )
+                .await?,
+            );
         }
     }
 
@@ -109,9 +151,10 @@ pub async fn all_output_assets_operation(
 
 async fn make_stats_output(
     assets: Vc<OutputAssets>,
+    asset_groups: Vc<OutputAssetGroups>,
     dist_root: Vc<FileSystemPath>,
 ) -> Result<ResolvedVc<Box<dyn OutputAsset>>> {
-    let webpack_stats = generate_webpack_stats(assets, dist_root).await?;
+    let webpack_stats = generate_webpack_stats(assets, asset_groups, dist_root).await?;
     let stats_json = serde_json::to_string_pretty(&*webpack_stats)?;
     let dist_root_owned = dist_root.owned().await?;
     let stats_output = VirtualOutputAsset::new(

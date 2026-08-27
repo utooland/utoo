@@ -11,6 +11,19 @@ export interface EntryOptions {
   html?: HtmlConfig;
 }
 
+/** A named server entry compiled as an independently addressable Node.js bundle. */
+export interface ServerEntryOptions {
+  name: string;
+  import: string;
+}
+
+/**
+ * Server entries. A string preserves the legacy single `index` entry behavior.
+ * In array form, the first entry is the primary server runtime and receives
+ * Server Functions; the remaining entries are emitted independently.
+ */
+export type ServerEntry = string | ServerEntryOptions[];
+
 export interface LibraryOptions {
   name?: string;
   export?: Array<string>;
@@ -153,6 +166,9 @@ export interface ProxyRule {
 
 export type DevServerProxy = ProxyRule[];
 
+/** Browser console levels forwarded to the development terminal. */
+export type BrowserToTerminal = boolean | "error" | "warn";
+
 /** Object style proxy options without `context`. */
 export type ProxyOptions = Omit<ProxyRule, "context">;
 
@@ -194,12 +210,20 @@ export type ProviderConfig = Record<string, string | [string, string]>;
 export interface DevServerConfig {
   /** Enable Hot Module Replacement. */
   hot?: boolean;
+  /** Register HMR chunk lists as dynamic chunks are loaded. */
+  dynamicHmrChunkLists?: boolean;
   /** Port to listen on. */
   port?: number;
   /** Host to bind (e.g. localhost, 0.0.0.0). */
   host?: string;
   /** Use HTTPS; when true without a certificate, a self-signed cert may be generated. */
   https?: boolean;
+  /**
+   * Forward browser console output to the terminal.
+   * `"error"` forwards errors, `"warn"` adds warnings, and `true` forwards all
+   * supported console output. Defaults to `false` when omitted.
+   */
+  browserToTerminal?: BrowserToTerminal;
   /** HTTP proxy rules for Hono dev server (HTTP only; no generic WS proxy in this layer). */
   proxy?: DevServerProxy;
 }
@@ -223,6 +247,10 @@ export interface ConfigComplete {
   mode?: "production" | "development";
   module?: ModuleOptions;
   resolve?: ResolveOptions;
+  /**
+   * External dependencies for client and Node-target builds. Server entries and
+   * Server Functions also use this map unless `server.externals` is provided.
+   */
   externals?: Record<string, ExternalConfig>;
   output?: {
     path?: string;
@@ -265,6 +293,11 @@ export interface ConfigComplete {
     /** Extract legal comments to `[file].LICENSE.txt` when minifying library output. */
     extractComments?: boolean;
     treeShaking?: boolean;
+    /**
+     * Infer side-effect-free modules from source code when package metadata does not
+     * declare side effects. Defaults to `true`, matching Next.js.
+     */
+    inferModuleSideEffects?: boolean;
     splitChunks?: Record<
       "js" | "css",
       {
@@ -304,6 +337,10 @@ export interface ConfigComplete {
       localIdentName?: string;
     };
     emotion?: boolean | EmotionOptions;
+    /**
+     * Inline PostCSS configuration. Its plugins run after plugins from a
+     * discovered postcss.config.* file in the same PostCSS pass.
+     */
     postcss?: JSONValue;
     less?: {
       loader?: string;
@@ -343,13 +380,29 @@ export interface ConfigComplete {
   swcPlugins?: [string, any][];
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
-  turbopackMemoryEviction?: boolean | "full";
+  /**
+   * Controls memory eviction for the persistent Turbopack cache.
+   * Defaults to "auto". Use false to disable eviction or "full" to evict
+   * after every snapshot.
+   */
+  turbopackMemoryEviction?: boolean | "auto" | "full";
   nodePolyfill?: boolean;
   mdx?: MdxOptions;
   devServer?: DevServerConfig;
   server?: {
     /** Entry point for the server runtime (e.g. "src/server.ts") */
-    entry?: string;
+    entry?: ServerEntry;
+    /**
+     * Server-only resolution options. Alias entries override matching
+     * `resolve.alias` entries; extensions replace `resolve.extensions` when set.
+     */
+    resolve?: ResolveOptions;
+    /**
+     * Server-specific externals. When omitted, top-level `externals` are used for
+     * backwards compatibility. When provided, this replaces the top-level map for
+     * server entries and Server Functions; use `{}` to disable configured externals.
+     */
+    externals?: Record<string, ExternalConfig>;
     output?: {
       /** Output path for server chunks, relative to project root. */
       path?: string;

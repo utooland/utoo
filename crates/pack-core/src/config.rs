@@ -25,11 +25,8 @@ use turbopack_core::{
     module_graph::style_groups::StyleGroupsAlgorithm,
     resolve::ResolveAliasMap,
 };
-use turbopack_ecmascript::{
-    OptionTreeShaking, TreeShakingMode,
-    transform::{
-        OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
-    },
+use turbopack_ecmascript::transform::{
+    OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
 };
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
@@ -138,6 +135,7 @@ pub struct Entries(Vec<EntryOptions>);
 #[serde(rename_all = "camelCase")]
 pub struct DevServer {
     pub hot: Option<bool>,
+    pub dynamic_hmr_chunk_lists: Option<bool>,
 }
 
 /// Provider configuration item - can be a module name string or [module, export] tuple.
@@ -162,7 +160,16 @@ pub struct ProviderConfig(
 #[serde(rename_all = "camelCase")]
 pub struct ServerConfig {
     /// Entry point for the server runtime (e.g. "src/server.ts")
-    pub entry: Option<RcStr>,
+    pub entry: Option<ServerEntry>,
+    /// Server-only resolution options. Alias entries override matching shared aliases;
+    /// extensions replace the shared extension list when configured.
+    pub resolve: Option<ResolveConfig>,
+    /// Server-specific external dependencies. When omitted, the top-level `externals`
+    /// configuration is used for backwards compatibility. When present, including an
+    /// empty object, this completely replaces the top-level configuration for server
+    /// entries and Server Functions.
+    #[bincode(with = "option_indexmap")]
+    pub externals: Option<FxIndexMap<RcStr, ExternalConfig>>,
     /// Configuration for Server Functions (RPC)
     pub function: Option<ServerFunctionConfig>,
     /*
@@ -181,6 +188,35 @@ pub struct ServerConfig {
     */
     /// Server output configuration
     pub output: Option<ServerOutputConfig>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(untagged)]
+pub enum ServerEntry {
+    Import(RcStr),
+    Entries(Vec<ServerEntryOptions>),
+}
+
+impl ServerEntry {
+    pub fn has_entries(&self) -> bool {
+        match self {
+            Self::Import(_) => true,
+            Self::Entries(entries) => !entries.is_empty(),
+        }
+    }
+
+    pub fn has_named_entries(&self) -> bool {
+        matches!(self, Self::Entries(entries) if !entries.is_empty())
+    }
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerEntryOptions {
+    pub name: RcStr,
+    pub import: RcStr,
 }
 
 #[turbo_tasks::value(eq = "manual")]
@@ -260,6 +296,15 @@ pub struct Config {
     #[cfg(feature = "test")]
     #[serde(rename = "runtimeType")]
     runtime_type: Option<RcStr>,
+}
+
+impl Config {
+    fn resolved_server_externals(&self) -> Option<&FxIndexMap<RcStr, ExternalConfig>> {
+        self.server
+            .as_ref()
+            .and_then(|server| server.externals.as_ref())
+            .or(self.externals.as_ref())
+    }
 }
 
 #[turbo_tasks::value]
@@ -449,7 +494,7 @@ fn normalize_css_modules_pattern(pattern: &str) -> String {
 }
 
 #[turbo_tasks::value(eq = "manual")]
-#[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveConfig {
     #[serde(rename = "alias")]
@@ -486,6 +531,9 @@ pub struct OptimizationConfig {
     /// Extract legal comments to a separate LICENSE file when minifying library output.
     pub extract_comments: Option<bool>,
     pub tree_shaking: Option<bool>,
+    /// Infer whether modules without explicit package metadata are side-effect free.
+    /// Defaults to true, matching Next.js.
+    pub infer_module_side_effects: Option<bool>,
     pub package_imports: Option<Vec<RcStr>>,
     #[bincode(with = "option_indexmap")]
     pub modularize_imports: Option<FxIndexMap<String, ModularizeImportPackageConfig>>,
@@ -1351,6 +1399,16 @@ impl Config {
     }
 
     #[turbo_tasks::function]
+    pub fn server_externals_config(&self) -> Vc<ExternalsConfig> {
+        let externals = self
+            .resolved_server_externals()
+            .cloned()
+            .unwrap_or_default();
+
+        ExternalsConfig(externals).cell()
+    }
+
+    #[turbo_tasks::function]
     pub fn optimization(&self) -> Vc<OptimizationConfig> {
         self.optimization.clone().unwrap_or_default().cell()
     }
@@ -1718,6 +1776,20 @@ impl Config {
     }
 
     #[turbo_tasks::function]
+    pub fn server_resolve_alias_options(&self) -> Result<Vc<ResolveAliasMap>> {
+        let Some(resolve_alias) = self
+            .server
+            .as_ref()
+            .and_then(|server| server.resolve.as_ref())
+            .and_then(|resolve| resolve.resolve_alias.as_ref())
+        else {
+            return Ok(ResolveAliasMap::cell(ResolveAliasMap::default()));
+        };
+        let alias_map: ResolveAliasMap = resolve_alias.try_into()?;
+        Ok(alias_map.cell())
+    }
+
+    #[turbo_tasks::function]
     pub fn resolve_extension(&self) -> Vc<ResolveExtensions> {
         let Some(resolve_extensions) = self
             .resolve
@@ -1727,6 +1799,21 @@ impl Config {
             return Vc::cell(None);
         };
         Vc::cell(Some(resolve_extensions.clone()))
+    }
+
+    #[turbo_tasks::function]
+    pub fn server_resolve_extension(&self) -> Vc<ResolveExtensions> {
+        let resolve_extensions = self
+            .server
+            .as_ref()
+            .and_then(|server| server.resolve.as_ref())
+            .and_then(|resolve| resolve.resolve_extensions.as_ref())
+            .or_else(|| {
+                self.resolve
+                    .as_ref()
+                    .and_then(|resolve| resolve.resolve_extensions.as_ref())
+            });
+        Vc::cell(resolve_extensions.cloned())
     }
 
     #[turbo_tasks::function]
@@ -1818,36 +1905,23 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn tree_shaking_mode_for_foreign_code(
-        &self,
-        _is_development: bool,
-    ) -> Vc<OptionTreeShaking> {
+    pub fn module_fragments_enabled_for_foreign_code(&self, _is_development: bool) -> Vc<bool> {
         let tree_shaking = self
             .optimization
             .as_ref()
             .map(|op| op.tree_shaking.unwrap_or_default());
 
-        OptionTreeShaking(match tree_shaking {
-            Some(false) => Some(TreeShakingMode::ReexportsOnly),
-            Some(true) => Some(TreeShakingMode::ModuleFragments),
-            None => Some(TreeShakingMode::ReexportsOnly),
-        })
-        .cell()
+        Vc::cell(matches!(tree_shaking, Some(true)))
     }
 
     #[turbo_tasks::function]
-    pub fn tree_shaking_mode_for_user_code(&self, _is_development: bool) -> Vc<OptionTreeShaking> {
+    pub fn module_fragments_enabled_for_user_code(&self, _is_development: bool) -> Vc<bool> {
         let tree_shaking = self
             .optimization
             .as_ref()
             .map(|op| op.tree_shaking.unwrap_or_default());
 
-        OptionTreeShaking(match tree_shaking {
-            Some(false) => Some(TreeShakingMode::ReexportsOnly),
-            Some(true) => Some(TreeShakingMode::ModuleFragments),
-            None => Some(TreeShakingMode::ReexportsOnly),
-        })
-        .cell()
+        Vc::cell(matches!(tree_shaking, Some(true)))
     }
 
     #[turbo_tasks::function]
@@ -1956,6 +2030,16 @@ impl Config {
     }
 
     #[turbo_tasks::function]
+    pub fn infer_module_side_effects(&self) -> Vc<bool> {
+        Vc::cell(
+            self.optimization
+                .as_ref()
+                .and_then(|op| op.infer_module_side_effects)
+                .unwrap_or(true),
+        )
+    }
+
+    #[turbo_tasks::function]
     pub async fn nested_async_chunking(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
         let option = self
             .optimization
@@ -2026,6 +2110,98 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_server_entries_deserialization() {
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "server": {
+                "entry": [
+                    {
+                        "name": "server",
+                        "import": "./src/server.ts"
+                    },
+                    {
+                        "name": "index-server",
+                        "import": "./src/pages/index.server.ts"
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+
+        let server = config.server.unwrap();
+        assert!(matches!(
+            server.entry.as_ref(),
+            Some(ServerEntry::Entries(entries))
+                if matches!(entries.as_slice(), [
+                    ServerEntryOptions { name: server_name, import: server_import },
+                    ServerEntryOptions { name: page_name, import: page_import }
+                ] if server_name == "server"
+                    && server_import == "./src/server.ts"
+                    && page_name == "index-server"
+                    && page_import == "./src/pages/index.server.ts")
+        ));
+
+        let legacy: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "server": { "entry": "./src/server.ts" }
+        }))
+        .unwrap();
+        assert!(matches!(
+            legacy.server.unwrap().entry,
+            Some(ServerEntry::Import(import)) if import == "./src/server.ts"
+        ));
+    }
+
+    #[test]
+    fn test_server_externals_override_and_fallback() {
+        let overridden: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "externals": {
+                "client-only": "global ClientOnly"
+            },
+            "server": {
+                "externals": {
+                    "server-only": "commonjs server-only"
+                }
+            }
+        }))
+        .unwrap();
+        let overridden_externals = overridden.resolved_server_externals().unwrap();
+        assert!(!overridden_externals.contains_key("client-only"));
+        assert!(matches!(
+            overridden_externals.get("server-only"),
+            Some(ExternalConfig::Basic(name)) if name == "commonjs server-only"
+        ));
+
+        let inherited: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "externals": {
+                "shared": "commonjs shared"
+            },
+            "server": {}
+        }))
+        .unwrap();
+        assert!(matches!(
+            inherited
+                .resolved_server_externals()
+                .and_then(|externals| externals.get("shared")),
+            Some(ExternalConfig::Basic(name)) if name == "commonjs shared"
+        ));
+
+        let disabled: Config = serde_json::from_value(serde_json::json!({
+            "entry": [],
+            "externals": {
+                "shared": "commonjs shared"
+            },
+            "server": {
+                "externals": {}
+            }
+        }))
+        .unwrap();
+        assert!(disabled.resolved_server_externals().unwrap().is_empty());
+    }
 
     #[test]
     fn test_externals_deserialization() {

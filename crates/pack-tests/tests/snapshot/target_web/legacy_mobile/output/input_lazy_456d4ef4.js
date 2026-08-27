@@ -1,4 +1,4 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(self["TURBOPACK"] || (self["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 "[project]/target_web/legacy_mobile/input/lazy.js [client] (ecmascript)", (function(__turbopack_context__){
 "use strict";
 
