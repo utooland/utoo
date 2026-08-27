@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 2413,
+      "size": 2450,
       "hash": "",
       "files": [
         "main.js"
@@ -31,7 +31,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 2413,
+      "size": 2450,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -43,7 +43,7 @@
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 1800,
+      "size": 1812,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -91,7 +91,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 1018
+      "size": 1055
     },
     {
       "name": "node_modules/@emotion/react/jsx-runtime.js",

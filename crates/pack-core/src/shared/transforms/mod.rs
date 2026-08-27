@@ -13,13 +13,13 @@ use image::{StructuredImageModuleType, module::BlurPlaceholderMode};
 use inline_css::{InlineCssModuleType, module::InjectType};
 use wasm::StaticWasmModuleType;
 
-pub mod classic_jsx_react_import;
 pub mod css_modules;
 pub mod default_export_namer;
 pub mod emotion;
 pub mod image;
 pub mod inline_css;
 pub mod jsx_dev_filename;
+pub mod jsx_import_preserver;
 pub mod modularize_imports;
 pub mod remove_console;
 pub mod styled_components;

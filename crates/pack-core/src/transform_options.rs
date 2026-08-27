@@ -55,9 +55,9 @@ pub async fn get_typescript_transform_options(
                 .and_then(|v| v.as_bool())
         })
         .await?
-        .unwrap_or(true)
+        .unwrap_or(false)
     } else {
-        true
+        false
     };
 
     let ts_transform_options = TypescriptTransformOptions {
