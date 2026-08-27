@@ -548,6 +548,8 @@ jobs:
         id: pnpm12
         if: contains(github.event.inputs.phases_pm_list, 'pnpm12')
         uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
         with:
           version: next-12
           dest: ~/setup-pnpm12
@@ -692,6 +694,8 @@ jobs:
         id: pnpm12
         if: contains(github.event.inputs.phases_pm_list, 'pnpm12')
         uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
         with:
           version: next-12
           dest: ~/setup-pnpm12
@@ -832,6 +836,8 @@ jobs:
         id: pnpm12
         if: contains(steps.pm.outputs.list, 'pnpm12')
         uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
         with:
           version: next-12
           dest: ~/setup-pnpm12
@@ -913,6 +919,8 @@ jobs:
         id: pnpm12
         if: contains(steps.pm.outputs.list, 'pnpm12')
         uses: pnpm/setup@v2
+        env:
+          PNPM_CONFIG_PM_ON_FAIL: ignore
         with:
           version: next-12
           dest: ~/setup-pnpm12
