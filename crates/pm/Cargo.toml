@@ -12,6 +12,10 @@ categories  = ["command-line-utilities", "development-tools"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "utoo_pm"
+path = "src/lib.rs"
+
 [[bin]]
 name = "utoo"
 path = "src/main.rs"
