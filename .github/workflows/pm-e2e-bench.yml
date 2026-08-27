@@ -593,7 +593,7 @@ jobs:
           if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           "$UTOO_NEXT_BIN" --version
           bun --version
-          if command -v pnpm >/dev/null; then env PNPM_CONFIG_PM_ON_FAIL=ignore pnpm --version; fi
+          if command -v pnpm >/dev/null; then env npm_config_package_manager_strict=false npm_config_manage_package_manager_versions=false pnpm --version; fi
           if [ -n "${PNPM12_BIN:-}" ]; then env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version; fi
           if command -v aube >/dev/null; then aube --version; fi
       - name: Define cache wipe function
@@ -722,7 +722,7 @@ jobs:
           utoo --version
           if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           bun --version
-          if command -v pnpm >/dev/null; then env PNPM_CONFIG_PM_ON_FAIL=ignore pnpm --version; fi
+          if command -v pnpm >/dev/null; then env npm_config_package_manager_strict=false npm_config_manage_package_manager_versions=false pnpm --version; fi
           if [ -n "${PNPM12_BIN:-}" ]; then env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version; fi
           if command -v aube >/dev/null; then aube --version; fi
       - name: Define cache wipe function

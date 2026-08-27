@@ -470,7 +470,7 @@ install_cmd() {
     bun)       echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
     # Some npm projects set `package-lock=false` in .npmrc. pnpm maps that to
     # its own lockfile switch, so force it back on for lock-based p3/p4 parity.
-    pnpm)      echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM_BIN install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm)      echo "env npm_config_package_manager_strict=false npm_config_manage_package_manager_versions=false $PNPM_BIN install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
     pnpm12)    echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM12_BIN install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM12_STORE" ;;
     aube)      echo "env XDG_DATA_HOME=$AUBE_DATA XDG_CACHE_HOME=$AUBE_CACHE NPM_CONFIG_REGISTRY=$REGISTRY aube install --ignore-scripts --reporter silent" ;;
   esac
@@ -483,7 +483,7 @@ resolve_cmd() {
     utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
     utoo-alt)  echo "env $UTOO_ALT_ENV utoo deps --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
     bun)       echo "bun install --lockfile-only --registry=$REGISTRY" ;;
-    pnpm)      echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM_BIN install --lockfile-only --ignore-scripts --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm)      echo "env npm_config_package_manager_strict=false npm_config_manage_package_manager_versions=false $PNPM_BIN install --lockfile-only --ignore-scripts --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
     pnpm12)    echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM12_BIN install --lockfile-only --ignore-scripts --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM12_STORE" ;;
     aube)      echo "env XDG_DATA_HOME=$AUBE_DATA XDG_CACHE_HOME=$AUBE_CACHE NPM_CONFIG_REGISTRY=$REGISTRY aube install --lockfile-only --ignore-scripts --reporter silent" ;;
   esac
