@@ -20,6 +20,8 @@ if [ -n "${UTOO_ALT_ENV:-}" ] && [[ ",${PM_LIST:-}," != *",utoo-alt,"* ]]; then
   PM_LIST="${PM_LIST:+$PM_LIST,}utoo-alt"
 fi
 IFS=',' read -ra PACKAGE_MANAGERS <<< "${PM_LIST:-utoo,bun}"
+PNPM_BIN=${PNPM_BIN:-pnpm}
+PNPM12_BIN=${PNPM12_BIN:-pnpm12}
 
 BENCH_DIR=${BENCH_DIR:-/tmp/pm-bench}
 RESULTS_DIR=${RESULTS_DIR:-/tmp/pm-bench-results}
@@ -35,6 +37,7 @@ UTOO_ALT_CACHE="${UTOO_ALT_CACHE:-/tmp/utoo-alt-bench-cache}"
 BUN_CACHE="${BUN_CACHE:-/tmp/bun-bench-cache}"
 export BUN_INSTALL_CACHE_DIR="$BUN_CACHE"
 PNPM_STORE="${PNPM_STORE:-/tmp/pnpm-bench-store}"
+PNPM12_STORE="${PNPM12_STORE:-/tmp/pnpm12-bench-store}"
 AUBE_DATA="${AUBE_DATA:-/tmp/aube-bench-data}"
 AUBE_CACHE="${AUBE_CACHE:-/tmp/aube-bench-cache}"
 
@@ -177,6 +180,7 @@ capture_footprint() {
     utoo-alt)  cache=$UTOO_ALT_CACHE ;;
     bun)       cache=$BUN_CACHE ;;
     pnpm)      cache=$PNPM_STORE ;;
+    pnpm12)    cache=$PNPM12_STORE ;;
     aube)      cache="$AUBE_DATA $AUBE_CACHE" ;;
   esac
   printf '{"cache":%d,"node_modules":%d,"lockfile":%d}\n' \
@@ -197,7 +201,7 @@ PROJECT_DIR="$BENCH_DIR/$PROJECT"
 # aube consumes pnpm-style workspace metadata. Synthesize the same workspace
 # list used by the legacy comparison, and disable its provenance downgrade
 # policy so the benchmark measures installation rather than policy rejection.
-if printf '%s\n' "${PACKAGE_MANAGERS[@]}" | grep -Eq '^(aube|pnpm)$'; then
+if printf '%s\n' "${PACKAGE_MANAGERS[@]}" | grep -Eq '^(aube|pnpm|pnpm12)$'; then
   node - "$PROJECT_DIR" <<'NODE'
 const fs = require("fs");
 const dir = process.argv[2];
@@ -228,6 +232,7 @@ write_prepare() {
     utoo-alt)  cache=$UTOO_ALT_CACHE ;;
     bun)       cache=$BUN_CACHE ;;
     pnpm)      cache=$PNPM_STORE ;;
+    pnpm12)    cache=$PNPM12_STORE ;;
     aube)      cache="$AUBE_DATA $AUBE_CACHE" ;;
   esac
 
@@ -250,7 +255,7 @@ EOF
       # Phase 0: full cold install — nothing reused. Lockfile + all caches wiped.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock aube-lock.yaml yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE" "$PNPM_STORE" "$AUBE_DATA" "$AUBE_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE" "$PNPM_STORE" "$PNPM12_STORE" "$AUBE_DATA" "$AUBE_CACHE"
 echo "[prep] phase 0 $pm: full cold (lockfile + caches + node_modules wiped)"
 EOF
       ;;
@@ -258,7 +263,7 @@ EOF
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock aube-lock.yaml yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE" "$PNPM_STORE" "$AUBE_DATA" "$AUBE_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE" "$PNPM_STORE" "$PNPM12_STORE" "$AUBE_DATA" "$AUBE_CACHE"
 echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
@@ -274,11 +279,11 @@ rm -rf "$BUN_CACHE"
 echo "[prep] phase 3 bun: restored bun.lock, wiped $BUN_CACHE"
 EOF
           ;;
-        pnpm) cat >> "$path" <<EOF
+        pnpm|pnpm12) cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock aube-lock.yaml yarn.lock
-cp -f "$LOCK_STASH/pnpm-lock.yaml" pnpm-lock.yaml
-rm -rf "$PNPM_STORE"
-echo "[prep] phase 3 pnpm: restored pnpm-lock.yaml, wiped $PNPM_STORE"
+cp -f "$LOCK_STASH/${pm}-lock.yaml" pnpm-lock.yaml
+rm -rf "$cache"
+echo "[prep] phase 3 $pm: restored ${pm}-lock.yaml, wiped $cache"
 EOF
           ;;
         aube) cat >> "$path" <<EOF
@@ -306,10 +311,10 @@ cp -f "$LOCK_STASH/bun.lock" bun.lock
 echo "[prep] phase 4 bun: restored bun.lock, kept cache"
 EOF
           ;;
-        pnpm) cat >> "$path" <<EOF
+        pnpm|pnpm12) cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock aube-lock.yaml yarn.lock
-cp -f "$LOCK_STASH/pnpm-lock.yaml" pnpm-lock.yaml
-echo "[prep] phase 4 pnpm: restored pnpm-lock.yaml, kept store"
+cp -f "$LOCK_STASH/${pm}-lock.yaml" pnpm-lock.yaml
+echo "[prep] phase 4 $pm: restored ${pm}-lock.yaml, kept store"
 EOF
           ;;
         aube) cat >> "$path" <<EOF
@@ -380,17 +385,19 @@ seed_for_phase() {
       fi
       [ -f bun.lock ] && cp -f bun.lock "$LOCK_STASH/bun.lock"
       ;;
-    p3_*:pnpm|p4_*:pnpm)
-      if [ ! -f pnpm-lock.yaml ] && [ ! -f "$LOCK_STASH/pnpm-lock.yaml" ]; then
+    p3_*:pnpm|p4_*:pnpm|p3_*:pnpm12|p4_*:pnpm12)
+      local pnpm_lock_stash="$LOCK_STASH/${pm}-lock.yaml"
+      if [ ! -f "$pnpm_lock_stash" ]; then
         # pnpm's lockfile-only path is not equivalent to its install path for
         # every real-world workspace. Seed with a full untimed install, then
         # p3's prepare deletes the store while p4 intentionally keeps it.
-        echo -e "  ${CYAN}seed: running full pnpm install to generate pnpm-lock.yaml/store${NC}"
+        echo -e "  ${CYAN}seed: running full $pm install to generate pnpm-lock.yaml/store${NC}"
         rm -f package-lock.json bun.lock aube-lock.yaml
+        rm -f pnpm-lock.yaml
         rm -rf node_modules
-        retry 3 bash -c "$(install_cmd pnpm) >> '$seed_log' 2>&1" || return 1
+        retry 3 bash -c "$(install_cmd "$pm") >> '$seed_log' 2>&1" || return 1
+        [ -f pnpm-lock.yaml ] && cp -f pnpm-lock.yaml "$pnpm_lock_stash"
       fi
-      [ -f pnpm-lock.yaml ] && cp -f pnpm-lock.yaml "$LOCK_STASH/pnpm-lock.yaml"
       ;;
     p3_*:aube|p4_*:aube)
       if [ ! -f aube-lock.yaml ] && [ ! -f "$LOCK_STASH/aube-lock.yaml" ]; then
@@ -408,7 +415,7 @@ seed_for_phase() {
     local expected_lock
     case "$pm" in
       bun) expected_lock="$LOCK_STASH/bun.lock" ;;
-      pnpm) expected_lock="$LOCK_STASH/pnpm-lock.yaml" ;;
+      pnpm|pnpm12) expected_lock="$LOCK_STASH/${pm}-lock.yaml" ;;
       aube) expected_lock="$LOCK_STASH/aube-lock.yaml" ;;
       *) expected_lock="$LOCK_STASH/package-lock.json" ;;
     esac
@@ -427,6 +434,7 @@ seed_for_phase() {
       utoo-alt)  cache=$UTOO_ALT_CACHE ;;
       bun)       cache=$BUN_CACHE ;;
       pnpm)      cache=$PNPM_STORE ;;
+      pnpm12)    cache=$PNPM12_STORE ;;
       aube)      cache=$AUBE_DATA ;;
     esac
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
@@ -437,9 +445,9 @@ seed_for_phase() {
       if [ "$pm" = bun ]; then
         rm -f package-lock.json
         [ -f "$LOCK_STASH/bun.lock" ] && cp -f "$LOCK_STASH/bun.lock" bun.lock
-      elif [ "$pm" = pnpm ]; then
+      elif [ "$pm" = pnpm ] || [ "$pm" = pnpm12 ]; then
         rm -f package-lock.json bun.lock aube-lock.yaml
-        [ -f "$LOCK_STASH/pnpm-lock.yaml" ] && cp -f "$LOCK_STASH/pnpm-lock.yaml" pnpm-lock.yaml
+        [ -f "$LOCK_STASH/${pm}-lock.yaml" ] && cp -f "$LOCK_STASH/${pm}-lock.yaml" pnpm-lock.yaml
       elif [ "$pm" = aube ]; then
         rm -f package-lock.json bun.lock
         [ -f "$LOCK_STASH/aube-lock.yaml" ] && cp -f "$LOCK_STASH/aube-lock.yaml" aube-lock.yaml
@@ -462,7 +470,8 @@ install_cmd() {
     bun)       echo "bun install --ignore-scripts --registry=$REGISTRY" ;;
     # Some npm projects set `package-lock=false` in .npmrc. pnpm maps that to
     # its own lockfile switch, so force it back on for lock-based p3/p4 parity.
-    pnpm)      echo "pnpm install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --config.package-manager-strict=false --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm)      echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM_BIN install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm12)    echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM12_BIN install --ignore-scripts --no-frozen-lockfile --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM12_STORE" ;;
     aube)      echo "env XDG_DATA_HOME=$AUBE_DATA XDG_CACHE_HOME=$AUBE_CACHE NPM_CONFIG_REGISTRY=$REGISTRY aube install --ignore-scripts --reporter silent" ;;
   esac
 }
@@ -474,7 +483,8 @@ resolve_cmd() {
     utoo-next) echo "$UTOO_NEXT_BIN deps --registry=$REGISTRY --cache-dir=$UTOO_NEXT_CACHE" ;;
     utoo-alt)  echo "env $UTOO_ALT_ENV utoo deps --registry=$REGISTRY --cache-dir=$UTOO_ALT_CACHE" ;;
     bun)       echo "bun install --lockfile-only --registry=$REGISTRY" ;;
-    pnpm)      echo "pnpm install --lockfile-only --ignore-scripts --config.lockfile=true --config.package-manager-strict=false --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm)      echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM_BIN install --lockfile-only --ignore-scripts --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM_STORE" ;;
+    pnpm12)    echo "env PNPM_CONFIG_PM_ON_FAIL=ignore $PNPM12_BIN install --lockfile-only --ignore-scripts --config.lockfile=true --registry=$REGISTRY --store-dir=$PNPM12_STORE" ;;
     aube)      echo "env XDG_DATA_HOME=$AUBE_DATA XDG_CACHE_HOME=$AUBE_CACHE NPM_CONFIG_REGISTRY=$REGISTRY aube install --lockfile-only --ignore-scripts --reporter silent" ;;
   esac
 }
@@ -515,7 +525,7 @@ run_phase_matrix() {
   done
   [ ${#live_pms[@]} -eq 0 ] && return 0
 
-  export PROJECT_DIR UTOO_CACHE BUN_CACHE PNPM_STORE AUBE_DATA AUBE_CACHE
+  export PROJECT_DIR UTOO_CACHE BUN_CACHE PNPM_STORE PNPM12_STORE AUBE_DATA AUBE_CACHE
 
   # Untimed warmup round: DNS resolver cached, TLS session ticket primed,
   # CDN edge POP populated per PM before any timed window opens.
