@@ -720,7 +720,7 @@ jobs:
         run: |
           hyperfine --version
           utoo --version
-          "$UTOO_NPM_BIN" --version
+          if [ -n "${UTOO_NPM_BIN:-}" ]; then "$UTOO_NPM_BIN" --version; fi
           bun --version
           if command -v pnpm >/dev/null; then env PNPM_CONFIG_PM_ON_FAIL=ignore pnpm --version; fi
           if [ -n "${PNPM12_BIN:-}" ]; then env PNPM_CONFIG_PM_ON_FAIL=ignore "$PNPM12_BIN" --version; fi
