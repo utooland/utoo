@@ -571,7 +571,7 @@ jobs:
       # utoo-npm (last published release) only changes on releases — bench it
       # on manual dispatch only; label-triggered PR runs compare against
       # utoo-next, which is the signal that can actually change per PR.
-      - if: github.event_name == 'workflow_dispatch'
+      - if: github.event_name == 'workflow_dispatch' && contains(github.event.inputs.phases_pm_list, 'utoo-npm')
         uses: ./.github/actions/install-utoo-npm-baseline
       # The utoo-next binary is built upstream by build-linux's
       # "Build next branch utoo (bench baseline)" step. Just download.
@@ -714,7 +714,8 @@ jobs:
       - uses: ./.github/actions/install-bench-tools
         with:
           platform: mac
-      - uses: ./.github/actions/install-utoo-npm-baseline
+      - if: contains(github.event.inputs.phases_pm_list, 'utoo-npm')
+        uses: ./.github/actions/install-utoo-npm-baseline
       - name: Verify tools
         run: |
           hyperfine --version
