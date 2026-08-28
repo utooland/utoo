@@ -1,10 +1,12 @@
+//! Registry login command.
+
 use anyhow::Result;
 use colored::Colorize;
 
 use crate::service::auth;
 use crate::util::user_config::get_registry;
 
-pub async fn login() -> Result<()> {
+pub async fn run() -> Result<()> {
     let registry = get_registry();
 
     println!("Login to {}", registry.cyan());

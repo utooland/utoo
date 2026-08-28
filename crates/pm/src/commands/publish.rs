@@ -1,3 +1,5 @@
+//! Package publishing command.
+
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::collections::HashMap;
@@ -27,7 +29,7 @@ use crate::{error::CliError, error::classify};
 /// is published. With `--filter` the matching workspace member(s) are resolved
 /// from the workspace root and published in topological order, so a member can
 /// be published from the repo root without `cd`-ing into its directory.
-pub async fn publish(
+pub async fn run(
     tag: Option<&str>,
     mode: RunMode,
     otp: Option<&str>,

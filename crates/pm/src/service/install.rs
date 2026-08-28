@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::cmd::deps::build_deps;
+use crate::commands::deps::build_deps;
 use crate::fs;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::lock::{

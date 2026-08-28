@@ -1,3 +1,5 @@
+//! Registry connectivity command.
+
 use anyhow::Result;
 use colored::Colorize;
 
@@ -9,7 +11,7 @@ use crate::util::presenter::emit;
 use crate::util::registry::ping_registry;
 use crate::util::user_config::{detect_supports_semver, get_registry};
 
-pub async fn ping(registry: Option<&str>) -> Result<()> {
+pub async fn run(registry: Option<&str>) -> Result<()> {
     let registry = registry.map(String::from).unwrap_or_else(get_registry);
 
     if !invocation::json() {

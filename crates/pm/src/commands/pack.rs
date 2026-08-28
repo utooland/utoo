@@ -1,3 +1,5 @@
+//! Package tarball creation command.
+
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::io::{self, Write};
@@ -11,7 +13,7 @@ use crate::util::format_print::print_pack_details;
 use crate::util::invocation;
 use crate::util::presenter::emit;
 
-pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
+pub async fn run(path: Option<String>, mode: RunMode) -> Result<()> {
     let package_root = if let Some(p) = path {
         PathBuf::from(p)
     } else {

@@ -1,3 +1,5 @@
+//! Registry identity command.
+
 use anyhow::Result;
 
 use crate::error::{CliError, classify};
@@ -7,7 +9,7 @@ use crate::util::invocation;
 use crate::util::presenter::emit;
 use crate::util::user_config::get_registry;
 
-pub async fn whoami() -> Result<()> {
+pub async fn run() -> Result<()> {
     let registry = get_registry();
     let token = auth::require_token(&registry).await?;
 

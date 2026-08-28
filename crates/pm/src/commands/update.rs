@@ -1,9 +1,11 @@
+//! Dependency update command.
+
 use crate::service::update::clean_package_lock;
 use crate::util::cli_enum::{ReifyMode, ScriptPolicy};
 use crate::util::install_progress::DownloadBaseline;
 use crate::util::invocation;
 use crate::util::presenter::emit;
-use crate::{cmd::install::install_with_mode, helper::workspace::init_project_root};
+use crate::{commands::install::install_with_mode, helper::workspace::init_project_root};
 use anyhow::{Context, Result};
 use clap::Args;
 
@@ -18,7 +20,9 @@ pub struct UpdateArgs {
     pub force: bool,
 }
 
-pub async fn update(args: UpdateArgs, scripts: ScriptPolicy) -> Result<()> {
+pub use UpdateArgs as Options;
+
+pub async fn run(args: UpdateArgs, scripts: ScriptPolicy) -> Result<()> {
     let machine = invocation::json();
     let download_baseline = machine.then(DownloadBaseline::capture);
     let cwd = std::env::current_dir().context("Failed to get current directory")?;

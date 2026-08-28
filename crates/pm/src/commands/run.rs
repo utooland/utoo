@@ -1,3 +1,5 @@
+//! Package-script execution command.
+
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::process::Stdio;
@@ -81,7 +83,7 @@ pub async fn run(
 /// Fallback for `utoo <name>` when `<name>` is not a built-in subcommand:
 /// prefer a custom command from the config, otherwise run `<name>` as a
 /// package.json script.
-pub async fn run_fallback(
+pub async fn fallback(
     script_name: &str,
     filter: WorkspaceFilter,
     script_args: Vec<String>,

@@ -1,3 +1,5 @@
+//! Registry package-metadata command.
+
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context as _, Result, anyhow};
@@ -15,7 +17,7 @@ use crate::util::presenter::emit;
 use crate::util::user_config::get_registry;
 
 /// View package information from registry, similar to npm view
-pub async fn view(package_spec: &str) -> Result<()> {
+pub async fn run(package_spec: &str) -> Result<()> {
     let registry_url = get_registry();
     view_with_registry(package_spec, &registry_url).await
 }
