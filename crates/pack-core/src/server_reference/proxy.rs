@@ -4,9 +4,9 @@ use swc_core::{
     ecma::{
         ast::{
             BindingIdent, CallExpr, Callee, Decl, ExportDecl, ExportSpecifier, Expr, ExprOrSpread,
-            Ident, ImportDecl, ImportNamedSpecifier, ImportSpecifier, ImportStarAsSpecifier, Lit,
-            Module, ModuleDecl, ModuleExportName, ModuleItem, ObjectPatProp, Pat, Program, Str,
-            VarDecl, VarDeclKind, VarDeclarator,
+            Ident, ImportDecl, ImportNamedSpecifier, ImportSpecifier, Lit, Module, ModuleDecl,
+            ModuleExportName, ModuleItem, ObjectPatProp, Pat, Program, Str, VarDecl, VarDeclKind,
+            VarDeclarator,
         },
         utils::private_ident,
     },
@@ -160,7 +160,7 @@ pub fn collect_exports(module: &Module) -> Vec<(String, Option<Ident>)> {
 ///
 /// Generated code for a module with `createUser` and `deleteUser` exports:
 /// ```js
-/// import * as _server from "./actions" with { __turbopack_transition__: "server-reference" };
+/// import "./actions" with { __turbopack_transition__: "server-reference" };
 /// import { createServerReference } from "@utoo/server-function/client";
 /// export const createUser = createServerReference("a1b2c3...", "createUser");
 /// export const deleteUser = createServerReference("d4e5f6...", "deleteUser");
@@ -176,15 +176,12 @@ pub fn create_server_proxy_module(
 
     let mut body: Vec<ModuleItem> = Vec::new();
 
-    // import * as _server from "./self" with { __turbopack_transition__: "server-reference" };
+    // import "./self" with { __turbopack_transition__: "server-reference" };
     // This import is for module graph discovery only — the ServerReferenceModule
-    // produces empty content in client chunks.
-    let server_ref_ident = private_ident!("_server");
+    // produces empty content in client chunks. Keep it side-effect-only so
+    // TypeScript import elision cannot remove the transition edge.
     body.push(ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
-        specifiers: vec![ImportSpecifier::Namespace(ImportStarAsSpecifier {
-            local: server_ref_ident,
-            span: DUMMY_SP,
-        })],
+        specifiers: vec![],
         src: Box::new(target_import.into()),
         type_only: false,
         with: Some(with_clause(&[
