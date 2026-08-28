@@ -359,7 +359,11 @@ pub async fn get_client_module_options_context(
     // TypeScript import elision runs before the React transform. Preserve the React
     // binding needed by classic JSX (including per-file @jsxRuntime directives) and
     // JSX directives attached to imports that TypeScript may remove.
-    let jsx_import_preserver_rule = get_jsx_import_preserver_rule();
+    let classic_jsx_runtime = react_config
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.as_str() == "classic");
+    let jsx_import_preserver_rule = get_jsx_import_preserver_rule(classic_jsx_runtime);
     client_rules.push(jsx_import_preserver_rule.clone());
     foreign_client_rules.push(jsx_import_preserver_rule);
 

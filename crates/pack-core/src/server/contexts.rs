@@ -135,6 +135,12 @@ pub async fn get_server_module_options_context(
     let jsx_transform_options = get_jsx_transform_options(mode, config, false)
         .to_resolved()
         .await?;
+    let classic_jsx_runtime = config
+        .react()
+        .await?
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.as_str() == "classic");
 
     let mut loader_conditions = BTreeSet::new();
     loader_conditions.insert(WebpackLoaderBuiltinCondition::Node);
@@ -164,7 +170,7 @@ pub async fn get_server_module_options_context(
     let mut server_rules = get_server_transforms_rules(config, false).await?;
     let mut foreign_server_rules = get_server_transforms_rules(config, true).await?;
 
-    let jsx_import_preserver_rule = get_jsx_import_preserver_rule();
+    let jsx_import_preserver_rule = get_jsx_import_preserver_rule(classic_jsx_runtime);
     server_rules.push(jsx_import_preserver_rule.clone());
     foreign_server_rules.push(jsx_import_preserver_rule);
 

@@ -21,9 +21,9 @@ const REACT_USE_MARKER: &str = "__UTOOPACK_JSX_IMPORT_PRESERVER__";
 /// the React transform will generate. This rule temporarily uses the classic
 /// `React` binding and moves JSX directives to the module so neither is removed
 /// with an otherwise-unused import.
-pub fn get_jsx_import_preserver_rule() -> ModuleRule {
+pub fn get_jsx_import_preserver_rule(classic_runtime: bool) -> ModuleRule {
     let preserve = EcmascriptInputTransform::Plugin(ResolvedVc::cell(Box::new(
-        JsxImportPreserverTransformer,
+        JsxImportPreserverTransformer { classic_runtime },
     ) as _));
     let cleanup = EcmascriptInputTransform::Plugin(ResolvedVc::cell(Box::new(
         JsxImportPreserverCleanupTransformer,
@@ -47,7 +47,9 @@ pub fn get_jsx_import_preserver_rule() -> ModuleRule {
 }
 
 #[derive(Debug)]
-struct JsxImportPreserverTransformer;
+struct JsxImportPreserverTransformer {
+    classic_runtime: bool,
+}
 
 #[async_trait]
 impl CustomTransformer for JsxImportPreserverTransformer {
@@ -62,6 +64,12 @@ impl CustomTransformer for JsxImportPreserverTransformer {
         };
 
         preserve_jsx_directives(module, ctx.comments);
+
+        let classic_runtime =
+            jsx_runtime_directive(module, ctx.comments).unwrap_or(self.classic_runtime);
+        if !classic_runtime {
+            return Ok(());
+        }
 
         let mut scanner = ReactJsxScanner::default();
         module.visit_with(&mut scanner);
@@ -143,6 +151,29 @@ fn is_jsx_directive(comment: &Comment) -> bool {
         && comment.text.lines().any(|line| {
             let line = line.trim().trim_start_matches('*').trim();
             line.starts_with("@jsx")
+        })
+}
+
+/// Returns the per-file JSX runtime override, when present. This takes
+/// precedence over the project-level runtime in the React transform.
+fn jsx_runtime_directive(module: &Module, comments: &dyn Comments) -> Option<bool> {
+    comments
+        .get_leading(module.span.lo)?
+        .iter()
+        .find_map(|comment| {
+            if comment.kind != CommentKind::Block {
+                return None;
+            }
+
+            comment.text.lines().find_map(|line| {
+                let line = line.trim().trim_start_matches('*').trim();
+                let runtime = line.strip_prefix("@jsxRuntime")?.trim();
+                match runtime.split_whitespace().next()? {
+                    "classic" => Some(true),
+                    "automatic" => Some(false),
+                    _ => None,
+                }
+            })
         })
 }
 
