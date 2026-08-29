@@ -446,6 +446,7 @@ pub async fn get_client_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             cjs_tree_shaking: module_fragments_enabled_for_user_code,
+            mangle_export_names: mode_ref.is_production(),
             infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
@@ -453,6 +454,7 @@ pub async fn get_client_module_options_context(
         css: CssOptionsContext {
             source_maps,
             module_css_condition: Some(module_styles_rule_condition()),
+            module_css_debuggable_idents: mode_ref.is_development(),
             css_modules_pattern,
             ..Default::default()
         },
@@ -555,6 +557,7 @@ pub async fn get_client_resolve_options_context(
     let custom_conditions = vec![mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
         enable_node_modules: Some(project_path.root().owned().await?),
+        server_relative_root: Some(project_path.clone()),
         custom_conditions,
         import_map: Some(client_import_map),
         fallback_import_map: Some(client_fallback_import_map),

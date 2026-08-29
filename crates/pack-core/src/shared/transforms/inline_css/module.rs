@@ -261,6 +261,7 @@ impl InlineCssModuleType {
             ResolvedVc::upcast(module_asset_context);
         let compile_time_info = asset_context.compile_time_info().to_resolved().await?;
         let environment = compile_time_info.environment().to_resolved().await?;
+        let module_options_context = module_asset_context.module_options_context().await?;
         let is_at_import = matches!(
             &reference_type,
             ReferenceType::Css(CssReferenceSubType::AtImport(_))
@@ -279,6 +280,7 @@ impl InlineCssModuleType {
             import_context.map(|context| *context),
             Some(*environment),
             LightningCssFeatureFlags::default(),
+            module_options_context.css.module_css_debuggable_idents,
             css_modules_pattern,
         )
         .to_resolved()
@@ -290,7 +292,6 @@ impl InlineCssModuleType {
             return Ok(Vc::upcast(*css));
         }
         let content_module = InlineCssContentModule { source, css }.resolved_cell();
-        let module_options_context = module_asset_context.module_options_context().await?;
         let injector_source: ResolvedVc<Box<dyn Source>> = ResolvedVc::upcast(
             InlineCssFileSource {
                 css: source,
@@ -306,6 +307,7 @@ impl InlineCssModuleType {
             EcmascriptOptions {
                 follow_reexports: module_options_context.follow_reexports,
                 module_fragments_enabled: module_options_context.module_fragments_enabled,
+                mangle_export_names: module_options_context.ecmascript.mangle_export_names,
                 ..Default::default()
             }
             .resolved_cell(),
