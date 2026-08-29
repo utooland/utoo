@@ -520,9 +520,8 @@ pub struct OptionImageConfig(Option<ImageConfig>);
 #[serde(rename_all = "camelCase")]
 pub struct OptimizationConfig {
     pub module_ids: Option<ModuleIds>,
-    /// When the code is minified, this opts out of the default mangling of
-    /// local names for variables, functions etc., which can be useful for
-    /// debugging/profiling purposes.
+    /// Opt out of mangling local names during minification and generated export keys in production
+    /// builds, which can be useful for debugging and profiling.
     pub no_mangling: Option<bool>,
     /// Whether to enable compression when minifying.
     #[bincode(with = "turbo_bincode::serde_self_describing")]
