@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/invalid_pseudo_class/input/index.less?modules [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"displayName\": \"index-less__5KwGvG__displayName\",\n  \"layoutContainer\": \"index-less__5KwGvG__layoutContainer\",\n  \"layoutContainer2\": \"index-less__5KwGvG__layoutContainer2\",\n  \"rowBox\": \"index-less__5KwGvG__rowBox\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA;AACA;AACA;AACA"}},
-    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/invalid_pseudo_class/input/index.ts"],"sourcesContent":["import style from './index.less';\n\nstyle"],"names":[],"mappings":"AAAA;;AAEA,oKAAK"}}]
-}

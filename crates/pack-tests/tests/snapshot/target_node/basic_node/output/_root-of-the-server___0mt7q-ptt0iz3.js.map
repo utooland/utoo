@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/basic_node/input/utils.ts"],"sourcesContent":["export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n"],"names":["greet","name","add","a","b"],"mappings":"AAAO,SAASA,MAAMC,IAAY;IAChC,OAAO,CAAC,OAAO,EAAEA,KAAK,CAAC,CAAC;AAC1B;AAEO,SAASC,IAAIC,CAAS,EAAEC,CAAS;IACtC,OAAOD,IAAIC;AACb"}},
+    {"offset": {"line": 25, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/target_node/basic_node/input/index.ts"],"sourcesContent":["import path from \"node:path\";\nimport { greet } from \"./utils\";\n\nconst name = process.env.USER ?? \"world\";\nconst message = greet(name);\n\nconsole.log(message);\nconsole.log(\"cwd:\", process.cwd());\nconsole.log(\"dirname:\", path.dirname(\"/foo/bar/baz.txt\"));\nconsole.log(\"extname:\", path.extname(\"index.ts\"));\nconsole.log(\"joined:\", path.join(\"src\", \"utils\", \"index.ts\"));\n"],"names":["name","process","env","USER","message","console","log","cwd","dirname","extname","join"],"mappings":"AAAA;AACA;;;AAEA,MAAMA,OAAOC,QAAQC,GAAG,CAACC,IAAI,IAAI;AACjC,MAAMC,UAAU,IAAA,4IAAK,EAACJ;AAEtBK,QAAQC,GAAG,CAACF;AACZC,QAAQC,GAAG,CAAC,QAAQL,QAAQM,GAAG;AAC/BF,QAAQC,GAAG,CAAC,YAAY,4HAAI,CAACE,OAAO,CAAC;AACrCH,QAAQC,GAAG,CAAC,YAAY,4HAAI,CAACG,OAAO,CAAC;AACrCJ,QAAQC,GAAG,CAAC,WAAW,4HAAI,CAACI,IAAI,CAAC,OAAO,SAAS"}}]
+}

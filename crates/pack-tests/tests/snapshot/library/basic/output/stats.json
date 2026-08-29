@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 2082,
+      "size": 2076,
       "hash": "",
       "files": [
         "main.js"
@@ -31,7 +31,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 2082,
+      "size": 2076,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -67,7 +67,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 953
+      "size": 949
     },
     {
       "name": "root EmotionStyled commonjs emotion-styled",
@@ -83,7 +83,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 286
+      "size": 284
     },
     {
       "name": "library/basic/input/a.ts",

@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_loose/input/a.js"],"sourcesContent":["import pageAStyles from \"./a.module.css\";\nimport sharedStyles from \"./shared.module.css\";\n\nexport const pageAClassNames = [sharedStyles.shared, pageAStyles.local];\n"],"names":["pageAClassNames","shared","local"],"mappings":"AAAA;AACA;;;AAEO,MAAMA,kBAAkB;IAAC,2KAAY,CAACC,MAAM;IAAE,sKAAW,CAACC,KAAK;CAAC"}},
+    {"offset": {"line": 20, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_loose/input/a.module.css [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"local\": \"-uTsoq_local\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA"}},
+    {"offset": {"line": 26, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_loose/input/shared.module.css [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"shared\": \"Zdvjja_shared\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA"}}]
+}

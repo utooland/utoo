@@ -3,12 +3,12 @@
     "main": {
       "name": "main",
       "chunks": [
-        "input_index_d913cfd2.js",
+        "input_index_0eqdxa7ujoyj7.js",
         "main.js"
       ],
       "assets": [
         {
-          "name": "input_index_d913cfd2.js"
+          "name": "input_index_0eqdxa7ujoyj7.js"
         },
         {
           "name": "main.js"
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_index_d913cfd2.js",
-      "size": 328,
+      "id": "input_index_0eqdxa7ujoyj7.js",
+      "size": 333,
       "hash": "",
       "files": [
-        "input_index_d913cfd2.js"
+        "input_index_0eqdxa7ujoyj7.js"
       ]
     },
     {
@@ -35,7 +35,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 288,
+      "size": 293,
       "hash": "",
       "files": [
         "main.js"
@@ -57,26 +57,26 @@
     },
     {
       "type": "asset",
-      "name": "input_index_d913cfd2.js",
+      "name": "input_index_0eqdxa7ujoyj7.js",
       "info": {},
-      "size": 328,
+      "size": 333,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_index_d913cfd2.js"
+        "input_index_0eqdxa7ujoyj7.js"
       ]
     },
     {
       "type": "asset",
-      "name": "input_index_d913cfd2.js.map",
+      "name": "input_index_0eqdxa7ujoyj7.js.map",
       "info": {},
       "size": 290,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_index_d913cfd2.js.map"
+        "input_index_0eqdxa7ujoyj7.js.map"
       ]
     },
     {
@@ -95,7 +95,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 288,
+      "size": 293,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -145,7 +145,7 @@
       "name": "basic/copy/input/index.js",
       "id": "[project]/basic/copy/input/index.js [client] (ecmascript)",
       "chunks": [
-        "input_index_d913cfd2.js"
+        "input_index_0eqdxa7ujoyj7.js"
       ],
       "size": 79
     }

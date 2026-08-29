@@ -13,7 +13,7 @@ function jsxs() {
     return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
 }
 __turbopack_context__.s([
-    "jsx",
+    "f",
     0,
     jsx
 ]);
@@ -59,13 +59,13 @@ console.log(__TURBOPACK__imported__module__32__["styled"]);
 console.log(__TURBOPACK__imported__module__81__["a"]);
 function App({ content }) {
     // @ts-ignore
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__61__["jsx"])("div", {
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__61__["f"])("div", {
         children: content
     });
 }
 // @ts-ignore
 const root = __TURBOPACK__imported__module__11__["default"].createRoot(document.getElementById('root'));
-root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__61__["jsx"])(App, {
+root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__61__["f"])(App, {
     content: 'hello'
 }));
 __turbopack_context__.s([]);

@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/runtime/input/public-path.js"],"sourcesContent":["__webpack_public_path__ = globalThis.__ASSET_BASE__;\n\nexport const activePublicPath = __webpack_public_path__;\n"],"names":["publicPath","globalThis","__ASSET_BASE__","activePublicPath"],"mappings":"AAAAA,WAAAA,UAAuB,GAAGC,WAAWC,cAAc;AAE5C,MAAMC,mBAAmBH,WAAAA,UAAuB"}},
-    {"offset": {"line": 18, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/runtime/input/index.js"],"sourcesContent":["import { activePublicPath } from \"./public-path.js\";\nimport asset from \"./asset.jpg\";\n\nexport function getImageUrl() {\n  return asset;\n}\n\nexport function getActivePublicPath() {\n  return activePublicPath;\n}\n"],"names":["getImageUrl","getActivePublicPath"],"mappings":"AAAA;AACA;;;AAEO,SAASA;IACd,OAAO,8CAAK;AACd;AAEO,SAASC;IACd,OAAO,uDAAgB;AACzB"}}]
-}

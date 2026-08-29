@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_index_abb60b70.js"],"runtimeModuleIds":[59]}
+    {"otherChunks":["input_index_1z5a_erw88q4d.js"],"runtimeModuleIds":[59]}
 ]);
 (() => {
 var chunksToRegister = globalThis["TURBOPACK"];

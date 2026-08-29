@@ -14,7 +14,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         ]);
         [__TURBOPACK__imported__module__263__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
         ;
-        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__263__["default"] + " world";
+        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__263__["f"] + " world";
         __turbopack_context__.s([
             "default",
             0,
@@ -52,9 +52,9 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         ]);
         [__TURBOPACK__imported__module__263__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
         ;
-        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__263__["default"] + " world";
+        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__263__["f"] + " world";
         __turbopack_context__.s([
-            "default",
+            "f",
             0,
             __TURBOPACK__default__export__
         ]);
@@ -78,7 +78,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         [__TURBOPACK__imported__module__513__, __TURBOPACK__imported__module__356__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
         ;
         ;
-        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__513__["default"] + ", " + __TURBOPACK__imported__module__356__["default"];
+        var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__513__["default"] + ", " + __TURBOPACK__imported__module__356__["f"];
         __turbopack_context__.s([
             "default",
             0,
@@ -113,7 +113,7 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         await 1;
         var __TURBOPACK__default__export__ = "hello";
         __turbopack_context__.s([
-            "default",
+            "f",
             0,
             __TURBOPACK__default__export__
         ]);

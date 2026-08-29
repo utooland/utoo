@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/jsx-runtime.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\nexport function jsxs() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\n"],"names":["jsx","jsxs"],"mappings":"AAAO,SAASA;IACd,OAAO;AACT;AACO,SAASC;IACd,OAAO;AACT","ignoreList":[0]}},
+    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/frontmatter-path-guard/input/page.md.js?type=frontmatter"],"sourcesContent":["export default 'md-frontmatter'"],"names":[],"mappings":"qCAAe"}},
+    {"offset": {"line": 32, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/frontmatter-path-guard/input/page.js.js?type=frontmatter"],"sourcesContent":["export default 'js-frontmatter'"],"names":[],"mappings":"qCAAe"}},
+    {"offset": {"line": 42, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/webpack-loaders/frontmatter-path-guard/input/index.tsx"],"sourcesContent":["// @ts-ignore\nimport markdownFrontmatter from './page.md?type=frontmatter';\n// @ts-ignore\nimport jsFrontmatter from './page.js?type=frontmatter';\n\nexport default function App() {\n    return (\n        <div>\n            <p id=\"markdown-frontmatter\">{markdownFrontmatter}</p>\n            <p id=\"js-frontmatter\">{jsFrontmatter}</p>\n        </div>\n    );\n}\n"],"names":["App","id"],"mappings":";AAAA,aAAa;AACb;AACA,aAAa;AACb;;;;AAEe,SAASA;IACpB,qBACI,8IAAC;;0BACG,8IAAC;gBAAEC,IAAG;0BAAwB,iMAAmB;;0BACjD,8IAAC;gBAAEA,IAAG;0BAAkB,iMAAa;;;;AAGjD"}}]
+}

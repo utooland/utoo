@@ -3,12 +3,12 @@
     "main": {
       "name": "main",
       "chunks": [
-        "input_index_eff851b8.js",
+        "input_index_0yzwyi6ourq_9.js",
         "main.js"
       ],
       "assets": [
         {
-          "name": "input_index_eff851b8.js"
+          "name": "input_index_0yzwyi6ourq_9.js"
         },
         {
           "name": "main.js"
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_index_eff851b8.js",
-      "size": 370,
+      "id": "input_index_0yzwyi6ourq_9.js",
+      "size": 375,
       "hash": "",
       "files": [
-        "input_index_eff851b8.js"
+        "input_index_0yzwyi6ourq_9.js"
       ]
     },
     {
@@ -35,7 +35,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 316,
+      "size": 321,
       "hash": "",
       "files": [
         "main.js"
@@ -45,33 +45,33 @@
   "assets": [
     {
       "type": "asset",
-      "name": "input_index_eff851b8.js",
+      "name": "input_index_0yzwyi6ourq_9.js",
       "info": {},
-      "size": 370,
+      "size": 375,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_index_eff851b8.js"
+        "input_index_0yzwyi6ourq_9.js"
       ]
     },
     {
       "type": "asset",
-      "name": "input_index_eff851b8.js.map",
+      "name": "input_index_0yzwyi6ourq_9.js.map",
       "info": {},
       "size": 321,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_index_eff851b8.js.map"
+        "input_index_0yzwyi6ourq_9.js.map"
       ]
     },
     {
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 316,
+      "size": 321,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -97,7 +97,7 @@
       "name": "basic/chunk_loading_global/input/index.js",
       "id": "[project]/basic/chunk_loading_global/input/index.js [client] (ecmascript)",
       "chunks": [
-        "input_index_eff851b8.js"
+        "input_index_0yzwyi6ourq_9.js"
       ],
       "size": 93
     }

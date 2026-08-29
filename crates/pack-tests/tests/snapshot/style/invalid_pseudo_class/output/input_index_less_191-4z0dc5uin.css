@@ -1,0 +1,34 @@
+/* [project]/style/invalid_pseudo_class/input/index.less.css?modules [client] (css) */
+._5KwGvG_rowBox {
+  flex-direction: row;
+  align-items: center;
+  margin-top: 16px;
+  display: flex;
+}
+
+._5KwGvG_rowBox:first {
+  margin-top: 0;
+}
+
+img {
+  cursor: default !important;
+}
+
+form[id="step1"] {
+  background: red;
+}
+
+._5KwGvG_displayName {
+  color: var(#040f24d9);
+  margin-bottom: 12px;
+}
+
+._5KwGvG_layoutContainer {
+  background-image: url("");
+}
+
+._5KwGvG_layoutContainer2 {
+  background-image: url("<path-to-image>") lightgray 50% / cover no-repeat;
+}
+
+/*# sourceMappingURL=input_index_less_191-4z0dc5uin.css.map*/

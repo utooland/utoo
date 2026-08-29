@@ -1,8 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/antd/es/ButtonGroup/index.js"],"sourcesContent":["export default function ButtonGroup() {\n    return \"ButtonGroup\";\n}"],"names":["ButtonGroup"],"mappings":"AAAe,SAASA;IACpB,OAAO;AACX","ignoreList":[0]}},
-    {"offset": {"line": 16, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/antd/es/DatePicker/index.js"],"sourcesContent":["export default function DatePicker() {\n    return \"DatePicker\";\n}"],"names":["DatePicker"],"mappings":"AAAe,SAASA;IACpB,OAAO;AACX","ignoreList":[0]}},
-    {"offset": {"line": 28, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/optimization/modularize_imports_camel_case/input/index.js"],"sourcesContent":["import { ButtonGroup, DatePicker } from \"antd\";\n\nconsole.log(ButtonGroup, DatePicker);"],"names":["console","log"],"mappings":"AAAA;AAAA;;;AAEAA,QAAQC,GAAG,CAAC,yJAAW,EAAE,wJAAU"}}]
-}
