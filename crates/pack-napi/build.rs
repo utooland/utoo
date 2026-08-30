@@ -11,7 +11,6 @@ fn main() -> anyhow::Result<()> {
     let is_macos_target = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|value| value == "macos");
     let is_linux_target = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|value| value == "linux");
     let is_wasm_target = env::var("CARGO_CFG_TARGET_FAMILY").is_ok_and(|value| value == "wasm");
-    let is_ci = env::var("CI").is_ok_and(|value| !value.is_empty());
 
     // Generates, stores build-time information as static values.
     // There are some places relying on correct values for this (i.e telemetry),
@@ -36,11 +35,7 @@ fn main() -> anyhow::Result<()> {
     // commit hash as a version is okay.
     let git = vergen_gitcl::GitclBuilder::default()
         .dirty(/* include_untracked */ true)
-        .describe(
-            /* tags */ true,
-            /* dirty */ !is_ci, // suppress the dirty suffix in CI
-            /* matches */ Some("v[0-9]*"), // find the last version tag
-        )
+        .sha(/* short */ true)
         .build()?;
     vergen_gitcl::Emitter::default()
         .add_instructions(&cargo)?
