@@ -42,13 +42,27 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 22.14.0
+          node-version: 20
 
       - name: Setup Utoo
         uses: utooland/setup-utoo@v1
 
+      - name: Keep Node 20 for integration tests
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json'));
+            delete pkg.engines['install-node'];
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
       - name: Install dependencies
         run: utoo install
+
+      - name: Verify Node 20 runtime
+        run: |
+          test "$(node -p 'process.versions.node.split(".")[0]')" = "20"
+          test "$(npm exec -- node -p 'process.versions.node.split(".")[0]')" = "20"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
@@ -65,6 +79,9 @@ jobs:
           npm run build --workspace @utoo/pack-shared
           npm run build:local --workspace @utoo/pack
           npm run build --workspace @utoo/pack-cli
+
+          # Exercise the generated NAPI loader on the minimum supported Node major.
+          NAPI_RS_ENFORCE_VERSION_CHECK=1 node -e 'require("./packages/pack/src/binding.js")'
 
           # Regression coverage for independent PostCSS and loader evaluator graphs sharing one
           # build-time runtime (utooland/utoo#3316).
