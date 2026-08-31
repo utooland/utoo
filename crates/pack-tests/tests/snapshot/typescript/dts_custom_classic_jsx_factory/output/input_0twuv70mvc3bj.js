@@ -11,7 +11,7 @@ function h(type, props, ...children) {
 }
 const Fragment = Symbol.for("fragment");
 __turbopack_context__.s([
-    "Fragment",
+    "y",
     0,
     Fragment,
     "h",
@@ -30,7 +30,7 @@ __turbopack_context__.s([
 ;
 const heading = "Custom classic JSX factory";
 function App() {
-    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__59__["h"])(__TURBOPACK__imported__module__59__["Fragment"], null, /*#__PURE__*/ (0, __TURBOPACK__imported__module__59__["h"])("h1", null, heading));
+    return /*#__PURE__*/ (0, __TURBOPACK__imported__module__59__["h"])(__TURBOPACK__imported__module__59__["y"], null, /*#__PURE__*/ (0, __TURBOPACK__imported__module__59__["h"])("h1", null, heading));
 }
 __turbopack_context__.s([
     "default",
@@ -40,4 +40,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=input_7646245b.js.map
+//# sourceMappingURL=input_0twuv70mvc3bj.js.map

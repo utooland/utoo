@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_custom_classic_jsx_factory/input/factory.ts"],"sourcesContent":["export function h(type: unknown, props: unknown, ...children: unknown[]) {\n  return { type, props, children };\n}\n\nexport const Fragment = Symbol.for(\"fragment\");\n"],"names":["h","type","props","children","Fragment","Symbol","for"],"mappings":"AAAO,SAASA,EAAEC,IAAa,EAAEC,KAAc,EAAE,GAAGC,QAAmB;IACrE,OAAO;QAAEF;QAAMC;QAAOC;IAAS;AACjC;AAEO,MAAMC,WAAWC,OAAOC,GAAG,CAAC"}},
-    {"offset": {"line": 24, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_custom_classic_jsx_factory/input/index.tsx"],"sourcesContent":["/**\n * @jsxRuntime classic\n * @jsx h\n * @jsxFrag Fragment\n */\nimport { Fragment, h } from \"./factory\";\nimport { Heading } from \"./types\";\n\nconst heading: Heading = \"Custom classic JSX factory\";\n\nexport default function App() {\n  return (\n    <>\n      <h1>{heading}</h1>\n    </>\n  );\n}\n"],"names":["heading","App"],"mappings":"AAAA;;;;CAIC,GACD;;AAGA,MAAMA,UAAmB;AAEV,SAASC;IACtB,qBACE,IAZJ,wCAIG,EAJH,+CAIG,sBASG,IAbN,wCAIG,EASI,YAAID;AAGX"}}]
-}

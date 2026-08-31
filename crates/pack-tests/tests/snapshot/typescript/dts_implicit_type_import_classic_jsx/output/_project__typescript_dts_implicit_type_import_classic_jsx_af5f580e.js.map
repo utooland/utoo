@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_implicit_type_import_classic_jsx/node_modules/@alipay/bigfish/react.js"],"sourcesContent":["const React = {\n    createElement() {},\n};\n\nexport default React;\n"],"names":["React","createElement"],"mappings":"AAAA,MAAMA,QAAQ;IACVC,kBAAiB;AACrB;qCAEeD","ignoreList":[0]}},
-    {"offset": {"line": 17, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_implicit_type_import_classic_jsx/input/index.tsx"],"sourcesContent":["import React from '@alipay/bigfish/react';\nimport { Heading } from './types';\n\nconst heading: Heading = 'Implicit type import';\n\nexport default function App() {\n    return <h1>{heading}</h1>;\n}\n"],"names":["heading","App"],"mappings":"AAAA;;AAGA,MAAMA,UAAmB;AAEV,SAASC;IACpB,qBAAO,6DAAC,YAAID;AAChB"}}]
-}
