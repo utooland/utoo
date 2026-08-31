@@ -1,0 +1,3 @@
+# The CSS snapshot carries the class-name behavior under test. Ignore JavaScript runtime chunks.
+main.js
+input_

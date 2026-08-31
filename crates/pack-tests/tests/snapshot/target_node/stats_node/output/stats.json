@@ -3,12 +3,12 @@
     "main": {
       "name": "main",
       "chunks": [
-        "_root-of-the-server___7e972a20.js",
+        "_root-of-the-server___1njalkkd93qz4.js",
         "main.js"
       ],
       "assets": [
         {
-          "name": "_root-of-the-server___7e972a20.js"
+          "name": "_root-of-the-server___1njalkkd93qz4.js"
         },
         {
           "name": "main.js"
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "_root-of-the-server___7e972a20.js",
-      "size": 934,
+      "id": "_root-of-the-server___1njalkkd93qz4.js",
+      "size": 939,
       "hash": "",
       "files": [
-        "_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___1njalkkd93qz4.js"
       ]
     },
     {
@@ -35,7 +35,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 271,
+      "size": 276,
       "hash": "",
       "files": [
         "main.js"
@@ -45,26 +45,26 @@
   "assets": [
     {
       "type": "asset",
-      "name": "_root-of-the-server___7e972a20.js",
+      "name": "_root-of-the-server___1njalkkd93qz4.js",
       "info": {},
-      "size": 934,
+      "size": 939,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___1njalkkd93qz4.js"
       ]
     },
     {
       "type": "asset",
-      "name": "_root-of-the-server___7e972a20.js.map",
+      "name": "_root-of-the-server___1njalkkd93qz4.js.map",
       "info": {},
       "size": 1048,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "_root-of-the-server___7e972a20.js.map"
+        "_root-of-the-server___1njalkkd93qz4.js.map"
       ]
     },
     {
@@ -95,7 +95,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 271,
+      "size": 276,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -121,7 +121,7 @@
       "name": "path",
       "id": "[externals]/path [external] (path, cjs)",
       "chunks": [
-        "_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___1njalkkd93qz4.js"
       ],
       "size": 139
     },
@@ -129,7 +129,7 @@
       "name": "target_node/stats_node/input/index.js",
       "id": "[project]/target_node/stats_node/input/index.js [server] (ecmascript)",
       "chunks": [
-        "_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___1njalkkd93qz4.js"
       ],
       "size": 279
     },
@@ -137,7 +137,7 @@
       "name": "target_node/stats_node/input/utils.js",
       "id": "[project]/target_node/stats_node/input/utils.js [server] (ecmascript)",
       "chunks": [
-        "_root-of-the-server___7e972a20.js"
+        "_root-of-the-server___1njalkkd93qz4.js"
       ],
       "size": 240
     }

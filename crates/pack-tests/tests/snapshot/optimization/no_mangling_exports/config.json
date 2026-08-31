@@ -1,0 +1,32 @@
+{
+  "runtimeType": "dummy",
+  "config": {
+    "entry": [
+      {
+        "import": "input/client.js",
+        "name": "client"
+      }
+    ],
+    "output": {
+      "path": "output/client"
+    },
+    "server": {
+      "entry": [
+        {
+          "import": "input/server.js",
+          "name": "server"
+        }
+      ],
+      "output": {
+        "filename": "[name].js",
+        "path": "output/server"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named",
+      "noMangling": true
+    },
+    "sourceMaps": false
+  }
+}

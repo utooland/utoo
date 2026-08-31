@@ -280,6 +280,7 @@ export interface ConfigComplete {
   provider?: ProviderConfig;
   optimization?: {
     moduleIds?: "named" | "deterministic";
+    /** Disable local-name minifier mangling and production export-name mangling. */
     noMangling?: boolean;
     compress?:
       | boolean

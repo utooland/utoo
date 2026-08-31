@@ -2,6 +2,6 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/library/node_auto_css_modules/input/index.css?modules [library-server] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"primaryButton\": \"index__xcHvDW__primaryButton\",\n  \"title\": \"index__xcHvDW__title\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA;AACA"}},
+    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/library/node_auto_css_modules/input/index.css?modules [library-server] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"primaryButton\": \"xcHvDW_primaryButton\",\n  \"title\": \"xcHvDW_title\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA;AACA"}},
     {"offset": {"line": 15, "column": 0}, "map": {"version":3,"sources":["./../library/node_auto_css_modules/input/index.js"],"sourcesContent":["import styles from \"./index.css\";\n\nexport const titleClassName = styles.title;\nexport const primaryButtonClassName = styles.primaryButton;\nexport default styles;\n"],"names":["titleClassName","title","primaryButtonClassName","primaryButton"],"mappings":"AAAA;;AAEO,MAAMA,iBAAiB,iLAAM,CAACC,KAAK;AACnC,MAAMC,yBAAyB,iLAAM,CAACC,aAAa;qCAC3C,iLAAM"}}]
 }

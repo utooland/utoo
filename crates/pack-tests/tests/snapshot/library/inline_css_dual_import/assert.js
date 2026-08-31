@@ -18,7 +18,8 @@ assert.deepStrictEqual(inlineStyleIds.sort(), [
   "library/inline_css_dual_import/input/reward.less.css",
   "library/inline_css_dual_import/input/reward.less.css?modules",
 ]);
-assert.match(bundle, /\.reward-less__[\w]+__prizeBackgroundImage \{/);
+assert.match(bundle, /\.[\w-]+_prizeBackgroundImage \{/);
+assert.doesNotMatch(bundle, /\.reward-less__/);
 assert.match(bundle, /\\n\.prizeBackgroundImage \{/);
 assert.doesNotMatch(
   outputFiles.join("\n"),

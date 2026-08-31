@@ -6,8 +6,8 @@
 "[project]/library/node_auto_css_modules/input/index.css?modules [library-server] (css module)", ((__turbopack_context__) => {
 
 __turbopack_context__.v({
-  "primaryButton": "index__xcHvDW__primaryButton",
-  "title": "index__xcHvDW__title",
+  "primaryButton": "xcHvDW_primaryButton",
+  "title": "xcHvDW_title",
 });
 }),
 "[project]/library/node_auto_css_modules/input/index.js [library-server] (ecmascript)", ((__turbopack_context__) => {

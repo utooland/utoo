@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_inline_type_import_classic_jsx/node_modules/react/index.js"],"sourcesContent":["const React = {\n    createElement: function createElement() {},\n    Fragment: 'Fragment',\n    Component: function Component() {},\n};\n\nexport default React;\nexport const createElement = React.createElement;\nexport const Fragment = React.Fragment;\nexport const Component = React.Component;\n"],"names":["React","createElement","Fragment","Component"],"mappings":"AAAA,MAAMA,QAAQ;IACVC,eAAe,SAASA,iBAAiB;IACzCC,UAAU;IACVC,WAAW,SAASA,aAAa;AACrC;qCAEeH;AACR,MAAMC,gBAAgBD,MAAMC,aAAa;AACzC,MAAMC,WAAWF,MAAME,QAAQ;AAC/B,MAAMC,YAAYH,MAAMG,SAAS","ignoreList":[0]}},
+    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_inline_type_import_classic_jsx/input/index.tsx"],"sourcesContent":["import React from 'react';\nimport { type Heading } from './types';\n\nconst heading: Heading = 'Inline type import';\n\nexport default function App() {\n    return <h1>{heading}</h1>;\n}\n"],"names":["heading","App"],"mappings":"AAAA;;AAGA,MAAMA,UAAmB;AAEV,SAASC;IACpB,qBAAO,uDAAC,YAAID;AAChB"}}]
+}

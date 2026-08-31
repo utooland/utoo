@@ -67,7 +67,7 @@ FG6adF1kPdxcnQ9rUk0b1jaemDjUwXJRycSSrmUPKiA6MTt8YVMx3Xf4NTZvmTugEE9pXSLyFeQQzEx3
 ;
 var __TURBOPACK__default__export__1 = __TURBOPACK__default__export__.length;
 __turbopack_context__.s([
-    "default",
+    "f",
     0,
     __TURBOPACK__default__export__1
 ], 148);
@@ -81,7 +81,7 @@ setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
 
 var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
 ;
-console.log('x', __TURBOPACK__imported__module__148__["default"]);
+console.log('x', __TURBOPACK__imported__module__148__["f"]);
 __turbopack_context__.s([]);
 }),
 554, ((__turbopack_context__, module, exports) => {
@@ -106,7 +106,7 @@ __turbopack_context__.s([]);
 ;
 var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
 ;
-console.log('y', __TURBOPACK__imported__module__148__["default"]);
+console.log('y', __TURBOPACK__imported__module__148__["f"]);
 ;
 __turbopack_context__.s([], 77);
 }),

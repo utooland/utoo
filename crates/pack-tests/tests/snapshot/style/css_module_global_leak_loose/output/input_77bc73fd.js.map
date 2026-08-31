@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_loose/input/b.js"],"sourcesContent":["import sharedStyles from \"./shared.module.css\";\n\nexport const pageBClassNames = [sharedStyles.shared];\n"],"names":["pageBClassNames","shared"],"mappings":"AAAA;;AAEO,MAAMA,kBAAkB;IAAC,2KAAY,CAACC,MAAM;CAAC"}},
-    {"offset": {"line": 17, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/css_module_global_leak_loose/input/shared.module.css [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"shared\": \"shared-module__Zdvjja__shared\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA"}}]
-}

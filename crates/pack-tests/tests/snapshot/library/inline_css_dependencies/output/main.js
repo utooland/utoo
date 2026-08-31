@@ -257,7 +257,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_depend
 ;
 const globalValue = "global";
 __turbopack_context__.s([
-    "globalValue",
+    "f",
     0,
     globalValue
 ]);
@@ -302,7 +302,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_depend
 ;
 const loadingStyles = __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$json$2e5b$json$5d2e$cjs__$5b$library$2d$client$5d$__$28$ecmascript$29$__["default"];
 __turbopack_context__.s([
-    "loadingStyles",
+    "f",
     0,
     loadingStyles
 ]);
@@ -313,7 +313,7 @@ __turbopack_context__.s([
 ;
 const sideEffectFreeValue = "side-effect-free";
 __turbopack_context__.s([
-    "sideEffectFreeValue",
+    "f",
     0,
     sideEffectFreeValue
 ]);
@@ -351,7 +351,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_depend
 ;
 const selectiveValue = "selective";
 __turbopack_context__.s([
-    "selectiveValue",
+    "f",
     0,
     selectiveValue
 ]);
@@ -368,10 +368,10 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_depend
 ;
 ;
 const dependencyValues = {
-    globalValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$global$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["globalValue"],
-    loadingStyles: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["loadingStyles"],
-    selectiveValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["selectiveValue"],
-    sideEffectFreeValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$side$2d$effect$2d$free$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["sideEffectFreeValue"]
+    globalValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$global$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
+    loadingStyles: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
+    selectiveValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
+    sideEffectFreeValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$side$2d$effect$2d$free$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"]
 };
 __turbopack_context__.s([
     "dependencyValues",

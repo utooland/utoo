@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/invalid_pseudo_class/input/index.less?modules [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"displayName\": \"_5KwGvG_displayName\",\n  \"layoutContainer\": \"_5KwGvG_layoutContainer\",\n  \"layoutContainer2\": \"_5KwGvG_layoutContainer2\",\n  \"rowBox\": \"_5KwGvG_rowBox\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA;AACA;AACA;AACA"}},
+    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/invalid_pseudo_class/input/index.ts"],"sourcesContent":["import style from './index.less';\n\nstyle"],"names":[],"mappings":"AAAA;;AAEA,oKAAK"}}]
+}

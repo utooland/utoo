@@ -1,8 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/tsconfig-mod/index.js"],"sourcesContent":["export const foo = 'bar';"],"names":["foo"],"mappings":"AAAO,MAAMA,MAAM","ignoreList":[0]}},
-    {"offset": {"line": 14, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/tsconfig-mod/foo.ts"],"sourcesContent":["export const prop = \"prop\";\n"],"names":["prop"],"mappings":"AAAO,MAAMA,OAAO","ignoreList":[0]}},
-    {"offset": {"line": 24, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/foreign_tsconfig/input/index.ts"],"sourcesContent":["import { foo } from 'tsconfig-mod';\nimport { prop } from 'tsconfig-mod/foo';\n\nconsole.log('foo', foo);\nconsole.log('prop', prop);"],"names":["console","log"],"mappings":"AAAA;AACA;;;AAEAA,QAAQC,GAAG,CAAC,OAAO,0CAAG;AACtBD,QAAQC,GAAG,CAAC,QAAQ,2CAAI"}}]
-}

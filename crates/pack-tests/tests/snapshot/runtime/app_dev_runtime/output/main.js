@@ -1,6 +1,6 @@
 (globalThis["utooChunk_appDev"] || (globalThis["utooChunk_appDev"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_index_fe72225c.js"],"runtimeModuleIds":[41]}
+    {"otherChunks":["input_index_0gh3b55vvb6s2.js"],"runtimeModuleIds":[41]}
 ]);
 (() => {
 var chunksToRegister = globalThis["utooChunk_appDev"];

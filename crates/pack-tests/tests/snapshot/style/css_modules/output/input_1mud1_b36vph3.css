@@ -1,0 +1,77 @@
+/* [project]/style/css_modules/input/auto_css_modules/style1.css?modules [client] (css) */
+.rkQtTq_container {
+  background-color: #f0f0f0;
+  padding: 20px;
+}
+
+.rkQtTq_title {
+  color: #333;
+  font-size: 24px;
+}
+
+/* [project]/style/css_modules/input/auto_css_modules/style.less.css?modules [client] (css) */
+.AKDVIa_button {
+  color: #fff;
+  background-color: #007bff;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 20px;
+}
+
+/* [project]/style/css_modules/input/auto_css_modules/style.sass.css?modules [client] (css) */
+.X8Ic7G_card {
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 4px #0000001a;
+}
+
+/* [project]/style/css_modules/input/auto_css_modules/style.scss.css?modules [client] (css) */
+.cmKNAa_header {
+  background-color: #28a745;
+}
+
+.cmKNAa_header:hover {
+  background-color: #1e7e34;
+}
+
+/* [project]/style/css_modules/input/auto_css_modules/style2.css?modules [client] (css) */
+.c_G5cG_existing {
+  color: red;
+  font-weight: bold;
+}
+
+/* [project]/style/css_modules/input/normal_css_modules/style.module.css [client] (css) */
+.VXAErG_container {
+  background-color: #f0f0f0;
+  padding: 20px;
+}
+
+.VXAErG_title {
+  color: #333;
+  font-size: 24px;
+}
+
+/* [project]/style/css_modules/input/normal_css_modules/style.module.less.module.css [client] (css) */
+._774aKG_button {
+  color: #fff;
+  background-color: #007bff;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 20px;
+}
+
+/* [project]/style/css_modules/input/normal_css_modules/style.module.sass.module.css [client] (css) */
+.Kl-Kua_card {
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 2px 4px #0000001a;
+}
+
+/* [project]/style/css_modules/input/normal_css_modules/style.module.scss.module.css [client] (css) */
+.xnTRRG_header {
+  background-color: #28a745;
+}
+
+.xnTRRG_header:hover {
+  background-color: #1e7e34;
+}

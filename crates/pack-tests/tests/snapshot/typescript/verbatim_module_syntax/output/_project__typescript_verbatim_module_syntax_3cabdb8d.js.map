@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/verbatim_module_syntax/node_modules/react/index.js"],"sourcesContent":["const React = {\n    createElement: function createElement() {},\n    Fragment: 'Fragment',\n    Component: function Component() {},\n};\n\nexport default React;\nexport const createElement = React.createElement;\nexport const Fragment = React.Fragment;\nexport const Component = React.Component;\n"],"names":["React","createElement","Fragment","Component"],"mappings":"AAAA,MAAMA,QAAQ;IACVC,eAAe,SAASA,iBAAiB;IACzCC,UAAU;IACVC,WAAW,SAASA,aAAa;AACrC;qCAEeH;AACR,MAAMC,gBAAgBD,MAAMC,aAAa;AACzC,MAAMC,WAAWF,MAAME,QAAQ;AAC/B,MAAMC,YAAYH,MAAMG,SAAS","ignoreList":[0]}},
-    {"offset": {"line": 22, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/verbatim_module_syntax/input/index.tsx"],"sourcesContent":["// This is the opposite of basic/foreign_jsx_transform test case.\nimport React from 'react';\n\nconst App = () => {\n    return (\n        <div>\n            Verbatim module syntax Test Case\n        </div>\n    )\n}\n\nexport enum RefType {\n    property = '11' as any,\n    event = '22' as any,\n}\n\nconsole.log(RefType.property, RefType.event);\n\nexport default App;"],"names":["App","RefType","console","log"],"mappings":"AAAA,iEAAiE;AACjE;;AAEA,MAAMA,MAAM;IACR,qBACI,4LAAC,aAAI;AAIb;AAEO,IAAA,AAAKC,iCAAAA;;;WAAAA;;AAKZC,QAAQC,GAAG;qCAEIH"}}]
-}

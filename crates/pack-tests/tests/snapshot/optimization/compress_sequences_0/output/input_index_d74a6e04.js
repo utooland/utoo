@@ -1,3 +1,0 @@
-(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,"[project]/optimization/compress_sequences_0/input/index.js [client] (ecmascript)",__turbopack_context__=>{"use strict";function sideEffect(v){return globalThis.__seq_log=(globalThis.__seq_log||0)+v,globalThis.__seq_log}function calc(a,b){return sideEffect(a)+sideEffect(b)}calc(1,2);__turbopack_context__.s(["calc",0,calc])}]);
-
-//# sourceMappingURL=input_index_d74a6e04.js.map

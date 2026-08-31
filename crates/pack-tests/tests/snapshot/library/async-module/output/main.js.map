@@ -2,10 +2,10 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/a.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;QAAA;;;;;;6CAEe,+CAAC,GAAG"}},
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/a.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;QAAA;;;;;;6CAEe,yCAAC,GAAG"}},
     {"offset": {"line": 31, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/async.js"],"sourcesContent":["// This is the async chunk\nexport default 42;\nexport const nested = () => import(\"./a\");\n"],"names":["nested"],"mappings":"AAAA,0BAA0B;qCACX;AACR,MAAMA,SAAS"}},
-    {"offset": {"line": 46, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/b.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;QAAA;;;;;;6CAEe,+CAAC,GAAG"}},
-    {"offset": {"line": 69, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/main.js"],"sourcesContent":["import a from \"./a\";\nimport b from \"./b\";\n\nexport default a + \", \" + b;\n"],"names":[],"mappings":";;QAAA;QACA;;;;;;;;6CAEe,+CAAC,GAAG,OAAO,+CAAC"}},
+    {"offset": {"line": 46, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/b.js"],"sourcesContent":["import x from \"./shared\";\n\nexport default x + \" world\";\n"],"names":[],"mappings":";;QAAA;;;;;;6CAEe,yCAAC,GAAG"}},
+    {"offset": {"line": 69, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/main.js"],"sourcesContent":["import a from \"./a\";\nimport b from \"./b\";\n\nexport default a + \", \" + b;\n"],"names":[],"mappings":";;QAAA;QACA;;;;;;;;6CAEe,+CAAC,GAAG,OAAO,yCAAC"}},
     {"offset": {"line": 95, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/index.js"],"sourcesContent":["const result = await require(\"./main\");\n\nawait import(\"./async\");\n\nresult.default;"],"names":["result","default"],"mappings":";;QAAA,MAAMA,SAAS;QAEf;QAEAA,OAAOC,OAAO"}},
     {"offset": {"line": 109, "column": 0}, "map": {"version":3,"sources":["./../library/async-module/input/shared.js"],"sourcesContent":["await 1;\nawait 1;\nexport default \"hello\";\n"],"names":[],"mappings":";;QAAA,MAAM;QACN,MAAM;6CACS"}}]
 }

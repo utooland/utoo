@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/node_modules/react/jsx-runtime.js"],"sourcesContent":["export function jsx() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\nexport function jsxs() {\n  return 'purposefully empty stub for react/jsx-runtime.js'\n}\n"],"names":["jsx","jsxs"],"mappings":"AAAO,SAASA;IACd,OAAO;AACT;AACO,SAASC;IACd,OAAO;AACT","ignoreList":[0]}},
-    {"offset": {"line": 19, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/no_named_export_default/input/index.js"],"sourcesContent":["export default () => {\n    return <div>hello</div>\n}"],"names":[],"mappings":";;qCAAe;IACX,qBAAO,gJAAC;kBAAI;;AAChB"}}]
-}

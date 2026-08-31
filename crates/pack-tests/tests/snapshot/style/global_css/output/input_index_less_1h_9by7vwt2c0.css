@@ -1,0 +1,9 @@
+/* [project]/style/global_css/input/index.less.css [client] (css) */
+.polestar-checkbox-box :global(.ant-checkbox-wrapper) {
+  color: #000000d9;
+  font-weight: 400;
+}
+
+:global .ant-menu {
+  background-color: #f0f2f5 !important;
+}
