@@ -38,7 +38,7 @@ pub fn create_turbo_tasks(
 ) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
         let version_info = GitVersionInfo {
-            describe: env!("VERGEN_GIT_DESCRIBE"),
+            describe: env!("VERGEN_GIT_SHA"),
             dirty: option_env!("CI").is_none_or(|value| value.is_empty())
                 && env!("VERGEN_GIT_DIRTY") == "true",
         };
