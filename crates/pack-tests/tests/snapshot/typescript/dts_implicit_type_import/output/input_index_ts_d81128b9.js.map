@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/dts_implicit_type_import/input/index.ts"],"sourcesContent":["import { MyType } from './types';\n\nconst value: MyType = 'implicit type import';\n\nconsole.log(value);\n"],"names":["value","console","log"],"mappings":"AAEA,MAAMA,QAAgB;AAEtBC,QAAQC,GAAG,CAACF"}}]
+}

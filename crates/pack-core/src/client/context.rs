@@ -61,6 +61,7 @@ use crate::{
             css_modules::get_auto_css_modules_rule,
             default_export_namer::get_default_export_namer_rule,
             emotion::get_emotion_transform_rule, jsx_dev_filename::get_jsx_dev_filename_rule,
+            jsx_import_preserver::get_jsx_import_preserver_rule,
             remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
@@ -354,6 +355,17 @@ pub async fn get_client_module_options_context(
         get_client_transforms_rules(config, false, inline_postcss_transform).await?;
     let mut foreign_client_rules =
         get_client_transforms_rules(config, true, inline_foreign_postcss_transform).await?;
+
+    // TypeScript import elision runs before the React transform. Preserve the React
+    // binding needed by classic JSX (including per-file @jsxRuntime directives) and
+    // JSX directives attached to imports that TypeScript may remove.
+    let classic_jsx_runtime = react_config
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.as_str() == "classic");
+    let jsx_import_preserver_rule = get_jsx_import_preserver_rule(classic_jsx_runtime);
+    client_rules.push(jsx_import_preserver_rule.clone());
+    foreign_client_rules.push(jsx_import_preserver_rule);
 
     client_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
     foreign_client_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
