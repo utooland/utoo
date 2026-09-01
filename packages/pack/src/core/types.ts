@@ -85,6 +85,8 @@ export interface Project {
     currentDirectoryFileUrl: string,
   ): Promise<StackFrame | null>;
 
+  getCompletedTaskCount(): number;
+
   updateInfoSubscribe(
     aggregationMs: number,
   ): AsyncIterableIterator<NapiUpdateMessage>;

@@ -985,6 +985,16 @@ impl From<UpdateInfo> for NapiUpdateInfo {
     }
 }
 
+#[napi]
+pub fn project_get_completed_task_count(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+) -> u32 {
+    project
+        .turbopack_ctx
+        .turbo_tasks()
+        .get_completed_scheduled_task_count() as u32
+}
+
 /// Subscribes to lifecycle events of the compilation.
 ///
 /// Emits an [UpdateMessage::Start] event when any computation starts.

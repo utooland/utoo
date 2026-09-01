@@ -12,7 +12,10 @@ let compilingLogCount = 0;
 const originalConsoleLog = console.log;
 
 console.log = (...args: unknown[]) => {
-  if (args[0] === "Compiling...") {
+  if (
+    typeof args[0] === "string" &&
+    /^Compiling\.\.\. \(\d+ tasks? completed\)$/.test(args[0])
+  ) {
     compilingLogCount++;
   }
   originalConsoleLog(...args);

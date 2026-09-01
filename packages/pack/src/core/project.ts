@@ -598,6 +598,10 @@ export function projectFactory(endpointWatchOptions?: {
       return binding.projectGetSourceMapSync(this._nativeProject, filePath);
     }
 
+    getCompletedTaskCount(): number {
+      return binding.projectGetCompletedTaskCount(this._nativeProject);
+    }
+
     updateInfoSubscribe(aggregationMs: number) {
       return subscribe<NapiUpdateMessage>(true, async (callback) =>
         binding.projectUpdateInfoSubscribe(

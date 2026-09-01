@@ -225,6 +225,8 @@ export interface NapiWrittenEndpoint {
 
 export declare function projectEntrypointsSubscribe(project: { __napiType: "Project" }, func: (err: Error, value: TurbopackResult<NapiEntrypoints>) => void): { __napiType: "RootTask" }
 
+export declare function projectGetCompletedTaskCount(project: { __napiType: "Project" }): number
+
 export declare function projectGetSourceForAsset(project: { __napiType: "Project" }, filePath: string): Promise<string | null>
 
 export declare function projectGetSourceMap(project: { __napiType: "Project" }, filePath: RcStr): Promise<string | null>
