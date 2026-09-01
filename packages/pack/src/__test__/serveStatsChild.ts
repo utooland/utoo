@@ -14,7 +14,7 @@ const statsPath = path.join(projectPath, "dist", "stats.json");
 const htmlPath = path.join(projectPath, "dist", "index.html");
 
 function normalizeFileName(name: string): string {
-  return name.replace(/_[0-9a-f]{8}(?=\.)/g, "_<hash>");
+  return name.replace(/_(?:[0-9a-f]{8}|[0-9a-z_-]{13})(?=\.)/g, "_<hash>");
 }
 
 function normalizeStats(stats: any) {

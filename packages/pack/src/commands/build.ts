@@ -19,6 +19,11 @@ import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
+import {
+  formatDuration,
+  formatTaskCount,
+  TaskProgress,
+} from "../utils/taskProgress";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
@@ -107,7 +112,20 @@ async function buildInternal(
       },
     );
 
-    const entrypoints = await project.writeAllEntrypointsToDisk();
+    const progress = new TaskProgress(project);
+    const compileStart = Date.now();
+    progress.start("Compiling");
+
+    let completedTasks = 0;
+    const entrypoints = await project
+      .writeAllEntrypointsToDisk()
+      .finally(() => {
+        completedTasks = progress.stop();
+      });
+
+    console.log(
+      `Compiled in ${formatDuration(Date.now() - compileStart)} (${formatTaskCount(completedTasks)})`,
+    );
 
     handleIssues(entrypoints.issues);
     const htmlGenerationManager = new HtmlGenerationManager(
