@@ -1,0 +1,24 @@
+{
+  "expectedAppEndpoints": 2,
+  "config": {
+    "entry": [
+      {
+        "import": "input/first.js",
+        "name": "first"
+      },
+      {
+        "import": "input/second.js",
+        "name": "second"
+      }
+    ],
+    "mode": "development",
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "output": {
+      "path": "output"
+    },
+    "sourceMaps": true
+  }
+}
