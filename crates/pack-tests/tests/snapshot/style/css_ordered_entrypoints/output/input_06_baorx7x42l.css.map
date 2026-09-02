@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["file:///Users/zoomdong/utoo/crates/pack-tests/tests/snapshot/style/css_ordered_entrypoints/style/css_ordered_entrypoints/input/reset.css"],"sourcesContent":[".button {\n  color: red;\n}\n"],"names":[],"mappings":"AAAA"}},
-    {"offset": {"line": 6, "column": 0}, "map": {"version":3,"sources":["file:///Users/zoomdong/utoo/crates/pack-tests/tests/snapshot/style/css_ordered_entrypoints/style/css_ordered_entrypoints/input/theme.css"],"sourcesContent":[".button {\n  color: blue;\n}\n"],"names":[],"mappings":"AAAA"}}]
-}

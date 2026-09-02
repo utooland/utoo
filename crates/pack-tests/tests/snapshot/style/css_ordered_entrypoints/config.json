@@ -19,6 +19,6 @@
     "output": {
       "path": "output"
     },
-    "sourceMaps": true
+    "sourceMaps": false
   }
 }
