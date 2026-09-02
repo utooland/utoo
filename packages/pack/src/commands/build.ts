@@ -67,6 +67,7 @@ async function buildInternal(
   );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
+  const showProgress = bundleOptions.tracing ?? true;
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
@@ -90,7 +91,7 @@ async function buildInternal(
         },
         dev: bundleOptions.dev ?? false,
         buildId: bundleOptions.buildId || nanoid(),
-        tracing: bundleOptions.tracing ?? true,
+        tracing: showProgress,
         config: {
           ...bundleOptions.config,
           stats: shouldCreateWebpackStats,
@@ -112,20 +113,22 @@ async function buildInternal(
       },
     );
 
-    const progress = new TaskProgress(project);
+    const progress = showProgress ? new TaskProgress(project) : undefined;
     const compileStart = Date.now();
-    progress.start("Compiling");
+    progress?.start("Compiling");
 
     let completedTasks = 0;
     const entrypoints = await project
       .writeAllEntrypointsToDisk()
       .finally(() => {
-        completedTasks = progress.stop();
+        completedTasks = progress?.stop() ?? 0;
       });
 
-    console.log(
-      `Compiled in ${formatDuration(Date.now() - compileStart)} (${formatTaskCount(completedTasks)})`,
-    );
+    if (showProgress) {
+      console.log(
+        `Compiled in ${formatDuration(Date.now() - compileStart)} (${formatTaskCount(completedTasks)})`,
+      );
+    }
 
     handleIssues(entrypoints.issues);
     const htmlGenerationManager = new HtmlGenerationManager(

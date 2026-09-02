@@ -129,7 +129,8 @@ pub struct NapiProjectOptions {
     /// The build id.
     pub build_id: String,
 
-    /// Whether to enable default tracing logs.
+    /// Whether the JavaScript caller emits compilation progress. Rust tracing is configured with
+    /// `RUST_LOG`.
     pub tracing: bool,
 
     pub pack_path: String,
@@ -472,20 +473,12 @@ pub fn project_new<'env>(
                 .with(chrome_layer)
                 .init();
         });
-    } else if options.tracing {
+    } else if let Ok(env_filter) = EnvFilter::try_from_default_env() {
         TRACING_INIT.call_once(|| {
-            let env_filter = EnvFilter::try_from_default_env();
-            let env_filter_enabled = env_filter.is_ok();
             tracing_subscriber::fmt()
-                .with_env_filter(env_filter.unwrap_or_else(|_| {
-                    EnvFilter::new("pack_napi=info,pack_api=info,pack_core=info")
-                }))
-                .with_target(env_filter_enabled)
-                .with_span_events(if env_filter_enabled {
-                    FmtSpan::CLOSE
-                } else {
-                    FmtSpan::NONE
-                })
+                .with_env_filter(env_filter)
+                .with_target(true)
+                .with_span_events(FmtSpan::CLOSE)
                 .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
                     "%Y-%m-%d %H:%M:%S.%3f".to_string(),
                 ))
