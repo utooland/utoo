@@ -131,7 +131,10 @@ export interface NapiProjectOptions {
   dev: boolean
   /** The build id. */
   buildId: string
-  /** Whether to enable default tracing logs. */
+  /**
+   * Whether the JavaScript caller emits compilation progress. Rust tracing is configured with
+   * `RUST_LOG`.
+   */
   tracing: boolean
   packPath: string
 }

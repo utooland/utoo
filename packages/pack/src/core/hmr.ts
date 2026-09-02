@@ -273,6 +273,7 @@ export async function createHotReloader(
   );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
+  const showProgress = bundleOptions.tracing ?? true;
 
   let project: Project;
   try {
@@ -285,7 +286,7 @@ export async function createHotReloader(
         },
         dev: true,
         buildId: bundleOptions.buildId || nanoid(),
-        tracing: bundleOptions.tracing ?? true,
+        tracing: showProgress,
         config: {
           ...bundleOptions.config,
           mode: "development",
@@ -315,7 +316,7 @@ export async function createHotReloader(
     throw error;
   }
 
-  const progress = new TaskProgress(project);
+  const progress = showProgress ? new TaskProgress(project) : undefined;
 
   const entrypointsSubscription = project.entrypointsSubscribe();
 
@@ -343,19 +344,20 @@ export async function createHotReloader(
   let closePromise: Promise<void> | undefined;
 
   function markHmrEvent() {
-    if (!hmrEventHappened) {
-      progress.start("Compiling");
-      hmrEventHappened = true;
-    }
-  }
-
-  function finishHmrEvent(duration: number) {
-    const completedTasks = progress.stop();
-
-    if (!hmrEventHappened) {
+    if (!progress || hmrEventHappened) {
       return;
     }
 
+    progress.start("Compiling");
+    hmrEventHappened = true;
+  }
+
+  function finishHmrEvent(duration: number) {
+    if (!progress || !hmrEventHappened) {
+      return;
+    }
+
+    const completedTasks = progress.stop();
     console.log(
       `Compiled in ${formatDuration(duration)} (${formatTaskCount(completedTasks)})`,
     );
@@ -942,7 +944,7 @@ export async function createHotReloader(
 
     async close() {
       hmrEventHappened = false;
-      progress.stop();
+      progress?.stop();
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
       closePromise ??= (
