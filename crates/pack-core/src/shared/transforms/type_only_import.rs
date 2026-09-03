@@ -19,10 +19,9 @@ pub fn get_type_only_import_rule(enable_mdx_rs: bool) -> ModuleRule {
 /// Normalizes inline type-only imports and exports to their declaration-level
 /// equivalents when every specifier is type-only.
 ///
-/// Utoopack enables SWC's `verbatimModuleSyntax` behavior by default so unused value
-/// imports survive classic JSX transforms. Without this normalization, SWC preserves
-/// all-type named imports and exports as `import {}` or `export {}` and creates
-/// unintended runtime dependencies.
+/// When `verbatimModuleSyntax` is enabled explicitly, SWC preserves inline type
+/// specifiers as `import {}` or `export {}`. Normalizing an all-type declaration
+/// lets SWC remove it without creating an unintended runtime dependency.
 #[derive(Debug)]
 struct TypeOnlyImportTransformer;
 

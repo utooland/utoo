@@ -1,9 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/server_function/input/transport.ts"],"sourcesContent":["export function createServerReference(id: string, name: string) {\n  return async function (...args: any[]) {\n    console.log(`[Transport] Call ${name} (${id}) with`, args);\n    return { ok: true };\n  };\n}\n"],"names":["createServerReference","id","name","args","console","log","ok"],"mappings":"AAAO,SAASA,sBAAsBC,EAAU,EAAEC,IAAY;IAC5D,OAAO,eAAgB,GAAGC,IAAW;QACnCC,QAAQC,GAAG,CAAC,CAAC,iBAAiB,EAAEH,KAAK,EAAE,EAAED,GAAG,MAAM,CAAC,EAAEE;QACrD,OAAO;YAAEG,IAAI;QAAK;IACpB;AACF"}},
-    {"offset": {"line": 24, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
-    {"offset": {"line": 45, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
-    {"offset": {"line": 59, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/server_function/input/index.ts"],"sourcesContent":["import { createUser, deleteUser } from \"./actions\";\nimport { createUser as createAdminUser } from \"./admin\";\n\nasync function main() {\n  const user = await createUser(\"Alice\", \"alice@example.com\");\n  console.log(\"Created user:\", user);\n\n  await deleteUser(user.id);\n  console.log(\"Deleted user\");\n\n  const admin = await createAdminUser(\"Bob\", \"superadmin\");\n  console.log(\"Created admin user:\", admin);\n}\n\nmain();\n"],"names":["main","user","console","log","id","admin"],"mappings":"AAAA;AACA;;;AAEA,eAAeA;IACb,MAAMC,OAAO,MAAM,IAAA,sJAAU,EAAC,SAAS;IACvCC,QAAQC,GAAG,CAAC,iBAAiBF;IAE7B,MAAM,IAAA,sJAAU,EAACA,KAAKG,EAAE;IACxBF,QAAQC,GAAG,CAAC;IAEZ,MAAME,QAAQ,MAAM,IAAA,oJAAe,EAAC,OAAO;IAC3CH,QAAQC,GAAG,CAAC,uBAAuBE;AACrC;AAEAL"}}]
-}

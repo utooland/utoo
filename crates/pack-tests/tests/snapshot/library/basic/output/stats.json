@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 2413,
+      "size": 2076,
       "hash": "",
       "files": [
         "main.js"
@@ -31,7 +31,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 2413,
+      "size": 2076,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -43,7 +43,7 @@
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 1800,
+      "size": 1796,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -54,32 +54,8 @@
   ],
   "modules": [
     {
-      "name": "root EmotionStyled commonjs emotion-styled",
-      "id": 132,
-      "chunks": [
-        "main.js"
-      ],
-      "size": 279
-    },
-    {
-      "name": "library/basic/input/a.ts",
-      "id": 481,
-      "chunks": [
-        "main.js"
-      ],
-      "size": 116
-    },
-    {
-      "name": "root React commonjs react",
-      "id": 571,
-      "chunks": [
-        "main.js"
-      ],
-      "size": 253
-    },
-    {
       "name": "root ReactDOM commonjs react-dom",
-      "id": 611,
+      "id": 11,
       "chunks": [
         "main.js"
       ],
@@ -87,19 +63,35 @@
     },
     {
       "name": "library/basic/input/index.tsx",
-      "id": 620,
+      "id": 20,
       "chunks": [
         "main.js"
       ],
-      "size": 1018
+      "size": 949
+    },
+    {
+      "name": "root EmotionStyled commonjs emotion-styled",
+      "id": 32,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 279
     },
     {
       "name": "node_modules/@emotion/react/jsx-runtime.js",
-      "id": 861,
+      "id": 61,
       "chunks": [
         "main.js"
       ],
-      "size": 286
+      "size": 284
+    },
+    {
+      "name": "library/basic/input/a.ts",
+      "id": 81,
+      "chunks": [
+        "main.js"
+      ],
+      "size": 116
     }
   ]
 }

@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/typescript/verbatim_module_syntax/input/index.tsx"],"sourcesContent":["// This is the opposite of basic/foreign_jsx_transform test case.\nimport React from 'react';\n\nconst App = () => {\n    return (\n        <div>\n            Verbatim module syntax Test Case\n        </div>\n    )\n}\n\nexport enum RefType {\n    property = '11' as any,\n    event = '22' as any,\n}\n\nconsole.log(RefType.property, RefType.event);\n\nexport default App;"],"names":["App","RefType","console","log"],"mappings":"AAAA,iEAAiE;AAGjE,MAAMA,MAAM;IACR,qBACI,oBAAC,aAAI;AAIb;AAEO,IAAA,AAAKC,iCAAAA;;;WAAAA;;AAKZC,QAAQC,GAAG;qCAEIH"}}]
-}

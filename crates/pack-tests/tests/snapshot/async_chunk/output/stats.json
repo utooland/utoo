@@ -3,12 +3,12 @@
     "main": {
       "name": "main",
       "chunks": [
-        "input_489a6048.js",
+        "input_15liy8us72sxf.js",
         "main.js"
       ],
       "assets": [
         {
-          "name": "input_489a6048.js"
+          "name": "input_15liy8us72sxf.js"
         },
         {
           "name": "main.js"
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_489a6048.js",
-      "size": 885,
+      "id": "input_0g__tdm89q74f.js",
+      "size": 710,
       "hash": "",
       "files": [
-        "input_489a6048.js"
+        "input_0g__tdm89q74f.js"
       ]
     },
     {
@@ -34,11 +34,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "input_5038173c.js",
-      "size": 711,
+      "id": "input_15liy8us72sxf.js",
+      "size": 891,
       "hash": "",
       "files": [
-        "input_5038173c.js"
+        "input_15liy8us72sxf.js"
       ]
     },
     {
@@ -47,7 +47,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 259,
+      "size": 264,
       "hash": "",
       "files": [
         "main.js"
@@ -57,57 +57,57 @@
   "assets": [
     {
       "type": "asset",
-      "name": "input_489a6048.js",
+      "name": "input_0g__tdm89q74f.js",
       "info": {},
-      "size": 885,
+      "size": 710,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_489a6048.js"
+        "input_0g__tdm89q74f.js"
       ]
     },
     {
       "type": "asset",
-      "name": "input_489a6048.js.map",
-      "info": {},
-      "size": 798,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "input_489a6048.js.map"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "input_5038173c.js",
-      "info": {},
-      "size": 711,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "input_5038173c.js"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "input_5038173c.js.map",
+      "name": "input_0g__tdm89q74f.js.map",
       "info": {},
       "size": 731,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "input_5038173c.js.map"
+        "input_0g__tdm89q74f.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "input_15liy8us72sxf.js",
+      "info": {},
+      "size": 891,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "input_15liy8us72sxf.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "input_15liy8us72sxf.js.map",
+      "info": {},
+      "size": 798,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "input_15liy8us72sxf.js.map"
       ]
     },
     {
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 259,
+      "size": 264,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -133,41 +133,41 @@
       "name": "async_chunk/input/node_modules/bar/index.js",
       "id": 2,
       "chunks": [
-        "input_489a6048.js"
+        "input_15liy8us72sxf.js"
       ],
-      "size": 154
+      "size": 152
     },
     {
       "name": "async_chunk/input/node_modules/foo/index.js",
       "id": 26,
       "chunks": [
-        "input_5038173c.js"
+        "input_0g__tdm89q74f.js"
       ],
-      "size": 154
+      "size": 152
     },
     {
       "name": "async_chunk/input/index.js",
       "id": 45,
       "chunks": [
-        "input_489a6048.js"
+        "input_15liy8us72sxf.js"
       ],
-      "size": 268
+      "size": 266
     },
     {
       "name": "async_chunk/input/import.js",
       "id": 76,
       "chunks": [
-        "input_5038173c.js"
+        "input_0g__tdm89q74f.js"
       ],
-      "size": 331
+      "size": 327
     },
     {
       "name": "async_chunk/input/import.js",
       "id": 92,
       "chunks": [
-        "input_489a6048.js"
+        "input_15liy8us72sxf.js"
       ],
-      "size": 232
+      "size": 237
     }
   ]
 }

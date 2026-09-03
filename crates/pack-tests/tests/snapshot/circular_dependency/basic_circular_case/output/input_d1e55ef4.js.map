@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/circular_dependency/basic_circular_case/input/a.ts"],"sourcesContent":["import index from './index';\n\nindex;\n\nconst c = 1;\n\nexport default c;"],"names":["c"],"mappings":";;;;AAAA;;AAEA,mKAAK;AAEL,MAAMA,IAAI;qCAEKA"}},
-    {"offset": {"line": 17, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/circular_dependency/basic_circular_case/input/index.ts"],"sourcesContent":["import a from './a';\n\nexport default a;"],"names":[],"mappings":";;;;AAAA;;qCAEe,+JAAC"}}]
-}

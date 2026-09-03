@@ -41,6 +41,7 @@ use crate::{
         resolve::externals_plugin::ExternalsPlugin,
         transforms::{
             css_modules::get_auto_css_modules_rule,
+            jsx_import_preserver::get_jsx_import_preserver_rule,
             remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
@@ -134,6 +135,12 @@ pub async fn get_server_module_options_context(
     let jsx_transform_options = get_jsx_transform_options(mode, config, false)
         .to_resolved()
         .await?;
+    let classic_jsx_runtime = config
+        .react()
+        .await?
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.as_str() == "classic");
 
     let mut loader_conditions = BTreeSet::new();
     loader_conditions.insert(WebpackLoaderBuiltinCondition::Node);
@@ -162,6 +169,10 @@ pub async fn get_server_module_options_context(
 
     let mut server_rules = get_server_transforms_rules(config, false).await?;
     let mut foreign_server_rules = get_server_transforms_rules(config, true).await?;
+
+    let jsx_import_preserver_rule = get_jsx_import_preserver_rule(classic_jsx_runtime);
+    server_rules.push(jsx_import_preserver_rule.clone());
+    foreign_server_rules.push(jsx_import_preserver_rule);
 
     server_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
     foreign_server_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
@@ -254,6 +265,7 @@ pub async fn get_server_module_options_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             cjs_tree_shaking: module_fragments_enabled_for_user_code,
+            mangle_export_names: mode_ref.is_production() && !*config.no_mangling().await?,
             infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
             ..Default::default()
@@ -261,6 +273,7 @@ pub async fn get_server_module_options_context(
         css: CssOptionsContext {
             source_maps,
             module_css_condition: Some(module_styles_rule_condition()),
+            module_css_debuggable_idents: mode_ref.is_development(),
             css_modules_pattern,
             ..Default::default()
         },
@@ -362,6 +375,7 @@ pub async fn get_server_resolve_options_context(
     let custom_conditions = vec!["node".into(), mode.await?.condition().into()];
     let resolve_options_context = ResolveOptionsContext {
         enable_node_modules: Some(project_path.root().owned().await?),
+        server_relative_root: Some(project_path.clone()),
         enable_node_externals: true,
         enable_mjs_extension: true,
         enable_node_native_modules: true,

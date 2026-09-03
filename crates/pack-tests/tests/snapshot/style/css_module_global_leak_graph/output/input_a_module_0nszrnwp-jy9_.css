@@ -1,0 +1,14 @@
+/* [project]/style/css_module_global_leak_graph/input/a.module.css [client] (css) */
+.i4MvZq_local {
+  color: red;
+}
+
+:root {
+  --page-a-global-only: "PAGE_A_GLOBAL_ONLY_3275";
+}
+
+body {
+  overflow: hidden;
+}
+
+/*# sourceMappingURL=input_a_module_0nszrnwp-jy9_.css.map*/

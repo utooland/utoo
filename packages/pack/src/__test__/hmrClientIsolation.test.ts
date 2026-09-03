@@ -22,6 +22,7 @@ const projectMocks = vi.hoisted(() => {
     onExit: vi.fn(async () => {}),
     shutdown: vi.fn(async () => {}),
     updateInfoSubscribe: () => (async function* () {})(),
+    getCompletedTaskCount: vi.fn(() => 0),
   };
 
   return {

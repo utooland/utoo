@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 4455,
+      "size": 4425,
       "hash": "",
       "files": [
         "main.js"
@@ -31,7 +31,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 4455,
+      "size": 4425,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -59,7 +59,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 1152
+      "size": 1146
     },
     {
       "name": "library/async-module/input/shared.js",
@@ -67,7 +67,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 500
+      "size": 494
     },
     {
       "name": "library/async-module/input/b.js",
@@ -75,7 +75,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 927
+      "size": 915
     },
     {
       "name": "library/async-module/input/index.js",
@@ -91,7 +91,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 927
+      "size": 921
     },
     {
       "name": "library/async-module/input/async.js",

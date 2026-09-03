@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "mode": "development",
+    "output": {
+      "cssFilename": "styles.css",
+      "path": "output"
+    },
+    "sourceMaps": false
+  }
+}

@@ -121,7 +121,7 @@ describe("serve server output HMR", () => {
     async (scenario) => {
       await expect(runServerOutputHmrFixture(scenario)).resolves.toEqual({
         initial: "SERVER_OUTPUT_V1",
-        initialCompilingLogs: 0,
+        initialCompilingLogs: 1,
         scenario,
         updated: "SERVER_OUTPUT_V2",
         updateCompilingLogs: 1,

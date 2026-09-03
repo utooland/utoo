@@ -19,7 +19,7 @@
       "entry": false,
       "recorded": false,
       "id": "main.js",
-      "size": 9432,
+      "size": 9406,
       "hash": "",
       "files": [
         "main.js"
@@ -43,7 +43,7 @@
       "type": "asset",
       "name": "main.js",
       "info": {},
-      "size": 9432,
+      "size": 9406,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -55,7 +55,7 @@
       "type": "asset",
       "name": "main.js.map",
       "info": {},
-      "size": 15568,
+      "size": 15555,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -87,7 +87,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 265
+      "size": 252
     },
     {
       "name": "library/less_css_modules/input/index.less",
@@ -95,7 +95,7 @@
       "chunks": [
         "main.js"
       ],
-      "size": 148
+      "size": 135
     },
     {
       "name": "library/less_css_modules/input/index.ts",

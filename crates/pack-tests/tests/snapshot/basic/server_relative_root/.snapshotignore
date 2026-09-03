@@ -1,0 +1,2 @@
+# The client runtime contains no resolution behavior; the client chunk and server output do.
+client/client.js

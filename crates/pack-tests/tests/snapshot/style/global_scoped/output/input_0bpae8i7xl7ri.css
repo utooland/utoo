@@ -1,0 +1,87 @@
+/* [project]/style/global_scoped/input/style.less.css [client] (css) */
+.check-box :global(.ant-checkbox-wrapper) {
+  color: #000000d9;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.polestar-tooltip-container ::-webkit-scrollbar-thumb {
+  background: #464646;
+}
+
+.polestar-tooltip-container ::-webkit-scrollbar-track {
+  background-color: #ffffffa6;
+}
+
+.polestar-tooltip-container ::-webkit-scrollbar-thumb:window-inactive {
+  background: #fafafa40;
+}
+
+.polestar-tooltip-container ::-webkit-scrollbar-thumb:hover {
+  background: #ddd;
+}
+
+:global ::-webkit-scrollbar {
+  width: 8px;
+  height: 4px;
+}
+
+.content-area {
+  background: none;
+  flex: 1;
+}
+
+.content-area:after {
+  background: red;
+  width: 100px;
+  height: 100px;
+}
+
+/* [project]/style/global_scoped/input/style.module.less.module.css [client] (css) */
+.VPl8sq_img  .image-render-box .ant-image {
+  padding-bottom: 100%;
+  position: relative;
+  height: 0 !important;
+}
+
+.VPl8sq_img  .image-render-box .ant-image img {
+  border-radius: 6px 0 0;
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  left: 0;
+}
+
+.VPl8sq_list  .ant-pro-card-body {
+  padding: 0;
+}
+
+.VPl8sq_list  .ant-pro-list {
+  width: 100%;
+}
+
+.VPl8sq_list  .ant-pro-list .ant-list-item {
+  padding: 0;
+}
+
+.VPl8sq_message {
+  color: red;
+}
+
+:is(.VPl8sq_message.left .VPl8sq_message-main, .VPl8sq_message.left .VPl8sq_message-context) {
+  font-size: 15px;
+}
+
+.VPl8sq_message .right {
+  font-size: 16px;
+}
+
+.VPl8sq_case-root  .tree-node:hover  .VPl8sq_operation {
+  display: inline-block;
+}
+
+.VPl8sq_case-root  .tree-node  .VPl8sq_operation {
+  display: none;
+}
+
+/*# sourceMappingURL=input_0bpae8i7xl7ri.css.map*/

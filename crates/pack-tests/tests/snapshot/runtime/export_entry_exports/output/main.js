@@ -1,6 +1,6 @@
 (globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_index_ts_6bcb050d.js"],"runtimeModuleIds":["[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)"]}
+    {"otherChunks":["input_index_ts_0jlwhohl013jv.js"],"runtimeModuleIds":["[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)"]}
 ]);
 (() => {
 (function(root, factory) {

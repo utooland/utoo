@@ -280,6 +280,7 @@ export interface ConfigComplete {
   provider?: ProviderConfig;
   optimization?: {
     moduleIds?: "named" | "deterministic";
+    /** Disable local-name minifier mangling and production export-name mangling. */
     noMangling?: boolean;
     compress?:
       | boolean
@@ -501,8 +502,8 @@ export interface BundleOptions {
   buildId?: string;
 
   /**
-   * Whether to enable default utoopack tracing logs.
-   * Defaults to true.
+   * Whether to show utoopack compilation progress.
+   * Defaults to true. Rust tracing logs are controlled by `RUST_LOG`.
    */
   tracing?: boolean;
 

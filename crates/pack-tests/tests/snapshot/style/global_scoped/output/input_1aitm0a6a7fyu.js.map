@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 3, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/global_scoped/input/style.module.less [client] (css module)"],"sourcesContent":["__turbopack_context__.v({\n  \"case-root\": \"VPl8sq_case-root\",\n  \"img\": \"VPl8sq_img\",\n  \"list\": \"VPl8sq_list\",\n  \"message\": \"VPl8sq_message\",\n  \"message-context\": \"VPl8sq_message-context\",\n  \"message-main\": \"VPl8sq_message-main\",\n  \"operation\": \"VPl8sq_operation\",\n});\n"],"names":[],"mappings":"AAAA;AACA;AACA;AACA;AACA;AACA;AACA;AACA;AACA"}},
+    {"offset": {"line": 16, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/style/global_scoped/input/index.js"],"sourcesContent":["// import global css file \nimport './style.less';\n// import css module file\nimport style from './style.module.less';\n\nconsole.log(style);"],"names":["console","log"],"mappings":"AAAA,0BAA0B;AAE1B,yBAAyB;AACzB;;;AAEAA,QAAQC,GAAG,CAAC,4JAAK"}}]
+}

@@ -23,10 +23,12 @@ jobs:
           - host: macos-latest
             target: aarch64-apple-darwin
             test: |
+              cargo check -p pack-napi --features plugin --target aarch64-apple-darwin &&
               cargo test -p pack-tests --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
             test: |
+              cargo check -p pack-napi --features plugin --target x86_64-apple-darwin &&
               cargo test -p pack-tests --target x86_64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -36,6 +38,7 @@ jobs:
               rustup install nightly-2026-07-29 &&
               rustup default nightly-2026-07-29 &&
               rustup target add x86_64-unknown-linux-gnu &&
+              cargo check -p pack-napi --features plugin --target x86_64-unknown-linux-gnu &&
               cargo test -p pack-tests --target x86_64-unknown-linux-gnu
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
@@ -51,6 +54,7 @@ jobs:
               rustup default nightly-2026-07-29 &&
               rustup target add x86_64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
+              cargo check -p pack-napi --features plugin --target x86_64-unknown-linux-musl &&
               cargo test -p pack-tests --target x86_64-unknown-linux-musl
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
@@ -61,6 +65,7 @@ jobs:
               rustup default nightly-2026-07-29 &&
               rustup target add aarch64-unknown-linux-gnu &&
               export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
+              cargo check -p pack-napi --features plugin --target aarch64-unknown-linux-gnu &&
               cargo test -p pack-tests --target aarch64-unknown-linux-gnu
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
@@ -76,6 +81,7 @@ jobs:
               rustup default nightly-2026-07-29 &&
               rustup target add aarch64-unknown-linux-musl &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
+              cargo check -p pack-napi --features plugin --target aarch64-unknown-linux-musl &&
               cargo test -p pack-tests --target aarch64-unknown-linux-musl
           # swc_plugin_runner not supported on aarch64 windows now
           # - host: windows-latest

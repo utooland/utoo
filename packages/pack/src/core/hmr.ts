@@ -28,6 +28,11 @@ import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import { isNodeTarget } from "../utils/target";
+import {
+  formatDuration,
+  formatTaskCount,
+  TaskProgress,
+} from "../utils/taskProgress";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { forwardBrowserLogs, isBrowserLogsMessage } from "./browserLogs";
 import { consumeHmrSubscription } from "./hmrSubscription";
@@ -268,6 +273,7 @@ export async function createHotReloader(
   );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
+  const showProgress = bundleOptions.tracing ?? true;
 
   let project: Project;
   try {
@@ -280,7 +286,7 @@ export async function createHotReloader(
         },
         dev: true,
         buildId: bundleOptions.buildId || nanoid(),
-        tracing: bundleOptions.tracing ?? true,
+        tracing: showProgress,
         config: {
           ...bundleOptions.config,
           mode: "development",
@@ -310,6 +316,8 @@ export async function createHotReloader(
     throw error;
   }
 
+  const progress = showProgress ? new TaskProgress(project) : undefined;
+
   const entrypointsSubscription = project.entrypointsSubscribe();
 
   let currentEntriesHandlingResolve: ((value?: unknown) => void) | undefined;
@@ -336,10 +344,24 @@ export async function createHotReloader(
   let closePromise: Promise<void> | undefined;
 
   function markHmrEvent() {
-    if (!hmrEventHappened) {
-      console.log("Compiling...");
-      hmrEventHappened = true;
+    if (!progress || hmrEventHappened) {
+      return;
     }
+
+    progress.start("Compiling");
+    hmrEventHappened = true;
+  }
+
+  function finishHmrEvent(duration: number) {
+    if (!progress || !hmrEventHappened) {
+      return;
+    }
+
+    const completedTasks = progress.stop();
+    console.log(
+      `Compiled in ${formatDuration(duration)} (${formatTaskCount(completedTasks)})`,
+    );
+    hmrEventHappened = false;
   }
 
   function sendToClient(client: WSLike, payload: HMR_ACTION_TYPES) {
@@ -921,6 +943,8 @@ export async function createHotReloader(
     },
 
     async close() {
+      hmrEventHappened = false;
+      progress?.stop();
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
       closePromise ??= (
@@ -942,6 +966,9 @@ export async function createHotReloader(
     },
   };
 
+  const initialBuildStart = Date.now();
+  markHmrEvent();
+
   handleEntrypointsSubscription().catch((err) => {
     console.error(err);
     process.exit(1);
@@ -949,6 +976,8 @@ export async function createHotReloader(
 
   // Write empty manifests
   await currentEntriesHandling;
+
+  finishHmrEvent(Date.now() - initialBuildStart);
 
   async function handleProjectUpdates() {
     for await (const updateMessage of project.updateInfoSubscribe(30)) {
@@ -980,13 +1009,7 @@ export async function createHotReloader(
             });
           }
 
-          if (hmrEventHappened) {
-            const time = updateMessage.value!.duration;
-            const timeMessage =
-              time > 2000 ? `${Math.round(time / 100) / 10}s` : `${time}ms`;
-            console.log(`Compiled in ${timeMessage}`);
-            hmrEventHappened = false;
-          }
+          finishHmrEvent(updateMessage.value!.duration);
           break;
         }
         default:

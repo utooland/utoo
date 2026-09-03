@@ -5,7 +5,7 @@
 
 37, (function(__turbopack_context__){
 
-__turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.index-less__-C211G__widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
+__turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.-C211G_widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
 }),
 15, ((__turbopack_context__, module, exports) => {
 
@@ -258,7 +258,7 @@ __turbopack_context__.s([
 
 __turbopack_context__.i(12);
 __turbopack_context__.v({
-  "widget-button": "index-less__-C211G__widget-button",
+  "widget-button": "-C211G_widget-button",
 });
 }),
 91, ((__turbopack_context__) => {
