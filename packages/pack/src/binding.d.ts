@@ -131,7 +131,10 @@ export interface NapiProjectOptions {
   dev: boolean
   /** The build id. */
   buildId: string
-  /** Whether to enable default tracing logs. */
+  /**
+   * Whether the JavaScript caller emits compilation progress. Rust tracing is configured with
+   * `RUST_LOG`.
+   */
   tracing: boolean
   packPath: string
 }
@@ -224,6 +227,8 @@ export interface NapiWrittenEndpoint {
 }
 
 export declare function projectEntrypointsSubscribe(project: { __napiType: "Project" }, func: (err: Error, value: TurbopackResult<NapiEntrypoints>) => void): { __napiType: "RootTask" }
+
+export declare function projectGetCompletedTaskCount(project: { __napiType: "Project" }): number
 
 export declare function projectGetSourceForAsset(project: { __napiType: "Project" }, filePath: string): Promise<string | null>
 

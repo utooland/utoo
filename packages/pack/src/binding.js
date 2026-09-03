@@ -710,6 +710,7 @@ module.exports.lockfileUnlock = nativeBinding.lockfileUnlock
 module.exports.lockfileUnlockSync = nativeBinding.lockfileUnlockSync
 module.exports.MemoryEvictionMode = nativeBinding.MemoryEvictionMode
 module.exports.projectEntrypointsSubscribe = nativeBinding.projectEntrypointsSubscribe
+module.exports.projectGetCompletedTaskCount = nativeBinding.projectGetCompletedTaskCount
 module.exports.projectGetSourceForAsset = nativeBinding.projectGetSourceForAsset
 module.exports.projectGetSourceMap = nativeBinding.projectGetSourceMap
 module.exports.projectGetSourceMapSync = nativeBinding.projectGetSourceMapSync

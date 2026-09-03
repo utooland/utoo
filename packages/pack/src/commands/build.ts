@@ -19,6 +19,11 @@ import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
+import {
+  formatDuration,
+  formatTaskCount,
+  TaskProgress,
+} from "../utils/taskProgress";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
@@ -62,6 +67,7 @@ async function buildInternal(
   );
   const shouldCreateWebpackStats =
     Boolean(process.env.ANALYZE) || Boolean(bundleOptions.config.stats);
+  const showProgress = bundleOptions.tracing ?? true;
   processHtmlEntry(bundleOptions.config, resolvedProjectPath);
   validateEntryPaths(bundleOptions.config, resolvedProjectPath);
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
@@ -85,7 +91,7 @@ async function buildInternal(
         },
         dev: bundleOptions.dev ?? false,
         buildId: bundleOptions.buildId || nanoid(),
-        tracing: bundleOptions.tracing ?? true,
+        tracing: showProgress,
         config: {
           ...bundleOptions.config,
           stats: shouldCreateWebpackStats,
@@ -107,7 +113,22 @@ async function buildInternal(
       },
     );
 
-    const entrypoints = await project.writeAllEntrypointsToDisk();
+    const progress = showProgress ? new TaskProgress(project) : undefined;
+    const compileStart = Date.now();
+    progress?.start("Compiling");
+
+    let completedTasks = 0;
+    const entrypoints = await project
+      .writeAllEntrypointsToDisk()
+      .finally(() => {
+        completedTasks = progress?.stop() ?? 0;
+      });
+
+    if (showProgress) {
+      console.log(
+        `Compiled in ${formatDuration(Date.now() - compileStart)} (${formatTaskCount(completedTasks)})`,
+      );
+    }
 
     handleIssues(entrypoints.issues);
     const htmlGenerationManager = new HtmlGenerationManager(

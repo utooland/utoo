@@ -24,7 +24,7 @@ export default defineCommand({
     },
     tracing: {
       type: "boolean",
-      description: "Enable default tracing logs (pass --no-tracing to disable)",
+      description: "Show compilation progress (pass --no-tracing to disable)",
     },
   },
   async run({ args }) {
