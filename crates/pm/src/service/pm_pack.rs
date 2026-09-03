@@ -25,9 +25,8 @@ pub struct PackResult {
     pub integrity: String,
     pub unpacked_size: u64,
     pub packed_size: u64,
-    /// The manifest as written into the tarball — with `workspace:`/`catalog:`
-    /// specifiers rewritten to concrete versions. Reused to build the publish
-    /// payload so the registry metadata matches the packed `package.json`.
+    /// The normalized manifest as written into the tarball. Reused to build the
+    /// publish payload so registry metadata matches the packed `package.json`.
     pub manifest: PackageJson,
 }
 
@@ -58,17 +57,20 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     // is cached from before the script ran, so read the current file from disk.
     let pkg: PackageJson = load_package_json(package_root).await?;
 
-    // Rewrite `workspace:`/`catalog:` specifiers so the packed manifest is
-    // installable outside the workspace. `None` means there was nothing to
-    // rewrite, in which case the on-disk package.json is packed verbatim.
+    // Normalize dependency protocols and publish-time manifest overrides.
+    // `None` means there was nothing to rewrite, in which case the on-disk
+    // package.json is packed verbatim.
     let normalized = normalize_publish_manifest(package_root, &pkg).await?;
     let pkg_json_override = normalized.as_ref().map(serialize_manifest).transpose()?;
+    let packed_manifest = normalized.unwrap_or_else(|| pkg.clone());
 
     // collect_pack_files uses ignore::WalkBuilder which does synchronous I/O.
     // Run on a blocking thread to avoid stalling the tokio runtime.
     let package_root_owned = package_root.to_path_buf();
     let collected = tokio::task::spawn_blocking({
-        let data = pkg.to_value();
+        // Publish-time main/types/bin overrides affect npm's always-included
+        // referenced files, so file selection must use the packed manifest.
+        let data = packed_manifest.to_value();
         let package_root = package_root_owned.clone();
         move || collect_pack_files(&package_root, &data)
     })
@@ -102,18 +104,18 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     Ok(PackResult {
         tarball_data: tar_data,
         files: file_paths,
-        name: package_info.name,
-        version: pkg.version.clone(),
+        name: packed_manifest.name.clone(),
+        version: packed_manifest.version.clone(),
         integrity,
         unpacked_size,
         packed_size,
-        manifest: normalized.unwrap_or(pkg),
+        manifest: packed_manifest,
     })
 }
 
 /// Whether `path` is the root-level `package.json` (the only manifest the
-/// `workspace:`/`catalog:` rewrite substitutes — nested `package.json` files
-/// are packed verbatim).
+/// publish normalization substitutes — nested `package.json` files are packed
+/// verbatim).
 fn is_root_manifest(path: &Path) -> bool {
     path == Path::new("package.json")
 }
