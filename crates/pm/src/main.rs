@@ -32,8 +32,8 @@ use crate::util::invocation::{self, Invocation};
 use crate::util::logger::{get_log_file_path, init_tracing, log_time, log_time_end};
 use crate::util::presenter;
 use crate::util::user_config::{
-    init_registry, set_cache_dir, set_legacy_peer_deps, set_manifests_concurrency_limit,
-    set_script_concurrency_limit,
+    get_ignore_scripts, init_registry, set_cache_dir, set_legacy_peer_deps,
+    set_manifests_concurrency_limit, set_script_concurrency_limit,
 };
 
 mod cli;
@@ -344,6 +344,8 @@ async fn async_main() -> Result<()> {
     set_manifests_concurrency_limit(cli.manifests_concurrency_limit);
     set_script_concurrency_limit(cli.script_concurrency_limit);
 
+    let root_ignore_scripts = cli.ignore_scripts || get_ignore_scripts().await;
+
     // Auto update: check cache → update or refresh in background
     init_auto_update().await;
 
@@ -360,7 +362,8 @@ async fn async_main() -> Result<()> {
             clean(&pattern, confirmation).await?;
             log_time_end(&format!("{pattern} cleaned"));
         }
-        Some(Commands::Install(args)) => {
+        Some(Commands::Install(mut args)) => {
+            args.ignore_scripts |= root_ignore_scripts;
             cmd::install::run(args, cli.legacy_peer_deps).await?;
         }
         Some(Commands::Uninstall {
@@ -368,7 +371,12 @@ async fn async_main() -> Result<()> {
             workspace,
             ignore_scripts,
         }) => {
-            cmd::install::uninstall(specs, workspace, ScriptPolicy::from(ignore_scripts)).await?;
+            cmd::install::uninstall(
+                specs,
+                workspace,
+                ScriptPolicy::from(root_ignore_scripts || ignore_scripts),
+            )
+            .await?;
         }
         Some(Commands::Rebuild) => {
             let cwd = std::env::current_dir()?;
@@ -379,7 +387,7 @@ async fn async_main() -> Result<()> {
             cmd::deps::run(workspace_only).await?;
         }
         Some(Commands::Update(args)) => {
-            update(args, ScriptPolicy::Run).await?;
+            update(args, ScriptPolicy::from(root_ignore_scripts)).await?;
             log_time_end("All packages updated");
         }
         Some(Commands::List { package }) => {
@@ -504,7 +512,7 @@ async fn async_main() -> Result<()> {
                 .await?;
             }
             // Default to install if no arguments
-            None => cmd::install::install_cwd(ScriptPolicy::from(cli.ignore_scripts)).await?,
+            None => cmd::install::install_cwd(ScriptPolicy::from(root_ignore_scripts)).await?,
         },
         // Completions is handled early before initialization
         Some(Commands::Completions { .. }) => unreachable!(),

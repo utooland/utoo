@@ -13,6 +13,26 @@ Write-Host "node arch: $(node -e 'console.log(process.arch)')"
 
 ut config set registry https://registry.npmjs.org --global
 
+# Case 0: ignore-scripts from local config
+Write-Yellow "Case 0: ignore-scripts from local config"
+try {
+    Push-Location e2e/pm/ignore-scripts-config
+
+    Remove-Item node_modules -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item package-lock.json, script-ran -Force -ErrorAction SilentlyContinue
+
+    utoo install
+    if ($LASTEXITCODE -ne 0) { throw "configured ignore-scripts install failed" }
+    if (Test-Path "script-ran") {
+        throw "ignore-scripts=true in .utoo.toml did not skip postinstall"
+    }
+
+    Write-Green "PASS: local ignore-scripts config skipped postinstall"
+}
+finally {
+    Pop-Location
+}
+
 # Case 1: Clone and install ant-design-x (next)
 Write-Yellow "Case 1: Clone and install ant-design-x (next)"
 try {

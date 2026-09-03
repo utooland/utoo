@@ -27,6 +27,9 @@ static REGISTRY: LazyLock<ConfigValue<String>> =
 static LEGACY_PEER_DEPS: LazyLock<ConfigValue<bool>> =
     LazyLock::new(|| ConfigValue::new("legacy-peer-deps", true));
 
+static IGNORE_SCRIPTS: LazyLock<ConfigValue<bool>> =
+    LazyLock::new(|| ConfigValue::new("ignore-scripts", false));
+
 static CACHE_DIR: LazyLock<ConfigValue<String>> = LazyLock::new(|| {
     ConfigValue::new(
         "cache-dir",
@@ -210,6 +213,10 @@ pub async fn get_peer_deps() -> PeerDeps {
         true => PeerDeps::Skip,
         false => PeerDeps::Include,
     }
+}
+
+pub async fn get_ignore_scripts() -> bool {
+    IGNORE_SCRIPTS.get().await
 }
 
 static OMIT: OnceLock<HashSet<OmitType>> = OnceLock::new();
