@@ -1,3 +1,5 @@
+//! Dependency lifecycle-script rebuild command.
+
 use crate::helper::lock::ensure_package_lock;
 use crate::model::cli_output::{DependencyOperation, RebuildResult, RebuildSummary};
 use crate::service::rebuild::RebuildService;
@@ -9,7 +11,7 @@ use anyhow::Result;
 use std::path::Path;
 use std::time::Instant;
 
-pub async fn rebuild(root_path: &Path) -> Result<()> {
+pub async fn run(root_path: &Path) -> Result<()> {
     start_progress_bar();
     let resolve_start = Instant::now();
     let package_lock = ensure_package_lock(root_path).await?;

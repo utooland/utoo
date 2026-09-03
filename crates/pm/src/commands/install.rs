@@ -1,3 +1,5 @@
+//! Dependency installation commands.
+
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
@@ -6,11 +8,11 @@ use clap::Args;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::spec::PackageSpec;
 
-use crate::helper::migrate::{FromPm, migrate_from_pnpm};
+pub use crate::helper::migrate::FromPm;
+use crate::helper::migrate::migrate_from_pnpm;
 use crate::helper::workspace::init_project_root;
 use crate::model::cli_output::{
     DependencyOperation, DependencyScope, DependencySummary, InstallResult, PackageVersion,
-    UninstallResult,
 };
 use crate::service::install::InstallService;
 use crate::service::script::ScriptOutput;
@@ -75,6 +77,8 @@ pub struct InstallArgs {
     pub from: Option<FromPm>,
 }
 
+pub use InstallArgs as Options;
+
 /// Entry point for the `install` command.
 ///
 /// Folds `--production` and `--legacy-peer-deps` into the omit set, then
@@ -115,7 +119,7 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
     } else if scope == InstallScope::Global {
         // For global installs, process packages one by one
         for spec in args.specs.iter() {
-            install_global_package(spec, args.prefix.as_deref()).await?;
+            global(spec, args.prefix.as_deref()).await?;
         }
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
     } else {
@@ -160,56 +164,9 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
     emit("install", &output, || Ok(()))
 }
 
-/// Entry point for the `uninstall` command.
-pub async fn uninstall(
-    specs: Vec<String>,
-    workspace: Option<String>,
-    scripts: ScriptPolicy,
-) -> Result<()> {
-    if specs.is_empty() {
-        anyhow::bail!("Package specification is required for uninstall");
-    }
-
-    let machine = invocation::json();
-    let root_path = if machine {
-        let cwd = std::env::current_dir()?;
-        Some(init_project_root(&cwd).await?)
-    } else {
-        None
-    };
-    let before = load_lock_snapshot(root_path.as_deref()).await;
-    let removed = before
-        .as_ref()
-        .map(|lock| direct_packages(lock, &specs))
-        .unwrap_or_default();
-    let spec_refs: Vec<&str> = specs.iter().map(|s| s.as_str()).collect();
-    update_packages(
-        PackageAction::Remove,
-        &spec_refs,
-        workspace.clone(),
-        scripts,
-        SaveType::Prod,
-    )
-    .await?;
-    log_time_end(&pluralized_package_count(specs.len(), "uninstalled"));
-    if !machine {
-        return Ok(());
-    }
-    let after = load_lock_snapshot(root_path.as_deref()).await;
-    let output = UninstallResult {
-        operation: DependencyOperation::Remove,
-        scope: DependencyScope::Local,
-        workspace,
-        requested: specs,
-        removed,
-        summary: dependency_summary(before.as_ref(), after.as_ref(), 0),
-    };
-    emit("uninstall", &output, || Ok(()))
-}
-
 /// Install all dependencies of the project containing the current directory.
 /// Shared by bare `utoo` and `utoo install` without specs.
-pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
+pub async fn current_project(scripts: ScriptPolicy) -> Result<()> {
     let download_baseline = DownloadBaseline::capture();
     let machine = invocation::json();
     let root_path = if machine {
@@ -245,7 +202,7 @@ pub async fn install_cwd(scripts: ScriptPolicy) -> Result<()> {
 async fn install_cwd_inner(scripts: ScriptPolicy) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root_path = init_project_root(&cwd).await?;
-    install(scripts, &root_path).await?;
+    project(&root_path, scripts).await?;
     log_time_end("All packages installed");
     Ok(())
 }
@@ -402,7 +359,7 @@ pub async fn migrate_from(from: Option<FromPm>) -> Result<()> {
     Ok(())
 }
 
-pub async fn update_packages(
+pub(super) async fn update_packages(
     action: PackageAction,
     specs: &[&str],
     workspace: Option<String>,
@@ -422,11 +379,11 @@ pub async fn update_packages(
     .await
 }
 
-pub async fn install(scripts: ScriptPolicy, root_path: &Path) -> Result<()> {
+pub async fn project(root_path: &Path, scripts: ScriptPolicy) -> Result<()> {
     install_with_mode(scripts, root_path, ReifyMode::Incremental).await
 }
 
-pub async fn install_with_mode(
+pub(super) async fn install_with_mode(
     scripts: ScriptPolicy,
     root_path: &Path,
     mode: ReifyMode,
@@ -435,7 +392,7 @@ pub async fn install_with_mode(
     InstallService::install_with_mode(scripts, root_path, &omit, mode, script_output()).await
 }
 
-pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+pub async fn global(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
     // Parameter validation
     if npm_spec.trim().is_empty() {
         anyhow::bail!("Package specification cannot be empty");
@@ -463,10 +420,10 @@ mod tests {
     #[tokio::test]
     async fn test_install_global_package_empty_spec() {
         // Test installing with empty package spec
-        let result = install_global_package("", None).await;
+        let result = global("", None).await;
         assert!(result.is_err(), "Should fail with empty package spec");
 
-        let result = install_global_package("   ", None).await;
+        let result = global("   ", None).await;
         assert!(
             result.is_err(),
             "Should fail with whitespace-only package spec"
@@ -484,12 +441,6 @@ mod tests {
             SaveType::Prod,
         )
         .await;
-        assert!(result.is_err(), "Should fail with empty specs");
-    }
-
-    #[tokio::test]
-    async fn test_uninstall_empty_specs() {
-        let result = uninstall(Vec::new(), None, ScriptPolicy::Run).await;
         assert!(result.is_err(), "Should fail with empty specs");
     }
 }

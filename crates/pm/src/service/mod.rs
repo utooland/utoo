@@ -1,6 +1,6 @@
 //! Business-logic layer — the work behind each CLI command.
 //!
-//! [`crate::cmd`] assembles args and calls in here; this layer orchestrates
+//! [`crate::commands`] assembles args and calls in here; this layer orchestrates
 //! [`crate::util`] (I/O, cache, linker, http) and `utoo_ruborist` (resolution).
 //!
 //! ```text

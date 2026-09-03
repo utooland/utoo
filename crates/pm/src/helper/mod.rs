@@ -1,4 +1,4 @@
-//! Cross-cutting orchestration helpers between [`crate::cmd`]/[`crate::service`]
+//! Cross-cutting orchestration helpers between [`crate::commands`]/[`crate::service`]
 //! and the `utoo_ruborist` resolver — workspace topology, lockfile lifecycle,
 //! and dep-graph utilities that don't belong to a single service.
 //!

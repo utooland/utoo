@@ -1,9 +1,11 @@
+//! Persistent package-manager configuration.
+
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Result, anyhow};
 use serde_json::Value;
 
-use crate::cli::ConfigCommands;
+pub use crate::cli::ConfigCommands as Command;
 use crate::error::CliError;
 use crate::model::cli_output::{ConfigGetResult, ConfigListResult, ConfigSetResult};
 use crate::util::cli_enum::ConfigScope;
@@ -11,17 +13,15 @@ use crate::util::config_file::Config;
 use crate::util::presenter::emit;
 
 /// Entry point for the `config` subcommand.
-pub async fn run(command: ConfigCommands) -> Result<()> {
+pub async fn run(command: Command) -> Result<()> {
     match command {
-        ConfigCommands::Set { key, value, global } => {
-            handle_config_set(key, value, global.into()).await
-        }
-        ConfigCommands::Get {
+        Command::Set { key, value, global } => handle_config_set(key, value, global.into()).await,
+        Command::Get {
             key,
             global,
             override_values,
         } => handle_config_get(key, global.into(), override_values).await,
-        ConfigCommands::List { global } => handle_config_list(global.into()).await,
+        Command::List { global } => handle_config_list(global.into()).await,
     }
 }
 
@@ -33,7 +33,7 @@ fn parse_key_val(s: &str) -> Result<(String, String)> {
     Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
-pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -> Result<()> {
+async fn handle_config_set(key: String, value: String, scope: ConfigScope) -> Result<()> {
     let mut config = Config::load(scope).await?;
     config.set(&key, value.clone(), scope)?;
     let label = if scope == ConfigScope::Global {
@@ -51,7 +51,7 @@ pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -
     })
 }
 
-pub async fn handle_config_get(
+async fn handle_config_get(
     key: String,
     scope: ConfigScope,
     override_values: Vec<String>,
@@ -90,7 +90,7 @@ pub async fn handle_config_get(
     Ok(())
 }
 
-pub async fn handle_config_list(scope: ConfigScope) -> Result<()> {
+async fn handle_config_list(scope: ConfigScope) -> Result<()> {
     let config = Config::load(scope).await?;
     let config_path = match scope {
         ConfigScope::Global => config.get_global_config_path()?,

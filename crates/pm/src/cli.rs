@@ -1,12 +1,12 @@
 //! Clap CLI definitions for the `utoo` binary.
 //!
 //! Pure argument-parsing types and helpers live here; per-command assembly
-//! and execution belong to the owning `cmd::*` module.
+//! and execution belong to the owning `commands::*` module.
 
 use clap::{Parser, Subcommand};
 
-use crate::cmd::install::InstallArgs;
-use crate::cmd::update::UpdateArgs;
+use crate::commands::install::InstallArgs;
+use crate::commands::update::UpdateArgs;
 use crate::constants::cmd::{
     CLEAN_ABOUT, CLEAN_ALIAS, CLEAN_NAME, COMPLETIONS_ABOUT, COMPLETIONS_ALIAS,
     COMPLETIONS_LONG_ABOUT, COMPLETIONS_NAME, CONFIG_ABOUT, CONFIG_ALIAS, CONFIG_NAME, DEPS_ABOUT,

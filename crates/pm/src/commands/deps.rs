@@ -1,3 +1,5 @@
+//! Dependency resolution command.
+
 use std::path::Path;
 use std::time::Instant;
 
@@ -45,7 +47,7 @@ pub async fn run(workspace_only: bool) -> Result<()> {
     emit("deps", &output, || Ok(()))
 }
 
-pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
+pub(crate) async fn build_deps(cwd: &Path) -> Result<PackageLock> {
     start_progress_bar();
     let resolve_start = Instant::now();
 
@@ -59,7 +61,7 @@ pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
     Ok(lock)
 }
 
-pub async fn build_workspace(cwd: &Path) -> Result<crate::service::workspace::WorkspaceJson> {
+async fn build_workspace(cwd: &Path) -> Result<crate::service::workspace::WorkspaceJson> {
     let workspace_file = WorkspaceService::build_workspace_json(cwd).await?;
     let content = serde_json::to_string_pretty(&workspace_file)?;
     crate::fs::write(cwd.join("workspace.json"), content)

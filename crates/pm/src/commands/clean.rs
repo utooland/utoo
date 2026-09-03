@@ -1,3 +1,5 @@
+//! Cache cleanup command.
+
 use anyhow::Result;
 
 use crate::error::{CliError, ErrorKind};
@@ -10,7 +12,7 @@ use crate::util::format_print::confirm;
 use crate::util::invocation;
 use crate::util::presenter::emit;
 
-pub async fn clean(pattern: &str, confirmation: ConfirmationPolicy) -> Result<()> {
+pub async fn run(pattern: &str, confirmation: ConfirmationPolicy) -> Result<()> {
     let to_delete = collect_cache_entries(pattern).await?;
 
     if to_delete.is_empty() {

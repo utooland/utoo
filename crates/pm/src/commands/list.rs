@@ -1,3 +1,5 @@
+//! Installed dependency inspection command.
+
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -9,7 +11,7 @@ use crate::util::invocation;
 use crate::util::presenter::emit;
 
 /// List dependency information, similar to npm list
-pub async fn list_dependencies(cwd: &Path, package_name: &str) -> Result<()> {
+pub async fn run(cwd: &Path, package_name: &str) -> Result<()> {
     tracing::debug!("Starting dependency listing...");
 
     // Find package-lock.json file
@@ -134,7 +136,7 @@ mod tests {
     async fn test_list_dependencies_lockfile_missing_error() {
         // A temp dir with no package-lock.json should produce a helpful error.
         let dir = tempfile::tempdir().unwrap();
-        let result = list_dependencies(dir.path(), "some-package").await;
+        let result = run(dir.path(), "some-package").await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(

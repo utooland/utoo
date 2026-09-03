@@ -1,3 +1,5 @@
+//! Registry logout command.
+
 use anyhow::Result;
 use colored::Colorize;
 
@@ -6,7 +8,7 @@ use crate::service::auth;
 use crate::util::presenter::emit;
 use crate::util::user_config::get_registry;
 
-pub async fn logout() -> Result<()> {
+pub async fn run() -> Result<()> {
     let registry = get_registry();
     let token = auth::require_token(&registry).await?;
 

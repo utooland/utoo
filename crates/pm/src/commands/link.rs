@@ -1,8 +1,10 @@
+//! Package linking command.
+
 use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::cmd::install::install;
+use crate::commands::install::project;
 use crate::error::{CliError, classify};
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::helper::workspace::update_cwd_to_project;
@@ -61,7 +63,7 @@ pub async fn run(packages: Option<Vec<String>>, prefix: Option<String>) -> Resul
 }
 
 /// Link current package to global (equivalent to npm link without args)
-pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<LinkEntry> {
+async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<LinkEntry> {
     // Resolve the effective prefix: CLI flag > UTOO_PREFIX env > config.
     let prefix = resolve_global_prefix(prefix).await;
     let prefix = prefix.as_deref();
@@ -81,7 +83,7 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
     }
 
     // Install dependencies
-    install(ScriptPolicy::Run, &project_path)
+    project(&project_path, ScriptPolicy::Run)
         .await
         .context("Failed to prepare dependencies for package to link")?;
 
@@ -116,7 +118,7 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
 }
 
 /// Link a global package to local node_modules (equivalent to npm link pkg_name)
-pub async fn link_global_to_local(
+async fn link_global_to_local(
     cwd: &Path,
     package_name: &str,
     prefix: Option<&str>,
