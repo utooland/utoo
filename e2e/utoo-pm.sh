@@ -16,6 +16,19 @@ echo -e "node path: $(node -e 'console.log(process.arch)')"
 
 ut config set registry https://registry.npmjs.org --global
 
+# Case 0: ignore-scripts from local config
+echo -e "${YELLOW}Case 0: ignore-scripts from local config${NC}"
+cd e2e/pm/ignore-scripts-config
+rm -rf node_modules
+rm -f package-lock.json script-ran
+utoo install || { echo -e "${RED}FAIL: configured ignore-scripts install failed${NC}"; exit 1; }
+if [ -f "script-ran" ]; then
+    echo -e "${RED}FAIL: ignore-scripts=true in .utoo.toml did not skip postinstall${NC}"
+    exit 1
+fi
+echo -e "${GREEN}PASS: local ignore-scripts config skipped postinstall${NC}"
+cd ../../..
+
 # Case 1: Clone and install ant-design-x (next)
 echo -e "${YELLOW}Case 1: Clone and install ant-design-x (next)${NC}"
 cd e2e/pm/ant-design-x

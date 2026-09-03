@@ -466,6 +466,7 @@ impl InstallService {
     pub async fn install_global_package(
         npm_spec: &str,
         prefix: Option<&str>,
+        scripts: ScriptPolicy,
         output: ScriptOutput,
     ) -> Result<()> {
         print_proxy_env_hint_once();
@@ -568,13 +569,11 @@ impl InstallService {
         let mut root_lifecycle = package_info.clone();
         root_lifecycle.bin_files.clear();
         let mut packages =
-            PackageService::collect_packages_from_lock(&lock, &root_path, ScriptPolicy::Run)
-                .await?;
+            PackageService::collect_packages_from_lock(&lock, &root_path, scripts).await?;
         packages.push((root_lifecycle, false));
         if !packages.is_empty() {
-            let queues =
-                PackageService::create_execution_queues_with_options(packages, ScriptPolicy::Run)?;
-            PackageService::execute_queues_with_options(queues, ScriptPolicy::Run, output).await?;
+            let queues = PackageService::create_execution_queues_with_options(packages, scripts)?;
+            PackageService::execute_queues_with_options(queues, scripts, output).await?;
         }
 
         // Link the tool's own bin into the global bin dir.

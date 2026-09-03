@@ -110,12 +110,13 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
         set_install_scope(scope);
     }
 
+    let scripts = ScriptPolicy::from(args.ignore_scripts);
     if args.specs.is_empty() {
-        install_cwd_inner(ScriptPolicy::from(args.ignore_scripts)).await?;
+        install_cwd_inner(scripts).await?;
     } else if scope == InstallScope::Global {
         // For global installs, process packages one by one
         for spec in args.specs.iter() {
-            install_global_package(spec, args.prefix.as_deref()).await?;
+            install_global_package(spec, args.prefix.as_deref(), scripts).await?;
         }
         log_time_end(&pluralized_package_count(args.specs.len(), "installed"));
     } else {
@@ -125,7 +126,7 @@ pub async fn run(args: InstallArgs, legacy_peer_deps: Option<bool>) -> Result<()
             PackageAction::Add,
             &spec_refs,
             args.workspace,
-            ScriptPolicy::from(args.ignore_scripts),
+            scripts,
             save_type,
         )
         .await?;
@@ -435,7 +436,11 @@ pub async fn install_with_mode(
     InstallService::install_with_mode(scripts, root_path, &omit, mode, script_output()).await
 }
 
-pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Result<()> {
+pub async fn install_global_package(
+    npm_spec: &str,
+    prefix: Option<&str>,
+    scripts: ScriptPolicy,
+) -> Result<()> {
     // Parameter validation
     if npm_spec.trim().is_empty() {
         anyhow::bail!("Package specification cannot be empty");
@@ -445,7 +450,8 @@ pub async fn install_global_package(npm_spec: &str, prefix: Option<&str>) -> Res
     let prefix = resolve_global_prefix(prefix).await;
 
     // Dispatch to service
-    InstallService::install_global_package(npm_spec, prefix.as_deref(), script_output()).await
+    InstallService::install_global_package(npm_spec, prefix.as_deref(), scripts, script_output())
+        .await
 }
 
 fn script_output() -> ScriptOutput {
@@ -463,10 +469,10 @@ mod tests {
     #[tokio::test]
     async fn test_install_global_package_empty_spec() {
         // Test installing with empty package spec
-        let result = install_global_package("", None).await;
+        let result = install_global_package("", None, ScriptPolicy::Run).await;
         assert!(result.is_err(), "Should fail with empty package spec");
 
-        let result = install_global_package("   ", None).await;
+        let result = install_global_package("   ", None, ScriptPolicy::Run).await;
         assert!(
             result.is_err(),
             "Should fail with whitespace-only package spec"

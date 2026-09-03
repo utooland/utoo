@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use super::install::InstallService;
 use super::script::ScriptOutput;
 use crate::helper::lock::resolve_package_spec;
+use crate::util::cli_enum::ScriptPolicy;
 
 /// Package management service for handling package installation and caching
 pub struct PackageManagementService;
@@ -55,6 +56,7 @@ impl PackageManagementService {
         InstallService::install_global_package(
             package_name,
             Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
+            ScriptPolicy::Run,
             output,
         )
         .await?;
