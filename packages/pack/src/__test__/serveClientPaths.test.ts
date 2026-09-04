@@ -82,14 +82,19 @@ function runServeClientPathsFixture() {
 }
 
 describe("serve client paths", () => {
-  it("exposes initial client paths without webpack stats", async () => {
+  it("serves initial client paths with correct HTTP statuses", async () => {
     await expect(runServeClientPathsFixture()).resolves.toMatchInlineSnapshot(`
       {
         "clientPaths": [
           "main.js",
           "src_index_<hash>.js",
         ],
+        "existingGetStatus": 200,
+        "missingGetStatus": 404,
+        "missingHeadStatus": 404,
         "statsGenerated": false,
+        "unsupportedMethodAllow": "GET, HEAD",
+        "unsupportedMethodStatus": 405,
       }
     `);
   }, 30_000);
