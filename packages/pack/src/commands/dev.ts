@@ -315,7 +315,12 @@ async function runDev(
     }),
   );
 
-  app.all("*", (c) => c.body(null, 405, { Allow: "GET, HEAD" }));
+  app.all("*", (c) => {
+    if (c.req.method === "GET" || c.req.method === "HEAD") {
+      return c.notFound();
+    }
+    return c.body(null, 405, { Allow: "GET, HEAD" });
+  });
 
   const server = honoServe({
     ...serveOptsBase,

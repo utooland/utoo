@@ -50,10 +50,24 @@ async function main() {
     throw new Error("serve onReady callback was not called");
   }
 
+  const origin = `http://127.0.0.1:${port}`;
+  const [existingGet, missingGet, missingHead, unsupportedMethod] =
+    await Promise.all([
+      fetch(`${origin}/main.js`),
+      fetch(`${origin}/favicon.ico`),
+      fetch(`${origin}/favicon.ico`, { method: "HEAD" }),
+      fetch(`${origin}/favicon.ico`, { method: "POST" }),
+    ]);
+
   console.log(
     `__CLIENT_PATHS_SNAPSHOT__${JSON.stringify({
       clientPaths: readyContext.clientPaths.map(normalizeFileName).sort(),
+      existingGetStatus: existingGet.status,
+      missingGetStatus: missingGet.status,
+      missingHeadStatus: missingHead.status,
       statsGenerated: fs.existsSync(statsPath),
+      unsupportedMethodAllow: unsupportedMethod.headers.get("allow"),
+      unsupportedMethodStatus: unsupportedMethod.status,
     })}`,
   );
   process.kill(process.pid, "SIGTERM");
