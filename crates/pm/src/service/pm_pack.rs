@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use ignore::WalkBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tar::{Builder, EntryType, Header};
 use utoo_ruborist::manifest::PackageJson;
 
@@ -25,9 +26,8 @@ pub struct PackResult {
     pub integrity: String,
     pub unpacked_size: u64,
     pub packed_size: u64,
-    /// The manifest as written into the tarball — with `workspace:`/`catalog:`
-    /// specifiers rewritten to concrete versions. Reused to build the publish
-    /// payload so the registry metadata matches the packed `package.json`.
+    /// The normalized manifest as written into the tarball. Reused to build the
+    /// publish payload so registry metadata matches the packed `package.json`.
     pub manifest: PackageJson,
 }
 
@@ -57,18 +57,23 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     // rewritten package.json (version bump, stripped fields). The `pkg` above
     // is cached from before the script ran, so read the current file from disk.
     let pkg: PackageJson = load_package_json(package_root).await?;
+    validate_pack_name(&pkg.name)?;
 
-    // Rewrite `workspace:`/`catalog:` specifiers so the packed manifest is
-    // installable outside the workspace. `None` means there was nothing to
-    // rewrite, in which case the on-disk package.json is packed verbatim.
+    // Normalize dependency protocols and publish-time manifest overrides.
+    // `None` means there was nothing to rewrite, in which case the on-disk
+    // package.json is packed verbatim.
     let normalized = normalize_publish_manifest(package_root, &pkg).await?;
     let pkg_json_override = normalized.as_ref().map(serialize_manifest).transpose()?;
+    let packed_manifest = normalized.unwrap_or_else(|| pkg.clone());
+    validate_pack_name(&packed_manifest.name)?;
 
     // collect_pack_files uses ignore::WalkBuilder which does synchronous I/O.
     // Run on a blocking thread to avoid stalling the tokio runtime.
     let package_root_owned = package_root.to_path_buf();
     let collected = tokio::task::spawn_blocking({
-        let data = pkg.to_value();
+        // Publish-time main/types/bin overrides affect npm's always-included
+        // referenced files, so file selection must use the packed manifest.
+        let data = packed_manifest.to_value();
         let package_root = package_root_owned.clone();
         move || collect_pack_files(&package_root, &data)
     })
@@ -102,18 +107,66 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     Ok(PackResult {
         tarball_data: tar_data,
         files: file_paths,
-        name: package_info.name,
-        version: pkg.version.clone(),
+        name: packed_manifest.name.clone(),
+        version: packed_manifest.version.clone(),
         integrity,
         unpacked_size,
         packed_size,
-        manifest: normalized.unwrap_or(pkg),
+        manifest: packed_manifest,
+    })
+}
+
+/// Validate both the source and published package names using pnpm's
+/// `validate-npm-package-name` `validForOldPackages` rules.
+fn validate_pack_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Missing 'name' field in package.json");
+    }
+    if !is_valid_old_npm_package_name(name) {
+        anyhow::bail!("Invalid package name \"{name}\".");
+    }
+    Ok(())
+}
+
+fn is_valid_old_npm_package_name(name: &str) -> bool {
+    if name.is_empty()
+        || name.starts_with('.')
+        || name.starts_with('-')
+        || name.starts_with('_')
+        || name.trim() != name
+        || name.eq_ignore_ascii_case("node_modules")
+        || name.eq_ignore_ascii_case("favicon.ico")
+    {
+        return false;
+    }
+    if is_url_friendly_package_name_part(name) {
+        return true;
+    }
+
+    let Some(rest) = name.strip_prefix('@') else {
+        return false;
+    };
+    let Some((scope, package)) = rest.split_once('/') else {
+        return false;
+    };
+    !scope.is_empty()
+        && !package.is_empty()
+        && !package.contains('/')
+        && !package.starts_with('.')
+        && is_url_friendly_package_name_part(scope)
+        && is_url_friendly_package_name_part(package)
+}
+
+fn is_url_friendly_package_name_part(value: &str) -> bool {
+    value.chars().all(|ch| {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')')
     })
 }
 
 /// Whether `path` is the root-level `package.json` (the only manifest the
-/// `workspace:`/`catalog:` rewrite substitutes — nested `package.json` files
-/// are packed verbatim).
+/// publish normalization substitutes — nested `package.json` files are packed
+/// verbatim).
 fn is_root_manifest(path: &Path) -> bool {
     path == Path::new("package.json")
 }
@@ -141,6 +194,7 @@ fn create_tarball(
     let mut encoder = GzEncoder::new(Vec::with_capacity(raw_estimate / 2), Compression::default());
     {
         let mut builder = Builder::new(&mut encoder);
+        builder.follow_symlinks(false);
         for (file_path, _) in files {
             let archive_path = Path::new("package").join(file_path);
             // Substitute the rewritten manifest for the on-disk package.json.
@@ -205,7 +259,7 @@ fn append_override<W: Write>(
 /// 3. **Inclusion check** (determines whether a surviving file is collected):
 ///    - `is_always_included`: `package.json`, `readme*`, `license*` — always
 ///      included even if not listed in the `files` whitelist
-///    - `referenced_files`: paths declared in `main`, `bin`, `types`, `typings` — always included
+///    - `referenced_files`: paths declared in `main`, `browser`, `bin`, `types`, `typings` — always included
 ///    - Whitelist: if `files` field exists, the file must match a pattern; otherwise all files
 ///      that passed layers 1–2 are included
 fn collect_pack_files(
@@ -214,6 +268,12 @@ fn collect_pack_files(
 ) -> Result<Vec<(PathBuf, u64)>> {
     let whitelist = compile_whitelist(package_json);
     let referenced_files = collect_referenced_files(package_json);
+    let mandatory_references = collect_mandatory_references(package_json);
+    let root_ignore = if whitelist.is_none() {
+        load_root_ignore(package_root)?
+    } else {
+        None
+    };
     let builder = build_file_walker(package_root, whitelist.is_some());
 
     let mut files = Vec::new();
@@ -241,8 +301,169 @@ fn collect_pack_files(
         }
     }
 
+    // Root ignore files can prune an entry point's parent directory before the
+    // inclusion check sees it. Re-check only clean, exact main/browser/bin
+    // references. Utoo deliberately does not emulate npm-packlist's ambiguous
+    // slash and nested-ignore edge cases here.
+    add_missing_referenced_files(
+        package_root,
+        root_ignore.as_ref(),
+        &mandatory_references,
+        &mut files,
+    )?;
+
     files.sort_by(|(a, _), (b, _)| a.cmp(b));
     Ok(files)
+}
+
+fn add_missing_referenced_files(
+    package_root: &Path,
+    root_ignore: Option<&Gitignore>,
+    referenced_files: &std::collections::HashSet<String>,
+    files: &mut Vec<(PathBuf, u64)>,
+) -> Result<()> {
+    let Some(root_ignore) = root_ignore else {
+        return Ok(());
+    };
+    let canonical_root = fs::canonicalize(package_root)
+        .with_context(|| format!("Failed to resolve {}", package_root.display()))?;
+    let mut collected: std::collections::HashSet<PathBuf> =
+        files.iter().map(|(path, _)| path.clone()).collect();
+    for referenced in referenced_files {
+        if referenced.ends_with('/') {
+            continue;
+        }
+        let relative = PathBuf::from(referenced);
+        if !root_ignore_prunes_reference(package_root, root_ignore, &relative) {
+            continue;
+        }
+        if collected.contains(&relative) || !is_safe_referenced_path(&relative) {
+            continue;
+        }
+        if let Some((actual_relative, size)) =
+            resolve_referenced_file(package_root, &canonical_root, &relative)?
+            && !contains_collected_path(&collected, &actual_relative)
+        {
+            collected.insert(actual_relative.clone());
+            files.push((actual_relative, size));
+        }
+    }
+    Ok(())
+}
+
+fn is_safe_referenced_path(path: &Path) -> bool {
+    let mut has_component = false;
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return false;
+        };
+        has_component = true;
+        let name = name.to_string_lossy();
+        if components.peek().is_some() && is_excluded_directory(&name) {
+            return false;
+        }
+    }
+    has_component
+        && path
+            .file_name()
+            .is_some_and(|name| !is_excluded_file(&name.to_string_lossy()))
+}
+
+fn resolve_referenced_file(
+    package_root: &Path,
+    canonical_root: &Path,
+    relative: &Path,
+) -> Result<Option<(PathBuf, u64)>> {
+    let components: Vec<_> = relative.components().collect();
+    let mut current = package_root.to_path_buf();
+    for component in &components {
+        current.push(component.as_os_str());
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to inspect {}", current.display()));
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Ok(None);
+        }
+        if current != package_root.join(relative) && !metadata.is_dir() {
+            return Ok(None);
+        }
+    }
+    let canonical_file = fs::canonicalize(&current)
+        .with_context(|| format!("Failed to resolve {}", current.display()))?;
+    let Ok(actual_relative) = canonical_file.strip_prefix(canonical_root) else {
+        return Ok(None);
+    };
+    if !is_safe_referenced_path(actual_relative) {
+        return Ok(None);
+    }
+    let metadata = fs::metadata(&canonical_file)
+        .with_context(|| format!("Failed to inspect {}", canonical_file.display()))?;
+    Ok(metadata
+        .is_file()
+        .then_some((actual_relative.to_path_buf(), metadata.len())))
+}
+
+fn contains_collected_path(collected: &std::collections::HashSet<PathBuf>, path: &Path) -> bool {
+    if cfg!(any(target_os = "macos", windows)) {
+        let path = path.to_string_lossy();
+        collected
+            .iter()
+            .any(|item| item.to_string_lossy().eq_ignore_ascii_case(&path))
+    } else {
+        collected.contains(path)
+    }
+}
+
+fn root_ignore_prunes_reference(
+    package_root: &Path,
+    root_ignore: &Gitignore,
+    relative: &Path,
+) -> bool {
+    if root_ignore
+        .matched_path_or_any_parents(package_root.join(relative), false)
+        .is_ignore()
+    {
+        return true;
+    }
+    let Some(parent) = relative.parent() else {
+        return false;
+    };
+    let mut current = PathBuf::new();
+    for component in parent.components() {
+        current.push(component.as_os_str());
+        if root_ignore
+            .matched(package_root.join(&current), true)
+            .is_ignore()
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn load_root_ignore(package_root: &Path) -> Result<Option<Gitignore>> {
+    let npmignore = package_root.join(".npmignore");
+    let ignore_file = if npmignore.exists() {
+        npmignore
+    } else {
+        let gitignore = package_root.join(".gitignore");
+        if !gitignore.exists() {
+            return Ok(None);
+        }
+        gitignore
+    };
+    let mut builder = GitignoreBuilder::new(package_root);
+    builder.case_insensitive(cfg!(any(target_os = "macos", windows)))?;
+    if let Some(error) = builder.add(ignore_file) {
+        return Err(error.into());
+    }
+    Ok(Some(builder.build()?))
 }
 
 fn compile_whitelist(
@@ -265,7 +486,7 @@ fn compile_whitelist(
 
 fn collect_referenced_files(pkg: &serde_json::Value) -> std::collections::HashSet<String> {
     let mut refs = std::collections::HashSet::new();
-    for key in ["main", "types", "typings"] {
+    for key in ["main", "browser", "types", "typings"] {
         if let Some(s) = pkg.get(key).and_then(|v| v.as_str()) {
             refs.insert(normalize_path(s));
         }
@@ -284,6 +505,49 @@ fn collect_referenced_files(pkg: &serde_json::Value) -> std::collections::HashSe
     refs
 }
 
+fn collect_mandatory_references(pkg: &serde_json::Value) -> std::collections::HashSet<String> {
+    let mut refs = std::collections::HashSet::new();
+    for key in ["main", "browser"] {
+        if let Some(reference) = pkg.get(key).and_then(|value| value.as_str())
+            && let Some(reference) = clean_package_file_reference(reference)
+        {
+            refs.insert(reference);
+        }
+    }
+    if let Some(bin) = pkg.get("bin") {
+        match bin {
+            serde_json::Value::String(reference) => {
+                if let Some(reference) = clean_package_file_reference(reference) {
+                    refs.insert(reference);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                refs.extend(
+                    map.values()
+                        .filter_map(|value| value.as_str())
+                        .filter_map(clean_package_file_reference),
+                );
+            }
+            _ => {}
+        }
+    }
+    refs
+}
+
+fn clean_package_file_reference(reference: &str) -> Option<String> {
+    let normalized = reference.replace('\\', "/");
+    let relative = normalized.strip_prefix("./").unwrap_or(&normalized);
+    if relative.is_empty() || relative.starts_with('/') || relative.ends_with('/') {
+        return None;
+    }
+    if relative.split('/').any(|component| {
+        component.is_empty() || component == "." || component == ".." || component.contains(':')
+    }) {
+        return None;
+    }
+    Some(relative.to_string())
+}
+
 fn build_file_walker(package_root: &Path, has_whitelist: bool) -> WalkBuilder {
     let has_npmignore = package_root.join(".npmignore").exists();
     let mut builder = WalkBuilder::new(package_root);
@@ -292,7 +556,8 @@ fn build_file_walker(package_root: &Path, has_whitelist: bool) -> WalkBuilder {
         .ignore(false)
         .git_global(false)
         .git_exclude(false)
-        .git_ignore(false);
+        .git_ignore(false)
+        .ignore_case_insensitive(cfg!(any(target_os = "macos", windows)));
 
     if has_whitelist {
         // Whitelist mode: no ignore files
@@ -305,7 +570,7 @@ fn build_file_walker(package_root: &Path, has_whitelist: bool) -> WalkBuilder {
     builder.filter_entry(|entry| {
         if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             let name = entry.file_name().to_string_lossy();
-            return !ALWAYS_EXCLUDE_DIRS.contains(&name.as_ref());
+            return !is_excluded_directory(&name);
         }
         true
     });
@@ -349,9 +614,39 @@ fn is_always_included(lower_rel_path: &str) -> bool {
 }
 
 fn is_excluded_file(name: &str) -> bool {
-    ALWAYS_EXCLUDE_FILES.contains(&name)
-        || ALWAYS_EXCLUDE_PREFIXES.iter().any(|p| name.starts_with(p))
-        || ALWAYS_EXCLUDE_SUFFIXES.iter().any(|s| name.ends_with(s))
+    ALWAYS_EXCLUDE_FILES
+        .iter()
+        .any(|excluded| hard_name_eq(name, excluded))
+        || ALWAYS_EXCLUDE_PREFIXES
+            .iter()
+            .any(|prefix| hard_name_starts_with(name, prefix))
+        || ALWAYS_EXCLUDE_SUFFIXES
+            .iter()
+            .any(|suffix| hard_name_ends_with(name, suffix))
+}
+
+fn is_excluded_directory(name: &str) -> bool {
+    ALWAYS_EXCLUDE_DIRS
+        .iter()
+        .any(|excluded| hard_name_eq(name, excluded))
+}
+
+fn hard_name_eq(name: &str, expected: &str) -> bool {
+    if cfg!(any(target_os = "macos", windows)) {
+        name.eq_ignore_ascii_case(expected)
+    } else {
+        name == expected
+    }
+}
+
+fn hard_name_starts_with(name: &str, prefix: &str) -> bool {
+    name.get(..prefix.len())
+        .is_some_and(|start| hard_name_eq(start, prefix))
+}
+
+fn hard_name_ends_with(name: &str, suffix: &str) -> bool {
+    name.get(name.len().saturating_sub(suffix.len())..)
+        .is_some_and(|end| hard_name_eq(end, suffix))
 }
 
 fn matches_any(path: &str, compiled: &[(String, Option<globset::GlobMatcher>)]) -> bool {
@@ -398,6 +693,183 @@ mod tests {
         assert!(matches_glob("a/b/c", "a/**/c"));
         assert!(matches_glob("a/c", "a/**/c"));
         assert!(matches_glob("a/x/y/c", "a/**/c"));
+    }
+
+    #[test]
+    fn test_clean_package_file_reference() {
+        for (input, expected) in [
+            ("dist/index.js", Some("dist/index.js")),
+            ("./dist/index.js", Some("dist/index.js")),
+            (r"dist\index.js", Some("dist/index.js")),
+            ("/dist/index.js", None),
+            ("//dist/index.js", None),
+            ("././dist/index.js", None),
+            ("dist//index.js", None),
+            ("dist/../index.js", None),
+            ("C:/dist/index.js", None),
+            ("dist/", None),
+        ] {
+            assert_eq!(
+                clean_package_file_reference(input).as_deref(),
+                expected,
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_only_runtime_entrypoints_are_recovered_from_root_ignore() {
+        for bin in [r#""dist/cli.js""#, r#"{ "fixture": "dist/cli.js" }"#] {
+            let dir = TempDir::new().unwrap();
+            let root = dir.path();
+            let manifest = format!(
+                r#"{{
+  "name": "fixture",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "browser": "dist/browser.js",
+  "types": "dist/index.d.ts",
+  "bin": {bin}
+}}"#
+            );
+            fs::write(root.join("package.json"), &manifest).unwrap();
+            fs::write(root.join(".npmignore"), "dist/\n").unwrap();
+            fs::create_dir(root.join("dist")).unwrap();
+            for file in ["index.js", "browser.js", "index.d.ts", "cli.js"] {
+                fs::write(root.join("dist").join(file), file).unwrap();
+            }
+
+            let files = collect_pack_files(root, &parse_json(&manifest)).unwrap();
+            assert!(has(&files, "dist/index.js"));
+            assert!(has(&files, "dist/browser.js"));
+            assert!(has(&files, "dist/cli.js"));
+            assert!(!has(&files, "dist/index.d.ts"));
+        }
+    }
+
+    #[test]
+    fn test_nested_only_ignore_does_not_trigger_entrypoint_recovery() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let manifest = r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "browser": "dist/browser.js"
+}"#;
+        fs::write(root.join("package.json"), manifest).unwrap();
+        fs::write(root.join(".npmignore"), "").unwrap();
+        fs::create_dir(root.join("dist")).unwrap();
+        fs::write(root.join("dist/.npmignore"), "browser.js\n").unwrap();
+        fs::write(root.join("dist/browser.js"), "browser").unwrap();
+
+        let files = collect_pack_files(root, &parse_json(manifest)).unwrap();
+        assert!(!has(&files, "dist/browser.js"));
+    }
+
+    #[test]
+    fn test_root_parent_ignore_with_entrypoint_negation_is_recovered() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let manifest = r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "browser": "dist/browser.js"
+}"#;
+        fs::write(root.join("package.json"), manifest).unwrap();
+        fs::write(root.join(".npmignore"), "dist/\n!dist/browser.js\n").unwrap();
+        fs::create_dir(root.join("dist")).unwrap();
+        fs::write(root.join("dist/browser.js"), "browser").unwrap();
+
+        let files = collect_pack_files(root, &parse_json(manifest)).unwrap();
+        assert!(has(&files, "dist/browser.js"));
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn test_hard_exclusions_are_case_insensitive() {
+        assert!(is_excluded_file(".NPMRC"));
+        assert!(is_excluded_directory("NODE_MODULES"));
+
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let manifest = r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "browser": ".NPMRC"
+}"#;
+        fs::write(root.join("package.json"), manifest).unwrap();
+        fs::write(root.join(".npmignore"), "*\n").unwrap();
+        fs::write(
+            root.join(".npmrc"),
+            "//registry.example/:_authToken=secret\n",
+        )
+        .unwrap();
+
+        let files = collect_pack_files(root, &parse_json(manifest)).unwrap();
+        assert!(!has(&files, ".NPMRC"));
+        assert!(!has(&files, ".npmrc"));
+
+        let alias_dir = TempDir::new().unwrap();
+        let alias_root = alias_dir.path();
+        let alias_manifest = r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "browser": "dist/browser.js"
+}"#;
+        fs::write(alias_root.join("package.json"), alias_manifest).unwrap();
+        fs::write(alias_root.join(".npmignore"), "dist/browser.js\n").unwrap();
+        fs::create_dir(alias_root.join("dist")).unwrap();
+        fs::write(alias_root.join("dist/Browser.js"), "browser").unwrap();
+
+        let files = collect_pack_files(alias_root, &parse_json(alias_manifest)).unwrap();
+        assert_eq!(
+            files
+                .iter()
+                .filter(|(path, _)| {
+                    normalize_path(&path.to_string_lossy()).eq_ignore_ascii_case("dist/browser.js")
+                })
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_valid_old_npm_package_name() {
+        for valid in [
+            "foo",
+            "foo-bar",
+            "foo.bar",
+            "foo_bar",
+            "@scope/foo",
+            "@scope/_foo",
+            "Foo",
+            "1.2.3",
+        ] {
+            assert!(
+                is_valid_old_npm_package_name(valid),
+                "{valid} should be valid"
+            );
+        }
+        for invalid in [
+            "",
+            ".foo",
+            "-foo",
+            "_foo",
+            " foo",
+            "foo ",
+            "bad name",
+            "node_modules",
+            "favicon.ico",
+            "@scope/.foo",
+            "@scope/foo/bar",
+            "@/foo",
+            "@scope/",
+        ] {
+            assert!(
+                !is_valid_old_npm_package_name(invalid),
+                "{invalid} should be invalid"
+            );
+        }
     }
 
     fn parse_json(s: &str) -> serde_json::Value {
@@ -447,6 +919,45 @@ mod tests {
         assert!(has(&files, "README.md"));
         assert!(has(&files, "dist/bundle.js"));
         assert!(!has(&files, "index.js"));
+    }
+
+    #[test]
+    fn test_referenced_file_cannot_escape_package_root() {
+        let parent = TempDir::new().unwrap();
+        let root = parent.path().join("package");
+        fs::create_dir(&root).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"t","version":"1.0.0","browser":"../secret.js"}"#,
+        )
+        .unwrap();
+        fs::write(parent.path().join("secret.js"), "secret").unwrap();
+
+        let data = parse_json(r#"{"name":"t","version":"1.0.0","browser":"../secret.js"}"#);
+        let files = collect_pack_files(&root, &data).unwrap();
+        assert!(!has(&files, "../secret.js"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_referenced_file_does_not_follow_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let project = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let root = project.path();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"t","version":"1.0.0","browser":"dist/browser.js"}"#,
+        )
+        .unwrap();
+        fs::write(root.join(".gitignore"), "dist/\n").unwrap();
+        fs::write(outside.path().join("browser.js"), "secret").unwrap();
+        symlink(outside.path(), root.join("dist")).unwrap();
+
+        let data = parse_json(r#"{"name":"t","version":"1.0.0","browser":"dist/browser.js"}"#);
+        let files = collect_pack_files(root, &data).unwrap();
+        assert!(!has(&files, "dist/browser.js"));
     }
 
     #[test]

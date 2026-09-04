@@ -125,8 +125,8 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
         None => auth::require_token(opts.registry).await?,
     };
 
-    // Reuse the manifest packed into the tarball (with `workspace:`/`catalog:`
-    // already rewritten) so the registry metadata matches the tarball contents.
+    // Reuse the normalized manifest packed into the tarball so the registry
+    // metadata matches the tarball contents.
     let payload = PublishPayload::new(&PublishPayloadInput {
         package_json: &pack_result.manifest,
         name: &pack_result.name,

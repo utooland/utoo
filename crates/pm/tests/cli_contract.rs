@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::thread;
 
+use flate2::read::GzDecoder;
 use serde_json::Value;
+use tar::Archive;
 use tempfile::tempdir;
 
 fn utoo() -> Command {
@@ -196,6 +198,283 @@ fn pack_json_is_one_clean_document() {
     assert_eq!(value["result"]["name"], "fixture");
     assert_eq!(value["result"]["dryRun"], true);
     assert_eq!(value["result"]["tarballPath"], Value::Null);
+}
+
+#[test]
+fn pack_applies_publish_config_overrides_to_tarball_only() {
+    let project = tempdir().unwrap();
+    let source_manifest = r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "browser": "./src/browser.ts",
+  "types": "./src/index.ts",
+  "bin": {
+    "fixture": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "name": "fixture-published",
+    "main": "./dist/index.js",
+    "browser": "./dist/browser.js",
+    "types": "./dist/index.d.ts",
+    "bin": {
+      "fixture": "./dist/cli.js"
+    },
+    "exports": {
+      ".": {
+        "import": "./dist/index.js",
+        "types": "./dist/index.d.ts"
+      }
+    }
+  },
+  "files": []
+}"#;
+    fs::write(project.path().join("package.json"), source_manifest).unwrap();
+    fs::create_dir(project.path().join("src")).unwrap();
+    fs::write(
+        project.path().join("src/index.ts"),
+        "export const source = true;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("src/browser.ts"),
+        "export const browserSource = true;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("src/cli.ts"),
+        "console.log('source');\n",
+    )
+    .unwrap();
+    fs::create_dir(project.path().join("dist")).unwrap();
+    fs::write(
+        project.path().join("dist/index.js"),
+        "export const compiled = true;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("dist/browser.js"),
+        "export const browserCompiled = true;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("dist/index.d.ts"),
+        "export declare const compiled: true;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("dist/cli.js"),
+        "console.log('compiled');\n",
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["name"], "fixture-published");
+    assert_eq!(value["result"]["filename"], "fixture-published-1.0.0.tgz");
+    let tarball_path = value["result"]["tarballPath"].as_str().unwrap();
+    let decoder = GzDecoder::new(fs::File::open(tarball_path).unwrap());
+    let mut archive = Archive::new(decoder);
+    let mut packed_manifest = None;
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        if entry.path().unwrap() == Path::new("package/package.json") {
+            let mut contents = String::new();
+            entry.read_to_string(&mut contents).unwrap();
+            packed_manifest = Some(serde_json::from_str::<Value>(&contents).unwrap());
+            break;
+        }
+    }
+    let packed_manifest = packed_manifest.expect("tarball should contain package/package.json");
+
+    assert_eq!(packed_manifest["name"], "fixture-published");
+    assert_eq!(packed_manifest["main"], "./dist/index.js");
+    assert_eq!(packed_manifest["browser"], "./dist/browser.js");
+    assert_eq!(packed_manifest["types"], "./dist/index.d.ts");
+    assert_eq!(packed_manifest["bin"]["fixture"], "./dist/cli.js");
+    assert_eq!(packed_manifest["exports"]["."]["import"], "./dist/index.js");
+    assert_eq!(
+        packed_manifest["exports"]["."]["types"],
+        "./dist/index.d.ts"
+    );
+    assert!(packed_manifest.get("publishConfig").is_none());
+    assert_eq!(
+        fs::read_to_string(project.path().join("package.json")).unwrap(),
+        source_manifest
+    );
+    let files = value["result"]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        files,
+        [
+            "dist/browser.js",
+            "dist/cli.js",
+            "dist/index.d.ts",
+            "dist/index.js",
+            "package.json"
+        ]
+    );
+}
+
+#[test]
+fn pack_rejects_empty_publish_config_name() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "publishConfig": {
+    "name": ""
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(value["command"], "pack");
+    assert_eq!(value["ok"], false);
+    assert_eq!(
+        value["error"]["message"],
+        "Missing 'name' field in package.json"
+    );
+}
+
+#[test]
+fn pack_rejects_invalid_publish_config_name() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "publishConfig": {
+    "name": "bad name"
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(value["command"], "pack");
+    assert_eq!(value["ok"], false);
+    assert_eq!(
+        value["error"]["message"],
+        "Invalid package name \"bad name\"."
+    );
+}
+
+#[test]
+fn pack_rejects_missing_source_name_with_publish_config_name() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "version": "1.0.0",
+  "publishConfig": {
+    "name": "fixture-published"
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(value["command"], "pack");
+    assert_eq!(value["ok"], false);
+    assert_eq!(
+        value["error"]["message"],
+        "Missing 'name' field in package.json"
+    );
+}
+
+#[test]
+fn pack_keeps_publish_config_browser_when_ignored() {
+    for ignore_file in [".gitignore", ".npmignore"] {
+        let project = tempdir().unwrap();
+        fs::write(
+            project.path().join("package.json"),
+            r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "publishConfig": {
+    "browser": "./dist/browser.js"
+  }
+}"#,
+        )
+        .unwrap();
+        fs::write(project.path().join(ignore_file), "dist/\n").unwrap();
+        fs::create_dir(project.path().join("dist")).unwrap();
+        fs::write(
+            project.path().join("dist/browser.js"),
+            "export const browser = true;\n",
+        )
+        .unwrap();
+
+        let output = utoo()
+            .current_dir(project.path())
+            .args(["--json", "pm-pack", "--dry-run"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{ignore_file}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let files = value["result"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|file| file["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(files, ["dist/browser.js", "package.json"], "{ignore_file}");
+    }
 }
 
 #[test]

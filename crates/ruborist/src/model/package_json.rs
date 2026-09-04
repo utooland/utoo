@@ -341,6 +341,11 @@ pub struct PublishConfig {
     /// Whether to generate and attach a signed provenance attestation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<bool>,
+
+    /// Preserve publish-time manifest overrides and other package-manager
+    /// extensions that utoo does not model explicitly.
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 /// Empty map constant for convenience methods that return references.
@@ -659,7 +664,10 @@ mod tests {
             "publishConfig": {
                 "tag": "beta",
                 "registry": "https://custom.registry.org",
-                "access": "public"
+                "access": "public",
+                "exports": {
+                    ".": "./dist/index.js"
+                }
             }
         });
 
@@ -678,6 +686,7 @@ mod tests {
         assert_eq!(pc.tag.as_deref(), Some("beta"));
         assert_eq!(pc.registry.as_deref(), Some("https://custom.registry.org"));
         assert_eq!(pc.access.as_deref(), Some("public"));
+        assert_eq!(pc.extra["exports"]["."], "./dist/index.js");
 
         // Round-trip: ensure new fields survive to_value
         let rt = pkg.to_value();
@@ -685,6 +694,7 @@ mod tests {
         assert_eq!(rt["private"], true);
         assert_eq!(rt["main"], "./lib/index.js");
         assert_eq!(rt["publishConfig"]["tag"], "beta");
+        assert_eq!(rt["publishConfig"]["exports"]["."], "./dist/index.js");
     }
 
     #[test]
