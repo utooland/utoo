@@ -825,9 +825,9 @@ mod tests {
         assert_eq!(
             files
                 .iter()
-                .filter(|(path, _)| path
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case("dist/browser.js"))
+                .filter(|(path, _)| {
+                    normalize_path(&path.to_string_lossy()).eq_ignore_ascii_case("dist/browser.js")
+                })
                 .count(),
             1
         );
