@@ -4,7 +4,7 @@ use flate2::write::GzEncoder;
 use ignore::WalkBuilder;
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tar::{Builder, EntryType, Header};
 use utoo_ruborist::manifest::PackageJson;
 
@@ -56,6 +56,7 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     // rewritten package.json (version bump, stripped fields). The `pkg` above
     // is cached from before the script ran, so read the current file from disk.
     let pkg: PackageJson = load_package_json(package_root).await?;
+    validate_pack_name(&pkg.name)?;
 
     // Normalize dependency protocols and publish-time manifest overrides.
     // `None` means there was nothing to rewrite, in which case the on-disk
@@ -63,9 +64,7 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     let normalized = normalize_publish_manifest(package_root, &pkg).await?;
     let pkg_json_override = normalized.as_ref().map(serialize_manifest).transpose()?;
     let packed_manifest = normalized.unwrap_or_else(|| pkg.clone());
-    if packed_manifest.name.is_empty() {
-        anyhow::bail!("Missing 'name' field in package.json");
-    }
+    validate_pack_name(&packed_manifest.name)?;
 
     // collect_pack_files uses ignore::WalkBuilder which does synchronous I/O.
     // Run on a blocking thread to avoid stalling the tokio runtime.
@@ -113,6 +112,54 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
         unpacked_size,
         packed_size,
         manifest: packed_manifest,
+    })
+}
+
+/// Validate both the source and published package names using pnpm's
+/// `validate-npm-package-name` `validForOldPackages` rules.
+fn validate_pack_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("Missing 'name' field in package.json");
+    }
+    if !is_valid_old_npm_package_name(name) {
+        anyhow::bail!("Invalid package name \"{name}\".");
+    }
+    Ok(())
+}
+
+fn is_valid_old_npm_package_name(name: &str) -> bool {
+    if name.is_empty()
+        || name.starts_with('.')
+        || name.starts_with('-')
+        || name.starts_with('_')
+        || name.trim() != name
+        || name.eq_ignore_ascii_case("node_modules")
+        || name.eq_ignore_ascii_case("favicon.ico")
+    {
+        return false;
+    }
+    if is_url_friendly_package_name_part(name) {
+        return true;
+    }
+
+    let Some(rest) = name.strip_prefix('@') else {
+        return false;
+    };
+    let Some((scope, package)) = rest.split_once('/') else {
+        return false;
+    };
+    !scope.is_empty()
+        && !package.is_empty()
+        && !package.contains('/')
+        && !package.starts_with('.')
+        && is_url_friendly_package_name_part(scope)
+        && is_url_friendly_package_name_part(package)
+}
+
+fn is_url_friendly_package_name_part(value: &str) -> bool {
+    value.chars().all(|ch| {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')')
     })
 }
 
@@ -246,8 +293,83 @@ fn collect_pack_files(
         }
     }
 
+    // Root ignore files can prune a referenced file's parent directory before
+    // the inclusion check sees it. Re-check exact manifest references without
+    // following symlinks so main/browser/types/bin remain mandatory but cannot
+    // escape the package root.
+    add_missing_referenced_files(package_root, &referenced_files, &mut files)?;
+
     files.sort_by(|(a, _), (b, _)| a.cmp(b));
     Ok(files)
+}
+
+fn add_missing_referenced_files(
+    package_root: &Path,
+    referenced_files: &std::collections::HashSet<String>,
+    files: &mut Vec<(PathBuf, u64)>,
+) -> Result<()> {
+    let mut collected: std::collections::HashSet<PathBuf> =
+        files.iter().map(|(path, _)| path.clone()).collect();
+    for referenced in referenced_files {
+        if referenced.ends_with('/') {
+            continue;
+        }
+        let relative = PathBuf::from(referenced);
+        if collected.contains(&relative) || !is_safe_referenced_path(&relative) {
+            continue;
+        }
+        if let Some(size) = referenced_file_size(package_root, &relative)? {
+            collected.insert(relative.clone());
+            files.push((relative, size));
+        }
+    }
+    Ok(())
+}
+
+fn is_safe_referenced_path(path: &Path) -> bool {
+    let mut has_component = false;
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return false;
+        };
+        has_component = true;
+        let name = name.to_string_lossy();
+        if components.peek().is_some() && ALWAYS_EXCLUDE_DIRS.contains(&name.as_ref()) {
+            return false;
+        }
+    }
+    has_component
+        && path
+            .file_name()
+            .is_some_and(|name| !is_excluded_file(&name.to_string_lossy()))
+}
+
+fn referenced_file_size(package_root: &Path, relative: &Path) -> Result<Option<u64>> {
+    let components: Vec<_> = relative.components().collect();
+    let mut current = package_root.to_path_buf();
+    for (index, component) in components.iter().enumerate() {
+        current.push(component.as_os_str());
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to inspect {}", current.display()));
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Ok(None);
+        }
+        let is_last = index + 1 == components.len();
+        if is_last {
+            return Ok(metadata.is_file().then_some(metadata.len()));
+        }
+        if !metadata.is_dir() {
+            return Ok(None);
+        }
+    }
+    Ok(None)
 }
 
 fn compile_whitelist(
@@ -405,6 +527,45 @@ mod tests {
         assert!(matches_glob("a/x/y/c", "a/**/c"));
     }
 
+    #[test]
+    fn test_valid_old_npm_package_name() {
+        for valid in [
+            "foo",
+            "foo-bar",
+            "foo.bar",
+            "foo_bar",
+            "@scope/foo",
+            "@scope/_foo",
+            "Foo",
+            "1.2.3",
+        ] {
+            assert!(
+                is_valid_old_npm_package_name(valid),
+                "{valid} should be valid"
+            );
+        }
+        for invalid in [
+            "",
+            ".foo",
+            "-foo",
+            "_foo",
+            " foo",
+            "foo ",
+            "bad name",
+            "node_modules",
+            "favicon.ico",
+            "@scope/.foo",
+            "@scope/foo/bar",
+            "@/foo",
+            "@scope/",
+        ] {
+            assert!(
+                !is_valid_old_npm_package_name(invalid),
+                "{invalid} should be invalid"
+            );
+        }
+    }
+
     fn parse_json(s: &str) -> serde_json::Value {
         serde_json::from_str(s).unwrap()
     }
@@ -452,6 +613,45 @@ mod tests {
         assert!(has(&files, "README.md"));
         assert!(has(&files, "dist/bundle.js"));
         assert!(!has(&files, "index.js"));
+    }
+
+    #[test]
+    fn test_referenced_file_cannot_escape_package_root() {
+        let parent = TempDir::new().unwrap();
+        let root = parent.path().join("package");
+        fs::create_dir(&root).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"t","version":"1.0.0","browser":"../secret.js"}"#,
+        )
+        .unwrap();
+        fs::write(parent.path().join("secret.js"), "secret").unwrap();
+
+        let data = parse_json(r#"{"name":"t","version":"1.0.0","browser":"../secret.js"}"#);
+        let files = collect_pack_files(&root, &data).unwrap();
+        assert!(!has(&files, "../secret.js"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_referenced_file_does_not_follow_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let project = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let root = project.path();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"t","version":"1.0.0","browser":"dist/browser.js"}"#,
+        )
+        .unwrap();
+        fs::write(root.join(".gitignore"), "dist/\n").unwrap();
+        fs::write(outside.path().join("browser.js"), "secret").unwrap();
+        symlink(outside.path(), root.join("dist")).unwrap();
+
+        let data = parse_json(r#"{"name":"t","version":"1.0.0","browser":"dist/browser.js"}"#);
+        let files = collect_pack_files(root, &data).unwrap();
+        assert!(!has(&files, "dist/browser.js"));
     }
 
     #[test]

@@ -370,6 +370,114 @@ fn pack_rejects_empty_publish_config_name() {
 }
 
 #[test]
+fn pack_rejects_invalid_publish_config_name() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "publishConfig": {
+    "name": "bad name"
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(value["command"], "pack");
+    assert_eq!(value["ok"], false);
+    assert_eq!(
+        value["error"]["message"],
+        "Invalid package name \"bad name\"."
+    );
+}
+
+#[test]
+fn pack_rejects_missing_source_name_with_publish_config_name() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "version": "1.0.0",
+  "publishConfig": {
+    "name": "fixture-published"
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let value: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(value["command"], "pack");
+    assert_eq!(value["ok"], false);
+    assert_eq!(
+        value["error"]["message"],
+        "Missing 'name' field in package.json"
+    );
+}
+
+#[test]
+fn pack_keeps_publish_config_browser_when_ignored() {
+    for ignore_file in [".gitignore", ".npmignore"] {
+        let project = tempdir().unwrap();
+        fs::write(
+            project.path().join("package.json"),
+            r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "publishConfig": {
+    "browser": "./dist/browser.js"
+  }
+}"#,
+        )
+        .unwrap();
+        fs::write(project.path().join(ignore_file), "dist/\n").unwrap();
+        fs::create_dir(project.path().join("dist")).unwrap();
+        fs::write(
+            project.path().join("dist/browser.js"),
+            "export const browser = true;\n",
+        )
+        .unwrap();
+
+        let output = utoo()
+            .current_dir(project.path())
+            .args(["--json", "pm-pack", "--dry-run"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{ignore_file}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let files = value["result"]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|file| file["path"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(files, ["dist/browser.js", "package.json"], "{ignore_file}");
+    }
+}
+
+#[test]
 fn install_json_lifecycle_success_is_one_clean_document() {
     let project = tempdir().unwrap();
     write_lifecycle_project(project.path(), 0);
