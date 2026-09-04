@@ -208,6 +208,7 @@ fn pack_applies_publish_config_overrides_to_tarball_only() {
   "version": "1.0.0",
   "type": "module",
   "main": "./src/index.ts",
+  "browser": "./src/browser.ts",
   "types": "./src/index.ts",
   "bin": {
     "fixture": "./src/cli.ts"
@@ -218,6 +219,7 @@ fn pack_applies_publish_config_overrides_to_tarball_only() {
   "publishConfig": {
     "name": "fixture-published",
     "main": "./dist/index.js",
+    "browser": "./dist/browser.js",
     "types": "./dist/index.d.ts",
     "bin": {
       "fixture": "./dist/cli.js"
@@ -239,6 +241,11 @@ fn pack_applies_publish_config_overrides_to_tarball_only() {
     )
     .unwrap();
     fs::write(
+        project.path().join("src/browser.ts"),
+        "export const browserSource = true;\n",
+    )
+    .unwrap();
+    fs::write(
         project.path().join("src/cli.ts"),
         "console.log('source');\n",
     )
@@ -247,6 +254,11 @@ fn pack_applies_publish_config_overrides_to_tarball_only() {
     fs::write(
         project.path().join("dist/index.js"),
         "export const compiled = true;\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("dist/browser.js"),
+        "export const browserCompiled = true;\n",
     )
     .unwrap();
     fs::write(
@@ -292,6 +304,7 @@ fn pack_applies_publish_config_overrides_to_tarball_only() {
 
     assert_eq!(packed_manifest["name"], "fixture-published");
     assert_eq!(packed_manifest["main"], "./dist/index.js");
+    assert_eq!(packed_manifest["browser"], "./dist/browser.js");
     assert_eq!(packed_manifest["types"], "./dist/index.d.ts");
     assert_eq!(packed_manifest["bin"]["fixture"], "./dist/cli.js");
     assert_eq!(packed_manifest["exports"]["."]["import"], "./dist/index.js");
@@ -313,11 +326,46 @@ fn pack_applies_publish_config_overrides_to_tarball_only() {
     assert_eq!(
         files,
         [
+            "dist/browser.js",
             "dist/cli.js",
             "dist/index.d.ts",
             "dist/index.js",
             "package.json"
         ]
+    );
+}
+
+#[test]
+fn pack_rejects_empty_publish_config_name() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+  "name": "fixture",
+  "version": "1.0.0",
+  "publishConfig": {
+    "name": ""
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = utoo()
+        .current_dir(project.path())
+        .args(["--json", "pm-pack", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(stderr.lines().count(), 1);
+    let value: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(value["command"], "pack");
+    assert_eq!(value["ok"], false);
+    assert_eq!(
+        value["error"]["message"],
+        "Missing 'name' field in package.json"
     );
 }
 

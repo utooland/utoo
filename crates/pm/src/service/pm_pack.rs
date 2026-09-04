@@ -63,6 +63,9 @@ pub async fn pack(package_root: &Path, output: ScriptOutput) -> Result<PackResul
     let normalized = normalize_publish_manifest(package_root, &pkg).await?;
     let pkg_json_override = normalized.as_ref().map(serialize_manifest).transpose()?;
     let packed_manifest = normalized.unwrap_or_else(|| pkg.clone());
+    if packed_manifest.name.is_empty() {
+        anyhow::bail!("Missing 'name' field in package.json");
+    }
 
     // collect_pack_files uses ignore::WalkBuilder which does synchronous I/O.
     // Run on a blocking thread to avoid stalling the tokio runtime.
@@ -207,7 +210,7 @@ fn append_override<W: Write>(
 /// 3. **Inclusion check** (determines whether a surviving file is collected):
 ///    - `is_always_included`: `package.json`, `readme*`, `license*` — always
 ///      included even if not listed in the `files` whitelist
-///    - `referenced_files`: paths declared in `main`, `bin`, `types`, `typings` — always included
+///    - `referenced_files`: paths declared in `main`, `browser`, `bin`, `types`, `typings` — always included
 ///    - Whitelist: if `files` field exists, the file must match a pattern; otherwise all files
 ///      that passed layers 1–2 are included
 fn collect_pack_files(
@@ -267,7 +270,7 @@ fn compile_whitelist(
 
 fn collect_referenced_files(pkg: &serde_json::Value) -> std::collections::HashSet<String> {
     let mut refs = std::collections::HashSet::new();
-    for key in ["main", "types", "typings"] {
+    for key in ["main", "browser", "types", "typings"] {
         if let Some(s) = pkg.get(key).and_then(|v| v.as_str()) {
             refs.insert(normalize_path(s));
         }
