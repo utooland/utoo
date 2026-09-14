@@ -7,6 +7,7 @@ use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc, trace::TraceRaw
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::{File, FileContent, FileSystemPath};
 use turbopack::{
+    condition::ContextCondition,
     evaluate_context::{config_tracing_module_context, node_evaluate_asset_context},
     module_options::{
         CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
@@ -581,15 +582,35 @@ pub async fn get_client_resolve_options_context(
         ..resolve_options_context.clone()
     };
 
+    let mut resolve_rules = Vec::with_capacity(2);
+    if enable_node_polyfill {
+        let node_polyfill_root = embed_file_path(rcstr!("node-polyfills/generated"))
+            .owned()
+            .await?;
+
+        let node_polyfill_resolve_options = ResolveOptionsContext {
+            enable_node_modules: Some(node_polyfill_root.parent()),
+            ..foreign_resolve_options.clone()
+        };
+
+        // This rule must precede the generic node_modules rule so dependencies
+        // resolve from the embedded generated/node_modules tree.
+        resolve_rules.push((
+            ContextCondition::InPath(node_polyfill_root),
+            node_polyfill_resolve_options.resolved_cell(),
+        ));
+    }
+    resolve_rules.push((
+        foreign_code_context_condition(config).await?,
+        foreign_resolve_options.resolved_cell(),
+    ));
+
     Ok(ResolveOptionsContext {
         enable_typescript: true,
         enable_react: true,
         enable_mjs_extension: true,
         custom_extensions: config.resolve_extension().owned().await?,
-        rules: vec![(
-            foreign_code_context_condition(config).await?,
-            foreign_resolve_options.resolved_cell(),
-        )],
+        rules: resolve_rules,
         ..resolve_options_context
     }
     .cell())
