@@ -13,24 +13,50 @@ assert.deepEqual(
 );
 
 async function main() {
-  for (const currentScript of [{ src: "https://example.test/main.js" }, null]) {
+  const document = {
+    currentScript: { src: "https://example.test/main.js" },
+    getElementsByTagName: () => [{ src: "https://example.test/main.js" }],
+  };
+  for (const host of [
+    { document },
+    { document: { ...document, currentScript: null } },
+    { importScripts() {}, location: new URL("https://example.test/main.js") },
+    { document, module: { exports: {} } },
+  ]) {
     const context = {
       console,
       URL,
+      ExternalValue: { answer: 17 },
       globalThis: undefined,
-      document: {
-        currentScript,
-        getElementsByTagName: () => [{ src: "https://example.test/main.js" }],
-      },
+      ...host,
     };
-    context.self = context;
+    if (host.module) {
+      context.global = context;
+      context.exports = host.module.exports;
+    } else {
+      context.self = context;
+    }
+    Object.defineProperty(context, "globalThis", {
+      value: undefined,
+      writable: false,
+    });
     const initialGlobals = Object.keys(context);
     vm.runInNewContext(code, context, { filename: "main.js" });
     assert.deepEqual(
       Object.keys(context).filter((key) => !initialGlobals.includes(key)),
-      ["LegacyLibrary"],
+      host.module ? [] : ["LegacyLibrary"],
     );
-    const library = context.LegacyLibrary;
+    const library = host.module ? host.module.exports : context.LegacyLibrary;
+    assert.equal(context.globalThis, undefined);
+    assert.equal(library.external, context.ExternalValue);
+    const globals = library.globals("local self", "local alias");
+    assert.equal(globals[0].ExternalValue, context.ExternalValue);
+    assert.equal(globals[1], "local self");
+    assert.equal(globals[2], "local alias");
+    assert.equal(globals[3].globalThis, globals[0]);
+    const local = library.localGlobal(23);
+    assert.equal(local.globalThis, 23);
+    assert.equal(local.property, 7);
     assert.equal(library.read(), 42);
     assert.equal(library.read({ answer: 7 }), 7);
     assert.equal(library.flag, 1);

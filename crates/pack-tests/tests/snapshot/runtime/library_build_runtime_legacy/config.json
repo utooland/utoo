@@ -10,6 +10,9 @@
       }
     ],
     "target": "Android 4, iOS 8",
+    "externals": {
+      "external-value": "ExternalValue"
+    },
     "sourceMaps": false,
     "optimization": {
       "minify": false,
