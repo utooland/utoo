@@ -14,15 +14,15 @@
     "app": {
       "name": "app",
       "chunks": [
-        "3yu4ts37d3a9k.js",
-        "turbopack-03bvao1fcu-xy.js"
+        "30yb82tx930gs.js",
+        "turbopack-1kawdn6actfxq.js"
       ],
       "assets": [
         {
-          "name": "3yu4ts37d3a9k.js"
+          "name": "30yb82tx930gs.js"
         },
         {
-          "name": "turbopack-03bvao1fcu-xy.js"
+          "name": "turbopack-1kawdn6actfxq.js"
         }
       ]
     },
@@ -44,11 +44,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "3yu4ts37d3a9k.js",
-      "size": 1615,
+      "id": "30yb82tx930gs.js",
+      "size": 1638,
       "hash": "",
       "files": [
-        "3yu4ts37d3a9k.js"
+        "30yb82tx930gs.js"
       ]
     },
     {
@@ -80,25 +80,25 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "turbopack-03bvao1fcu-xy.js",
+      "id": "turbopack-1kawdn6actfxq.js",
       "size": 306,
       "hash": "",
       "files": [
-        "turbopack-03bvao1fcu-xy.js"
+        "turbopack-1kawdn6actfxq.js"
       ]
     }
   ],
   "assets": [
     {
       "type": "asset",
-      "name": "24p0pf8xslnk2.js.map",
+      "name": "0137ygtj6x8ex.js.map",
       "info": {},
       "size": 908,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "24p0pf8xslnk2.js.map"
+        "0137ygtj6x8ex.js.map"
       ]
     },
     {
@@ -115,14 +115,14 @@
     },
     {
       "type": "asset",
-      "name": "3yu4ts37d3a9k.js",
+      "name": "30yb82tx930gs.js",
       "info": {},
-      "size": 1615,
+      "size": 1638,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "3yu4ts37d3a9k.js"
+        "30yb82tx930gs.js"
       ]
     },
     {
@@ -175,14 +175,14 @@
     },
     {
       "type": "asset",
-      "name": "turbopack-03bvao1fcu-xy.js",
+      "name": "turbopack-1kawdn6actfxq.js",
       "info": {},
       "size": 306,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "turbopack-03bvao1fcu-xy.js"
+        "turbopack-1kawdn6actfxq.js"
       ]
     }
   ],
@@ -191,7 +191,7 @@
       "name": "basic/stats_with_server_and_libraries/input/a.ts",
       "id": "[project]/basic/stats_with_server_and_libraries/input/a.ts [client] (ecmascript)",
       "chunks": [
-        "3yu4ts37d3a9k.js"
+        "30yb82tx930gs.js"
       ],
       "size": 120
     },
@@ -207,7 +207,7 @@
       "name": "basic/stats_with_server_and_libraries/input/app.ts",
       "id": "[project]/basic/stats_with_server_and_libraries/input/app.ts [client] (ecmascript)",
       "chunks": [
-        "3yu4ts37d3a9k.js"
+        "30yb82tx930gs.js"
       ],
       "size": 936
     },
@@ -215,7 +215,7 @@
       "name": "basic/stats_with_server_and_libraries/input/b.ts",
       "id": "[project]/basic/stats_with_server_and_libraries/input/b.ts [client] (ecmascript)",
       "chunks": [
-        "3yu4ts37d3a9k.js"
+        "30yb82tx930gs.js"
       ],
       "size": 120
     },

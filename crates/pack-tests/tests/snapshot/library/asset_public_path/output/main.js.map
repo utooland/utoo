@@ -2,5 +2,5 @@
   "version": 3,
   "sources": [],
   "sections": [
-    {"offset": {"line": 11, "column": 0}, "map": {"version":3,"sources":["./../library/asset_public_path/input/index.js"],"sourcesContent":["import logo from \"./logo.jpg\";\n\nexport const logoUrl = logo;\nexport default logo;\n"],"names":["logoUrl"],"mappings":"AAAA;;AAEO,MAAMA,UAAU,iJAAI;qCACZ,iJAAI"}}]
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["./../library/asset_public_path/input/index.js"],"sourcesContent":["import logo from \"./logo.jpg\";\n\nexport const logoUrl = logo;\nexport default logo;\n"],"names":["logoUrl"],"mappings":"AAAA;;AAEO,MAAMA,UAAU,iJAAI;qCACZ,iJAAI"}}]
 }

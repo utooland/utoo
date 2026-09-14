@@ -3,6 +3,15 @@
 })([
 ["index.js",
 
+"[project]/basic/server_alias/input/extension-value.server.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+__turbopack_context__.s([
+    "extensionValue",
+    ()=>extensionValue
+]);
+const extensionValue = "server extension";
+}),
 "[project]/basic/server_alias/input/server-only.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -20,15 +29,6 @@ __turbopack_context__.s([
     ()=>value
 ]);
 const value = "server alias";
-}),
-"[project]/basic/server_alias/input/extension-value.server.ts [server] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-__turbopack_context__.s([
-    "extensionValue",
-    ()=>extensionValue
-]);
-const extensionValue = "server extension";
 }),
 "[project]/basic/server_alias/input/server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";

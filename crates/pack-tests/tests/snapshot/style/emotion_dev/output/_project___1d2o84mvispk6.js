@@ -1,4 +1,4 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(()=>{"use strict";(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 "[project]/node_modules/@emotion/react/index.js [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -66,4 +66,4 @@ function App() {
     }, this);
 }
 }),
-]);
+]);})()

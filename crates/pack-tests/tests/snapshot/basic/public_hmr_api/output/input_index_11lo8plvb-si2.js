@@ -2,5 +2,5 @@
     script: typeof document === "object" ? document.currentScript : undefined,
     chunks: ["input_hmr_0dvu744qjj9xv.js","input_hmr_03zxwp6ycuogx.js","_root-of-the-server___1ctbs7ni6zzx8.js"],
     source: "entry",
-    version: "NjELHxVmBf0"
+    version: "Jgy07B66BA4"
 });

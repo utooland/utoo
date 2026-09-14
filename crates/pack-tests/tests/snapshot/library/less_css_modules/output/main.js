@@ -3,10 +3,6 @@
 })([
 ["main.js",
 
-37, (function(__turbopack_context__){
-
-__turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.-C211G_widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
-}),
 15, ((__turbopack_context__, module, exports) => {
 
 /**
@@ -228,6 +224,10 @@ module.exports = function(list, options) {
         lastIdentifiers = newLastIdentifiers;
     };
 };
+}),
+37, (function(__turbopack_context__){
+
+__turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.-C211G_widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
 }),
 12, ((__turbopack_context__) => {
 "use strict";
