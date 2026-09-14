@@ -64,18 +64,17 @@ async fn get_chunk_modules(
     let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
     let mut modules = Vec::new();
 
-    for item in chunk_items {
-        for (id, code, _) in &*item {
-            modules.push(WebpackStatsModule {
-                name: module_names
-                    .get(id)
-                    .cloned()
-                    .with_context(|| format!("missing source path for module {id}"))?,
-                id: id.into(),
-                chunks: vec![chunk_id.clone()],
-                size: code.source_code().len() as u64,
-            });
-        }
+    for item in &chunk_items {
+        let id = &item.id;
+        modules.push(WebpackStatsModule {
+            name: module_names
+                .get(id)
+                .cloned()
+                .with_context(|| format!("missing source path for module {id}"))?,
+            id: id.into(),
+            chunks: vec![chunk_id.clone()],
+            size: item.code.source_code().len() as u64,
+        });
     }
 
     Ok(modules)

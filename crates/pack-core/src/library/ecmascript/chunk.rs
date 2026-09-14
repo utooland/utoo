@@ -79,21 +79,15 @@ impl EcmascriptLibraryChunk {
             .reference_chunk_source_maps(*ResolvedVc::upcast(self.to_resolved().await?))
             .await?;
         let content = this.chunk.chunk_content().await?;
-        let mut chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
-        chunk_items.sort_by(|a, b| {
-            a.first()
-                .map(|(id, _, path)| (path, id))
-                .cmp(&b.first().map(|(id, _, path)| (path, id)))
-        });
+        // Items are already globally sorted by module path upstream.
+        let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
 
         let mut code = CodeBuilder::default();
         writeln!(code, "module.exports = [")?;
         for item in &chunk_items {
-            for (id, item_code, _) in &**item {
-                write!(code, "\n{}, ", StringifyJs(id))?;
-                code.push_code(item_code);
-                write!(code, ",")?;
-            }
+            write!(code, "\n{}, ", StringifyJs(&item.id))?;
+            code.push_code(&item.code);
+            write!(code, ",")?;
         }
         writeln!(code, "\n];")?;
 
@@ -441,20 +435,13 @@ impl EcmascriptLibraryEvaluateChunk {
         )?;
 
         let content = this.chunk.chunk_content().await?;
-        let mut chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
-        // Sort items by their module path so that similar modules stay
-        // together so that the chunks gzip better.
-        chunk_items.sort_by(|a, b| {
-            a.first()
-                .map(|(id, _, path)| (path, id))
-                .cmp(&b.first().map(|(id, _, path)| (path, id)))
-        });
+        // Items are already globally sorted by module path upstream so that
+        // similar modules stay together and the chunks gzip better.
+        let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
         for item in &chunk_items {
-            for (id, item_code, _) in &**item {
-                write!(code, "\n{}, ", StringifyJs(id))?;
-                code.push_code(item_code);
-                write!(code, ",")?;
-            }
+            write!(code, "\n{}, ", StringifyJs(&item.id))?;
+            code.push_code(&item.code);
+            write!(code, ",")?;
         }
 
         let params = EcmascriptBrowserChunkRuntimeParams {

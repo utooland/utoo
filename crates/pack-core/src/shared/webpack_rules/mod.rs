@@ -150,6 +150,19 @@ pub async fn webpack_loader_options(
         return Ok(Vc::cell(None));
     }
 
+    let target = ResolvedVc::cell(
+        if builtin_conditions.contains(&WebpackLoaderBuiltinCondition::Node) {
+            rcstr!("node")
+        } else {
+            rcstr!("web")
+        },
+    );
+    let mode = if builtin_conditions.contains(&WebpackLoaderBuiltinCondition::Development) {
+        rcstr!("development")
+    } else {
+        rcstr!("production")
+    };
+
     Ok(Vc::cell(Some(
         WebpackLoadersOptions {
             rules: ResolvedVc::cell(rules),
@@ -157,6 +170,8 @@ pub async fn webpack_loader_options(
             builtin_conditions: UtooWebpackLoaderBuiltinConditionSet::new(builtin_conditions)
                 .to_resolved()
                 .await?,
+            target,
+            mode,
         }
         .resolved_cell(),
     )))

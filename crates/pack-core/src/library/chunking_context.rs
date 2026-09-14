@@ -16,7 +16,8 @@ use turbopack_browser::chunking_context::{
 use turbopack_core::{
     asset::{Asset, AssetContent, no_hash_salt},
     chunk::{
-        ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
+        ChunkGroupResult, ChunkItem, ChunkItemOrBatchWithAsyncModuleInfo,
+        ChunkItemWithAsyncModuleInfo, ChunkType, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences,
         availability_info::AvailabilityInfo,
@@ -452,9 +453,7 @@ impl LibraryChunkingContext {
         hasher.write_value(chunk_items.len());
 
         for item in &chunk_items {
-            for (module_id, code, _) in &**item {
-                hasher.write_value((module_id, code.source_code()));
-            }
+            hasher.write_value((&item.id, item.code.source_code()));
         }
 
         let hash = hasher.finish();
@@ -795,6 +794,50 @@ impl ChunkingContext for LibraryChunkingContext {
             chunk_group_bootstrap_params: None,
         }
         .cell())
+    }
+
+    #[turbo_tasks::function]
+    async fn standalone_chunk(
+        self: ResolvedVc<Self>,
+        chunk_item: ResolvedVc<Box<dyn ChunkItem>>,
+    ) -> Result<Vc<Box<dyn OutputAsset>>> {
+        let chunk_type = chunk_item
+            .into_trait_ref()
+            .await?
+            .ty()
+            .to_resolved()
+            .await?;
+        let chunk = chunk_type
+            .chunk(
+                Vc::upcast(*self),
+                vec![ChunkItemOrBatchWithAsyncModuleInfo::ChunkItem(
+                    ChunkItemWithAsyncModuleInfo {
+                        chunk_item,
+                        chunk_type,
+                        module: None,
+                        async_info: None,
+                    },
+                )],
+                Vec::new(),
+                Vec::new(),
+            )
+            .to_resolved()
+            .await?;
+        if let Some(ecmascript_chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
+            let output_ident = self.ecmascript_chunk_ident_with_filename_template(
+                chunk_item.asset_ident(),
+                *ecmascript_chunk,
+            );
+            Ok(Vc::upcast(EcmascriptLibraryChunk::new(
+                *self,
+                output_ident,
+                *ecmascript_chunk,
+            )))
+        } else if let Some(output_asset) = ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(chunk) {
+            Ok(*output_asset)
+        } else {
+            bail!("Unable to generate output asset for standalone library chunk")
+        }
     }
 
     #[turbo_tasks::function]
