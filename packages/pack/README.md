@@ -121,34 +121,6 @@ The bundler can be configured via a `utoopack.json` or through the programmatic 
 
 For a full list of options, see the [Configuration Schema](./config_schema.json).
 
-### PostCSS implementation
-
-Set `styles.postcss.implementation` to the absolute path of the PostCSS module
-that should run your plugins. Framework integrations can resolve their own
-PostCSS dependency to avoid loading an incompatible version from the application:
-
-```javascript
-const { build } = require('@utoo/pack');
-
-await build({
-  config: {
-    entry: [{ import: './src/index.js' }],
-    styles: {
-      postcss: {
-        implementation: require.resolve('postcss'),
-        plugins: { 'postcss-flexbugs-fixes': {} }
-      }
-    }
-  }
-});
-```
-
-The path must be absolute and loadable by Node.js `require()`. Resolve it from
-the package that owns the desired PostCSS dependency. It applies to development,
-CSS hot updates, production, and server builds, including plugins loaded from
-`postcss.config.*`. Omitting it keeps the default runtime resolution of `postcss`.
-This option belongs in the Utoopack configuration, not in `postcss.config.*`.
-
 Production client builds default to short content-hashed JS and CSS chunk names,
 using Turbopack's 13-character base38 hash (for example, `<hash>.js` or
 `turbopack-<hash>.js` for entry runtimes). Development builds retain readable names.
