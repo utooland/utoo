@@ -343,7 +343,14 @@ export interface ConfigComplete {
      * Inline PostCSS configuration. Its plugins run after plugins from a
      * discovered postcss.config.* file in the same PostCSS pass.
      */
-    postcss?: JSONValue;
+    postcss?: {
+      /**
+       * Absolute path to the PostCSS module used at build time, for example
+       * require.resolve("postcss"). Defaults to resolving "postcss" at runtime.
+       */
+      implementation?: string | null;
+      [key: string]: JSONValue | null | undefined;
+    };
     less?: {
       loader?: string;
       implementation?: string;

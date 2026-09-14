@@ -51,10 +51,14 @@ pub async fn insert_server_reference_aliases(
 }
 
 #[turbo_tasks::function]
-#[allow(unused_variables)]
-pub async fn get_postcss_package_mapping() -> Result<Vc<ImportMapping>> {
+pub async fn get_postcss_package_mapping(config: Vc<Config>) -> Result<Vc<ImportMapping>> {
+    let implementation = config
+        .styles()
+        .await?
+        .postcss_implementation()?
+        .unwrap_or_else(|| rcstr!("postcss"));
     Ok(ImportMapping::External(
-        Some(rcstr!("postcss")),
+        Some(implementation),
         ExternalType::CommonJs,
         ExternalTraced::Untraced,
     )

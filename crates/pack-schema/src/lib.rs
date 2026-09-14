@@ -1192,6 +1192,7 @@ pub struct SchemaStyleConfig {
     #[schemars(
         description = "Inline PostCSS configuration appended after a discovered config file"
     )]
+    #[schemars(with = "Option<SchemaPostCssConfig>")]
     pub postcss: Option<serde_json::Value>,
 
     /// Sass configuration
@@ -1208,6 +1209,15 @@ pub struct SchemaStyleConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Inline CSS configuration")]
     pub inline_css: Option<serde_json::Value>,
+}
+
+#[derive(JsonSchema)]
+pub struct SchemaPostCssConfig {
+    /// Absolute path to the PostCSS module used at build time (for example, require.resolve("postcss")).
+    /// Defaults to resolving "postcss" at runtime.
+    pub implementation: Option<String>,
+    #[serde(flatten)]
+    pub options: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// CSS Modules configuration

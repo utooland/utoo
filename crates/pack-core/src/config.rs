@@ -457,6 +457,30 @@ pub struct StyleConfig {
     inline_css: Option<serde_json::Value>,
 }
 
+impl StyleConfig {
+    pub fn postcss_implementation(&self) -> Result<Option<RcStr>> {
+        let Some(implementation) = self
+            .postcss
+            .as_ref()
+            .and_then(|postcss| postcss.get("implementation"))
+            .filter(|implementation| !implementation.is_null())
+        else {
+            return Ok(None);
+        };
+        let implementation = implementation
+            .as_str()
+            .filter(|path| !path.is_empty() && crate::util::is_absolute_path(path));
+        Ok(Some(
+            implementation
+                .context(
+                    "styles.postcss.implementation must be an absolute path to a PostCSS module \
+                     (use require.resolve('postcss'))",
+                )?
+                .into(),
+        ))
+    }
+}
+
 #[turbo_tasks::value(eq = "manual")]
 #[derive(Clone, Debug, PartialEq, Default, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
@@ -1434,7 +1458,14 @@ impl Config {
             .styles
             .as_ref()
             .and_then(|styles| styles.postcss.as_ref())
-            .map(serde_json::to_string)
+            .cloned()
+            .map(|mut postcss| {
+                // This selects the processor, rather than configuring its plugins.
+                if let Some(options) = postcss.as_object_mut() {
+                    options.remove("implementation");
+                }
+                serde_json::to_string(&postcss)
+            })
             .transpose()?
             .map(RcStr::from);
 
@@ -2109,6 +2140,58 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn postcss_implementation_accepts_absolute_paths() {
+        for path in [
+            "/framework/node_modules/postcss/lib/postcss.js",
+            r"C:\framework\node_modules\postcss\lib\postcss.js",
+            r"\\server\framework\node_modules\postcss\lib\postcss.js",
+        ] {
+            let styles: StyleConfig = serde_json::from_value(serde_json::json!({
+                "postcss": { "implementation": path, "plugins": {} }
+            }))
+            .unwrap();
+            assert_eq!(
+                styles.postcss_implementation().unwrap().as_deref(),
+                Some(path)
+            );
+        }
+    }
+
+    #[test]
+    fn postcss_implementation_defaults_to_runtime_resolution() {
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({ "postcss": { "plugins": {} } }),
+            serde_json::json!({ "postcss": { "implementation": null } }),
+        ] {
+            let styles: StyleConfig = serde_json::from_value(value).unwrap();
+            assert_eq!(styles.postcss_implementation().unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn postcss_implementation_rejects_ambiguous_or_invalid_paths() {
+        for value in [
+            serde_json::json!(""),
+            serde_json::json!("postcss"),
+            serde_json::json!("./postcss.js"),
+            serde_json::json!(true),
+        ] {
+            let styles: StyleConfig = serde_json::from_value(serde_json::json!({
+                "postcss": { "implementation": value }
+            }))
+            .unwrap();
+            assert!(
+                styles
+                    .postcss_implementation()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("styles.postcss.implementation must be an absolute path")
+            );
+        }
+    }
 
     #[test]
     fn test_server_entries_deserialization() {

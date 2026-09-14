@@ -1566,6 +1566,19 @@
         "export"
       ]
     },
+    "SchemaPostCssConfig": {
+      "type": "object",
+      "properties": {
+        "implementation": {
+          "description": "Absolute path to the PostCSS module used at build time (for example, require.resolve(\"postcss\")). Defaults to resolving \"postcss\" at runtime.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
     "SchemaProviderConfigValue": {
       "description": "Provider configuration value. Can be a simple module name string or a [module, export] tuple.",
       "anyOf": [
@@ -1961,7 +1974,15 @@
           "description": "Less configuration"
         },
         "postcss": {
-          "description": "Inline PostCSS configuration appended after a discovered config file"
+          "description": "Inline PostCSS configuration appended after a discovered config file",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchemaPostCssConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "sass": {
           "description": "Sass configuration"
