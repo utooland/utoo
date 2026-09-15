@@ -72,6 +72,15 @@ __turbopack_context__.s([
     __TURBOPACK__default__export__1
 ], 148);
 }),
+498, ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__855__ = __turbopack_context__.i(855);
+var __TURBOPACK__imported__module__554__ = __turbopack_context__.i(554);
+;
+;
+__turbopack_context__.s([]);
+}),
 855, ((__turbopack_context__, module, exports) => {
 
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
@@ -87,15 +96,6 @@ __turbopack_context__.s([]);
 554, ((__turbopack_context__, module, exports) => {
 
 setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(77)), 1000);
-}),
-498, ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__855__ = __turbopack_context__.i(855);
-var __TURBOPACK__imported__module__554__ = __turbopack_context__.i(554);
-;
-;
-__turbopack_context__.s([]);
 }),
 77, ((__turbopack_context__) => {
 "use strict";

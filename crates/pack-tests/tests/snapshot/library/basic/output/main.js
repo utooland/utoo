@@ -3,32 +3,17 @@
 })([
 ["main.js",
 
-61, ((__turbopack_context__) => {
+32, ((__turbopack_context__) => {
 "use strict";
 
-function jsx() {
-    return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
-}
-function jsxs() {
-    return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
-}
-__turbopack_context__.s([
-    "f",
-    0,
-    jsx
-]);
+let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("emotion-styled", () => require("emotion-styled")); } else { mod = globalThis["EmotionStyled"] }
+
+__turbopack_context__.v(mod);
 }),
 11, ((__turbopack_context__) => {
 "use strict";
 
 let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("react-dom", () => require("react-dom")); } else { mod = globalThis["ReactDOM"] }
-
-__turbopack_context__.v(mod);
-}),
-32, ((__turbopack_context__) => {
-"use strict";
-
-let mod; if (typeof exports === 'object' && typeof module === 'object') { mod = __turbopack_context__.x("emotion-styled", () => require("emotion-styled")); } else { mod = globalThis["EmotionStyled"] }
 
 __turbopack_context__.v(mod);
 }),
@@ -69,6 +54,21 @@ root.render(/*#__PURE__*/ (0, __TURBOPACK__imported__module__61__["f"])(App, {
     content: 'hello'
 }));
 __turbopack_context__.s([]);
+}),
+61, ((__turbopack_context__) => {
+"use strict";
+
+function jsx() {
+    return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
+}
+function jsxs() {
+    return 'purposefully empty stub for @emotion/react/jsx-runtime.js';
+}
+__turbopack_context__.s([
+    "f",
+    0,
+    jsx
+]);
 }),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":[20]}],

@@ -9,6 +9,12 @@ var mod = __turbopack_context__.x("fs", () => require("fs"));
 
 module.exports = mod;
 }),
+"[externals]/path [external] (path, cjs)", ((__turbopack_context__, module, exports) => {
+
+var mod = __turbopack_context__.x("path", () => require("path"));
+
+module.exports = mod;
+}),
 "[project]/target_node/library_build_node_target/input/helper.js [library-server] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 const fs = __turbopack_context__.r("[externals]/fs [external] (fs, cjs)");
@@ -18,12 +24,6 @@ function readFile(filePath) {
 module.exports = {
     readFile
 };
-}),
-"[externals]/path [external] (path, cjs)", ((__turbopack_context__, module, exports) => {
-
-var mod = __turbopack_context__.x("path", () => require("path"));
-
-module.exports = mod;
 }),
 "[project]/target_node/library_build_node_target/input/index.js [library-server] (ecmascript)", ((__turbopack_context__, module, exports) => {
 

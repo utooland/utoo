@@ -1,4 +1,4 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
+(()=>{"use strict";(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
 "[@utoo/pack-runtime]/hmr/bootstrap.ts [client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -817,13 +817,18 @@ __turbopack_context__.s([
     ()=>subscribeToUpdate
 ]);
 const TURBOPACK_CHUNK_UPDATE_LISTENERS_GLOBAL = 'TURBOPACK_CHUNK_UPDATE_LISTENERS';
+let lastSeenHmrVersion;
 function connect({ addMessageListener, sendMessage, onUpdateError = console.error, chunkUpdateListenersGlobal }) {
     addMessageListener((msg)=>{
         switch(msg.type){
             case 'turbopack-connected':
+                if (lastSeenHmrVersion === undefined && msg.data !== undefined) {
+                    lastSeenHmrVersion = msg.data.hmrVersion;
+                }
                 handleSocketConnected(sendMessage);
                 break;
-            default:
+            case 'turbopack-message':
+                lastSeenHmrVersion = msg.hmrVersion;
                 try {
                     if (Array.isArray(msg.data)) {
                         for(let i = 0; i < msg.data.length; i++){
@@ -838,6 +843,11 @@ function connect({ addMessageListener, sendMessage, onUpdateError = console.erro
                     onUpdateError(e);
                     location.reload();
                 }
+                break;
+            case 'server-component-changes':
+                lastSeenHmrVersion = msg.hmrVersion;
+                break;
+            default:
                 break;
         }
     });
@@ -871,6 +881,7 @@ function subscribeToUpdates(sendMessage, resource, expectedVersion) {
     sendJSON(sendMessage, {
         type: 'turbopack-subscribe',
         ...resource,
+        hmrVersion: lastSeenHmrVersion,
         version: expectedVersion
     });
     return ()=>{
@@ -1282,4 +1293,4 @@ function triggerUpdate(msg) {
     }
 }
 }),
-]);
+]);})()

@@ -3,6 +3,12 @@
 })([
 ["server.js",
 
+"[externals]/server-only [external] (server-only, cjs)", ((__turbopack_context__, module, exports) => {
+
+var mod = __turbopack_context__.x("server-only", () => require("server-only"));
+
+module.exports = mod;
+}),
 "[project]/externals/server-specific/input/node_modules/client-only/index.js [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -11,12 +17,6 @@ __turbopack_context__.s([
     ()=>__TURBOPACK__default__export__
 ]);
 var __TURBOPACK__default__export__ = "bundled client-only";
-}),
-"[externals]/server-only [external] (server-only, cjs)", ((__turbopack_context__, module, exports) => {
-
-var mod = __turbopack_context__.x("server-only", () => require("server-only"));
-
-module.exports = mod;
 }),
 "[project]/externals/server-specific/input/server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";

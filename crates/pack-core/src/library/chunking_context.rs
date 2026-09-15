@@ -3,7 +3,7 @@ use bincode::{Decode, Encode};
 use qstring::QString;
 use rustc_hash::FxHashMap;
 use tracing::Instrument;
-use turbo_rcstr::RcStr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::{
@@ -16,7 +16,8 @@ use turbopack_browser::chunking_context::{
 use turbopack_core::{
     asset::{Asset, AssetContent, no_hash_salt},
     chunk::{
-        ChunkGroupResult, ChunkItem, ChunkableModule, ChunkingConfig, ChunkingConfigs,
+        ChunkGroupResult, ChunkItem, ChunkItemOrBatchWithAsyncModuleInfo,
+        ChunkItemWithAsyncModuleInfo, ChunkType, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, MinifyType, SourceMapSourceType,
         SourceMapsType, UnusedReferences,
         availability_info::AvailabilityInfo,
@@ -452,9 +453,7 @@ impl LibraryChunkingContext {
         hasher.write_value(chunk_items.len());
 
         for item in &chunk_items {
-            for (module_id, code, _) in &**item {
-                hasher.write_value((module_id, code.source_code()));
-            }
+            hasher.write_value((&item.id, item.code.source_code()));
         }
 
         let hash = hasher.finish();
@@ -795,6 +794,74 @@ impl ChunkingContext for LibraryChunkingContext {
             chunk_group_bootstrap_params: None,
         }
         .cell())
+    }
+
+    #[turbo_tasks::function]
+    async fn standalone_chunk(
+        self: ResolvedVc<Self>,
+        chunk_item: ResolvedVc<Box<dyn ChunkItem>>,
+    ) -> Result<Vc<Box<dyn OutputAsset>>> {
+        let chunk_type = chunk_item
+            .into_trait_ref()
+            .await?
+            .ty()
+            .to_resolved()
+            .await?;
+        let chunk = chunk_type
+            .chunk(
+                Vc::upcast(*self),
+                vec![ChunkItemOrBatchWithAsyncModuleInfo::ChunkItem(
+                    ChunkItemWithAsyncModuleInfo {
+                        chunk_item,
+                        chunk_type,
+                        module: None,
+                        async_info: None,
+                    },
+                )],
+                Vec::new(),
+                Vec::new(),
+            )
+            .to_resolved()
+            .await?;
+        if let Some(ecmascript_chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
+            let item_ident = chunk_item.asset_ident().to_resolved().await?;
+            let item_ident_ref = item_ident.await?;
+            let ident = if QString::from(item_ident_ref.query.as_str())
+                .get("name")
+                .is_some()
+            {
+                *item_ident
+            } else {
+                // Standalone chunk items are ordinary modules, not entries, so they carry
+                // no `?name=`. Derive a stable name from the item ident (path-based name
+                // plus an ident hash to keep distinct module parts apart).
+                let base = ident_to_output_filename(
+                    *item_ident,
+                    self.await?.root_path.clone(),
+                    rcstr!(".js"),
+                    None,
+                )
+                .owned()
+                .await?;
+                let hash = encode_hex(hash_xxh3_hash64(item_ident.to_string().await?.as_str()));
+                let name = format!("{base}-{}", &hash[..8]);
+                (*item_ident_ref)
+                    .clone()
+                    .with_query(format!("?name={name}").into())
+                    .into_vc()
+            };
+            let output_ident =
+                self.ecmascript_chunk_ident_with_filename_template(ident, *ecmascript_chunk);
+            Ok(Vc::upcast(EcmascriptLibraryChunk::new(
+                *self,
+                output_ident,
+                *ecmascript_chunk,
+            )))
+        } else if let Some(output_asset) = ResolvedVc::try_sidecast::<Box<dyn OutputAsset>>(chunk) {
+            Ok(*output_asset)
+        } else {
+            bail!("Unable to generate output asset for standalone library chunk")
+        }
     }
 
     #[turbo_tasks::function]

@@ -21,17 +21,24 @@ const cssModuleMarker =
   '"[project]/style/inline_css/input/index.less?modules [client] (css module)"';
 const entryMarker =
   '"[project]/style/inline_css/input/index.js [client] (ecmascript)"';
-const cssModuleStart = chunk.indexOf(cssModuleMarker);
-const entryStart = chunk.indexOf(entryMarker, cssModuleStart);
+// Match factory definitions (marker at line start followed by the factory),
+// not import calls that mention the same module id inside other factories.
+const cssModuleStart = chunk.indexOf(`\n${cssModuleMarker},`);
+const entryStart = chunk.indexOf(`\n${entryMarker},`);
 
 assert.notEqual(cssModuleStart, -1, "expected the CSS Modules facade");
-assert.notEqual(
-  entryStart,
-  -1,
-  "expected the JavaScript entry after the CSS Modules facade",
-);
+assert.notEqual(entryStart, -1, "expected the JavaScript entry");
 
-const cssModuleFactory = chunk.slice(cssModuleStart, entryStart);
+// Strict factories are grouped separately from non-strict ones, so the entry
+// may precede the facade. Slice the facade's own factory up to the next one.
+const nextFactoryStart = chunk.indexOf(
+  '\n"[project]/',
+  cssModuleStart + cssModuleMarker.length,
+);
+const cssModuleFactory = chunk.slice(
+  cssModuleStart,
+  nextFactoryStart === -1 ? undefined : nextFactoryStart,
+);
 
 assert.match(
   cssModuleFactory,

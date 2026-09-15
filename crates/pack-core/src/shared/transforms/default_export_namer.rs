@@ -98,10 +98,9 @@ impl VisitMut for DefaultExportNamerVisitor {
                                     .map(|pat| pat.into())
                                     .collect::<Vec<_>>(),
                                 body: Some(match *body {
-                                    BlockStmtOrExpr::BlockStmt(block_stmt) => block_stmt,
-                                    BlockStmtOrExpr::Expr(expr) => BlockStmt {
+                                    ArrowFunctionBody::FunctionBody(block_stmt) => block_stmt,
+                                    ArrowFunctionBody::Expr(expr) => FunctionBody {
                                         span,
-                                        ctxt,
                                         stmts: vec![Stmt::Return(ReturnStmt {
                                             span,
                                             arg: Some(expr),
@@ -115,6 +114,7 @@ impl VisitMut for DefaultExportNamerVisitor {
                                 return_type,
                                 type_params,
                                 decorators: vec![],
+                                this_param: None,
                             }
                             .into(),
                         }),

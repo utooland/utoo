@@ -3,10 +3,6 @@
 })([
 ["main.js",
 
-"[project]/library/inline_css_dependencies/node_modules/third-party-global/global.css [library-client] (css, inline css content)", (function(__turbopack_context__){
-
-__turbopack_context__.v("/* [project]/library/inline_css_dependencies/node_modules/third-party-global/global.css [library-client] (css) */\n.third-party-global {\n  color: red;\n}\n\n");
-}),
 "[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [library-client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 /**
@@ -229,6 +225,33 @@ module.exports = function(list, options) {
     };
 };
 }),
+"[project]/library/inline_css_dependencies/input/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$global$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-global/index.js [library-client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.js [library-client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$side$2d$effect$2d$free$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-side-effect-free/index.js [library-client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-selective/index.js [library-client] (ecmascript)");
+;
+;
+;
+;
+const dependencyValues = {
+    globalValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$global$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
+    loadingStyles: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
+    selectiveValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
+    sideEffectFreeValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$side$2d$effect$2d$free$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"]
+};
+__turbopack_context__.s([
+    "dependencyValues",
+    0,
+    dependencyValues
+]);
+}),
+"[project]/library/inline_css_dependencies/node_modules/third-party-global/global.css [library-client] (css, inline css content)", (function(__turbopack_context__){
+
+__turbopack_context__.v("/* [project]/library/inline_css_dependencies/node_modules/third-party-global/global.css [library-client] (css) */\n.third-party-global {\n  color: red;\n}\n\n");
+}),
 "[project]/library/inline_css_dependencies/node_modules/third-party-global/global.css { INLINE_CSS_CONTENT => \"[project]/library/inline_css_dependencies/node_modules/third-party-global/global.css [library-client] (css, inline css content)\" } [library-client] (inline css, ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -262,6 +285,20 @@ __turbopack_context__.s([
     globalValue
 ]);
 }),
+"[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$library$2d$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.css { INLINE_CSS_CONTENT => "[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.css [library-client] (css, inline css content)" } [library-client] (inline css, ecmascript)');
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$json$2e5b$json$5d2e$cjs__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.json.[json].cjs [library-client] (ecmascript)");
+;
+;
+const loadingStyles = __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$json$2e5b$json$5d2e$cjs__$5b$library$2d$client$5d$__$28$ecmascript$29$__["default"];
+__turbopack_context__.s([
+    "f",
+    0,
+    loadingStyles
+]);
+}),
 "[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.css [library-client] (css, inline css content)", (function(__turbopack_context__){
 
 __turbopack_context__.v("/* [project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.css [library-client] (css) */\n._loadingItem_fixture_1:before {\n  content: \"\";\n  animation: 1s infinite _fadeInOut_fixture_1;\n}\n\n@keyframes _fadeInOut_fixture_1 {\n  from {\n    opacity: 0;\n  }\n\n  to {\n    opacity: 1;\n  }\n}\n\n");
@@ -293,29 +330,17 @@ module.exports = {
     "loadingItem": "_loadingItem_fixture_1"
 };
 }),
-"[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/library/inline_css_dependencies/node_modules/third-party-selective/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$library$2d$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.css { INLINE_CSS_CONTENT => "[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.css [library-client] (css, inline css content)" } [library-client] (inline css, ecmascript)');
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$json$2e5b$json$5d2e$cjs__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.modules.json.[json].cjs [library-client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$keep$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$keep$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$library$2d$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/library/inline_css_dependencies/node_modules/third-party-selective/keep.css { INLINE_CSS_CONTENT => "[project]/library/inline_css_dependencies/node_modules/third-party-selective/keep.css [library-client] (css, inline css content)" } [library-client] (inline css, ecmascript)');
 ;
 ;
-const loadingStyles = __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$modules$2e$json$2e5b$json$5d2e$cjs__$5b$library$2d$client$5d$__$28$ecmascript$29$__["default"];
+const selectiveValue = "selective";
 __turbopack_context__.s([
     "f",
     0,
-    loadingStyles
-]);
-}),
-"[project]/library/inline_css_dependencies/node_modules/third-party-side-effect-free/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-;
-const sideEffectFreeValue = "side-effect-free";
-__turbopack_context__.s([
-    "f",
-    0,
-    sideEffectFreeValue
+    selectiveValue
 ]);
 }),
 "[project]/library/inline_css_dependencies/node_modules/third-party-selective/keep.css [library-client] (css, inline css content)", (function(__turbopack_context__){
@@ -343,40 +368,15 @@ var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d
 var __TURBOPACK__default__export__ = {};
 __turbopack_context__.s([]);
 }),
-"[project]/library/inline_css_dependencies/node_modules/third-party-selective/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"[project]/library/inline_css_dependencies/node_modules/third-party-side-effect-free/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$keep$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$keep$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$library$2d$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/library/inline_css_dependencies/node_modules/third-party-selective/keep.css { INLINE_CSS_CONTENT => "[project]/library/inline_css_dependencies/node_modules/third-party-selective/keep.css [library-client] (css, inline css content)" } [library-client] (inline css, ecmascript)');
 ;
-;
-const selectiveValue = "selective";
+const sideEffectFreeValue = "side-effect-free";
 __turbopack_context__.s([
     "f",
     0,
-    selectiveValue
-]);
-}),
-"[project]/library/inline_css_dependencies/input/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$global$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-global/index.js [library-client] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-precompiled/index.js [library-client] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$side$2d$effect$2d$free$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-side-effect-free/index.js [library-client] (ecmascript)");
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/library/inline_css_dependencies/node_modules/third-party-selective/index.js [library-client] (ecmascript)");
-;
-;
-;
-;
-const dependencyValues = {
-    globalValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$global$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
-    loadingStyles: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$precompiled$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
-    selectiveValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$selective$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"],
-    sideEffectFreeValue: __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_dependencies$2f$node_modules$2f$third$2d$party$2d$side$2d$effect$2d$free$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["f"]
-};
-__turbopack_context__.s([
-    "dependencyValues",
-    0,
-    dependencyValues
+    sideEffectFreeValue
 ]);
 }),
 ],

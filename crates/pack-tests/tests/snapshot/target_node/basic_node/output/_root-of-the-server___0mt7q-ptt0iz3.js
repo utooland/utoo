@@ -5,21 +5,6 @@ var mod = __turbopack_context__.x("node:path", () => require("node:path"));
 
 module.exports = mod;
 }),
-"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-function greet(name) {
-    return `Hello, ${name}!`;
-}
-function add(a, b) {
-    return a + b;
-}
-__turbopack_context__.s([
-    "f",
-    0,
-    greet
-]);
-}),
 "[project]/target_node/basic_node/input/index.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -35,6 +20,21 @@ console.log("dirname:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3
 console.log("extname:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__["default"].extname("index.ts"));
 console.log("joined:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__["default"].join("src", "utils", "index.ts"));
 __turbopack_context__.s([]);
+}),
+"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+function greet(name) {
+    return `Hello, ${name}!`;
+}
+function add(a, b) {
+    return a + b;
+}
+__turbopack_context__.s([
+    "f",
+    0,
+    greet
+]);
 }),
 ];
 

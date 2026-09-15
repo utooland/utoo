@@ -64,6 +64,20 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
     }
 }, false);
 }),
+511, ((__turbopack_context__) => {
+"use strict";
+
+return __turbopack_context__.a(async function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
+    try {
+        const result = await __turbopack_context__.r(220);
+        await Promise.resolve().then(()=>__turbopack_context__.i(864));
+        result.default;
+        __turbopack_async_result__();
+    } catch (e) {
+        __turbopack_async_result__(e);
+    }
+}, true);
+}),
 220, ((__turbopack_context__) => {
 "use strict";
 
@@ -89,20 +103,6 @@ return __turbopack_context__.a(async function(__turbopack_handle_async_dependenc
         __turbopack_async_result__(e);
     }
 }, false);
-}),
-511, ((__turbopack_context__) => {
-"use strict";
-
-return __turbopack_context__.a(async function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
-    try {
-        const result = await __turbopack_context__.r(220);
-        await Promise.resolve().then(()=>__turbopack_context__.i(864));
-        result.default;
-        __turbopack_async_result__();
-    } catch (e) {
-        __turbopack_async_result__(e);
-    }
-}, true);
 }),
 263, ((__turbopack_context__) => {
 "use strict";

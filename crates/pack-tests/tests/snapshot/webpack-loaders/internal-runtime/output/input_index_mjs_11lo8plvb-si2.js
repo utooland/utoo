@@ -2,5 +2,5 @@
     script: typeof document === "object" ? document.currentScript : undefined,
     chunks: ["_root-of-the-server___1wt8bhdf9fzog.js"],
     source: "entry",
-    version: "5/GGBpa5CEo"
+    version: "IOJ+nFtCsQo"
 });

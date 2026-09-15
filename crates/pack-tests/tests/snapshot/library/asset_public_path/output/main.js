@@ -3,9 +3,6 @@
 })([
 ["main.js",
 
-"[project]/library/asset_public_path/input/logo.jpg (static in ecmascript)", ((__turbopack_context__) => {
-
-__turbopack_context__.q("/static/logo.375683b7.jpg");}),
 "[project]/library/asset_public_path/input/index.js [library-server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -22,6 +19,9 @@ __turbopack_context__.s([
     logoUrl
 ]);
 }),
+"[project]/library/asset_public_path/input/logo.jpg (static in ecmascript)", ((__turbopack_context__) => {
+
+__turbopack_context__.q("/static/logo.375683b7.jpg");}),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/library/asset_public_path/input/index.js [library-server] (ecmascript)"]}],
 ]);

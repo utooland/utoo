@@ -141,7 +141,51 @@ function _type_of(obj) {
     return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj;
 }
 (function(__UTOOPACK__) {
-    var Context = /**
+    if (!Array.isArray(__UTOOPACK__)) {
+        return;
+    }
+    var CHUNK_BASE_PATH = "";
+    var CHUNK_SUFFIX_PATH = "";
+    var RELATIVE_ROOT_PATH = "..";
+    var RUNTIME_PUBLIC_PATH = "";
+    // Library builds deliberately collapse JavaScript into one chunk, so the
+    // component-chunk runtime path is unsupported in this custom runtime.
+    var SUPPORT_COMPONENT_CHUNKS = false;
+    /**
+ * This file contains runtime types and functions that are shared between all
+ * TurboPack ECMAScript runtimes.
+ *
+ * It will be prepended to the runtime code of each runtime.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-types.d.ts" />
+    /// <reference path="./async-module.ts" />
+    /**
+ * Describes why a module was instantiated.
+ * Shared between browser and Node.js runtimes.
+ */ var SourceType = function(SourceType) {
+        /**
+   * The module was instantiated because it was included in an evaluated chunk's
+   * runtime.
+   * SourceData is a ChunkPath.
+   */ SourceType[SourceType["Runtime"] = 0] = "Runtime";
+        /**
+   * The module was instantiated because a parent module imported it.
+   * SourceData is a ModuleId.
+   */ SourceType[SourceType["Parent"] = 1] = "Parent";
+        /**
+   * The module was instantiated because it was included in a chunk's hot module
+   * update.
+   * SourceData is an array of ModuleIds or undefined.
+   */ SourceType[SourceType["Update"] = 2] = "Update";
+        return SourceType;
+    }(SourceType || {});
+    /**
+ * Flag indicating which module object type to create when a module is merged. Set to `true`
+ * by each runtime that uses ModuleWithDirection (browser dev-base.ts, nodejs dev-base.ts,
+ * nodejs build-base.ts). Browser production (build-base.ts) leaves it as `false` since it
+ * uses plain Module objects.
+ */ var createModuleWithDirectionFlag = false;
+    var REEXPORTED_OBJECTS = new WeakMap();
+    /**
  * Constructs the `__turbopack_context__` object for a module.
  */ function Context(module1, exports1) {
         this.m = module1;
@@ -153,11 +197,14 @@ function _type_of(obj) {
         //    `esmExport`
         // Ideally we could find a new approach for async modules and drop this property altogether.
         this.e = exports1;
-    };
-    var defineProp = function defineProp(obj, name, options) {
+    }
+    var contextPrototype = Context.prototype;
+    var hasOwnProperty = Object.prototype.hasOwnProperty;
+    var toStringTag = typeof Symbol !== 'undefined' && Symbol.toStringTag;
+    function defineProp(obj, name, options) {
         if (!hasOwnProperty.call(obj, name)) Object.defineProperty(obj, name, options);
-    };
-    var getOverwrittenModule = function getOverwrittenModule(moduleCache, id) {
+    }
+    function getOverwrittenModule(moduleCache, id) {
         var _$module = moduleCache[id];
         if (!_$module) {
             if (createModuleWithDirectionFlag) {
@@ -169,8 +216,8 @@ function _type_of(obj) {
             moduleCache[id] = _$module;
         }
         return _$module;
-    };
-    var createModuleObject = /**
+    }
+    /**
  * Creates the module object. Only done here to ensure all module objects have the same shape.
  */ function createModuleObject(id) {
         return {
@@ -179,8 +226,8 @@ function _type_of(obj) {
             id: id,
             namespaceObject: undefined
         };
-    };
-    var createModuleWithDirection = function createModuleWithDirection(id) {
+    }
+    function createModuleWithDirection(id) {
         return {
             exports: {},
             error: undefined,
@@ -189,8 +236,9 @@ function _type_of(obj) {
             parents: [],
             children: []
         };
-    };
-    var esm = /**
+    }
+    var BindingTag_Value = 0;
+    /**
  * Adds the getters to the exports object.
  */ function esm(exports1, bindings, dynamic) {
         defineProp(exports1, '__esModule', {
@@ -238,8 +286,8 @@ function _type_of(obj) {
         // export proxy can surface keys discovered at runtime, so skip the seal for
         // them.
         if (!dynamic) Object.seal(exports1);
-    };
-    var esmExport = /**
+    }
+    /**
  * Makes the module an ESM with exports
  */ function esmExport(bindings, id, dynamic) {
         var _$module;
@@ -253,8 +301,9 @@ function _type_of(obj) {
         }
         _$module.namespaceObject = _$exports;
         esm(_$exports, bindings, dynamic);
-    };
-    var ensureDynamicExports = function ensureDynamicExports(module1, exports1) {
+    }
+    contextPrototype.s = esmExport;
+    function ensureDynamicExports(module1, exports1) {
         var reexportedObjects = REEXPORTED_OBJECTS.get(module1);
         if (!reexportedObjects) {
             REEXPORTED_OBJECTS.set(module1, reexportedObjects = []);
@@ -398,8 +447,8 @@ function _type_of(obj) {
             });
         }
         return reexportedObjects;
-    };
-    var dynamicExport = /**
+    }
+    /**
  * Dynamically exports properties from an object
  */ function dynamicExport(object, id) {
         var _$module;
@@ -415,8 +464,9 @@ function _type_of(obj) {
         if ((typeof object === "undefined" ? "undefined" : _type_of(object)) === 'object' && object !== null) {
             reexportedObjects.push(object);
         }
-    };
-    var exportValue = function exportValue(value, id) {
+    }
+    contextPrototype.j = dynamicExport;
+    function exportValue(value, id) {
         var _$module;
         if (id != null) {
             _$module = getOverwrittenModule(this.c, id);
@@ -424,8 +474,9 @@ function _type_of(obj) {
             _$module = this.m;
         }
         _$module.exports = value;
-    };
-    var exportNamespace = function exportNamespace(namespace, id) {
+    }
+    contextPrototype.v = exportValue;
+    function exportNamespace(namespace, id) {
         var _$module;
         if (id != null) {
             _$module = getOverwrittenModule(this.c, id);
@@ -433,13 +484,27 @@ function _type_of(obj) {
             _$module = this.m;
         }
         _$module.exports = _$module.namespaceObject = namespace;
-    };
-    var createGetter = function createGetter(obj, key) {
+    }
+    contextPrototype.n = exportNamespace;
+    function createGetter(obj, key) {
         return function() {
             return obj[key];
         };
+    }
+    /**
+ * @returns prototype of the object
+ */ var getProto = Object.getPrototypeOf ? function(obj) {
+        return Object.getPrototypeOf(obj);
+    } : function(obj) {
+        return obj.__proto__;
     };
-    var interopEsm = /**
+    /** Prototypes that are not expanded for exports */ var LEAF_PROTOTYPES = [
+        null,
+        getProto({}),
+        getProto([]),
+        getProto(getProto)
+    ];
+    /**
  * @param raw
  * @param ns
  * @param allowExportDefault
@@ -486,8 +551,8 @@ function _type_of(obj) {
         }
         esm(ns, bindings);
         return ns;
-    };
-    var createNS = function createNS(raw) {
+    }
+    function createNS(raw) {
         if (typeof raw === 'function') {
             return function() {
                 for(var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++){
@@ -498,23 +563,32 @@ function _type_of(obj) {
         } else {
             return Object.create(null);
         }
-    };
-    var esmImport = function esmImport(id) {
+    }
+    function esmImport(id) {
         var _$module = getOrInstantiateModuleFromParent(id, this.m);
         // any ES module has to have `module.namespaceObject` defined.
         if (_$module.namespaceObject) return _$module.namespaceObject;
         // only ESM can be an async module, so we don't need to worry about exports being a promise here.
         var raw = _$module.exports;
         return _$module.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
-    };
-    var asyncLoader = function asyncLoader(moduleId) {
+    }
+    contextPrototype.i = esmImport;
+    function asyncLoader(moduleId) {
         var loader = this.r(moduleId);
         return loader(esmImport.bind(this));
+    }
+    contextPrototype.A = asyncLoader;
+    // Add a simple runtime require so that environments without one can still pass
+    // `typeof require` CommonJS checks so that exports are correctly registered.
+    var runtimeRequire = typeof require === 'function' ? require : function require1() {
+        throw new Error('Unexpected use of runtime require');
     };
-    var commonJsRequire = function commonJsRequire(id) {
+    contextPrototype.t = runtimeRequire;
+    function commonJsRequire(id) {
         return getOrInstantiateModuleFromParent(id, this.m).exports;
-    };
-    var parseRequest = /**
+    }
+    contextPrototype.r = commonJsRequire;
+    /**
  * Remove fragments and query parameters since they are never part of the context map keys
  *
  * This matches how we parse patterns at resolving time.  Arguably we should only do this for
@@ -532,8 +606,8 @@ function _type_of(obj) {
             request = request.substring(0, queryIndex);
         }
         return request;
-    };
-    var moduleContext = /**
+    }
+    /**
  * `require.context` and require/import expression runtime.
  */ function moduleContext(map) {
         function moduleContext(id) {
@@ -576,20 +650,23 @@ function _type_of(obj) {
             })();
         };
         return moduleContext;
-    };
-    var getChunkPath = /**
+    }
+    contextPrototype.f = moduleContext;
+    /**
  * Returns the path of a chunk defined by its data.
  */ function getChunkPath(chunkData) {
         return typeof chunkData === 'string' ? chunkData : chunkData.path;
-    };
-    var installCompressedModuleFactories = // Load the CompressedmoduleFactories of a chunk into the `moduleFactories` Map.
-    // The CompressedModuleFactories format is
-    // - 1 or more module ids
-    // - a module factory function
-    // So walking this is a little complex but the flat structure is also fast to
-    // traverse, we can use `typeof` operators to distinguish the two cases.
+    }
+    // Load the CompressedModuleFactories of a chunk into the `moduleFactories` Map.
+    // The flat format alternates one or more module IDs with their factory function.
+    // Strict factories can be prepended as a nested array.
     function installCompressedModuleFactories(chunkModules, offset, moduleFactories, newModuleId) {
         var i = offset;
+        var strictFactories = chunkModules[i];
+        if (Array.isArray(strictFactories)) {
+            installCompressedModuleFactories(strictFactories, 0, moduleFactories, newModuleId);
+            i++;
+        }
         while(i < chunkModules.length){
             var end = i + 1;
             // Find our factory function
@@ -628,15 +705,45 @@ function _type_of(obj) {
                     newModuleId === null || newModuleId === void 0 ? void 0 : newModuleId(id1);
                 }
             }
-            i = end + 1; // end is pointing at the last factory advance to the next id or the end of the array.
+            i = end + 1;
         }
+    }
+    /**
+ * A pseudo "fake" URL object to resolve to its relative path.
+ *
+ * When UrlRewriteBehavior is set to relative, calls to the `new URL()` will construct url without base using this
+ * runtime function to generate context-agnostic urls between different rendering context, i.e ssr / client to avoid
+ * hydration mismatch.
+ *
+ * This is based on webpack's existing implementation:
+ * https://github.com/webpack/webpack/blob/87660921808566ef3b8796f8df61bd79fc026108/lib/runtime/RelativeUrlRuntimeModule.js
+ */ var relativeURL = function relativeURL(inputUrl) {
+        var realUrl = new URL(inputUrl, 'x:/');
+        var values = {};
+        for(var key in realUrl)values[key] = realUrl[key];
+        values.href = inputUrl;
+        values.pathname = inputUrl.replace(/[?#].*/, '');
+        values.origin = values.protocol = '';
+        values.toString = values.toJSON = function() {
+            for(var _len = arguments.length, _args = new Array(_len), _key = 0; _key < _len; _key++){
+                _args[_key] = arguments[_key];
+            }
+            return inputUrl;
+        };
+        for(var key1 in values)Object.defineProperty(this, key1, {
+            enumerable: true,
+            configurable: true,
+            value: values[key1]
+        });
     };
-    var invariant = /**
+    relativeURL.prototype = URL.prototype;
+    contextPrototype.U = relativeURL;
+    /**
  * Utility function to ensure all variants of an enum are handled.
  */ function invariant(never, computeMessage) {
         throw new Error("Invariant: ".concat(computeMessage(never)));
-    };
-    var factoryNotAvailableMessage = /**
+    }
+    /**
  * Constructs an error message for when a module factory is not available.
  */ function factoryNotAvailableMessage(moduleId, sourceType, sourceData) {
         var instantiationReason;
@@ -656,13 +763,17 @@ function _type_of(obj) {
                 });
         }
         return "Module ".concat(moduleId, " was instantiated ").concat(instantiationReason, ", but the module factory is not available.");
-    };
-    var requireStub = /**
+    }
+    /**
  * A stub function to make `require` available but non-functional in ESM.
  */ function requireStub(_moduleId) {
         throw new Error('dynamic usage of require is not supported');
-    };
-    var getAutomaticPublicPath = function getAutomaticPublicPath() {
+    }
+    contextPrototype.z = requireStub;
+    // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
+    contextPrototype.g = __utoo_global__;
+    var cachedAutomaticPublicPath;
+    function getAutomaticPublicPath() {
         if (cachedAutomaticPublicPath !== undefined) {
             return cachedAutomaticPublicPath;
         }
@@ -681,8 +792,8 @@ function _type_of(obj) {
         }
         cachedAutomaticPublicPath = scriptUrl ? scriptUrl.replace(/^blob:/, '').replace(/#.*$/, '').replace(/\?.*$/, '').replace(/\/[^/]*$/, '/') : '';
         return cachedAutomaticPublicPath;
-    };
-    var getPublicPath = /**
+    }
+    /**
  * Gets the public path for runtime assets.
  * Checks globalThis.publicPath and falls back to "/".
  */ function getPublicPath(mode) {
@@ -694,20 +805,35 @@ function _type_of(obj) {
             return publicPath.endsWith('/') ? publicPath : "".concat(publicPath, "/");
         }
         return '/';
-    };
-    var applyModuleFactoryName = function applyModuleFactoryName(factory) {
+    }
+    contextPrototype.p = getPublicPath;
+    function applyModuleFactoryName(factory) {
         // Give the module factory a nice name to improve stack traces.
         Object.defineProperty(factory, 'name', {
             value: 'module evaluation'
         });
-    };
-    var isPromise = function isPromise(maybePromise) {
+    }
+    /// <reference path="./runtime-types.d.ts" />
+    /// <reference path="./runtime-utils.ts" />
+    /**
+ * Top-level-await / async-module machinery. This is only included in the runtime
+ * when the module graph actually contains an async module (a module with
+ * top-level await, or one that transitively depends on one). When no async
+ * module is present, the chunk items never reference `__turbopack_context__.a`,
+ * so this whole file can be omitted.
+ *
+ * everything below is adapted from webpack
+ * https://github.com/webpack/webpack/blob/6be4065ade1e252c1d8dcba4af0f43e32af1bdc1/lib/runtime/AsyncModuleRuntimeModule.js#L13
+ */ var turbopackQueues = Symbol('turbopack queues');
+    var turbopackExports = Symbol('turbopack exports');
+    var turbopackError = Symbol('turbopack error');
+    function isPromise(maybePromise) {
         return maybePromise != null && (typeof maybePromise === "undefined" ? "undefined" : _type_of(maybePromise)) === 'object' && 'then' in maybePromise && typeof maybePromise.then === 'function';
-    };
-    var isAsyncModuleExt = function isAsyncModuleExt(obj) {
+    }
+    function isAsyncModuleExt(obj) {
         return turbopackQueues in obj;
-    };
-    var createPromise = function createPromise() {
+    }
+    function createPromise() {
         var resolve;
         var reject;
         var promise = new Promise(function(res, rej) {
@@ -719,8 +845,8 @@ function _type_of(obj) {
             resolve: resolve,
             reject: reject
         };
-    };
-    var resolveQueue = function resolveQueue(queue) {
+    }
+    function resolveQueue(queue) {
         if (queue && queue.status !== 1) {
             queue.status = 1;
             queue.forEach(function(fn) {
@@ -730,8 +856,8 @@ function _type_of(obj) {
                 return fn.queueCount-- ? fn.queueCount++ : fn();
             });
         }
-    };
-    var wrapDeps = function wrapDeps(deps) {
+    }
+    function wrapDeps(deps) {
         return deps.map(function(dep) {
             if (dep !== null && (typeof dep === "undefined" ? "undefined" : _type_of(dep)) === 'object') {
                 if (isAsyncModuleExt(dep)) return dep;
@@ -756,8 +882,8 @@ function _type_of(obj) {
             var _obj1;
             return _obj1 = {}, _define_property(_obj1, turbopackExports, dep), _define_property(_obj1, turbopackQueues, function() {}), _obj1;
         });
-    };
-    var asyncModule = function asyncModule(body, hasAwait) {
+    }
+    function asyncModule(body, hasAwait) {
         var _$module = this.m;
         var queue = hasAwait ? Object.assign([], {
             status: -1
@@ -823,8 +949,21 @@ function _type_of(obj) {
         if (queue && queue.status === -1) {
             queue.status = 0;
         }
-    };
-    var getChunkFromRegistration = /**
+    }
+    contextPrototype.a = asyncModule;
+    /**
+ * This file contains runtime types and functions that are shared between all
+ * Turbopack UMD library runtimes (DOM and Node.js).
+ *
+ * It will be appended to the runtime code of each runtime right after the
+ * shared runtime utils.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
+    /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
+    // Provided by build
+    var BACKEND;
+    var moduleFactories = new Map();
+    contextPrototype.M = moduleFactories;
+    /**
  * Determine the chunk to register from a registration entry.
  * In library builds, chunks are always string paths or script objects.
  */ function getChunkFromRegistration(chunk) {
@@ -837,8 +976,8 @@ function _type_of(obj) {
         } else {
             throw new Error("chunk path is empty");
         }
-    };
-    var externalRequire = /**
+    }
+    /**
  * Load CommonJS externals when a UMD bundle runs in a CommonJS environment.
  * Browser-targeted UMD bundles need this too because their wrapper supports
  * both global and CommonJS consumers.
@@ -854,8 +993,12 @@ function _type_of(obj) {
             return raw;
         }
         return interopEsm(raw, createNS(raw), true);
+    }
+    externalRequire.resolve = function(id, options) {
+        return require.resolve(id, options);
     };
-    var externalNamespace = /**
+    contextPrototype.x = externalRequire;
+    /**
  * Adds Webpack-compatible ESM metadata to external values while preserving
  * native ESM live bindings.
  */ function externalNamespace(mod) {
@@ -888,8 +1031,13 @@ function _type_of(obj) {
             });
         }
         return ns;
-    };
-    var getOrInstantiateRuntimeModule = /**
+    }
+    contextPrototype.N = externalNamespace;
+    /// <reference path="./runtime-base.ts" />
+    /// <reference path="./dummy.ts" />
+    var moduleCache = {};
+    contextPrototype.c = moduleCache;
+    /**
  * Gets or instantiates a runtime module.
  */ // @ts-ignore
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -902,8 +1050,23 @@ function _type_of(obj) {
             return _$module;
         }
         return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
+    }
+    /**
+ * Retrieves a module from the cache, or instantiate it if it is not cached.
+ */ // Used by the backend
+    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    var getOrInstantiateModuleFromParent = function getOrInstantiateModuleFromParent(id, sourceModule) {
+        var _$module = moduleCache[id];
+        if (_$module) {
+            if (_$module.error) {
+                throw _$module.error;
+            }
+            return _$module;
+        }
+        return instantiateModule(id, SourceType.Parent, sourceModule.id);
     };
-    var instantiateModule = function instantiateModule(id, sourceType, sourceData) {
+    function instantiateModule(id, sourceType, sourceData) {
         var moduleFactory = moduleFactories.get(id);
         if (typeof moduleFactory !== 'function') {
             // This can happen if modules incorrectly handle HMR disposes/updates,
@@ -927,8 +1090,8 @@ function _type_of(obj) {
             interopEsm(_$module.exports, _$module.namespaceObject);
         }
         return _$module;
-    };
-    var registerChunk = // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     function registerChunk(registration) {
         // An inlined entry-only registration is a bare params object (no source chunk).
         if (!Array.isArray(registration)) {
@@ -947,8 +1110,23 @@ function _type_of(obj) {
             installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories);
         }
         return BACKEND.registerChunk(chunk, runtimeParams);
-    };
-    var loadScript = /**
+    }
+    /**
+ * This file contains the runtime code specific to the Turbopack
+ * ECMAScript DOM runtime for library builds.
+ *
+ * It will be appended to the base runtime code in place of
+ * runtime-backend-node.ts when the target platform is browser/web.
+ *
+ * Since library builds produce a single, self-contained chunk,
+ * no dynamic chunk loading is needed. The BACKEND simply registers
+ * modules and instantiates runtime entries.
+ *
+ * The only DOM-specific addition is `loadScript` for script externals
+ * that need to be loaded from CDN or other external sources.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
+    var loadedScripts = new Map();
+    /**
  * Load an external script by creating a <script> tag.
  * This is used for script externals that need to be loaded from CDN or other external sources.
  */ function loadScript(scriptUrl) {
@@ -970,201 +1148,7 @@ function _type_of(obj) {
         });
         loadedScripts.set(scriptUrl, promise);
         return promise;
-    };
-    var factory = function factory() {
-        var runtimeModuleIds = [
-            "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)"
-        ];
-        var _$exports;
-        for(var i = 0; i < runtimeModuleIds.length; i++){
-            var _$module = moduleCache[runtimeModuleIds[i]];
-            if (_$module.error) throw _$module.error;
-            _$exports = _$module;
-        }
-        if (_$exports) {
-            // any ES module has to have `module.namespaceObject` defined.
-            if (_$exports.namespaceObject) return _$exports.namespaceObject;
-            // only ESM can be an async module, so we don't need to worry about exports being a promise here.
-            var raw = _$exports.exports;
-            return _$exports.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
-        }
-    };
-    if (!Array.isArray(__UTOOPACK__)) {
-        return;
     }
-    var CHUNK_BASE_PATH = "";
-    var CHUNK_SUFFIX_PATH = "";
-    var RELATIVE_ROOT_PATH = "..";
-    var RUNTIME_PUBLIC_PATH = "";
-    // Library builds deliberately collapse JavaScript into one chunk, so the
-    // component-chunk runtime path is unsupported in this custom runtime.
-    var SUPPORT_COMPONENT_CHUNKS = false;
-    /**
- * This file contains runtime types and functions that are shared between all
- * TurboPack ECMAScript runtimes.
- *
- * It will be prepended to the runtime code of each runtime.
- */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-types.d.ts" />
-    /// <reference path="./async-module.ts" />
-    /**
- * Describes why a module was instantiated.
- * Shared between browser and Node.js runtimes.
- */ var SourceType = function(SourceType) {
-        /**
-   * The module was instantiated because it was included in an evaluated chunk's
-   * runtime.
-   * SourceData is a ChunkPath.
-   */ SourceType[SourceType["Runtime"] = 0] = "Runtime";
-        /**
-   * The module was instantiated because a parent module imported it.
-   * SourceData is a ModuleId.
-   */ SourceType[SourceType["Parent"] = 1] = "Parent";
-        /**
-   * The module was instantiated because it was included in a chunk's hot module
-   * update.
-   * SourceData is an array of ModuleIds or undefined.
-   */ SourceType[SourceType["Update"] = 2] = "Update";
-        return SourceType;
-    }(SourceType || {});
-    /**
- * Flag indicating which module object type to create when a module is merged. Set to `true`
- * by each runtime that uses ModuleWithDirection (browser dev-base.ts, nodejs dev-base.ts,
- * nodejs build-base.ts). Browser production (build-base.ts) leaves it as `false` since it
- * uses plain Module objects.
- */ var createModuleWithDirectionFlag = false;
-    var REEXPORTED_OBJECTS = new WeakMap();
-    var contextPrototype = Context.prototype;
-    var hasOwnProperty = Object.prototype.hasOwnProperty;
-    var toStringTag = typeof Symbol !== 'undefined' && Symbol.toStringTag;
-    var BindingTag_Value = 0;
-    contextPrototype.s = esmExport;
-    contextPrototype.j = dynamicExport;
-    contextPrototype.v = exportValue;
-    contextPrototype.n = exportNamespace;
-    /**
- * @returns prototype of the object
- */ var getProto = Object.getPrototypeOf ? function(obj) {
-        return Object.getPrototypeOf(obj);
-    } : function(obj) {
-        return obj.__proto__;
-    };
-    /** Prototypes that are not expanded for exports */ var LEAF_PROTOTYPES = [
-        null,
-        getProto({}),
-        getProto([]),
-        getProto(getProto)
-    ];
-    contextPrototype.i = esmImport;
-    contextPrototype.A = asyncLoader;
-    // Add a simple runtime require so that environments without one can still pass
-    // `typeof require` CommonJS checks so that exports are correctly registered.
-    var runtimeRequire = typeof require === 'function' ? require : function require1() {
-        throw new Error('Unexpected use of runtime require');
-    };
-    contextPrototype.t = runtimeRequire;
-    contextPrototype.r = commonJsRequire;
-    contextPrototype.f = moduleContext;
-    /**
- * A pseudo "fake" URL object to resolve to its relative path.
- *
- * When UrlRewriteBehavior is set to relative, calls to the `new URL()` will construct url without base using this
- * runtime function to generate context-agnostic urls between different rendering context, i.e ssr / client to avoid
- * hydration mismatch.
- *
- * This is based on webpack's existing implementation:
- * https://github.com/webpack/webpack/blob/87660921808566ef3b8796f8df61bd79fc026108/lib/runtime/RelativeUrlRuntimeModule.js
- */ var relativeURL = function relativeURL(inputUrl) {
-        var realUrl = new URL(inputUrl, 'x:/');
-        var values = {};
-        for(var key in realUrl)values[key] = realUrl[key];
-        values.href = inputUrl;
-        values.pathname = inputUrl.replace(/[?#].*/, '');
-        values.origin = values.protocol = '';
-        values.toString = values.toJSON = function() {
-            for(var _len = arguments.length, _args = new Array(_len), _key = 0; _key < _len; _key++){
-                _args[_key] = arguments[_key];
-            }
-            return inputUrl;
-        };
-        for(var key1 in values)Object.defineProperty(this, key1, {
-            enumerable: true,
-            configurable: true,
-            value: values[key1]
-        });
-    };
-    relativeURL.prototype = URL.prototype;
-    contextPrototype.U = relativeURL;
-    contextPrototype.z = requireStub;
-    // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
-    contextPrototype.g = __utoo_global__;
-    var cachedAutomaticPublicPath;
-    contextPrototype.p = getPublicPath;
-    /// <reference path="./runtime-types.d.ts" />
-    /// <reference path="./runtime-utils.ts" />
-    /**
- * Top-level-await / async-module machinery. This is only included in the runtime
- * when the module graph actually contains an async module (a module with
- * top-level await, or one that transitively depends on one). When no async
- * module is present, the chunk items never reference `__turbopack_context__.a`,
- * so this whole file can be omitted.
- *
- * everything below is adapted from webpack
- * https://github.com/webpack/webpack/blob/6be4065ade1e252c1d8dcba4af0f43e32af1bdc1/lib/runtime/AsyncModuleRuntimeModule.js#L13
- */ var turbopackQueues = Symbol('turbopack queues');
-    var turbopackExports = Symbol('turbopack exports');
-    var turbopackError = Symbol('turbopack error');
-    contextPrototype.a = asyncModule;
-    /**
- * This file contains runtime types and functions that are shared between all
- * Turbopack UMD library runtimes (DOM and Node.js).
- *
- * It will be appended to the runtime code of each runtime right after the
- * shared runtime utils.
- */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-utils.ts" />
-    /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
-    // Provided by build
-    var BACKEND;
-    var moduleFactories = new Map();
-    contextPrototype.M = moduleFactories;
-    externalRequire.resolve = function(id, options) {
-        return require.resolve(id, options);
-    };
-    contextPrototype.x = externalRequire;
-    contextPrototype.N = externalNamespace;
-    /// <reference path="./runtime-base.ts" />
-    /// <reference path="./dummy.ts" />
-    var moduleCache = {};
-    contextPrototype.c = moduleCache;
-    /**
- * Retrieves a module from the cache, or instantiate it if it is not cached.
- */ // Used by the backend
-    // @ts-ignore
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    var getOrInstantiateModuleFromParent = function getOrInstantiateModuleFromParent(id, sourceModule) {
-        var _$module = moduleCache[id];
-        if (_$module) {
-            if (_$module.error) {
-                throw _$module.error;
-            }
-            return _$module;
-        }
-        return instantiateModule(id, SourceType.Parent, sourceModule.id);
-    };
-    /**
- * This file contains the runtime code specific to the Turbopack
- * ECMAScript DOM runtime for library builds.
- *
- * It will be appended to the base runtime code in place of
- * runtime-backend-node.ts when the target platform is browser/web.
- *
- * Since library builds produce a single, self-contained chunk,
- * no dynamic chunk loading is needed. The BACKEND simply registers
- * modules and instantiates runtime entries.
- *
- * The only DOM-specific addition is `loadScript` for script externals
- * that need to be loaded from CDN or other external sources.
- */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="./runtime-base.ts" />
-    var loadedScripts = new Map();
     contextPrototype.S = loadScript;
     (function() {
         BACKEND = {
@@ -1202,6 +1186,24 @@ function _type_of(obj) {
         push: registerChunk
     };
     chunksToRegister.forEach(registerChunk);
+    function factory() {
+        var runtimeModuleIds = [
+            "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)"
+        ];
+        var _$exports;
+        for(var i = 0; i < runtimeModuleIds.length; i++){
+            var _$module = moduleCache[runtimeModuleIds[i]];
+            if (_$module.error) throw _$module.error;
+            _$exports = _$module;
+        }
+        if (_$exports) {
+            // any ES module has to have `module.namespaceObject` defined.
+            if (_$exports.namespaceObject) return _$exports.namespaceObject;
+            // only ESM can be an async module, so we don't need to worry about exports being a promise here.
+            var raw = _$exports.exports;
+            return _$exports.namespaceObject = interopEsm(raw, createNS(raw), raw && raw.__esModule);
+        }
+    }
     if ((typeof exports === "undefined" ? "undefined" : _type_of(exports)) === 'object' && (typeof module === "undefined" ? "undefined" : _type_of(module)) === 'object') {
         module.exports = factory();
     } else if ((typeof exports === "undefined" ? "undefined" : _type_of(exports)) === 'object') {
@@ -1221,6 +1223,47 @@ function _type_of(obj) {
         "[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)",
         function(__turbopack_context__) {
             __turbopack_context__.v(__turbopack_context__.p("auto") + "asset.36cae746.svg");
+        },
+        "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)",
+        function(__turbopack_context__) {
+            "use strict";
+            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>");
+            var __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__ = __turbopack_context__.i("[externals]/ExternalValue [external] (ExternalValue, global)");
+            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)");
+            __turbopack_context__.s([
+                "asset",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__["default"];
+                },
+                "external",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__["default"];
+                },
+                "flag",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["flag"];
+                },
+                "globals",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["globals"];
+                },
+                "last",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["last"];
+                },
+                "load",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["load"];
+                },
+                "localGlobal",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["localGlobal"];
+                },
+                "read",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["read"];
+                }
+            ]);
         },
         "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>",
         function(__turbopack_context__) {
@@ -1285,47 +1328,6 @@ function _type_of(obj) {
                 "read",
                 0,
                 read
-            ]);
-        },
-        "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)",
-        function(__turbopack_context__) {
-            "use strict";
-            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>");
-            var __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__ = __turbopack_context__.i("[externals]/ExternalValue [external] (ExternalValue, global)");
-            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)");
-            __turbopack_context__.s([
-                "asset",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__["default"];
-                },
-                "external",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__["default"];
-                },
-                "flag",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["flag"];
-                },
-                "globals",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["globals"];
-                },
-                "last",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["last"];
-                },
-                "load",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["load"];
-                },
-                "localGlobal",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["localGlobal"];
-                },
-                "read",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["read"];
-                }
             ]);
         },
         "[project]/runtime/library_build_runtime_legacy/input/lazy.js [library-client] (ecmascript)",
