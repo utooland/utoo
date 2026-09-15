@@ -255,6 +255,10 @@ pub struct SchemaDevServer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_hmr_chunk_lists: Option<bool>,
 
+    /// Defer compiling client dynamic import targets until the browser requests them
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lazy_dynamic_imports: Option<bool>,
+
     /// Forward browser console output to the development terminal
     #[serde(skip_serializing_if = "Option::is_none")]
     pub browser_to_terminal: Option<SchemaBrowserToTerminal>,

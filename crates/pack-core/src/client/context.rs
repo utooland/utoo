@@ -450,6 +450,14 @@ pub async fn get_client_module_options_context(
             mangle_export_names: mode_ref.is_production() && !*config.no_mangling().await?,
             infer_module_side_effects: *config.infer_module_side_effects().await?,
             ignore_dynamic_requests: true,
+            // Development only: dynamic import targets are compiled when the browser first
+            // requests their manifest chunk (see `activate_lazy_chunk_operation`).
+            lazy_compilation: mode_ref.is_development()
+                && config
+                    .dev_server()
+                    .await?
+                    .lazy_dynamic_imports
+                    .unwrap_or_default(),
             ..Default::default()
         },
         css: CssOptionsContext {
@@ -763,6 +771,8 @@ pub async fn get_client_chunking_context(
         {
             builder = builder.dynamic_hmr_chunk_lists();
         }
+        // A manifest chunk keeps a lazily compiled import's URL stable across activation.
+        builder = builder.manifest_chunks(dev_server.lazy_dynamic_imports.unwrap_or_default());
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;

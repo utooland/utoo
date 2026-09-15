@@ -213,6 +213,12 @@ export interface DevServerConfig {
   hot?: boolean;
   /** Register HMR chunk lists as dynamic chunks are loaded. */
   dynamicHmrChunkLists?: boolean;
+  /**
+   * Defer compiling the targets of client `import()` calls until the browser
+   * first requests them. Development only; pair with `dynamicHmrChunkLists`
+   * so lazily loaded modules keep receiving HMR updates.
+   */
+  lazyDynamicImports?: boolean;
   /** Port to listen on. */
   port?: number;
   /** Host to bind (e.g. localhost, 0.0.0.0). */

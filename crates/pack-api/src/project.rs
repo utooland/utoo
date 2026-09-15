@@ -42,6 +42,9 @@ use turbopack_core::{
         BindingUsageInfo, OptionBindingUsageInfo, compute_binding_usage_info,
     },
 };
+use turbopack_ecmascript::async_chunk::proxy::{
+    activation_key_from_chunk_path, lazy_compilation_state,
+};
 
 use turbopack::evaluate_context::node_build_environment;
 
@@ -1855,6 +1858,18 @@ async fn copy_directory_recursive_helper(
     }
 
     Ok(Vc::cell(assets))
+}
+
+/// Activates the lazily compiled dynamic import whose manifest chunk is `chunk_path`, returning
+/// whether the path named one. The caller has to rewrite the owning entrypoints before serving
+/// the request so the activated manifest is on disk.
+#[turbo_tasks::function(operation, root)]
+pub async fn activate_lazy_chunk_operation(chunk_path: RcStr) -> Result<Vc<bool>> {
+    let Some(key) = activation_key_from_chunk_path(&chunk_path) else {
+        return Ok(Vc::cell(false));
+    };
+    lazy_compilation_state(key).await?.activate();
+    Ok(Vc::cell(true))
 }
 
 // This is a performance optimization. This function is a root aggregation function that

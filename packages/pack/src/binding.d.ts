@@ -236,6 +236,8 @@ export interface NapiWrittenEndpoint {
   config: NapiEndpointConfig
 }
 
+export declare function projectActivateLazyChunk(project: { __napiType: "Project" }, chunkPath: RcStr): Promise<boolean>
+
 export declare function projectEntrypointsSubscribe(project: { __napiType: "Project" }, func: (err: Error, value: TurbopackResult<NapiEntrypoints>) => void): { __napiType: "RootTask" }
 
 export declare function projectGetCompletedTaskCount(project: { __napiType: "Project" }): number
