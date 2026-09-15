@@ -59,22 +59,6 @@ pub async fn get_library_runtime_code(
         .as_ref()
         .map_or_else(|| "", |f| f.as_str());
 
-    if !*environment
-        .runtime_versions()
-        .supports_global_this()
-        .await?
-    {
-        writedoc!(
-            code,
-            r#"
-                if (typeof globalThis === 'undefined') {{
-                    if (typeof self !== 'undefined') self.globalThis = self;
-                    else if (typeof global !== 'undefined') global.globalThis = global;
-                }}
-            "#
-        )?;
-    }
-
     writedoc!(
         code,
         r#"

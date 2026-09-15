@@ -1,14 +1,18 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
+use rustc_hash::FxHashMap;
 use swc_core::{
     base::try_with_handler,
     common::{
-        EqIgnoreSpan, FileName, FilePathMapping, GLOBALS, Mark, SourceMap,
+        DUMMY_SP, EqIgnoreSpan, FileName, FilePathMapping, GLOBALS, Mark, SourceMap, SyntaxContext,
         comments::{Comments, SingleThreadedComments},
     },
     ecma::{
-        ast::{EsVersion, Program},
+        ast::{
+            BinExpr, BinaryOp, CondExpr, EsVersion, Expr, Ident, Lit, Program, Stmt, Str,
+            UnaryExpr, UnaryOp, VarDecl, VarDeclKind, VarDeclarator,
+        },
         codegen::{Emitter, text_writer::JsWriter},
         parser::{Parser, StringInput, Syntax, lexer::Lexer},
         preset_env::{Config, Targets, transform_from_env},
@@ -17,9 +21,11 @@ use swc_core::{
             fixer::fixer,
             helpers::{HELPERS, Helpers, inject_helpers},
             hygiene::{self, hygiene_with_config},
+            rename::rename,
             resolver,
         },
-        visit::VisitWith,
+        utils::private_ident,
+        visit::{Visit, VisitWith},
     },
 };
 use turbo_tasks::Vc;
@@ -54,6 +60,12 @@ pub(super) async fn generate_library_code(
         EsVersion::Es5
     };
     let lower = matches!(stage, CodegenStage::Lower);
+    let lower_global_this = lower
+        && !*environment
+            .runtime_versions()
+            .supports_global_this()
+            .await?;
+    let is_node_target = *environment.node_externals().await?;
     let source = code.source_code().to_str()?.into_owned();
     let cm = Arc::new(SourceMap::new(FilePathMapping::empty()));
     let fm = cm.new_source_file(FileName::Anon.into(), source);
@@ -116,6 +128,9 @@ pub(super) async fn generate_library_code(
             } else {
                 false
             };
+            // Include any free global references introduced by transform helpers as well.
+            let has_global_alias = lower_global_this
+                && lower_global_this_references(&mut program, unresolved_mark, is_node_target);
             if original_program
                 .as_ref()
                 .is_some_and(|original| program.eq_ignore_span(original))
@@ -127,12 +142,12 @@ pub(super) async fn generate_library_code(
                 ..Default::default()
             }));
             program.mutate(fixer(Some(&comments)));
-            Ok(Some((program, names, has_helpers)))
+            Ok(Some((program, names, has_helpers || has_global_alias)))
         })
     })
     .map_err(|error| error.to_pretty_error())?;
 
-    let Some((program, names, has_helpers)) = transformed else {
+    let Some((program, names, needs_wrapper)) = transformed else {
         // Preserve the original chunk layout, comments and sectioned source map when no
         // compatibility transform was needed. Reprinting would only add debugging noise.
         return Ok(code);
@@ -160,9 +175,9 @@ pub(super) async fn generate_library_code(
 
     let source: Rope = String::from_utf8(source)?.into();
     let mut builder = CodeBuilder::new(source_maps, generate_debug_id);
-    // SWC inserts helpers at program scope. Keep them private to this library, including the
-    // module factories passed as arguments to its runtime IIFE.
-    if has_helpers {
+    // Keep helpers and the legacy global-object alias private to the complete library,
+    // including the module factories passed as arguments to its runtime IIFE.
+    if needs_wrapper {
         builder += "(function() {\n";
     }
     if let Some(original_map) = &original_map {
@@ -180,10 +195,90 @@ pub(super) async fn generate_library_code(
     } else {
         builder.push_source(&source, None::<Rope>);
     }
-    if has_helpers {
+    if needs_wrapper {
         builder += "\n}).call(this);\n";
     }
     Ok(builder.build())
+}
+
+/// Resolve free globalThis references after assembly so runtime templates and external module
+/// factories use the same global object. Local bindings and property names must stay intact.
+fn lower_global_this_references(
+    program: &mut Program,
+    unresolved_mark: Mark,
+    is_node_target: bool,
+) -> bool {
+    let unresolved_ctxt = SyntaxContext::empty().apply_mark(unresolved_mark);
+    let mut finder = GlobalThisFinder {
+        unresolved_ctxt,
+        found: false,
+    };
+    program.visit_with(&mut finder);
+    if !finder.found {
+        return false;
+    }
+    let global = private_ident!("__utoo_global__");
+    let replacements =
+        FxHashMap::from_iter([(("globalThis".into(), unresolved_ctxt), global.to_id())]);
+    program.mutate(rename(&replacements));
+
+    let self_ident = Ident::new("self".into(), DUMMY_SP, unresolved_ctxt);
+    // Browser-targeted UMD can also be loaded through CommonJS on Node.js.
+    let fallback = Ident::new("global".into(), DUMMY_SP, unresolved_ctxt);
+    let init = if is_node_target {
+        Expr::Ident(fallback)
+    } else {
+        Expr::Cond(CondExpr {
+            span: DUMMY_SP,
+            test: Box::new(Expr::Bin(BinExpr {
+                span: DUMMY_SP,
+                op: BinaryOp::NotEqEq,
+                left: Box::new(Expr::Unary(UnaryExpr {
+                    span: DUMMY_SP,
+                    op: UnaryOp::TypeOf,
+                    arg: Box::new(Expr::Ident(self_ident.clone())),
+                })),
+                right: Box::new(Expr::Lit(Lit::Str(Str {
+                    span: DUMMY_SP,
+                    value: "undefined".into(),
+                    raw: None,
+                }))),
+            })),
+            cons: Box::new(Expr::Ident(self_ident)),
+            alt: Box::new(Expr::Ident(fallback)),
+        })
+    };
+    let declaration: Stmt = VarDecl {
+        span: DUMMY_SP,
+        ctxt: SyntaxContext::empty(),
+        kind: VarDeclKind::Var,
+        declare: false,
+        decls: vec![VarDeclarator {
+            span: DUMMY_SP,
+            name: global.into(),
+            init: Some(Box::new(init)),
+            definite: false,
+        }],
+    }
+    .into();
+    match program {
+        Program::Module(module) => module.body.insert(0, declaration.into()),
+        Program::Script(script) => script.body.insert(0, declaration),
+    }
+    true
+}
+
+struct GlobalThisFinder {
+    unresolved_ctxt: SyntaxContext,
+    found: bool,
+}
+
+impl Visit for GlobalThisFinder {
+    fn visit_ident(&mut self, ident: &Ident) {
+        if ident.sym == "globalThis" && ident.ctxt == self.unresolved_ctxt {
+            self.found = true;
+        }
+    }
 }
 
 fn statement_count(program: &Program) -> usize {

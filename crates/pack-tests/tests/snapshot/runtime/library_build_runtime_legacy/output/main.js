@@ -1,4 +1,5 @@
 (function() {
+var __utoo_global__ = typeof self !== "undefined" ? self : global;
 function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
     try {
         var info = gen[key](arg);
@@ -140,10 +141,6 @@ function _type_of(obj) {
     return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj;
 }
 (function(__UTOOPACK__) {
-    if (typeof globalThis === 'undefined') {
-        if (typeof self !== 'undefined') self.globalThis = self;
-        else if (typeof global !== 'undefined') global.globalThis = global;
-    }
     if (!Array.isArray(__UTOOPACK__)) {
         return;
     }
@@ -774,7 +771,7 @@ function _type_of(obj) {
     }
     contextPrototype.z = requireStub;
     // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
-    contextPrototype.g = globalThis;
+    contextPrototype.g = __utoo_global__;
     var cachedAutomaticPublicPath;
     function getAutomaticPublicPath() {
         if (cachedAutomaticPublicPath !== undefined) {
@@ -790,8 +787,8 @@ function _type_of(obj) {
                 scriptUrl = script === null || script === void 0 ? void 0 : script.src;
             }
         }
-        if (!scriptUrl && typeof globalThis.importScripts === 'function' && globalThis.location) {
-            scriptUrl = String(globalThis.location);
+        if (!scriptUrl && typeof __utoo_global__.importScripts === 'function' && __utoo_global__.location) {
+            scriptUrl = String(__utoo_global__.location);
         }
         cachedAutomaticPublicPath = scriptUrl ? scriptUrl.replace(/^blob:/, '').replace(/#.*$/, '').replace(/\?.*$/, '').replace(/\/[^/]*$/, '/') : '';
         return cachedAutomaticPublicPath;
@@ -803,8 +800,8 @@ function _type_of(obj) {
         if (mode === 'auto') {
             return getAutomaticPublicPath();
         }
-        if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === 'string') {
-            var publicPath = globalThis.publicPath;
+        if (typeof __utoo_global__ !== 'undefined' && typeof __utoo_global__.publicPath === 'string') {
+            var publicPath = __utoo_global__.publicPath;
             return publicPath.endsWith('/') ? publicPath : "".concat(publicPath, "/");
         }
         return '/';
@@ -1212,11 +1209,17 @@ function _type_of(obj) {
     } else if ((typeof exports === "undefined" ? "undefined" : _type_of(exports)) === 'object') {
         exports["LegacyLibrary"] = factory();
     } else {
-        globalThis["LegacyLibrary"] = factory();
+        __utoo_global__["LegacyLibrary"] = factory();
     }
 })([
     [
         "main.js",
+        "[externals]/ExternalValue [external] (ExternalValue, global)",
+        function(__turbopack_context__) {
+            "use strict";
+            var mod = __utoo_global__["ExternalValue"];
+            __turbopack_context__.v(mod);
+        },
         "[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)",
         function(__turbopack_context__) {
             __turbopack_context__.v(__turbopack_context__.p("auto") + "asset.36cae746.svg");
@@ -1225,15 +1228,24 @@ function _type_of(obj) {
         function(__turbopack_context__) {
             "use strict";
             var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>");
+            var __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__ = __turbopack_context__.i("[externals]/ExternalValue [external] (ExternalValue, global)");
             var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)");
             __turbopack_context__.s([
                 "asset",
                 function() {
                     return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__["default"];
                 },
+                "external",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__["default"];
+                },
                 "flag",
                 function() {
                     return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["flag"];
+                },
+                "globals",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["globals"];
                 },
                 "last",
                 function() {
@@ -1242,6 +1254,10 @@ function _type_of(obj) {
                 "load",
                 function() {
                     return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["load"];
+                },
+                "localGlobal",
+                function() {
+                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["localGlobal"];
                 },
                 "read",
                 function() {
@@ -1252,7 +1268,9 @@ function _type_of(obj) {
         "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>",
         function(__turbopack_context__) {
             "use strict";
+            var __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__ = __turbopack_context__.i("[externals]/ExternalValue [external] (ExternalValue, global)");
             var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)");
+            ;
             ;
             ;
             var read = function read(value) {
@@ -1273,16 +1291,40 @@ function _type_of(obj) {
                 }while (node.next);
                 return node.value;
             }
+            function globals(self1, __utoo_global__1) {
+                return [
+                    __utoo_global__,
+                    self1,
+                    __utoo_global__1,
+                    {
+                        globalThis: __utoo_global__
+                    }
+                ];
+            }
+            function localGlobal(globalThis1) {
+                return {
+                    globalThis: globalThis1,
+                    property: ({
+                        globalThis: 7
+                    }).globalThis
+                };
+            }
             __turbopack_context__.s([
                 "flag",
                 0,
                 flag,
+                "globals",
+                0,
+                globals,
                 "last",
                 0,
                 last,
                 "load",
                 0,
                 load,
+                "localGlobal",
+                0,
+                localGlobal,
                 "read",
                 0,
                 read
