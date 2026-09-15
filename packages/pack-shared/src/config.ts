@@ -395,6 +395,12 @@ export interface ConfigComplete {
    * after every snapshot.
    */
   turbopackMemoryEviction?: boolean | "auto" | "full";
+  /**
+   * Runs the turbo-tasks reference-counting garbage collector so tasks that
+   * become unreachable are dropped from memory during long dev sessions.
+   * Defaults to the `TURBO_ENGINE_GC` environment variable (off).
+   */
+  turbopackGc?: boolean;
   nodePolyfill?: boolean;
   mdx?: MdxOptions;
   devServer?: DevServerConfig;

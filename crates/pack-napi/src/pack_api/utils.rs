@@ -35,6 +35,7 @@ pub fn create_turbo_tasks(
     is_short_session: bool,
     eviction_mode: EvictionMode,
     small_preallocation: bool,
+    gc: Option<bool>,
 ) -> Result<UtooTurboTasks> {
     Ok(if persistent_caching {
         let version_info = GitVersionInfo {
@@ -67,6 +68,7 @@ pub fn create_turbo_tasks(
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
                 eviction_mode,
                 small_preallocation,
+                gc,
                 ..Default::default()
             },
             backing_storage,
@@ -82,6 +84,7 @@ pub fn create_turbo_tasks(
                 storage_mode: None,
                 dependency_tracking,
                 eviction_mode: EvictionMode::Off,
+                gc,
                 ..Default::default()
             },
             noop_backing_storage(),
