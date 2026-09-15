@@ -5,9 +5,11 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "gen:node-polyfills": "node scripts/generate-node-polyfills.mjs"
   },
   "devDependencies": {
-    "@types/node": "^20.3.0"
+    "@types/node": "^20.3.0",
+    "node-stdlib-browser": "1.3.1"
   }
 }
