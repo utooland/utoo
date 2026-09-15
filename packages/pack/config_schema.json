@@ -223,6 +223,13 @@
         "null"
       ]
     },
+    "turbopackGc": {
+      "description": "Run the turbo-tasks reference-counting garbage collector",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "turbopackMemoryEviction": {
       "description": "Turbopack memory eviction mode for the persistent cache",
       "anyOf": [
