@@ -93,6 +93,36 @@ function isRuntimeResolvedPublicPath(publicPath: string | undefined): boolean {
 
 // --- Public types (match dev.ts for index switch) ---
 
+const CONTENT_HASH_SUFFIX = /\.[0-9a-f]{6,}(\.js)$/;
+
+/**
+ * Finds the most recently written chunk in `distRoot` that shares the
+ * content-hash-less stem of `chunkPath` (relative to `distRoot`).
+ */
+async function latestChunkWithSameStem(
+  distRoot: string,
+  chunkPath: string,
+): Promise<string | null> {
+  const dir = path.posix.dirname(chunkPath);
+  const stem = path.posix
+    .basename(chunkPath)
+    .replace(CONTENT_HASH_SUFFIX, "$1");
+  const absDir = path.join(distRoot, dir);
+  let entries: string[];
+  try {
+    entries = await fs.promises.readdir(absDir);
+  } catch {
+    return null;
+  }
+  let latest: { name: string; mtimeMs: number } | null = null;
+  for (const name of entries) {
+    if (name.replace(CONTENT_HASH_SUFFIX, "$1") !== stem) continue;
+    const { mtimeMs } = await fs.promises.stat(path.join(absDir, name));
+    if (!latest || mtimeMs > latest.mtimeMs) latest = { name, mtimeMs };
+  }
+  return latest ? path.posix.join(dir, latest.name) : null;
+}
+
 export interface SelfSignedCertificate {
   key: string;
   cert: string;
@@ -261,7 +291,12 @@ async function runDev(
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
+  // Manifest chunks of lazily compiled dynamic imports are rewritten under a
+  // new content hash on activation; serve the browser's stable URL from there.
+  const lazyChunkAliases = new Map<string, string>();
   const rewriteRequestPath = (reqPath: string): string => {
+    const alias = lazyChunkAliases.get(reqPath.replace(/^\/+/, ""));
+    if (alias) return `/${alias}`;
     if (!normalizedPrefix) return reqPath;
     // Absolute-URL publicPath: do not rewrite (match dev.ts).
     if (
@@ -304,6 +339,36 @@ async function runDev(
   const proxyRules = bundleOptions.config?.devServer?.proxy;
   if (proxyRules && proxyRules.length > 0) {
     app.use("*", createHttpProxyMiddleware(proxyRules));
+  }
+
+  if (bundleOptions.config?.devServer?.lazyDynamicImports) {
+    // Requesting the manifest chunk of a lazily compiled dynamic import is what
+    // activates it, so rebuild the owning entrypoints before serveStatic reads it.
+    app.use("/*", async (c, next) => {
+      if (
+        (c.req.method === "GET" || c.req.method === "HEAD") &&
+        c.req.path.includes("lazy-compilation-")
+      ) {
+        const chunkPath = decodeURIComponent(
+          rewriteRequestPath(c.req.path),
+        ).replace(/^\/+/, "");
+        try {
+          if (await hotReloader.activateLazyChunk(chunkPath)) {
+            // The activated manifest has different content, so a content-hashed
+            // chunk filename puts it under a new name while the browser keeps
+            // requesting the URL baked into the entry. Serve the newest file
+            // with the same stem for that URL.
+            const current = await latestChunkWithSameStem(distRoot, chunkPath);
+            if (current && current !== chunkPath) {
+              lazyChunkAliases.set(chunkPath, current);
+            }
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      await next();
+    });
   }
 
   // GET handles HEAD automatically in Hono; serveStatic serves both

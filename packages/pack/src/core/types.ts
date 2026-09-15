@@ -62,6 +62,13 @@ export interface Project {
 
   writeAllEntrypointsToDisk(): Promise<TurbopackResult<RawEntrypoints>>;
 
+  /**
+   * Activates the lazily compiled dynamic import whose manifest chunk is
+   * `chunkPath` (relative to the output root). Returns whether the path named
+   * one; the owning entrypoints must be rewritten before the chunk is served.
+   */
+  activateLazyChunk(chunkPath: string): Promise<boolean>;
+
   entrypointsSubscribe(): AsyncIterableIterator<
     TurbopackResult<RawEntrypoints>
   >;
