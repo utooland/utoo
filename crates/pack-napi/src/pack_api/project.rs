@@ -35,7 +35,10 @@ use pack_api::{
         hmr_update_with_issues_operation,
     },
     operation::EntrypointsOperation,
-    project::{PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
+    project::{
+        PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions,
+        activate_lazy_chunk_operation,
+    },
     source_map::get_source_map_rope,
 };
 use pack_core::tracing_presets::{
@@ -659,6 +662,23 @@ async fn collect_endpoint_output_paths(
     }
 
     Ok(paths)
+}
+
+#[tracing::instrument(level = "info", name = "activate lazy chunk", skip_all)]
+#[napi]
+pub async fn project_activate_lazy_chunk(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+    chunk_path: RcStr,
+) -> napi::Result<bool> {
+    let ctx = &project.turbopack_ctx;
+    ctx.turbo_tasks()
+        .run(async move {
+            Ok(*activate_lazy_chunk_operation(chunk_path)
+                .read_strongly_consistent()
+                .await?)
+        })
+        .await
+        .map_err(|error| napi::Error::from_reason(PrettyPrintError(&error.into()).to_string()))
 }
 
 #[tracing::instrument(level = "info", name = "write all entrypoints to disk", skip_all)]

@@ -159,6 +159,13 @@ export interface HotReloaderInterface {
   /** Handle a message from a client (JSON string). */
   handleClientMessage(ws: WSLike, data: string): void;
   buildFallbackError(): Promise<void>;
+  /**
+   * Activates a lazily compiled dynamic import by the path of its manifest
+   * chunk (relative to the output root) and rewrites the entrypoints that ship
+   * it, so the activated manifest is on disk before the request is served.
+   * Returns false when the path is not a lazy compilation manifest chunk.
+   */
+  activateLazyChunk(chunkPath: string): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -941,6 +948,24 @@ export async function createHotReloader(
 
     async buildFallbackError() {
       // Not implemented yet.
+    },
+
+    async activateLazyChunk(chunkPath: string) {
+      if (!(await project.activateLazyChunk(chunkPath))) {
+        return false;
+      }
+      const owners = [...writtenEndpointPaths.entries()]
+        .filter(([, written]) => written.clientPaths.includes(chunkPath))
+        .map(([endpoint]) => endpoint);
+      if (owners.length === 0) {
+        // The chunk is not attributed to a written endpoint yet; rebuild everything.
+        await writeAllEntrypointsToDisk();
+      } else {
+        await Promise.all(
+          owners.map((endpoint) => writeEntrypointToDisk(endpoint, false)),
+        );
+      }
+      return true;
     },
 
     async close() {
