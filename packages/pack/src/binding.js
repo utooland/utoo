@@ -709,6 +709,7 @@ module.exports.lockfileTryAcquireSync = nativeBinding.lockfileTryAcquireSync
 module.exports.lockfileUnlock = nativeBinding.lockfileUnlock
 module.exports.lockfileUnlockSync = nativeBinding.lockfileUnlockSync
 module.exports.MemoryEvictionMode = nativeBinding.MemoryEvictionMode
+module.exports.projectActivateLazyChunk = nativeBinding.projectActivateLazyChunk
 module.exports.projectEntrypointsSubscribe = nativeBinding.projectEntrypointsSubscribe
 module.exports.projectGetCompletedTaskCount = nativeBinding.projectGetCompletedTaskCount
 module.exports.projectGetSourceForAsset = nativeBinding.projectGetSourceForAsset

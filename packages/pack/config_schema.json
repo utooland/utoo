@@ -715,6 +715,13 @@
             "boolean",
             "null"
           ]
+        },
+        "lazyDynamicImports": {
+          "description": "Defer compiling client dynamic import targets until the browser requests them",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },

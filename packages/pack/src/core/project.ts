@@ -536,6 +536,12 @@ export function projectFactory(endpointWatchOptions?: {
       });
     }
 
+    async activateLazyChunk(chunkPath: string): Promise<boolean> {
+      return await withErrorCause(() =>
+        binding.projectActivateLazyChunk(this._nativeProject, chunkPath),
+      );
+    }
+
     entrypointsSubscribe() {
       type NapiEndpoint = { __napiType: "Endpoint" };
 
