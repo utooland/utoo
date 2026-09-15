@@ -107,6 +107,7 @@ async function buildInternal(
         persistentCaching,
         turbopackMemoryEviction,
         smallPreallocation,
+        turbopackGc: bundleOptions.config.turbopackGc,
         // Build mode is a short-lived, one-shot compilation, so avoid paying
         // dependency graph bookkeeping cost unless the persistent cache needs it.
         dependencyTracking: persistentCaching,

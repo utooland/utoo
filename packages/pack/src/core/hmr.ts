@@ -309,6 +309,7 @@ export async function createHotReloader(
         persistentCaching,
         turbopackMemoryEviction,
         smallPreallocation,
+        turbopackGc: bundleOptions.config.turbopackGc,
       },
     );
   } catch (error) {

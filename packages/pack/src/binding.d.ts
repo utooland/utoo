@@ -167,6 +167,11 @@ export interface NapiTurboEngineOptions {
   turbopackMemoryEviction?: MemoryEvictionMode
   /** Avoid large backend preallocations to reduce startup memory. */
   smallPreallocation?: boolean
+  /**
+   * Run the turbo-tasks reference-counting garbage collector. Defaults to the
+   * `TURBO_ENGINE_GC` environment variable.
+   */
+  turbopackGc?: boolean
 }
 
 /**
