@@ -3,7 +3,7 @@ use bincode::{Decode, Encode};
 use qstring::QString;
 use rustc_hash::FxHashMap;
 use tracing::Instrument;
-use turbo_rcstr::RcStr;
+use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::{
@@ -824,10 +824,34 @@ impl ChunkingContext for LibraryChunkingContext {
             .to_resolved()
             .await?;
         if let Some(ecmascript_chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
-            let output_ident = self.ecmascript_chunk_ident_with_filename_template(
-                chunk_item.asset_ident(),
-                *ecmascript_chunk,
-            );
+            let item_ident = chunk_item.asset_ident().to_resolved().await?;
+            let item_ident_ref = item_ident.await?;
+            let ident = if QString::from(item_ident_ref.query.as_str())
+                .get("name")
+                .is_some()
+            {
+                *item_ident
+            } else {
+                // Standalone chunk items are ordinary modules, not entries, so they carry
+                // no `?name=`. Derive a stable name from the item ident (path-based name
+                // plus an ident hash to keep distinct module parts apart).
+                let base = ident_to_output_filename(
+                    *item_ident,
+                    self.await?.root_path.clone(),
+                    rcstr!(".js"),
+                    None,
+                )
+                .owned()
+                .await?;
+                let hash = encode_hex(hash_xxh3_hash64(item_ident.to_string().await?.as_str()));
+                let name = format!("{base}-{}", &hash[..8]);
+                (*item_ident_ref)
+                    .clone()
+                    .with_query(format!("?name={name}").into())
+                    .into_vc()
+            };
+            let output_ident =
+                self.ecmascript_chunk_ident_with_filename_template(ident, *ecmascript_chunk);
             Ok(Vc::upcast(EcmascriptLibraryChunk::new(
                 *self,
                 output_ident,
