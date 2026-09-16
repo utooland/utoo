@@ -1801,12 +1801,14 @@ impl Config {
     }
 
     /// Directory holding the persistent cache, lock file and traces. Relative
-    /// paths resolve from the project path.
+    /// paths resolve from the project path. An empty value falls back to the
+    /// default, matching `resolveCacheDirectory` on the JS side.
     #[turbo_tasks::function]
     pub fn cache_directory(&self) -> Vc<RcStr> {
         Vc::cell(
             self.cache_directory
                 .clone()
+                .filter(|directory| !directory.is_empty())
                 .unwrap_or_else(|| RcStr::from(DEFAULT_CACHE_DIRECTORY)),
         )
     }

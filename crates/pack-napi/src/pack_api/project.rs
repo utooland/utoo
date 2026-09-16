@@ -386,6 +386,7 @@ pub fn project_new<'env>(
     let cache_directory = turbo_engine_options
         .cache_directory
         .as_deref()
+        .filter(|directory| !directory.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(&options.project_path).join(DEFAULT_CACHE_DIRECTORY));
 
