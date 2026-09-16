@@ -7,7 +7,7 @@ use turbopack_node::execution_context::ExecutionContext;
 use crate::{
     config::Config,
     import_map::{insert_alias_option, insert_server_reference_aliases, insert_shared_aliases},
-    node_polyfill::get_node_polyfill_import_map,
+    node_polyfill::{get_node_polyfill_fallback_import_map, get_node_protocol_polyfill_import_map},
 };
 
 /// Computes the client fallback import map, which provides
@@ -17,7 +17,7 @@ pub async fn get_client_fallback_import_map(node_polyfill: bool) -> Result<Vc<Im
     let mut import_map = ImportMap::empty();
 
     if node_polyfill {
-        import_map.extend_ref(&*get_node_polyfill_import_map().await?);
+        import_map.extend_ref(&*get_node_polyfill_fallback_import_map().await?);
     }
 
     Ok(import_map.cell())
@@ -42,6 +42,10 @@ pub async fn get_client_import_map(
         &pack_path,
     )
     .await?;
+
+    if *config.node_polyfill().await? {
+        import_map.extend_ref(&*get_node_protocol_polyfill_import_map().await?);
+    }
 
     insert_alias_option(
         &mut import_map,

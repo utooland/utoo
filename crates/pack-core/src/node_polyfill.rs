@@ -28,22 +28,34 @@ static NODE_POLYFILL_ALIASES: LazyLock<Vec<(RcStr, RcStr)>> = LazyLock::new(|| {
         .collect()
 });
 
-#[turbo_tasks::function]
-pub async fn get_node_polyfill_import_map() -> Result<Vc<ImportMap>> {
+async fn create_node_polyfill_import_map(node_protocol: bool) -> Result<ImportMap> {
     let mut import_map = ImportMap::empty();
+    let context = crate::embed_js::embed_fs().root().owned().await?;
 
     for (original, alias) in NODE_POLYFILL_ALIASES.iter() {
+        if original.as_str().starts_with("node:") != node_protocol {
+            continue;
+        }
+
         import_map.insert_exact_alias(
             original.clone(),
-            ImportMapping::PrimaryAlternative(
-                alias.clone(),
-                Some(crate::embed_js::embed_fs().root().owned().await?),
-            )
-            .resolved_cell(),
+            ImportMapping::PrimaryAlternative(alias.clone(), Some(context.clone())).resolved_cell(),
         );
     }
 
-    Ok(import_map.cell())
+    Ok(import_map)
+}
+
+/// Bare specifiers such as `buffer`, used as fallback mappings.
+#[turbo_tasks::function]
+pub async fn get_node_polyfill_fallback_import_map() -> Result<Vc<ImportMap>> {
+    Ok(create_node_polyfill_import_map(false).await?.cell())
+}
+
+/// `node:` specifiers such as `node:buffer`, used as primary mappings.
+#[turbo_tasks::function]
+pub async fn get_node_protocol_polyfill_import_map() -> Result<Vc<ImportMap>> {
+    Ok(create_node_polyfill_import_map(true).await?.cell())
 }
 
 #[cfg(test)]
