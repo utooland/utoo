@@ -167,6 +167,11 @@ export interface NapiTurboEngineOptions {
   turbopackMemoryEviction?: MemoryEvictionMode
   /** Avoid large backend preallocations to reduce startup memory. */
   smallPreallocation?: boolean
+  /**
+   * Absolute directory for the persistent cache, lock file and traces.
+   * Defaults to `.turbopack` inside the project path.
+   */
+  cacheDirectory?: string
 }
 
 /**

@@ -6,6 +6,7 @@ import path from "path";
 import { BundleOptions } from "../config/types";
 import { resolveBundleOptions, WebpackConfig } from "../config/webpackCompat";
 import { projectFactory } from "../core/project";
+import { resolveCacheDirectory } from "../utils/cacheDirectory";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
 import {
@@ -73,8 +74,12 @@ async function buildInternal(
   await cleanOutput(bundleOptions.config, resolvedProjectPath);
 
   const createProject = projectFactory();
-  const persistentCacheLock = await acquirePersistentCacheLock(
+  const cacheDirectory = resolveCacheDirectory(
     resolvedProjectPath,
+    bundleOptions.config.cacheDirectory,
+  );
+  const persistentCacheLock = await acquirePersistentCacheLock(
+    cacheDirectory,
     "utoo pack build",
     persistentCaching,
   );
@@ -110,6 +115,7 @@ async function buildInternal(
         // Build mode is a short-lived, one-shot compilation, so avoid paying
         // dependency graph bookkeeping cost unless the persistent cache needs it.
         dependencyTracking: persistentCaching,
+        cacheDirectory,
       },
     );
 

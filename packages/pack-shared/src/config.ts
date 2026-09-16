@@ -390,6 +390,11 @@ export interface ConfigComplete {
   pluginRuntimeStrategy?: "workerThreads" | "childProcesses";
   persistentCaching?: boolean;
   /**
+   * Directory for the persistent cache, lock file and traces.
+   * Relative paths resolve from the project path. Defaults to `.turbopack`.
+   */
+  cacheDirectory?: string;
+  /**
    * Controls memory eviction for the persistent Turbopack cache.
    * Defaults to "auto". Use false to disable eviction or "full" to evict
    * after every snapshot.
