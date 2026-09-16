@@ -93,6 +93,9 @@ function isRuntimeResolvedPublicPath(publicPath: string | undefined): boolean {
 
 // --- Public types (match dev.ts for index switch) ---
 
+// The `.<hex>` suffix produced by `[contenthash]` filename templates. Turbopack's
+// default `_<hash>` suffix is derived from the asset ident, so it stays the same
+// when a manifest chunk is rewritten and needs no stripping.
 const CONTENT_HASH_SUFFIX = /\.[0-9a-f]{6,}(\.js)$/;
 
 /**
@@ -294,9 +297,7 @@ async function runDev(
   // Manifest chunks of lazily compiled dynamic imports are rewritten under a
   // new content hash on activation; serve the browser's stable URL from there.
   const lazyChunkAliases = new Map<string, string>();
-  const rewriteRequestPath = (reqPath: string): string => {
-    const alias = lazyChunkAliases.get(reqPath.replace(/^\/+/, ""));
-    if (alias) return `/${alias}`;
+  const stripPublicPathPrefix = (reqPath: string): string => {
     if (!normalizedPrefix) return reqPath;
     // Absolute-URL publicPath: do not rewrite (match dev.ts).
     if (
@@ -309,6 +310,13 @@ async function runDev(
       return removePathPrefix(reqPath, normalizedPrefix);
     }
     return reqPath;
+  };
+  const rewriteRequestPath = (reqPath: string): string => {
+    // Aliases are keyed by the output-relative chunk path, i.e. after the
+    // public-path prefix is removed.
+    const distPath = stripPublicPathPrefix(reqPath);
+    const alias = lazyChunkAliases.get(distPath.replace(/^\/+/, ""));
+    return alias ? `/${alias}` : distPath;
   };
 
   // HMR WebSocket route must be registered before "/*" so it is not handled by serveStatic
@@ -350,7 +358,7 @@ async function runDev(
         c.req.path.includes("lazy-compilation-")
       ) {
         const chunkPath = decodeURIComponent(
-          rewriteRequestPath(c.req.path),
+          stripPublicPathPrefix(c.req.path),
         ).replace(/^\/+/, "");
         try {
           if (await hotReloader.activateLazyChunk(chunkPath)) {
