@@ -32,13 +32,27 @@ const workerThreadsWithWorkerData = {
   },
 };
 
-// Used to directly inject polyfill instance into systemjs
+// Registry for loader require() calls, covering both bare and node: names.
+// build-loaderWorker bundles this file into esm/loaderWorkerInline.js via cli/umd.js.
+// Webpack aliases resolve the static require() calls below to node-stdlib-browser
+// packages or local mocks (e.g. "stream" -> stream-browserify).
+// At runtime, cjs.ts injects a custom require into loader modules. Its loadModule()
+// checks this registry before importMaps/filesystem resolution and returns the
+// bundled exports through these getters. For example, a loader's
+// require("_stream_duplex") receives the bundled stream.Duplex constructor.
 export default {
   get assert() {
     return require("assert");
   },
   get "node:assert"() {
     return require("assert");
+  },
+
+  get "assert/strict"() {
+    return require("assert").strict;
+  },
+  get "node:assert/strict"() {
+    return require("assert").strict;
   },
 
   buffer,
@@ -188,6 +202,41 @@ export default {
     return require("stream");
   },
 
+  get _stream_duplex() {
+    return require("stream").Duplex;
+  },
+  get "node:_stream_duplex"() {
+    return require("stream").Duplex;
+  },
+
+  get _stream_passthrough() {
+    return require("stream").PassThrough;
+  },
+  get "node:_stream_passthrough"() {
+    return require("stream").PassThrough;
+  },
+
+  get _stream_readable() {
+    return require("stream").Readable;
+  },
+  get "node:_stream_readable"() {
+    return require("stream").Readable;
+  },
+
+  get _stream_transform() {
+    return require("stream").Transform;
+  },
+  get "node:_stream_transform"() {
+    return require("stream").Transform;
+  },
+
+  get _stream_writable() {
+    return require("stream").Writable;
+  },
+  get "node:_stream_writable"() {
+    return require("stream").Writable;
+  },
+
   get string_decoder() {
     return require("string_decoder");
   },
@@ -239,9 +288,13 @@ export default {
 
   fs,
   "node:fs": fs,
+  "fs/promises": fs.promises,
+  "node:fs/promises": fs.promises,
 
   path,
   "node:path": path,
+  "path/posix": path.posix,
+  "node:path/posix": path.posix,
 
   process,
   "node:process": process,
@@ -258,6 +311,27 @@ export default {
   },
   get "node:util"() {
     return require("util");
+  },
+
+  get "util/types"() {
+    return require("util").types;
+  },
+  get "node:util/types"() {
+    return require("util").types;
+  },
+
+  get perf_hooks() {
+    return require("perf_hooks");
+  },
+  get "node:perf_hooks"() {
+    return require("perf_hooks");
+  },
+
+  get v8() {
+    return require("v8");
+  },
+  get "node:v8"() {
+    return require("v8");
   },
 
   worker_threads: workerThreadsWithWorkerData,
