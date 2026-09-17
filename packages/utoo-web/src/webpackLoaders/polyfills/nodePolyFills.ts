@@ -32,6 +32,44 @@ const workerThreadsWithWorkerData = {
   },
 };
 
+export function nodeModulePaths(directory: string): string[] {
+  const paths: string[] = [];
+  while (true) {
+    if (path.basename(directory) !== "node_modules") {
+      const modules = path.join(directory, "node_modules");
+      if (!paths.includes(modules)) paths.push(modules);
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return paths;
+    directory = parent;
+  }
+}
+
+// jiti uses these Module APIs to execute transpiled ESM config files.
+class Module {
+  static Module = Module;
+  static _nodeModulePaths = (from: string) =>
+    nodeModulePaths(path.resolve(from));
+
+  static get builtinModules(): string[] {
+    return Object.keys(nodePolyFills).filter((id) => !id.startsWith("node:"));
+  }
+
+  static createRequire(filename: string) {
+    return (self as any).createRequire(filename);
+  }
+
+  static wrap(source: string): string {
+    return `(function (exports, require, module, __filename, __dirname) {\n${source}\n});`;
+  }
+
+  exports = {};
+  children: Module[] = [];
+  loaded = false;
+
+  constructor(public id: string) {}
+}
+
 // Registry for loader require() calls, covering both bare and node: names.
 // build-loaderWorker bundles this file into esm/loaderWorkerInline.js via cli/umd.js.
 // Webpack aliases resolve the static require() calls below to node-stdlib-browser
@@ -40,7 +78,7 @@ const workerThreadsWithWorkerData = {
 // checks this registry before importMaps/filesystem resolution and returns the
 // bundled exports through these getters. For example, a loader's
 // require("_stream_duplex") receives the bundled stream.Duplex constructor.
-export default {
+const nodePolyFills = {
   get assert() {
     return require("assert");
   },
@@ -142,16 +180,8 @@ export default {
     return require("https");
   },
 
-  get module() {
-    return {
-      createRequire: (self as any).createRequire,
-    };
-  },
-  get "node:module"() {
-    return {
-      createRequire: (self as any).createRequire,
-    };
-  },
+  module: Module,
+  "node:module": Module,
 
   get net() {
     return require("net");
@@ -337,3 +367,5 @@ export default {
   worker_threads: workerThreadsWithWorkerData,
   "node:worker_threads": workerThreadsWithWorkerData,
 };
+
+export default nodePolyFills;
