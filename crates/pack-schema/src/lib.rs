@@ -100,6 +100,13 @@ pub struct CompleteConfig {
     #[schemars(description = "Enable persistent caching")]
     pub persistent_caching: Option<bool>,
 
+    /// Directory for the persistent cache and other internal files
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Directory for the persistent cache, lock file and traces. Relative paths resolve from the project path. Defaults to `.turbopack`"
+    )]
+    pub cache_directory: Option<String>,
+
     /// Turbopack memory eviction mode for the persistent cache
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Turbopack memory eviction mode for the persistent cache")]

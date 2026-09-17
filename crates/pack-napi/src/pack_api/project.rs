@@ -38,6 +38,7 @@ use pack_api::{
     project::{PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions},
     source_map::get_source_map_rope,
 };
+use pack_core::config::DEFAULT_CACHE_DIRECTORY;
 use pack_core::tracing_presets::{
     TRACING_OVERVIEW_TARGETS, TRACING_TARGETS, TRACING_TURBO_TASKS_TARGETS,
     TRACING_TURBOPACK_TARGETS,
@@ -186,6 +187,9 @@ pub struct NapiTurboEngineOptions {
     /// Run the turbo-tasks reference-counting garbage collector. Defaults to the
     /// `TURBO_ENGINE_GC` environment variable.
     pub turbopack_gc: Option<bool>,
+    /// Absolute directory for the persistent cache, lock file and traces.
+    /// Defaults to `.turbopack` inside the project path.
+    pub cache_directory: Option<String>,
 }
 
 /// Turbopack's memory eviction strategy for the persistent cache.
@@ -382,6 +386,13 @@ pub fn project_new<'env>(
         });
     }
 
+    let cache_directory = turbo_engine_options
+        .cache_directory
+        .as_deref()
+        .filter(|directory| !directory.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&options.project_path).join(DEFAULT_CACHE_DIRECTORY));
+
     let mut trace = std::env::var("TURBOPACK_TRACING")
         .ok()
         .filter(|v| !v.is_empty());
@@ -424,11 +435,10 @@ pub fn project_new<'env>(
 
         let subscriber = subscriber.with(FilterLayer::try_new(&trace).unwrap());
 
-        let internal_dir = PathBuf::from(&options.project_path).join(".turbopack");
-        std::fs::create_dir_all(&internal_dir)
-            .context("Unable to create .turbopack directory")
+        std::fs::create_dir_all(&cache_directory)
+            .with_context(|| format!("Unable to create cache directory {cache_directory:?}"))
             .unwrap();
-        let trace_file = internal_dir.join(".trace-turbopack");
+        let trace_file = cache_directory.join(".trace-turbopack");
         let trace_writer = std::fs::File::create(trace_file.clone()).unwrap();
         let (trace_writer, trace_writer_guard) = TraceWriter::new(trace_writer);
         let subscriber = subscriber.with(RawTraceLayer::new(trace_writer));
@@ -504,7 +514,7 @@ pub fn project_new<'env>(
             let small_preallocation = turbo_engine_options.small_preallocation.unwrap_or(false);
             let turbopack_gc = turbo_engine_options.turbopack_gc;
             let turbo_tasks = create_turbo_tasks(
-                PathBuf::from(&options.project_path),
+                cache_directory,
                 persistent_caching,
                 memory_limit,
                 dependency_tracking,

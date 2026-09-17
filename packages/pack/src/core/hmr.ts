@@ -15,6 +15,7 @@ import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
 import type { MemoryEvictionMode, NapiWrittenEndpoint } from "../binding";
 import { BundleOptions } from "../config/types";
+import { resolveCacheDirectory } from "../utils/cacheDirectory";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
 import { debounce, getPackPath, processIssues } from "../utils/common";
 import {
@@ -256,8 +257,12 @@ export async function createHotReloader(
   const smallPreallocation = isTruthyEnv(
     process.env.UTOO_TURBOPACK_SMALL_PREALLOCATION,
   );
-  const persistentCacheLock = await acquirePersistentCacheLock(
+  const cacheDirectory = resolveCacheDirectory(
     resolvedProjectPath,
+    bundleOptions.config.cacheDirectory,
+  );
+  const persistentCacheLock = await acquirePersistentCacheLock(
+    cacheDirectory,
     "utoo pack dev",
     persistentCaching,
   );
@@ -310,6 +315,7 @@ export async function createHotReloader(
         turbopackMemoryEviction,
         smallPreallocation,
         turbopackGc: bundleOptions.config.turbopackGc,
+        cacheDirectory,
       },
     );
   } catch (error) {

@@ -172,6 +172,11 @@ export interface NapiTurboEngineOptions {
    * `TURBO_ENGINE_GC` environment variable.
    */
   turbopackGc?: boolean
+  /**
+   * Absolute directory for the persistent cache, lock file and traces.
+   * Defaults to `.turbopack` inside the project path.
+   */
+  cacheDirectory?: string
 }
 
 /**

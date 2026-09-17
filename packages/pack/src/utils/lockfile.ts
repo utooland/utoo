@@ -69,7 +69,7 @@ export class PersistentCacheLock {
 }
 
 export async function acquirePersistentCacheLock(
-  projectPath: string,
+  cacheDirectory: string,
   processName: string,
   persistentCaching: boolean,
 ) {
@@ -77,10 +77,9 @@ export async function acquirePersistentCacheLock(
     return undefined;
   }
 
-  const internalDir = path.join(path.resolve(projectPath), ".turbopack");
-  fs.mkdirSync(internalDir, { recursive: true });
+  fs.mkdirSync(cacheDirectory, { recursive: true });
   return PersistentCacheLock.acquireWithRetries(
-    path.join(internalDir, "lock"),
+    path.join(cacheDirectory, "lock"),
     processName,
   );
 }
@@ -105,5 +104,5 @@ function formatLockError(lockPath: string, processName: string) {
 
   return `Unable to acquire ${processName} persistent cache lock at ${pc.cyan(
     lockPath,
-  )}. Another utoo pack process may be using the same .turbopack cache.${owner}`;
+  )}. Another utoo pack process may be using the same cache directory.${owner}`;
 }

@@ -257,6 +257,10 @@ pub struct ServerOutputConfig {
     pub chunk_filename: Option<RcStr>,
 }
 
+/// Default directory, relative to the project path, for the persistent cache
+/// and other internal files.
+pub const DEFAULT_CACHE_DIRECTORY: &str = ".turbopack";
+
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, OperationValue, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
@@ -286,6 +290,7 @@ pub struct Config {
     #[cfg(any(feature = "process_pool", feature = "worker_pool"))]
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
+    cache_directory: Option<RcStr>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     turbopack_memory_eviction: Option<serde_json::Value>,
     node_polyfill: Option<bool>,
@@ -1793,6 +1798,19 @@ impl Config {
     #[turbo_tasks::function]
     pub fn persistent_caching_enabled(&self) -> Result<Vc<bool>> {
         Ok(Vc::cell(self.persistent_caching.unwrap_or_default()))
+    }
+
+    /// Directory holding the persistent cache, lock file and traces. Relative
+    /// paths resolve from the project path. An empty value falls back to the
+    /// default, matching `resolveCacheDirectory` on the JS side.
+    #[turbo_tasks::function]
+    pub fn cache_directory(&self) -> Vc<RcStr> {
+        Vc::cell(
+            self.cache_directory
+                .clone()
+                .filter(|directory| !directory.is_empty())
+                .unwrap_or_else(|| RcStr::from(DEFAULT_CACHE_DIRECTORY)),
+        )
     }
 
     #[turbo_tasks::function]

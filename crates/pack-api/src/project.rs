@@ -14,7 +14,7 @@ use pack_core::{
     server::contexts::{
         ServerChunkingContextOptions, get_server_chunking_context, get_server_compile_time_info,
     },
-    util::{Runtime, convert_to_project_relative},
+    util::{Runtime, convert_to_project_relative, is_absolute_path},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -827,11 +827,24 @@ impl Project {
             }
         }
 
-        let project_turbopack = join_path(&unix_relative_project, ".turbopack")
-            .map(RcStr::from)
-            .unwrap_or_else(|| rcstr!(".turbopack"));
-        if !denied_paths.contains(&project_turbopack) {
-            denied_paths.push(project_turbopack);
+        // turbo-tasks writes into the cache directory itself, so it must never be watched. A
+        // directory outside the root filesystem cannot be watched in the first place.
+        let cache_directory = self.config.cache_directory().await?;
+        let cache_directory = if is_absolute_path(&cache_directory) {
+            strip_root_prefix_for_file_system(&cache_directory, &self.root_path)
+        } else {
+            join_path(
+                &unix_relative_project,
+                &to_file_system_path(&cache_directory),
+            )
+        };
+        if let Some(cache_directory) = cache_directory
+            && !cache_directory.is_empty()
+        {
+            let cache_directory = RcStr::from(cache_directory);
+            if !denied_paths.contains(&cache_directory) {
+                denied_paths.push(cache_directory);
+            }
         }
         // Get watched ignored paths from configuration
         let watched_ignored = self.watch.ignored.clone();

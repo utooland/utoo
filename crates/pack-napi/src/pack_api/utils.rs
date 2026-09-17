@@ -28,7 +28,7 @@ use turbopack_core::{
 };
 
 pub fn create_turbo_tasks(
-    output_path: PathBuf,
+    cache_directory: PathBuf,
     persistent_caching: bool,
     _memory_limit: usize,
     dependency_tracking: bool,
@@ -47,7 +47,7 @@ pub fn create_turbo_tasks(
         // TODO: check is_ci;
         let is_ci: bool = false;
         let (backing_storage, cache_state) = turbo_backing_storage(
-            &output_path.join(".turbopack/.cache"),
+            &cache_directory.join(".cache"),
             &version_info,
             BackingStorageOptions {
                 is_ci,
