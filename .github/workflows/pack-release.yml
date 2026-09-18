@@ -363,10 +363,63 @@ jobs:
         env:
           VERSION: ${{ steps.get_version.outputs.VERSION }}
 
+  wait_for_npm:
+    name: Wait for npm propagation
+    needs:
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Setup node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.14.0
+          package-manager-cache: false
+      - name: Wait for ecosystem packages
+        shell: bash
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          set -euo pipefail
+          : "${VERSION:?VERSION is required}"
+
+          # npm publish can succeed before registry metadata exposes the version.
+          # Include the native binding used by the Ubuntu ecosystem runners.
+          packages=(@utoo/pack @utoo/pack-shared @utoo/pack-cli @utoo/pack-linux-x64-gnu)
+          for attempt in {1..12}; do
+            ready=true
+            for package in "${packages[@]}"; do
+              if version=$(npm view "${package}@${VERSION}" version \
+                --registry=https://registry.npmjs.org \
+                --prefer-online --fetch-retries=0 --fetch-timeout=10000) && \
+                [[ "$version" == "$VERSION" ]]; then
+                echo "${package}@${VERSION} is available"
+              else
+                echo "Waiting for ${package}@${VERSION} (attempt ${attempt}/12)"
+                ready=false
+                break
+              fi
+            done
+
+            if [[ "$ready" == true ]]; then
+              echo "All ecosystem packages are available on npm"
+              exit 0
+            fi
+            if (( attempt < 12 )); then
+              sleep 45
+            fi
+          done
+
+          echo "::error::npm propagation timed out for ${VERSION}; ecosystem tests were not started"
+          exit 1
+
   ecosystem:
     name: Ecosystem CI
     needs:
       - publish
+      - wait_for_npm
     permissions:
       contents: read
     uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@main
