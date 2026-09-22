@@ -273,7 +273,9 @@ async fn drain_tapped<R: tokio::io::AsyncRead + Unpin>(
     // it without limit — the full bytes still land in `raw` for the dump.
     const MAX_SEGMENT: usize = 4 * 1024;
     let mut segment: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 8 * 1024];
+    // Keep pipe buffers out of the nested installation/lifecycle futures.
+    // Inline arrays inflate every caller and exhaust the Windows debug stack.
+    let mut chunk = vec![0u8; 8 * 1024];
     loop {
         match reader.read(&mut chunk).await {
             Ok(0) => break,

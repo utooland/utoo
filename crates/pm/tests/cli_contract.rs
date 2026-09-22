@@ -188,6 +188,35 @@ fn cli_startup_fits_a_one_megabyte_stack() {
     assert_eq!(document["ok"], true);
 }
 
+#[cfg(unix)]
+#[test]
+fn captured_install_lifecycle_fits_a_one_megabyte_stack() {
+    let project = tempdir().unwrap();
+    write_lifecycle_project(project.path(), 0);
+    let output = Command::new("/bin/sh")
+        .args(["-c", r#"ulimit -s 1024 && exec "$@""#, "utoo-small-stack"])
+        .arg(env!("CARGO_BIN_EXE_utoo"))
+        .args(["--json", "--registry", "http://127.0.0.1:9", "install"])
+        .current_dir(project.path())
+        .env("HOME", project.path())
+        .env("NO_UPDATE_NOTIFIER", "1")
+        .env("UTOO_SELF_PIN", "0")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    assert!(!stdout.contains("LIFECYCLE_STDOUT_MARKER"));
+    let document: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(document["command"], "install");
+    assert_eq!(document["ok"], true);
+}
+
 #[test]
 fn json_version_is_one_machine_document() {
     let output = utoo().args(["--json", "--version"]).output().unwrap();
