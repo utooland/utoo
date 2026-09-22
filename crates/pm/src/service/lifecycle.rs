@@ -9,26 +9,15 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use tokio::task::JoinSet;
 
-use super::ScriptService;
-use super::exec::{ScriptFailure, status_exit_code};
 use crate::model::cli_output::{CapturedOutput, ExecutionStatus, LifecycleExecution};
 use crate::model::package::PackageInfo;
 use crate::service::project::discovery::find_workspace_path;
+use crate::service::script::ScriptService;
+use crate::service::script::{ScriptFailure, status_exit_code};
 use crate::util::format_print::{
     announce_script, print_hook_done, print_layer_separator, print_multi_workspace_header,
     print_workspace_result,
 };
-
-/// How script output is handled.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ScriptOutput {
-    /// Stream to terminal in real time (user-facing scripts).
-    Verbose,
-    /// Capture and only print on failure (dependency lifecycle scripts).
-    Silent,
-    /// Capture without writing to stdout/stderr (machine invocations).
-    Machine,
-}
 
 /// What to do when a workspace doesn't have the requested script.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -56,7 +45,7 @@ fn should_run_lifecycle(
     }
 }
 
-/// Where the output of a [`ScriptService::run_lifecycle`] call goes.
+/// Where the output of a [`LifecycleService::run_lifecycle`] call goes.
 ///
 /// Capture borrows the caller's buffers so they retain bytes captured up to
 /// a failing step — `run_in_layers` prints those as the `✗ [ws] …` tail.
@@ -84,7 +73,16 @@ pub struct MachineLifecycleOutcome {
     pub failure: Option<String>,
 }
 
-impl ScriptService {
+#[derive(Clone)]
+pub struct LifecycleService {
+    executor: ScriptService,
+}
+
+impl LifecycleService {
+    pub fn new(executor: ScriptService) -> Self {
+        Self { executor }
+    }
+
     pub async fn run_lifecycle_machine(
         &self,
         package: &PackageInfo,
@@ -129,6 +127,7 @@ impl ScriptService {
             };
             let started = Instant::now();
             let captured = self
+                .executor
                 .execute_custom_script_captured(package, step_name, &script, step_args.to_vec())
                 .await;
             let duration_ms = started.elapsed().as_millis() as u64;
@@ -241,7 +240,8 @@ impl ScriptService {
                     // `✓ <hook> [Xs]` marker when it finishes. (The silent
                     // dependency-script path, which shows nothing, is where the
                     // heartbeat earns its keep — see `logger::ScriptHeartbeat`.)
-                    self.execute_custom_script(package, step_name, &content, step_args.to_vec())
+                    self.executor
+                        .execute_custom_script(package, step_name, &content, step_args.to_vec())
                         .await
                         .with_context(|| format!("Failed to execute {step_name}"))?;
                     if *timed {
@@ -262,6 +262,7 @@ impl ScriptService {
                     )
                     .expect("writing a lifecycle header to String cannot fail");
                     let cap = self
+                        .executor
                         .execute_custom_script_captured(
                             package,
                             step_name,
@@ -277,6 +278,7 @@ impl ScriptService {
                 LifecycleSink::Machine => {
                     let started = Instant::now();
                     let cap = self
+                        .executor
                         .execute_custom_script_captured(
                             package,
                             step_name,
@@ -341,7 +343,7 @@ impl ScriptService {
         let package = PackageInfo::load(&package_path).await?;
         let args = script_args.unwrap_or_default();
 
-        crate::service::project::context::Context::scripts(cwd)
+        crate::service::project::context::Context::lifecycle(cwd)
             .await
             .run_lifecycle(
                 &package,
@@ -475,7 +477,7 @@ enum WorkspaceOutcome {
 }
 
 async fn run_script_captured(
-    executor: &ScriptService,
+    executor: &LifecycleService,
     workspace_dir: &Path,
     script_name: &str,
     workspace_name: &str,

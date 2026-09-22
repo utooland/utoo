@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::model::RunMode;
 use crate::model::cli_output::{PackFile, PackResult as CliPackResult};
-use crate::service::pm_pack as pack_service;
+use crate::service::publish::pack as pack_service;
 use crate::service::script::ScriptOutput;
 use crate::util::format_print::print_pack_details;
 use crate::util::invocation;

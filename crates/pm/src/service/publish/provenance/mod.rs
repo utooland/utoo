@@ -11,7 +11,7 @@
 //!    Rekor tlog) and assembles a Sigstore bundle v0.3.
 //!
 //! The bundle is attached to the publish request as a second `_attachments`
-//! entry named `<name>-<version>.sigstore` (see [`crate::model::publish_payload`]).
+//! entry named `<name>-<version>.sigstore` (see [`crate::service::publish::payload`]).
 //!
 //! Provenance only succeeds in a supported CI; outside one, [`generate`] bails
 //! with guidance rather than producing an unsigned/invalid attestation.

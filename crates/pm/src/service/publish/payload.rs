@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use utoo_ruborist::manifest::PackageJson;
 
-use crate::service::provenance::ProvenanceBundle;
+use crate::service::publish::provenance::ProvenanceBundle;
 
 /// Input for building the publish payload.
 pub(crate) struct PublishPayloadInput<'a> {

@@ -101,13 +101,13 @@ impl std::error::Error for ScriptExit {}
 /// exposes bounded output tails to JSON callers without producing a second
 /// stdout/stderr document.
 #[derive(Debug)]
-pub(super) struct ScriptFailure {
+pub(crate) struct ScriptFailure {
     message: String,
     execution: LifecycleExecution,
 }
 
 impl ScriptFailure {
-    pub(super) fn failed_to_start(
+    pub(crate) fn failed_to_start(
         package: &PackageInfo,
         event: &str,
         command: String,
@@ -156,7 +156,7 @@ impl ScriptFailure {
         }
     }
 
-    pub(super) fn lifecycle(
+    pub(crate) fn lifecycle(
         package: &PackageInfo,
         event: &str,
         command: &str,
@@ -224,7 +224,7 @@ pub(crate) fn script_failure_details(error: &anyhow::Error) -> Option<ErrorDetai
 /// Map a child `ExitStatus` to the exit code utoo should adopt: `128 + signal`
 /// for a signal death (so SIGPIPE → 141), otherwise the child's own code,
 /// falling back to 1 when neither is available.
-pub(super) fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
+pub(crate) fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
     #[cfg(unix)]
     if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
         return 128 + signal;

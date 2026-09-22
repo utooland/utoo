@@ -20,7 +20,8 @@ use crate::model::cli_output::{
     RequiredBy, VersionResult,
 };
 use crate::service::config::ConfigService;
-use crate::service::script::{MissingScript, ScriptExit, script_failure_details};
+use crate::service::lifecycle::MissingScript;
+use crate::service::script::{ScriptExit, script_failure_details};
 use crate::service::workspace::WorkspaceFilter;
 use crate::util::cli_enum::{
     ColorPolicy, ConfigScope, ConfirmationPolicy, ConsoleVerbosity, InitMode, OutputFormat,

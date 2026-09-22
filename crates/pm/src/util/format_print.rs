@@ -10,7 +10,7 @@ use utoo_ruborist::registry::{RegistryError, ResolveError};
 
 use crate::helper::migrate::MigrateResult;
 use crate::service::dependency_graph::{DepTreeNode, LockGraphService};
-use crate::service::pm_pack::PackResult;
+use crate::service::publish::pack::PackResult;
 use crate::util::logger::format_elapsed_time;
 
 pub use package_view::print_package_info;
