@@ -40,6 +40,8 @@ struct VersionCache {
     last_update_failed: Option<u64>,
 }
 
+const INTERNAL_UPDATE_ENV: &str = "UTOO_INTERNAL_UPDATE";
+
 const CACHE_TTL_SECS: u64 = 3600; // 1 hour
 const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours
 
@@ -52,7 +54,10 @@ const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours
 pub async fn init_auto_update() {
     // A project-pinned child must stay on the requested release for the whole
     // operation instead of replacing the user's global installation.
-    if invocation::quiet() || crate::helper::self_pin::is_active() {
+    if std::env::var_os(INTERNAL_UPDATE_ENV).is_some()
+        || invocation::quiet()
+        || crate::helper::self_pin::is_active()
+    {
         return;
     }
 
@@ -173,11 +178,7 @@ fn mark_update_failed(timestamp: Option<u64>) {
 }
 
 async fn execute_update(version: &str) -> Result<()> {
-    let status = tokio::process::Command::new("utoo")
-        .args(["i", &format!("utoo@{version}"), "-g"])
-        .env("CI", "1")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+    let status = update_command(version)?
         .status()
         .await
         .context("Failed to execute update command")?;
@@ -187,6 +188,18 @@ async fn execute_update(version: &str) -> Result<()> {
     } else {
         anyhow::bail!("update command exited with {status}")
     }
+}
+
+fn update_command(version: &str) -> Result<tokio::process::Command> {
+    let executable = std::env::current_exe().context("Failed to locate current utoo executable")?;
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .args(["i", &format!("utoo@{version}"), "-g"])
+        .env(INTERNAL_UPDATE_ENV, "1")
+        .env("CI", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    Ok(command)
 }
 
 /// Fetch latest version from registry, write to cache file, and return the version.
@@ -251,6 +264,22 @@ mod tests {
     use super::*;
     use std::process::{Command, Stdio};
     use tokio::time::Duration;
+
+    #[test]
+    fn update_uses_current_executable_and_marks_internal_child() {
+        let command = update_command("1.2.3").unwrap();
+        let command = command.as_std();
+        assert_eq!(
+            command.get_program(),
+            std::env::current_exe().unwrap().as_os_str()
+        );
+        assert!(
+            command
+                .get_envs()
+                .any(|(key, value)| key == INTERNAL_UPDATE_ENV
+                    && value == Some(std::ffi::OsStr::new("1")))
+        );
+    }
 
     #[test]
     fn test_skip_ci_environment() {
