@@ -40,9 +40,30 @@ fn serve_publish_registry_responses(
         .iter()
         .map(|(status, body)| (status.to_string(), body.to_string()))
         .collect();
+    listener.set_nonblocking(true).unwrap();
     let handle = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let listener = runtime
+            .block_on(async { tokio::net::TcpListener::from_std(listener) })
+            .unwrap();
         for (response_status, response_body) in responses {
-            let (mut stream, _) = listener.accept().unwrap();
+            // A CLI startup failure must fail this fixture instead of leaving
+            // the test joined forever on a request that will never arrive.
+            let (stream, _) = runtime
+                .block_on(async {
+                    tokio::time::timeout(std::time::Duration::from_secs(15), listener.accept())
+                        .await
+                })
+                .expect("timed out waiting for the CLI registry request")
+                .unwrap();
+            let mut stream = stream.into_std().unwrap();
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(15)))
+                .unwrap();
             let mut request = Vec::new();
             let mut chunk = [0_u8; 8192];
             let header_end = loop {
@@ -140,6 +161,31 @@ process.exit({exit_code});
         ),
     )
     .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_startup_fits_a_one_megabyte_stack() {
+    // Set the limit in a fresh process: macOS can reject lowering the stack
+    // limit in a child forked directly from a test worker thread.
+    let output = Command::new("/bin/sh")
+        .args([
+            "-c",
+            r#"ulimit -s 1024 && exec "$1" --json --version"#,
+            "utoo-small-stack",
+        ])
+        .arg(env!("CARGO_BIN_EXE_utoo"))
+        .env("NO_UPDATE_NOTIFIER", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(document["command"], "version");
+    assert_eq!(document["ok"], true);
 }
 
 #[test]

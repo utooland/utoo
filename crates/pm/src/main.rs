@@ -59,7 +59,7 @@ fn main() {
         .worker_threads(worker_threads)
         .build()
         .expect("failed to build tokio runtime")
-        .block_on(async_main());
+        .block_on(cli_future());
 
     if let Err(e) = result {
         if let Some(exit) = e.downcast_ref::<cmd::CommandExit>() {
@@ -130,6 +130,13 @@ fn main() {
         }
         process::exit(exit_code);
     }
+}
+
+// Construct the large future outside main's frame before entering block_on.
+// Debug builds otherwise retain its stack temporaries while polling the CLI.
+#[inline(never)]
+fn cli_future() -> std::pin::Pin<Box<impl std::future::Future<Output = Result<()>>>> {
+    Box::pin(async_main())
 }
 
 async fn async_main() -> Result<()> {
@@ -352,176 +359,182 @@ async fn async_main() -> Result<()> {
     // Auto update: check cache → update or refresh in background
     init_auto_update().await;
 
-    match cli.command {
-        Some(Commands::Clean { pattern, yes }) => {
-            let confirmation = ConfirmationPolicy::from(yes);
-            if confirmation.requires_interaction() && !invocation::interactive() {
-                return Err(CliError::usage(
-                    "refusing to prompt for cache deletion in non-interactive mode",
-                )
-                .with_suggestion("rerun with `utoo clean --yes`")
-                .into());
+    // Separate command polling from startup so debug builds keep their
+    // temporaries within the Windows main-thread stack limit.
+    async {
+        match cli.command {
+            Some(Commands::Clean { pattern, yes }) => {
+                let confirmation = ConfirmationPolicy::from(yes);
+                if confirmation.requires_interaction() && !invocation::interactive() {
+                    return Err(CliError::usage(
+                        "refusing to prompt for cache deletion in non-interactive mode",
+                    )
+                    .with_suggestion("rerun with `utoo clean --yes`")
+                    .into());
+                }
+                clean(&pattern, confirmation).await?;
+                log_time_end(&format!("{pattern} cleaned"));
             }
-            clean(&pattern, confirmation).await?;
-            log_time_end(&format!("{pattern} cleaned"));
-        }
-        Some(Commands::Install(mut args)) => {
-            args.ignore_scripts |= root_ignore_scripts;
-            cmd::install::run(args, cli.legacy_peer_deps).await?;
-        }
-        Some(Commands::Uninstall {
-            specs,
-            workspace,
-            ignore_scripts,
-        }) => {
-            cmd::install::uninstall(
+            Some(Commands::Install(mut args)) => {
+                args.ignore_scripts |= root_ignore_scripts;
+                cmd::install::run(args, cli.legacy_peer_deps).await?;
+            }
+            Some(Commands::Uninstall {
                 specs,
                 workspace,
-                ScriptPolicy::from(root_ignore_scripts || ignore_scripts),
-            )
-            .await?;
-        }
-        Some(Commands::Rebuild) => {
-            let cwd = std::env::current_dir()?;
-            rebuild(&cwd).await?;
-            log_time_end("All packages rebuilt");
-        }
-        Some(Commands::Deps { workspace_only }) => {
-            cmd::deps::run(workspace_only).await?;
-        }
-        Some(Commands::Update(args)) => {
-            update(args, ScriptPolicy::from(root_ignore_scripts)).await?;
-            log_time_end("All packages updated");
-        }
-        Some(Commands::List { package }) => {
-            let cwd = std::env::current_dir()?;
-            list_dependencies(&cwd, &package).await?;
-        }
-        Some(Commands::Execute { command, args }) => {
-            service::execute::execute_package(&std::env::current_dir()?, &command, args).await?;
-        }
-        Some(Commands::Run {
-            script,
-            workspace,
-            workspaces,
-            if_present,
-            args,
-        }) => {
-            let missing = if if_present {
-                MissingScript::Skip
-            } else {
-                MissingScript::Fail
-            };
-            run(
-                script.as_deref(),
-                WorkspaceFilter::from_flags(workspace, workspaces),
-                missing,
-                (!args.is_empty()).then_some(args),
-            )
-            .await?;
-        }
-        Some(Commands::View { package }) => {
-            view(&package).await?;
-        }
-        Some(Commands::Link { packages, prefix }) => {
-            cmd::link::run(packages, prefix).await?;
-        }
-        Some(Commands::Init { yes }) => {
-            let mode = InitMode::from(yes);
-            if mode.requires_interaction() && !invocation::interactive() {
-                return Err(CliError::usage(
-                    "refusing to prompt for package metadata in non-interactive mode",
-                )
-                .with_suggestion("re-run with `utoo init --yes`")
-                .into());
-            }
-            let output = if invocation::json() {
-                service::init::InitOutput::Machine
-            } else {
-                service::init::InitOutput::Human
-            };
-            service::init::init(mode, output, None).await?;
-            log_time_end("package.json created");
-            if invocation::json() {
-                let path = std::env::current_dir()?.join("package.json");
-                let package: serde_json::Value =
-                    serde_json::from_str(&crate::fs::read_to_string(&path).await?)?;
-                presenter::emit(
-                    "init",
-                    &InitResult {
-                        path: path.to_string_lossy().into_owned(),
-                        name: package["name"].as_str().unwrap_or_default().to_string(),
-                        version: package["version"].as_str().unwrap_or_default().to_string(),
-                    },
-                    || Ok(()),
-                )?;
-            }
-        }
-        Some(Commands::Pack { path, dry_run }) => {
-            cmd::pm_pack::pack(path, dry_run.into()).await?;
-            log_time_end("Pack complete");
-        }
-        Some(Commands::Publish {
-            tag,
-            dry_run,
-            otp,
-            access,
-            // utoo performs no Git cleanliness checks, so `--no-git-checks` is a
-            // documented no-op accepted for pnpm/npm compatibility.
-            no_git_checks: _,
-            provenance,
-        }) => {
-            // `--workspace`/`--filter` selects member(s); empty means the current
-            // package. `--workspaces` is intentionally NOT honored here to avoid
-            // an accidental publish of every member.
-            let filter = if cli.workspace.is_empty() {
-                WorkspaceFilter::Current
-            } else {
-                WorkspaceFilter::Selected(cli.workspace)
-            };
-            cmd::publish::publish(
-                tag.as_deref(),
-                dry_run.into(),
-                otp.as_deref(),
-                access,
-                filter,
-                ProvenancePolicy::from(provenance),
-            )
-            .await?;
-        }
-        Some(Commands::Ping { registry }) => {
-            cmd::ping::ping(registry.as_deref()).await?;
-        }
-        Some(Commands::Login) => {
-            cmd::login::login().await?;
-        }
-        Some(Commands::Whoami) => {
-            cmd::whoami::whoami().await?;
-        }
-        Some(Commands::Logout) => {
-            cmd::logout::logout().await?;
-        }
-        Some(Commands::Config { command }) => {
-            cmd::config::run(command).await?;
-        }
-        None => match cli.script_name {
-            // A bare `utoo <name>`: custom command from config, else script
-            Some(script_name) => {
-                run_fallback(
-                    &script_name,
-                    WorkspaceFilter::from_flags(cli.workspace, cli.workspaces),
-                    cli.script_args,
+                ignore_scripts,
+            }) => {
+                cmd::install::uninstall(
+                    specs,
+                    workspace,
+                    ScriptPolicy::from(root_ignore_scripts || ignore_scripts),
                 )
                 .await?;
             }
-            // Default to install if no arguments
-            None => cmd::install::install_cwd(ScriptPolicy::from(root_ignore_scripts)).await?,
-        },
-        // Completions is handled early before initialization
-        Some(Commands::Completions { .. }) => unreachable!(),
-    }
+            Some(Commands::Rebuild) => {
+                let cwd = std::env::current_dir()?;
+                rebuild(&cwd).await?;
+                log_time_end("All packages rebuilt");
+            }
+            Some(Commands::Deps { workspace_only }) => {
+                cmd::deps::run(workspace_only).await?;
+            }
+            Some(Commands::Update(args)) => {
+                update(args, ScriptPolicy::from(root_ignore_scripts)).await?;
+                log_time_end("All packages updated");
+            }
+            Some(Commands::List { package }) => {
+                let cwd = std::env::current_dir()?;
+                list_dependencies(&cwd, &package).await?;
+            }
+            Some(Commands::Execute { command, args }) => {
+                service::execute::execute_package(&std::env::current_dir()?, &command, args)
+                    .await?;
+            }
+            Some(Commands::Run {
+                script,
+                workspace,
+                workspaces,
+                if_present,
+                args,
+            }) => {
+                let missing = if if_present {
+                    MissingScript::Skip
+                } else {
+                    MissingScript::Fail
+                };
+                run(
+                    script.as_deref(),
+                    WorkspaceFilter::from_flags(workspace, workspaces),
+                    missing,
+                    (!args.is_empty()).then_some(args),
+                )
+                .await?;
+            }
+            Some(Commands::View { package }) => {
+                view(&package).await?;
+            }
+            Some(Commands::Link { packages, prefix }) => {
+                cmd::link::run(packages, prefix).await?;
+            }
+            Some(Commands::Init { yes }) => {
+                let mode = InitMode::from(yes);
+                if mode.requires_interaction() && !invocation::interactive() {
+                    return Err(CliError::usage(
+                        "refusing to prompt for package metadata in non-interactive mode",
+                    )
+                    .with_suggestion("re-run with `utoo init --yes`")
+                    .into());
+                }
+                let output = if invocation::json() {
+                    service::init::InitOutput::Machine
+                } else {
+                    service::init::InitOutput::Human
+                };
+                service::init::init(mode, output, None).await?;
+                log_time_end("package.json created");
+                if invocation::json() {
+                    let path = std::env::current_dir()?.join("package.json");
+                    let package: serde_json::Value =
+                        serde_json::from_str(&crate::fs::read_to_string(&path).await?)?;
+                    presenter::emit(
+                        "init",
+                        &InitResult {
+                            path: path.to_string_lossy().into_owned(),
+                            name: package["name"].as_str().unwrap_or_default().to_string(),
+                            version: package["version"].as_str().unwrap_or_default().to_string(),
+                        },
+                        || Ok(()),
+                    )?;
+                }
+            }
+            Some(Commands::Pack { path, dry_run }) => {
+                cmd::pm_pack::pack(path, dry_run.into()).await?;
+                log_time_end("Pack complete");
+            }
+            Some(Commands::Publish {
+                tag,
+                dry_run,
+                otp,
+                access,
+                // utoo performs no Git cleanliness checks, so `--no-git-checks` is a
+                // documented no-op accepted for pnpm/npm compatibility.
+                no_git_checks: _,
+                provenance,
+            }) => {
+                // `--workspace`/`--filter` selects member(s); empty means the current
+                // package. `--workspaces` is intentionally NOT honored here to avoid
+                // an accidental publish of every member.
+                let filter = if cli.workspace.is_empty() {
+                    WorkspaceFilter::Current
+                } else {
+                    WorkspaceFilter::Selected(cli.workspace)
+                };
+                cmd::publish::publish(
+                    tag.as_deref(),
+                    dry_run.into(),
+                    otp.as_deref(),
+                    access,
+                    filter,
+                    ProvenancePolicy::from(provenance),
+                )
+                .await?;
+            }
+            Some(Commands::Ping { registry }) => {
+                cmd::ping::ping(registry.as_deref()).await?;
+            }
+            Some(Commands::Login) => {
+                cmd::login::login().await?;
+            }
+            Some(Commands::Whoami) => {
+                cmd::whoami::whoami().await?;
+            }
+            Some(Commands::Logout) => {
+                cmd::logout::logout().await?;
+            }
+            Some(Commands::Config { command }) => {
+                cmd::config::run(command).await?;
+            }
+            None => match cli.script_name {
+                // A bare `utoo <name>`: custom command from config, else script
+                Some(script_name) => {
+                    run_fallback(
+                        &script_name,
+                        WorkspaceFilter::from_flags(cli.workspace, cli.workspaces),
+                        cli.script_args,
+                    )
+                    .await?;
+                }
+                // Default to install if no arguments
+                None => cmd::install::install_cwd(ScriptPolicy::from(root_ignore_scripts)).await?,
+            },
+            // Completions is handled early before initialization
+            Some(Commands::Completions { .. }) => unreachable!(),
+        }
 
-    Ok(())
+        Ok(())
+    }
+    .await
 }
 
 fn has_flag_before_delimiter(args: &[String], flag: &str) -> bool {
