@@ -13,8 +13,8 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::ScriptsView;
 
-use super::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
-use super::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
+use crate::service::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
+use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 
 /// npm install lifecycle ordered by event chain, each expanding to
 /// `pre<event>` / `<event>` / `post<event>` via [`ScriptService::run_lifecycle`].
@@ -571,7 +571,7 @@ impl PackageService {
                     continue;
                 }
 
-                ScriptService::ensure_executable(&target_path)
+                super::bins::ensure_executable(&target_path)
                     .await
                     .with_context(|| {
                         format!(

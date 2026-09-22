@@ -56,7 +56,7 @@ pub fn write_compact_sync<T: Serialize>(path: &Path, value: &T) -> io::Result<()
 ///
 /// `pkg_path` is used for error/log context only. This is the single
 /// implementation of the lenient contract — both the async loader here and
-/// the sync loader in `util::cloner` go through it so the tolerance can't
+/// the sync loader in `service::install::materialize` go through it so the tolerance can't
 /// drift between paths.
 pub fn parse_package_json_lenient<T: DeserializeOwned>(
     content: &str,

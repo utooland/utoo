@@ -7,8 +7,8 @@ use reqwest::{Client, StatusCode};
 use tokio_retry::RetryIf;
 use utoo_ruborist::spec::Protocol;
 
-use super::install_progress::{DOWNLOADED_BYTES, DownloadGuard};
-use super::retry::{RetryableError, build_download_client, create_retry_strategy};
+use crate::util::install_progress::{DOWNLOADED_BYTES, DownloadGuard};
+use crate::util::retry::{RetryableError, build_download_client, create_retry_strategy};
 
 // Global downloader client. Concurrency and duplicate work are controlled by
 // the caller's scheduler. Stores `Result` so proxy-configuration errors

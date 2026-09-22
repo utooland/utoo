@@ -9,9 +9,9 @@ use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
 
 use crate::service::auth;
-use crate::util::cloner::{ClonePolicy, PackageClone, clone_package_sync};
-use crate::util::downloader::download_bytes;
-use crate::util::package_cache::{
+use crate::service::install::download::download_bytes;
+use crate::service::install::materialize::{ClonePolicy, PackageClone, clone_package_sync};
+use crate::service::install::store::{
     CachePlan, ExtractOutcome, PackageSource, extract_non_registry_to_target, extract_to_cache,
     registry_cache_lookup, resolve_cache_plan,
 };

@@ -1,3 +1,15 @@
+//! Package installation: lock-driven materialization, tools, bins and hooks.
+
+pub(crate) mod binary;
+pub(crate) mod bins;
+pub(crate) mod download;
+pub(crate) mod extract;
+mod hooks;
+mod materialize;
+pub(crate) mod rebuild;
+mod scheduler;
+mod store;
+
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::{Context as _, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -8,32 +20,32 @@ use std::time::Instant;
 use crate::fs;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
 use crate::model::package::PackageInfo;
-use crate::service::package::PackageService;
+use crate::service::install::hooks::PackageService;
+use crate::service::install::materialize::ClonePolicy;
+use crate::service::install::rebuild::RebuildService;
+use crate::service::install::store::PackageSource;
 use crate::service::project::context::Context;
 use crate::service::project::lock::{
     Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
     resolve_package_spec_details, update_package_json,
 };
 use crate::service::project::resolve_and_save_lock;
-use crate::service::rebuild::RebuildService;
 use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::{OmitType, PackageAction, ReifyMode, SaveType};
-use crate::util::cloner::ClonePolicy;
 use crate::util::install_progress;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
-use crate::util::package_cache::PackageSource;
 use crate::util::proxy_env::print_proxy_env_hint_once;
 use utoo_ruborist::builder::DevDeps;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::progress::PackageTarballInfo;
 
-use super::binary::{requires_private_copy, update_package_binary};
 use super::clean::clean_deps;
+use binary::{requires_private_copy, update_package_binary};
 
 /// Check if a package should be omitted based on omit config
 fn should_omit_package(package: &Package, omit: &HashSet<OmitType>) -> bool {
@@ -98,7 +110,7 @@ async fn install_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
-    scheduler: &super::install_scheduler::InstallScheduler,
+    scheduler: &scheduler::InstallScheduler,
     mode: ReifyMode,
 ) -> Result<()> {
     // Surface the clean step in the spinner — it doesn't move `pos`, so
@@ -137,7 +149,7 @@ async fn reify_packages(
     groups: &HashMap<usize, Vec<(String, Package)>>,
     cwd: &Path,
     omit: &HashSet<OmitType>,
-    scheduler: &super::install_scheduler::InstallScheduler,
+    scheduler: &scheduler::InstallScheduler,
     mode: ReifyMode,
 ) -> Result<()> {
     log_progress("linking packages");
@@ -344,7 +356,7 @@ impl InstallService {
         // itself emits a `tracing::warn` with the specific mismatch reason.
         let use_fresh_lock = fs::try_exists(&lock_path).await.unwrap_or(false)
             && !is_pkg_lock_outdated(root_path).await.unwrap_or(true);
-        let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
+        let scheduler_handle = scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
         let (package_lock, events_prefetched) = if use_fresh_lock {
@@ -357,7 +369,7 @@ impl InstallService {
             };
             (lock, false)
         } else {
-            let receiver = super::install_scheduler::InstallEventReceiver::new(
+            let receiver = scheduler::InstallEventReceiver::new(
                 crate::util::logger::ProgressReceiver,
                 scheduler.clone(),
             );
@@ -465,7 +477,7 @@ impl InstallService {
             root_path.display()
         );
 
-        let scheduler_handle = super::install_scheduler::InstallSchedulerHandle::start();
+        let scheduler_handle = scheduler::InstallSchedulerHandle::start();
         let scheduler = scheduler_handle.scheduler();
 
         let install_result: Result<_> = async {
@@ -509,7 +521,7 @@ impl InstallService {
             let resolve_start = Instant::now();
             let mut options = Context::deps_options(
                 root_path.clone(),
-                super::install_scheduler::InstallEventReceiver::new(
+                scheduler::InstallEventReceiver::new(
                     crate::util::logger::ProgressReceiver,
                     scheduler.clone(),
                 ),
@@ -572,8 +584,7 @@ impl InstallService {
         // Link the tool's own bin into the global bin dir.
         let target_bin_dir =
             get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
-        package_info
-            .link_to_global(&target_bin_dir)
+        bins::link_to_global(&package_info, &target_bin_dir)
             .await
             .context("Failed to link binary files to global")?;
 
