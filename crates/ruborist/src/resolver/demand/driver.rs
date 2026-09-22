@@ -2,6 +2,7 @@
 //! fetch pipeline, and feeds resolved manifests back into the graph. Owns the
 //! per-run [`ManifestState`] store and [`FetchQueues`] scheduler.
 
+use crate::util::error::SharedError;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -263,7 +264,12 @@ where
                 if edge.edge_type == EdgeType::Optional {
                     placements.push(make_placement(graph, parent, edge, Resolution::Skip));
                 } else {
-                    return Err(chain_err(graph, parent, &edge, registry_error(message)));
+                    return Err(chain_err(
+                        graph,
+                        parent,
+                        &edge,
+                        ResolveError::Registry(RegistryError(anyhow::Error::new(message)).into()),
+                    ));
                 }
             }
             EdgeStep::Park { wait, fetch } => {
@@ -546,24 +552,25 @@ where
 // These tie the manifest store and the fetch scheduler together; the store and
 // the queue stay unaware of each other.
 
-pub(super) fn registry_error<E: From<RegistryError>>(
-    message: impl Into<String>,
-) -> ResolveError<E> {
-    ResolveError::Registry(RegistryError(anyhow::anyhow!(message.into())).into())
-}
-
 /// Unwrap one completed fetch task and feed its result back into the
 /// store/queues. Shared by the non-blocking drain and the blocking tail of
 /// the level loop.
 fn absorb_fetch_done<E: From<RegistryError>>(
     state: &mut ManifestState,
     queues: &mut FetchQueues,
-    done: Result<FetchDone, String>,
+    done: Result<FetchDone, SharedError>,
     supports_semver: ResolutionMode,
     peer_deps: PeerDeps,
     level_pending: &mut VecDeque<WaitingEdge>,
 ) -> Result<(), ResolveError<E>> {
-    let done = done.map_err(|e| registry_error::<E>(format!("manifest fetch task failed: {e}")))?;
+    let done = done.map_err(|error| {
+        ResolveError::Registry(
+            RegistryError(anyhow::Error::new(
+                error.context("manifest fetch task failed"),
+            ))
+            .into(),
+        )
+    })?;
     apply_fetch_result(
         state,
         queues,
@@ -599,12 +606,12 @@ async fn fetch_registry_manifest_inner<R: ManifestProvider>(
         Err(error) => match key {
             FetchKey::Full(name) => FetchDone::Full {
                 name,
-                result: Err(format!("{error:#}")),
+                result: Err(SharedError::capture(&error)),
             },
             FetchKey::Version(name, spec) => FetchDone::Version {
                 name,
                 spec,
-                result: Err(format!("{error:#}")),
+                result: Err(SharedError::capture(&error)),
             },
         },
     }
@@ -625,7 +632,7 @@ where
                 if error.is_panic() {
                     std::panic::resume_unwind(error.into_panic());
                 }
-                error.to_string()
+                SharedError::from(anyhow::Error::new(error))
             })
     })
 }
@@ -1005,7 +1012,7 @@ mod tests {
             FetchDone::Version {
                 name: "shared".to_string(),
                 spec: "^1.0.0".to_string(),
-                result: Err("registry exploded".to_string()),
+                result: Err(SharedError::from(anyhow::anyhow!("registry exploded"))),
             },
             ResolutionMode::Semver,
             PeerDeps::Skip,
@@ -1014,7 +1021,10 @@ mod tests {
 
         // Failure recorded so the woken edge resolves to skip-or-error, not a hang.
         assert_eq!(
-            state.get_version_failure("shared", "^1.0.0"),
+            state
+                .get_version_failure("shared", "^1.0.0")
+                .map(ToString::to_string)
+                .as_deref(),
             Some("registry exploded")
         );
         assert_eq!(ready.len(), 1);

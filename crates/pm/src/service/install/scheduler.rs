@@ -7,6 +7,7 @@ use bytes::Bytes;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
+use utoo_ruborist::util::error::SharedError;
 
 use crate::service::auth;
 use crate::service::install::download::download_bytes;
@@ -64,7 +65,7 @@ struct DownloadedPackage {
     bytes: Bytes,
 }
 
-type CloneResponder = oneshot::Sender<Result<(), String>>;
+type CloneResponder = oneshot::Sender<Result<(), SharedError>>;
 
 enum Command {
     PrefetchDownload(PackageSource),
@@ -79,26 +80,26 @@ enum Command {
 enum StageReport {
     CacheResolved {
         spec: CloneSpec,
-        result: Result<CachePlan, String>,
+        result: Result<CachePlan, SharedError>,
     },
     Download {
         package: PackageSource,
-        result: Result<DownloadOutcome, String>,
+        result: Result<DownloadOutcome, SharedError>,
     },
     Extract {
         key: String,
-        result: Result<ExtractOutcome, String>,
+        result: Result<ExtractOutcome, SharedError>,
     },
     /// A non-registry tarball was fetched/read and extracted directly into its
     /// `node_modules` target (no global cache). The target is fully materialized,
     /// so this completes the clone for that target outright.
     DirectExtract {
         target: PathBuf,
-        result: Result<(), String>,
+        result: Result<(), SharedError>,
     },
     Clone {
         target: PathBuf,
-        result: Result<bool, String>,
+        result: Result<bool, SharedError>,
     },
 }
 
@@ -206,7 +207,7 @@ impl InstallScheduler {
             .map_err(|_| anyhow!("install scheduler stopped"))?;
         rx.await
             .context("install scheduler stopped before clone completed")?
-            .map_err(anyhow::Error::msg)
+            .map_err(anyhow::Error::new)
     }
 }
 
@@ -409,7 +410,7 @@ impl SchedulerState {
                 &git_clones,
             )
             .await
-            .map_err(|e| format!("{e:#}"));
+            .map_err(SharedError::from);
             StageReport::CacheResolved { spec, result }
         }));
     }
@@ -459,9 +460,9 @@ impl SchedulerState {
                         download_bytes(&package.tarball_url, token.as_deref())
                             .await
                             .map(DownloadOutcome::Bytes)
-                            .map_err(|e| format!("{e:#}"))
+                            .map_err(SharedError::from)
                     }
-                    Err(e) => Err(format!("{e:#}")),
+                    Err(e) => Err(SharedError::from(e)),
                 };
                 StageReport::Download { package, result }
             }));
@@ -481,7 +482,7 @@ impl SchedulerState {
             self.async_ops.push(tokio::spawn(async move {
                 let result = extract_to_cache(&downloaded.package, downloaded.bytes)
                     .await
-                    .map_err(|e| format!("{e:#}"));
+                    .map_err(SharedError::from);
                 StageReport::Extract { key, result }
             }));
         }
@@ -509,9 +510,11 @@ impl SchedulerState {
                         target: &job.spec.target,
                         policy: job.spec.policy,
                     })
-                    .map_err(|e| format!("{e:#}"))
+                    .map_err(SharedError::from)
                 }))
-                .unwrap_or_else(|_| Err("install clone worker panicked".to_string()));
+                .unwrap_or_else(|_| {
+                    Err(SharedError::from(anyhow!("install clone worker panicked")))
+                });
                 let _ = clone_done_tx.send(StageReport::Clone { target, result });
             });
         }
@@ -534,7 +537,7 @@ impl SchedulerState {
             self.async_ops.push(tokio::spawn(async move {
                 let result = extract_non_registry_to_target(&spec.package, &spec.target)
                     .await
-                    .map_err(|e| format!("{e:#}"));
+                    .map_err(SharedError::from);
                 StageReport::DirectExtract { target, result }
             }));
         }
@@ -610,7 +613,7 @@ impl SchedulerState {
         }
     }
 
-    fn complete_download(&mut self, key: String, result: Result<PathBuf, String>) {
+    fn complete_download(&mut self, key: String, result: Result<PathBuf, SharedError>) {
         let waiters = self.fetch_waiters.remove(&key).unwrap_or_default();
         match result {
             Ok(cache_path) => {
@@ -630,7 +633,7 @@ impl SchedulerState {
         }
     }
 
-    fn complete_clone(&mut self, target: PathBuf, result: Result<(), String>) {
+    fn complete_clone(&mut self, target: PathBuf, result: Result<(), SharedError>) {
         if result.is_ok() {
             self.clone_done.insert(target.clone());
         }
@@ -648,7 +651,10 @@ impl SchedulerState {
                 }
             }
         } else if let Some(children) = self.blocked_by_parent.remove(&target) {
-            let error = format!("parent package {} failed to clone", target.display());
+            let error = result.expect_err("failed parent clone").context(format!(
+                "parent package {} failed to clone",
+                target.display()
+            ));
             for child in children {
                 self.complete_clone(child.target, Err(error.clone()));
             }
@@ -658,7 +664,7 @@ impl SchedulerState {
     fn fail_pending(&mut self, message: &str) {
         for (_, waiters) in self.clone_waiters.drain() {
             for waiter in waiters {
-                let _ = waiter.send(Err(message.to_string()));
+                let _ = waiter.send(Err(SharedError::from(anyhow!(message.to_string()))));
             }
         }
     }
@@ -811,12 +817,20 @@ mod tests {
 
         assert_eq!(state.blocked_by_parent[&parent_target].len(), 1);
 
-        state.complete_clone(parent_target.clone(), Err("boom".to_string()));
+        state.complete_clone(
+            parent_target.clone(),
+            Err(SharedError::from(anyhow!("boom"))),
+        );
 
         let error = child_rx.await.unwrap().unwrap_err();
         let parent_path = parent_target.to_string_lossy();
-        assert!(error.contains("parent package"));
-        assert!(error.contains(parent_path.as_ref()));
+        assert!(error.to_string().contains("parent package"));
+        assert!(error.to_string().contains(parent_path.as_ref()));
+        assert!(
+            anyhow::Error::new(error)
+                .chain()
+                .any(|cause| cause.to_string() == "boom")
+        );
         assert!(!state.clone_waiters.contains_key(&child_target));
         assert!(!state.blocked_by_parent.contains_key(&parent_target));
     }

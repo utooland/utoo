@@ -6,6 +6,7 @@
 //! prefetches. Pure scheduling — holds no manifest data (that's [`super::state`])
 //! and does not depend on it.
 
+use crate::util::error::SharedError;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
@@ -36,12 +37,12 @@ impl ManifestJob {
 pub(crate) enum FetchDone {
     Full {
         name: String,
-        result: Result<ManifestFullData, String>,
+        result: Result<ManifestFullData, SharedError>,
     },
     Version {
         name: String,
         spec: String,
-        result: Result<Arc<CoreVersionManifest>, String>,
+        result: Result<Arc<CoreVersionManifest>, SharedError>,
     },
 }
 
@@ -58,7 +59,7 @@ impl FetchDone {
 /// handle so independent fetch + parse jobs progress on the multi-threaded
 /// runtime; wasm keeps the provider future local and lets `FuturesUnordered`
 /// poll browser-backed I/O without requiring a Tokio `LocalSet`.
-pub(crate) type FetchFuture = Pin<Box<dyn Future<Output = Result<FetchDone, String>>>>;
+pub(crate) type FetchFuture = Pin<Box<dyn Future<Output = Result<FetchDone, SharedError>>>>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FetchPriority {

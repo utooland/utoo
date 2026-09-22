@@ -76,7 +76,8 @@ where
         .await
         .map_err(|e| match e {
             FetchError::Retryable(e) | FetchError::Permanent(e) => {
-                anyhow!("Failed to fetch {target}: {e:#}")
+                let message = format!("Failed to fetch {target}: {e:#}");
+                e.context(message)
             }
         })
 }
