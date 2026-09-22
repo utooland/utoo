@@ -598,7 +598,6 @@ impl ScriptService {
         run_owned(cmd, true, None, resource.into_iter().collect()).await
     }
 
-    #[cfg(windows)]
     pub(crate) async fn wait_inherited(
         child: tokio::process::Child,
     ) -> Result<std::process::ExitStatus> {
