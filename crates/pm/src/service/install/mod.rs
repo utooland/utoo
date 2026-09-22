@@ -200,7 +200,7 @@ async fn reify_packages(
                             PROGRESS_BAR.inc(1);
                             continue;
                         }
-                        link(Path::new(&resolved), Path::new(path))
+                        link(&cwd.join(&resolved), &target_path)
                             .await
                             .with_context(|| format!("Link failed: {resolved} -> {path}"))?;
                         PROGRESS_BAR.inc(1);
@@ -650,6 +650,33 @@ mod tests {
     use crate::model::package::{LifecycleScripts, PackageInfo};
     use crate::util::platform_const::GLOBAL_NODE_MODULES;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn workspace_links_use_the_supplied_root_without_changing_cwd() {
+        let root = tempdir().unwrap();
+        let member = root.path().join("packages/member");
+        fs::create_dir_all(&member).await.unwrap();
+        let package: Package =
+            serde_json::from_str(r#"{"resolved":"packages/member","link":true}"#).unwrap();
+        let groups = HashMap::from([(1, vec![("node_modules/member".into(), package)])]);
+        let handle = scheduler::InstallSchedulerHandle::start();
+        reify_packages(
+            &groups,
+            root.path(),
+            &HashSet::new(),
+            &handle.scheduler(),
+            ReifyMode::Incremental,
+        )
+        .await
+        .unwrap();
+        handle.shutdown().await;
+        assert_eq!(
+            fs::canonicalize(root.path().join("node_modules/member"))
+                .await
+                .unwrap(),
+            fs::canonicalize(member).await.unwrap()
+        );
+    }
 
     #[test]
     fn global_install_root_is_the_package_isolation_boundary() {

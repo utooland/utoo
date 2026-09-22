@@ -458,7 +458,7 @@ async fn async_main() -> Result<()> {
                 } else {
                     service::init::InitOutput::Human
                 };
-                service::init::init(mode, output, None).await?;
+                service::init::init(mode, output, &std::env::current_dir()?).await?;
                 log_time_end("package.json created");
                 if invocation::json() {
                     let path = std::env::current_dir()?.join("package.json");
