@@ -39,7 +39,7 @@
 //!
 //! # Failure semantics
 //!
-//! When `init` returns `Err`, the entry is removed and waiters wake up to
+//! When `init` fails, is canceled, or panics, its entry is removed and waiters wake up to
 //! retry as fresh workers (since the original error can't be cloned across
 //! waiters and we'd rather have each caller see a fresh error than a stale
 //! shared one). A single transient failure isn't broadcast as a shared error
@@ -73,6 +73,25 @@ enum Value<V> {
 /// ```
 pub struct OnceMap<K, V> {
     map: DashMap<K, Value<V>>,
+}
+
+/// Owns one initialization generation. Dropping a canceled/panicking future
+/// releases its claim; identity checking prevents an old owner from removing
+/// a newer attempt for the same key.
+struct Initializer<'a, K: Eq + Hash, V> {
+    map: &'a DashMap<K, Value<V>>,
+    key: K,
+    owner: Arc<Notify>,
+}
+
+impl<K: Eq + Hash, V> Drop for Initializer<'_, K, V> {
+    fn drop(&mut self) {
+        self.map.remove_if(
+            &self.key,
+            |_, value| matches!(value, Value::Waiting(owner) if Arc::ptr_eq(owner, &self.owner)),
+        );
+        self.owner.notify_waiters();
+    }
 }
 
 impl<K, V> std::fmt::Debug for OnceMap<K, V> {
@@ -112,84 +131,41 @@ where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<V, E>>,
     {
-        // Fast path: check if already done
-        if let Some(entry) = self.map.get(&key)
-            && let Value::Done(result) = entry.value()
-        {
-            return Ok(Arc::clone(result));
-        }
-
-        // Try to register as the worker
-        let notify = Arc::new(Notify::new());
-        let entry = self.map.entry(key.clone());
-
-        let is_worker = match entry {
-            Entry::Occupied(occupied) => {
-                match occupied.get() {
-                    Value::Done(result) => {
-                        return Ok(Arc::clone(result));
+        loop {
+            let (owner, waiting) = match self.map.entry(key.clone()) {
+                Entry::Occupied(entry) => match entry.get() {
+                    Value::Done(value) => return Ok(Arc::clone(value)),
+                    Value::Waiting(owner) => {
+                        let owner = Arc::clone(owner);
+                        // Snapshot the notification generation before releasing
+                        // the map lock, including failure/cancellation wakeups.
+                        let waiting = Arc::clone(&owner).notified_owned();
+                        (owner, Some(waiting))
                     }
-                    Value::Waiting(existing_notify) => {
-                        let existing_notify = Arc::clone(existing_notify);
-
-                        // Register the waiter BEFORE releasing the lock.
-                        // This prevents a race condition where the worker
-                        // completes and calls notify_waiters() between
-                        // dropping the lock and registering the waiter -
-                        // which would cause us to miss the notification and
-                        // wait forever.
-                        let notified = existing_notify.notified();
-                        drop(occupied);
-
-                        // Double-check: the value might have been inserted
-                        // between releasing the lock and here.
-                        if let Some(entry) = self.map.get(&key)
-                            && let Value::Done(result) = entry.value()
-                        {
-                            return Ok(Arc::clone(result));
-                        }
-
-                        notified.await;
-
-                        if let Some(entry) = self.map.get(&key)
-                            && let Value::Done(result) = entry.value()
-                        {
-                            return Ok(Arc::clone(result));
-                        }
-                        // Worker failed; promote ourselves to retry as a fresh worker.
-                        false
-                    }
+                },
+                Entry::Vacant(entry) => {
+                    let owner = Arc::new(Notify::new());
+                    entry.insert(Value::Waiting(Arc::clone(&owner)));
+                    (owner, None)
                 }
+            };
+            if let Some(waiting) = waiting {
+                waiting.await;
+                continue;
             }
-            Entry::Vacant(vacant) => {
-                vacant.insert(Value::Waiting(Arc::clone(&notify)));
-                true
+            let guard = Initializer {
+                map: &self.map,
+                key: key.clone(),
+                owner,
+            };
+            let value = Arc::new(init().await?);
+            if let Entry::Occupied(mut entry) = self.map.entry(key)
+                && matches!(entry.get(), Value::Waiting(owner) if Arc::ptr_eq(owner, &guard.owner))
+            {
+                entry.insert(Value::Done(Arc::clone(&value)));
             }
-        };
-
-        // If we observed a failed prior attempt, retry recursively. Recursion
-        // depth is bounded by concurrent retries on the same key, which is
-        // typically tiny; pinning avoids the boxed-future cost in the common
-        // single-pass case.
-        if !is_worker {
-            return Box::pin(self.get_or_try_init(key, init)).await;
-        }
-
-        // Execute the work
-        let result = init().await;
-
-        match result {
-            Ok(v) => {
-                let arc = Arc::new(v);
-                self.map.insert(key, Value::Done(Arc::clone(&arc)));
-                notify.notify_waiters();
-                Ok(arc)
-            }
-            Err(e) => {
-                self.map.remove(&key);
-                notify.notify_waiters();
-                Err(e)
-            }
+            // Dropping the guard wakes waiters and keeps a completed value.
+            return Ok(value);
         }
     }
 }
@@ -202,6 +178,79 @@ mod tests {
     use tokio::sync::Barrier;
 
     use super::*;
+
+    #[tokio::test]
+    async fn canceled_owner_wakes_registered_waiters() {
+        let map = Arc::new(OnceMap::<String, u32>::new());
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let owner_map = Arc::clone(&map);
+        let owner = tokio::spawn(async move {
+            owner_map
+                .get_or_try_init::<(), _, _>("k".into(), || async {
+                    let _ = started.send(());
+                    std::future::pending().await
+                })
+                .await
+        });
+        ready.await.unwrap();
+        let mut waiter =
+            std::pin::pin!(map.get_or_try_init::<(), _, _>("k".into(), || async { Ok(42) }));
+        assert!(futures::poll!(waiter.as_mut()).is_pending());
+        owner.abort();
+        assert!(owner.await.unwrap_err().is_cancelled());
+        let result = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*result, 42);
+    }
+
+    #[tokio::test]
+    async fn panicking_owner_wakes_waiters_and_allows_retry() {
+        let map = Arc::new(OnceMap::<String, u32>::new());
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let owner_map = Arc::clone(&map);
+        let owner = tokio::spawn(async move {
+            owner_map
+                .get_or_try_init::<(), _, _>("k".into(), || async {
+                    let _ = started.send(());
+                    released.await.unwrap();
+                    panic!("initializer panic");
+                })
+                .await
+        });
+        ready.await.unwrap();
+        let mut waiter =
+            std::pin::pin!(map.get_or_try_init::<(), _, _>("k".into(), || async { Ok(7) }));
+        assert!(futures::poll!(waiter.as_mut()).is_pending());
+        release.send(()).unwrap();
+        assert!(owner.await.unwrap_err().is_panic());
+        let result = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*result, 7);
+    }
+
+    #[test]
+    fn old_owner_cannot_remove_new_initialization() {
+        let map = OnceMap::<String, u32>::new();
+        let owner = Arc::new(Notify::new());
+        let guard = Initializer {
+            map: &map.map,
+            key: "k".into(),
+            owner: Arc::clone(&owner),
+        };
+        map.map.insert("k".into(), Value::Waiting(owner));
+        let replacement = Arc::new(Notify::new());
+        map.map
+            .insert("k".into(), Value::Waiting(Arc::clone(&replacement)));
+        drop(guard);
+        assert!(
+            matches!(map.map.get("k").unwrap().value(), Value::Waiting(current) if Arc::ptr_eq(current, &replacement))
+        );
+    }
 
     #[tokio::test]
     async fn test_try_init_dedupes_success() {
