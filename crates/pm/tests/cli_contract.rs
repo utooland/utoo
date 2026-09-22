@@ -1118,3 +1118,51 @@ fn precondition_errors_have_their_own_exit_code() {
         .unwrap();
     assert_eq!(output.status.code(), Some(7));
 }
+
+#[test]
+fn if_present_skips_missing_main_and_hooks_in_human_and_json_modes() {
+    for json in [false, true] {
+        for workspace in [false, true] {
+            let temp = tempdir().unwrap();
+            let package_dir = if workspace {
+                temp.path().join("member")
+            } else {
+                temp.path().to_path_buf()
+            };
+            fs::create_dir_all(&package_dir).unwrap();
+            if workspace {
+                fs::write(
+                    temp.path().join("package.json"),
+                    r#"{"name":"root","workspaces":["member"]}"#,
+                )
+                .unwrap();
+            }
+            fs::write(package_dir.join("package.json"), r#"{"name":"member","version":"1.0.0","scripts":{"preabsent":"node -e \"require('fs').writeFileSync('hook-ran', 'yes')\"","postabsent":"exit 42"}}"#).unwrap();
+            let mut cmd = utoo();
+            cmd.current_dir(temp.path())
+                .env("CI", "1")
+                .env("UTOO_SELF_PIN", "0")
+                .env_remove("UTOO_FORCE_UPDATE")
+                .args(["--registry", "http://127.0.0.1:9", "--quiet"]);
+            if json {
+                cmd.arg("--json");
+            }
+            cmd.args(["run", "absent", "--if-present"]);
+            if workspace {
+                cmd.args(["--workspace", "member"]);
+            }
+            let output = cmd.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(!package_dir.join("hook-ran").exists());
+            if json {
+                let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(result["result"]["executions"].as_array().unwrap().len(), 0);
+                assert_eq!(result["result"]["skipped"].as_array().unwrap().len(), 1);
+            }
+        }
+    }
+}

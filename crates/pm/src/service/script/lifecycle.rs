@@ -35,8 +35,25 @@ pub enum ScriptOutput {
 pub enum MissingScript {
     /// Fail with an error (default, matches `npm run --workspaces`).
     Fail,
-    /// Skip silently (`--if-present`).
+    /// Skip the entire event chain (`--if-present`).
     Skip,
+    /// Install lifecycles run available pre/post hooks independently.
+    AllowHooks,
+}
+
+fn should_run_lifecycle(
+    package: &PackageInfo,
+    event: &str,
+    missing: MissingScript,
+) -> Result<bool> {
+    if package.scripts.contains_key(event) || missing == MissingScript::AllowHooks {
+        return Ok(true);
+    }
+    match missing {
+        MissingScript::Fail => anyhow::bail!("Script '{event}' not found in package.json"),
+        MissingScript::Skip => Ok(false),
+        MissingScript::AllowHooks => unreachable!(),
+    }
 }
 
 /// Where the output of a [`ScriptService::run_lifecycle`] call goes.
@@ -78,12 +95,15 @@ impl ScriptService {
         let pre_name = format!("pre{event}");
         let post_name = format!("post{event}");
         let main_script = package.scripts.get(event).cloned();
-        if missing == MissingScript::Fail && main_script.is_none() {
-            return MachineLifecycleOutcome {
-                executions: Vec::new(),
-                skipped: false,
-                failure: Some(format!("Script '{event}' not found in package.json")),
-            };
+        match should_run_lifecycle(package, event, missing) {
+            Ok(true) => {}
+            result => {
+                return MachineLifecycleOutcome {
+                    executions: Vec::new(),
+                    skipped: result.is_ok(),
+                    failure: result.err().map(|error| error.to_string()),
+                };
+            }
         }
         let steps: [(&str, Option<String>, &[&str]); 3] = [
             (
@@ -179,8 +199,8 @@ impl ScriptService {
     /// event = preinstall + install + postinstall, each independent).
     ///
     /// `missing` controls behaviour when the main script is undefined:
-    /// `Fail` bails (matches `npm run <name>`), `Skip` runs whatever subset
-    /// of pre/post exists. Pre/post are always silently skipped when absent.
+    /// `Fail` bails, `Skip` skips the chain, and `AllowHooks` runs available
+    /// pre/post hooks independently. Absent pre/post scripts are always skipped.
     pub async fn run_lifecycle(
         package: &PackageInfo,
         event: &str,
@@ -195,8 +215,8 @@ impl ScriptService {
         let pre_script = package.scripts.get(&pre_name).cloned();
         let post_script = package.scripts.get(&post_name).cloned();
 
-        if missing == MissingScript::Fail && main_script.is_none() {
-            anyhow::bail!("Script '{event}' not found in package.json");
+        if !should_run_lifecycle(package, event, missing)? {
+            return Ok(false);
         }
 
         let steps: [(&str, Option<String>, &[&str]); 3] = [
@@ -302,6 +322,7 @@ impl ScriptService {
         script_name: &str,
         workspace: Option<&str>,
         script_args: Option<Vec<&str>>,
+        missing: MissingScript,
     ) -> Result<()> {
         let package_path = if let Some(workspace_name) = workspace {
             let ws_dir = find_workspace_path(cwd, workspace_name)
@@ -328,7 +349,7 @@ impl ScriptService {
                 workspace_label: workspace,
                 timed: false,
             },
-            MissingScript::Fail,
+            missing,
         )
         .await?;
 
@@ -485,7 +506,7 @@ async fn run_script_captured(
                 header: &mut header,
                 body: &mut body,
             },
-            MissingScript::Skip,
+            missing,
         )
         .await
     }

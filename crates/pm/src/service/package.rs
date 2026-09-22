@@ -142,7 +142,7 @@ impl PackageService {
                         event,
                         &[],
                         LifecycleSink::Machine,
-                        MissingScript::Skip,
+                        MissingScript::AllowHooks,
                     )
                     .await
                 }
@@ -155,7 +155,7 @@ impl PackageService {
                             workspace_label,
                             timed: true,
                         },
-                        MissingScript::Skip,
+                        MissingScript::AllowHooks,
                     )
                     .await
                 }
