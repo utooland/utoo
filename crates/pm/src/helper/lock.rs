@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Context as _, Result, anyhow};
 use serde_json::Value;
 use utoo_ruborist::builder::PeerDeps;
-use utoo_ruborist::lock::{LockPackage, PackageLock};
+use utoo_ruborist::lock::{LockPackage, PackageLock, lock_satisfies_overrides};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::runtime::install_runtime_from_map;
@@ -389,6 +389,10 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
         return Ok(true);
     }
 
+    if !lock_satisfies_overrides(&lock_file, &root_pkg, root_path) {
+        tracing::debug!("package-lock.json needs resolution under current overrides");
+        return Ok(true);
+    }
     Ok(false)
 }
 

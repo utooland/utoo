@@ -12,7 +12,7 @@ use super::manifest::{CoreVersionManifest, NodeManifest};
 use super::node::{EdgeType, NodeType};
 use super::override_rule::Overrides;
 use super::package_json::PackageJson;
-use crate::resolver::semver::matches;
+use crate::resolver::semver::{matches, normalize_spec};
 
 /// Package node in the dependency graph.
 #[derive(Debug, Clone)]
@@ -218,6 +218,8 @@ pub struct DependencyGraph {
     /// millions of comparisons on large trees, all inside the single-threaded
     /// resolver driver.
     child_index: HashMap<NodeIndex, HashMap<String, NodeIndex>>,
+    /// Imported slots whose identity has not yet been validated by a current edge.
+    pub(crate) seeded_nodes: HashSet<NodeIndex>,
     /// Workspace members by package name, registered in
     /// [`add_node`](Self::add_node) — the single node-creation chokepoint —
     /// so `workspace:` edge settlement never re-derives the member set from
@@ -264,6 +266,7 @@ impl DependencyGraph {
             overrides,
             override_names,
             child_index: HashMap::new(),
+            seeded_nodes: HashSet::new(),
             workspace_members: HashMap::new(),
         }
     }
@@ -413,6 +416,16 @@ impl DependencyGraph {
         if let Some(GraphEdge::Dependency(dep)) = self.graph.edge_weight_mut(edge_id) {
             dep.valid = true;
             dep.to = Some(target);
+            // A current dependency has validated this slot. Ordinary semver
+            // edges may reuse an npm alias occupying it, as on a cold build.
+            self.seeded_nodes.remove(&target);
+        }
+    }
+
+    pub(crate) fn mark_dependency_skipped(&mut self, edge_id: EdgeIndex) {
+        if let Some(GraphEdge::Dependency(dep)) = self.graph.edge_weight_mut(edge_id) {
+            dep.valid = true;
+            dep.to = None;
         }
     }
 
@@ -566,67 +579,92 @@ impl DependencyGraph {
         false
     }
 
-    /// Find compatible node in parent chain for dependency resolution.
-    ///
-    /// For unconditional overrides (spec == "*"), uses the override target_spec.
-    /// For conditional overrides (spec != "*"), override is checked later in
-    /// process_dependency using the resolved version.
-    pub fn find_compatible_node(
+    /// Whether a recorded edge still satisfies current override policy. A
+    /// removed override is checked against the original dependency range too.
+    pub(crate) fn lock_target_matches(
         &self,
         from: NodeIndex,
         name: &str,
-        version_spec: &str,
-    ) -> FindResult {
-        // Check for unconditional override (spec == "*", no resolved version yet)
-        let effective_spec = if let Some(target) = self.check_override(from, name, None) {
-            tracing::debug!(
-                "Using unconditional override for {}@{} => {}",
-                name,
-                version_spec,
-                target
-            );
-            target
-        } else {
-            version_spec.to_string()
-        };
-
-        // Get physical parent of from node, default to from if it's the root
-        let parent = self.get_physical_parent(from).unwrap_or(from);
-
-        // Recursively search up the parent chain
-        self.find_in_parent_chain(parent, name, &effective_spec, from)
+        spec: &str,
+        target: NodeIndex,
+    ) -> bool {
+        if self.has_conditional_override(from, name) {
+            return false;
+        }
+        let override_spec = self.check_override(from, name, None);
+        let effective = override_spec.as_deref().unwrap_or(spec);
+        let (real_name, range) = normalize_spec(name, effective);
+        // Non-registry locks already pin their URL/commit. Without an override
+        // retain those pins; a changed source override needs actual resolution.
+        if !matches!(
+            crate::spec::PackageSpec::from(effective),
+            crate::spec::PackageSpec::Registry { .. }
+        ) {
+            return override_spec.is_none();
+        }
+        let node = &self.graph[target];
+        let identity_matches = node.manifest.name() == real_name
+            || (!self.seeded_nodes.contains(&target) && !effective.trim().starts_with("npm:"));
+        identity_matches && matches(&range, &node.version)
     }
 
-    /// Recursively search for compatible node in parent chain.
+    /// Find a reusable node under current policy, or the slot for a new node.
+    pub fn find_compatible_node(&self, from: NodeIndex, name: &str, spec: &str) -> FindResult {
+        let parent = self.get_physical_parent(from).unwrap_or(from);
+        self.find_in_parent_chain(parent, name, from, &|index| {
+            self.lock_target_matches(from, name, spec, index)
+                && matches(
+                    self.check_override(from, name, None)
+                        .as_deref()
+                        .unwrap_or(spec),
+                    &self.graph[index].version,
+                )
+        })
+    }
+
+    /// Once the original spec and overrides have been resolved, compare the
+    /// actual result rather than applying the original range a second time.
+    pub(crate) fn find_resolved_node(
+        &self,
+        from: NodeIndex,
+        name: &str,
+        manifest: &CoreVersionManifest,
+    ) -> FindResult {
+        let parent = self.get_physical_parent(from).unwrap_or(from);
+        self.find_in_parent_chain(parent, name, from, &|index| {
+            let node = &self.graph[index];
+            node.manifest.name() == manifest.name
+                && node.version == manifest.version
+                && node.manifest.dist().is_some_and(|dist| {
+                    dist.tarball == manifest.dist.tarball
+                        && dist.integrity == manifest.dist.integrity
+                })
+        })
+    }
+
     fn find_in_parent_chain(
         &self,
         current: NodeIndex,
         name: &str,
-        spec: &str,
         requester: NodeIndex,
+        accepts: &impl Fn(NodeIndex) -> bool,
     ) -> FindResult {
-        // Probe the per-parent name index — O(depth) total instead of a
-        // linear scan over every physical child per ancestor level.
-        if let Some(child_idx) = self.find_physical_child(current, name) {
-            let child = &self.graph[child_idx];
-            if matches(spec, &child.version) {
-                return FindResult::Reuse(child_idx);
+        if let Some(child) = self.find_physical_child(current, name) {
+            if accepts(child) {
+                return FindResult::Reuse(child);
             }
-            tracing::debug!(
-                "found conflict deps {}@{} got {}, conflict at {:?}",
-                name,
-                spec,
-                child.version,
-                child_idx
-            );
+            // An invalidated lock target with no retained logical edges can
+            // be replaced in its original slot, preserving unrelated layout.
+            if self.seeded_nodes.contains(&child) && !self.graph.edge_weights().any(|edge| {
+                matches!(edge, GraphEdge::Dependency(dep) if dep.valid && dep.to == Some(child))
+            }) {
+                return FindResult::New(current);
+            }
             return FindResult::Conflict(requester);
         }
-
-        // Recurse to parent
         if let Some(parent) = self.get_physical_parent(current) {
-            self.find_in_parent_chain(parent, name, spec, requester)
+            self.find_in_parent_chain(parent, name, requester, accepts)
         } else {
-            // Reached root, install here
             FindResult::New(current)
         }
     }

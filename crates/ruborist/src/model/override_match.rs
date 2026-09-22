@@ -106,6 +106,23 @@ impl DependencyGraph {
         None
     }
 
+    /// Conditional rules depend on the original resolution, which a lockfile
+    /// does not retain after replacement. Re-resolve instead of treating the
+    /// already-overridden version as the rule's input.
+    pub(crate) fn has_conditional_override(&self, from: NodeIndex, name: &str) -> bool {
+        if !self.override_names.contains(name) {
+            return false;
+        }
+        let chain = self.collect_parent_chain(from);
+        self.overrides.as_ref().is_some_and(|overrides| {
+            overrides.rules.iter().any(|rule| {
+                rule.name == name
+                    && rule.spec != "*"
+                    && self.matches_parent_chain_for_rule(rule, &chain)
+            })
+        })
+    }
+
     /// Check if a parent chain matches an override rule's parent condition.
     ///
     /// The rule's parent chain is from inner to outer: debug.parent = body-parser,

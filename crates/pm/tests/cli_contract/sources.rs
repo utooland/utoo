@@ -431,3 +431,170 @@ fn git_lock_does_not_fall_back_to_a_branch() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("full commit"));
     assert!(!project.join("node_modules/fixture/package.json").exists());
 }
+
+#[test]
+fn changed_overrides_update_warm_install_and_deps_without_moving_unrelated_packages() {
+    let mut registry = mockito::Server::new();
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    let cache = fixture.path().join("cache");
+    let mut mocks = Vec::new();
+    let mut locked = serde_json::Map::new();
+    for name in ["a", "b", "c", "real-b"] {
+        let mut versions = serde_json::Map::new();
+        for version in if name == "b" || name == "real-b" {
+            vec!["1.0.0", "2.0.0", "3.0.0"]
+        } else {
+            vec!["1.0.0"]
+        } {
+            let mut manifest = json!({"name":name,"version":version});
+            if name == "a" {
+                manifest["dependencies"] = json!({"b":"^1"});
+            }
+            let bytes = archive(&manifest, &format!("{name}@{version}"));
+            let path = format!("/{name}/{version}.tgz");
+            let url = format!("{}{path}", registry.url());
+            manifest["dist"] = json!({"tarball":url, "integrity":integrity(&bytes)});
+            mocks.push(
+                registry
+                    .mock("GET", path.as_str())
+                    .with_body(bytes)
+                    .expect_at_least(0)
+                    .create(),
+            );
+            if version == "1.0.0" && name != "real-b" {
+                let mut entry = json!({"version":version, "resolved":url, "integrity":manifest["dist"]["integrity"]});
+                if name == "a" {
+                    entry["dependencies"] = json!({"b":"^1"});
+                }
+                locked.insert(format!("node_modules/{name}"), entry);
+            }
+            versions.insert(version.into(), manifest);
+        }
+        mocks.push(
+            registry
+                .mock("GET", format!("/{name}").as_str())
+                .with_body(
+                    json!({"name":name,"dist-tags":{"latest":"1.0.0"},"versions":versions})
+                        .to_string(),
+                )
+                .expect_at_least(0)
+                .create(),
+        );
+    }
+    let mut root =
+        json!({"name":"root","version":"1.0.0","dependencies":{"a":"1.0.0","c":"1.0.0"}});
+    project_at(&project, root.clone(), Value::Object(locked));
+    let mut unchanged = None;
+    for (rule, expected_name, expected_version) in [
+        (Value::Null, "b", "1.0.0"),
+        (json!({"b":"2.0.0"}), "b", "2.0.0"),
+        (json!({"b":"3.0.0"}), "b", "3.0.0"),
+        (Value::Null, "b", "1.0.0"),
+        (json!({"b@^1":"2.0.0"}), "b", "2.0.0"),
+        (json!({"a":{"b":"3.0.0"}}), "b", "3.0.0"),
+        (json!({"b":"npm:real-b@2.0.0"}), "real-b", "2.0.0"),
+        (Value::Null, "b", "1.0.0"),
+        (json!({"b":"npm:real-b@1.0.0"}), "real-b", "1.0.0"),
+        (Value::Null, "b", "1.0.0"),
+    ] {
+        root["overrides"] = rule.clone();
+        fs::write(project.join("package.json"), root.to_string()).unwrap();
+        for action in ["install", "deps"] {
+            assert_success(
+                &command(&project, &cache, &registry.url())
+                    .args(["--ignore-scripts", action])
+                    .output()
+                    .unwrap(),
+            );
+            let lock: Value =
+                serde_json::from_slice(&fs::read(project.join("package-lock.json")).unwrap())
+                    .unwrap();
+            let b = &lock["packages"]["node_modules/b"];
+            assert_eq!(b["version"], expected_version, "{action}: {rule}");
+            assert_eq!(
+                b.get("name").and_then(Value::as_str).unwrap_or("b"),
+                expected_name,
+                "{action}: {rule}"
+            );
+            if let Some(c) = &unchanged {
+                assert_eq!(&lock["packages"]["node_modules/c"], c);
+            } else if action == "deps" {
+                unchanged = Some(lock["packages"]["node_modules/c"].clone());
+            }
+            if action == "install" {
+                assert_eq!(
+                    fs::read_to_string(project.join("node_modules/b/marker.txt")).unwrap(),
+                    format!("{expected_name}@{expected_version}")
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn alias_slot_reuse_survives_cold_install_lock_import_and_target_change() {
+    let mut registry = mockito::Server::new();
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    let cache = fixture.path().join("cache");
+    let mut mocks = Vec::new();
+    for (name, version) in [("debug", "4.4.3"), ("raw-body", "2.1.3"), ("ms", "2.1.3")] {
+        let mut manifest = json!({"name":name,"version":version});
+        if name == "debug" {
+            manifest["dependencies"] = json!({"ms":"^2.1.3"});
+        }
+        let bytes = archive(&manifest, name);
+        let path = format!("/{name}.tgz");
+        manifest["dist"] =
+            json!({"tarball":format!("{}{path}", registry.url()),"integrity":integrity(&bytes)});
+        mocks.push(
+            registry
+                .mock("GET", path.as_str())
+                .with_body(bytes)
+                .expect_at_least(0)
+                .create(),
+        );
+        mocks.push(registry.mock("GET", format!("/{name}").as_str()).with_body(
+            json!({"name":name,"dist-tags":{"latest":version},"versions":{version:manifest}}).to_string()
+        ).expect_at_least(0).create());
+    }
+    fs::create_dir_all(&project).unwrap();
+    let mut root = json!({"name":"root","version":"1.0.0","dependencies":{"debug":"^4","ms":"npm:raw-body@2.1.3"}});
+    fs::write(project.join("package.json"), root.to_string()).unwrap();
+    let mut original_lock = None;
+    for action in ["install", "install", "deps"] {
+        assert_success(
+            &command(&project, &cache, &registry.url())
+                .args(["--ignore-scripts", action])
+                .output()
+                .unwrap(),
+        );
+        assert!(!project.join("node_modules/debug/node_modules/ms").exists());
+        if action == "install" {
+            assert_eq!(
+                fs::read_to_string(project.join("node_modules/ms/marker.txt")).unwrap(),
+                "raw-body"
+            );
+            fs::remove_dir_all(project.join("node_modules")).unwrap();
+        }
+        let lock = fs::read(project.join("package-lock.json")).unwrap();
+        if let Some(original) = &original_lock {
+            assert_eq!(&lock, original);
+        } else {
+            original_lock = Some(lock);
+        }
+    }
+    root["dependencies"]["ms"] = "npm:ms@2.1.3".into();
+    fs::write(project.join("package.json"), root.to_string()).unwrap();
+    assert_success(
+        &command(&project, &cache, &registry.url())
+            .args(["install", "--ignore-scripts"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("node_modules/ms/marker.txt")).unwrap(),
+        "ms"
+    );
+}

@@ -2,7 +2,7 @@
 //! fetch pipeline, and feeds resolved manifests back into the graph. Owns the
 //! per-run [`ManifestState`] store and [`FetchQueues`] scheduler.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -439,6 +439,7 @@ where
 
     let root_idx = graph.root_index;
     let mut current_level = vec![root_idx];
+    let mut visited = HashSet::from([root_idx]);
 
     // Resolve the graph one BFS level at a time; each iteration discovers the
     // next level from the edges it resolves.
@@ -522,6 +523,15 @@ where
         ctx.place_level(graph, &mut state, &mut placements, &mut next_level)
             .await?;
 
+        for &node in &current_level {
+            next_level.extend(
+                graph
+                    .get_resolved_dependencies(node)
+                    .into_iter()
+                    .map(|(_, target)| target),
+            );
+        }
+        next_level.retain(|node| visited.insert(*node));
         receiver.on_event(BuildEvent::LevelComplete {
             next_level_count: next_level.len(),
         });
