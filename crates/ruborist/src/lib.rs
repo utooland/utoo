@@ -25,6 +25,7 @@
 pub mod model;
 pub mod resolver;
 pub mod service;
+mod sources;
 pub mod spec;
 pub mod traits;
 pub mod util;
@@ -103,7 +104,7 @@ pub mod git {
     pub use crate::model::git::GitCloneResult;
 
     #[cfg(feature = "native-git")]
-    pub use crate::resolver::git::{GitCloneCache, ensure_repo_cached};
+    pub use crate::sources::git::{GitCloneCache, ensure_repo_cached};
 }
 
 /// Tar + gzip primitives and the atomic cache-slot commit protocol.
@@ -117,9 +118,9 @@ pub mod git {
 /// marker (see `resolver/common.rs`).
 pub mod tar {
     #[cfg(any(feature = "native-git", feature = "http-tarball"))]
-    pub use crate::resolver::common::commit_cache_dir_atomic;
+    pub use crate::sources::common::commit_cache_dir_atomic;
     #[cfg(feature = "http-tarball")]
-    pub use crate::resolver::tar::{
+    pub use crate::sources::tar::{
         MAX_UNCOMPRESSED_BYTES, estimate_uncompressed_size, extract_tarball_to_dir,
         gzip_decompress, is_safe_tar_entry_path, normalize_entry_mode,
     };

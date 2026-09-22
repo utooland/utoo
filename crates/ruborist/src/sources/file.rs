@@ -11,12 +11,12 @@ use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
 
-use super::builder::ProcessResult;
-use super::edges::DependencyEdgeInfo;
 use super::tar::read_local_tarball_manifest;
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::manifest::NodeManifest;
 use crate::model::node::EdgeType;
+use crate::resolver::builder::ProcessResult;
+use crate::resolver::edges::DependencyEdgeInfo;
 use crate::resolver::registry::ResolveError;
 use crate::traits::registry::ResolvedPackage;
 

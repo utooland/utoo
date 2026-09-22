@@ -16,8 +16,11 @@ use std::sync::Arc;
 
 use dashmap::DashSet;
 
-use super::manifest;
-use super::store::{ManifestStore, NoopStore};
+pub(super) mod cache;
+pub(super) mod manifest;
+pub(super) mod manifest_provider;
+pub(super) mod store;
+use self::store::{ManifestStore, NoopStore};
 use crate::traits::registry::{RegistryClient, RegistryError, is_npm_registry};
 
 /// Get current timestamp in seconds since UNIX epoch.

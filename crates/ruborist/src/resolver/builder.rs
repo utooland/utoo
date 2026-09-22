@@ -40,7 +40,7 @@ async fn resolve_git_dep(
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "native-git")]
     {
-        crate::resolver::git::resolve_git_dep(cache_dir, spec, name, clone_cache).await
+        crate::sources::git::resolve_git_dep(cache_dir, spec, name, clone_cache).await
     }
     #[cfg(not(feature = "native-git"))]
     {
@@ -63,7 +63,7 @@ async fn resolve_http_dep(
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::http::resolve_http_dep(url, fetch_cache).await
+        crate::sources::http::resolve_http_dep(url, fetch_cache).await
     }
     #[cfg(not(feature = "http-tarball"))]
     {
@@ -78,14 +78,14 @@ async fn resolve_http_dep(
 // a resolver is disabled the cache alias falls back to `DedupCache<()>`, which
 // has the same shape so the struct literal still compiles.
 #[cfg(feature = "native-git")]
-use crate::resolver::git::GitCloneCache;
+use crate::sources::git::GitCloneCache;
 #[cfg(feature = "http-tarball")]
-use crate::resolver::http::HttpFetchCache;
+use crate::sources::http::HttpFetchCache;
 
 #[cfg(not(feature = "native-git"))]
-type GitCloneCache = crate::resolver::common::DedupCache<()>;
+type GitCloneCache = crate::sources::common::DedupCache<()>;
 #[cfg(not(feature = "http-tarball"))]
-type HttpFetchCache = crate::resolver::common::DedupCache<()>;
+type HttpFetchCache = crate::sources::common::DedupCache<()>;
 
 // Re-export edge types
 pub use super::edges::{
@@ -667,7 +667,7 @@ async fn resolve_override_file_tarball<E>(
                 reason: "file: directory overrides (symlink) are not supported — use a tarball (.tgz)",
             }),
             // Same local-tarball read+parse the normal file-dep resolver uses.
-            Ok(_) => match crate::resolver::tar::read_local_tarball_manifest(abs).await {
+            Ok(_) => match crate::sources::tar::read_local_tarball_manifest(abs).await {
                 Ok(m) => Ok(Some(Arc::new(m))),
                 Err(_) if *edge_type == EdgeType::Optional => Ok(None),
                 Err(source) => Err(file_err(source)),
