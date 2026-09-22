@@ -7,10 +7,12 @@
 use anyhow::{Result, anyhow};
 use bytes::Bytes;
 
-use super::fetch::{FetchError, classify_reqwest_error, classify_status, with_fetch_retry};
-use super::http::get_client;
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
 use crate::resolver::version::resolve_target_version_lazy;
+use crate::service::fetch::{
+    FetchError, classify_reqwest_error, classify_status, with_fetch_retry,
+};
+use crate::service::http::get_client;
 use crate::util::spawn_cpu;
 
 /// Parse a JSON buffer on rayon's CPU thread pool (native) or inline

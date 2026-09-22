@@ -5,6 +5,7 @@
 //! scheduling (that lives in [`super::queue`]) and no fetch orchestration (that
 //! lives in the driver, which owns both this store and the queue).
 
+use crate::util::error::SharedError;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
@@ -35,7 +36,7 @@ pub(super) type WaitingEdge = (NodeIndex, DependencyEdgeInfo);
 struct VersionSlot {
     cache: HashMap<String, HashMap<String, Arc<CoreVersionManifest>>>,
     waiters: HashMap<String, HashMap<String, Vec<WaitingEdge>>>,
-    failures: HashMap<String, HashMap<String, String>>,
+    failures: HashMap<String, HashMap<String, SharedError>>,
 }
 
 impl VersionSlot {
@@ -43,8 +44,8 @@ impl VersionSlot {
         self.cache.get(name)?.get(spec)
     }
 
-    fn failure(&self, name: &str, spec: &str) -> Option<&str> {
-        self.failures.get(name)?.get(spec).map(String::as_str)
+    fn failure(&self, name: &str, spec: &str) -> Option<&SharedError> {
+        self.failures.get(name)?.get(spec)
     }
 
     /// Already resolved or failed — no need to fetch again.
@@ -76,7 +77,7 @@ impl VersionSlot {
 /// the type and lets the resolver decide with a single lookup + `match`.
 pub(crate) enum PackageVersions {
     /// The full-manifest fetch failed; no version of the package can resolve.
-    Failed(String),
+    Failed(SharedError),
     /// Full manifest (all versions) — resolve a concrete version client-side.
     Full(Arc<FullManifest>),
     /// Versions list only — resolve a version, then fetch its manifest.
@@ -182,7 +183,7 @@ impl ManifestState {
     }
 
     /// Look up a recorded fetch failure for `(name, spec)`.
-    pub(crate) fn get_version_failure(&self, name: &str, spec: &str) -> Option<&str> {
+    pub(crate) fn get_version_failure(&self, name: &str, spec: &str) -> Option<&SharedError> {
         self.version.failure(name, spec)
     }
 
@@ -192,7 +193,7 @@ impl ManifestState {
     }
 
     /// Record a fetch failure for `(name, spec)`.
-    pub(crate) fn fail_version(&mut self, name: &str, spec: &str, error: String) {
+    pub(crate) fn fail_version(&mut self, name: &str, spec: &str, error: SharedError) {
         self.version
             .failures
             .entry(name.to_string())
@@ -277,8 +278,14 @@ mod tests {
     fn test_fail_version_records_and_settles() {
         let mut state = ManifestState::default();
         assert!(!state.is_version_settled("pkg", "^1"));
-        state.fail_version("pkg", "^1", "boom".to_string());
-        assert_eq!(state.get_version_failure("pkg", "^1"), Some("boom"));
+        state.fail_version("pkg", "^1", SharedError::from(anyhow::anyhow!("boom")));
+        assert_eq!(
+            state
+                .get_version_failure("pkg", "^1")
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("boom")
+        );
         assert!(state.is_version_settled("pkg", "^1"));
     }
 }

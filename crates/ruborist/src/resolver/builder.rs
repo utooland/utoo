@@ -40,7 +40,7 @@ async fn resolve_git_dep(
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "native-git")]
     {
-        crate::resolver::git::resolve_git_dep(cache_dir, spec, name, clone_cache).await
+        crate::sources::git::resolve_git_dep(cache_dir, spec, name, clone_cache).await
     }
     #[cfg(not(feature = "native-git"))]
     {
@@ -63,7 +63,7 @@ async fn resolve_http_dep(
 ) -> anyhow::Result<ResolvedPackage> {
     #[cfg(feature = "http-tarball")]
     {
-        crate::resolver::http::resolve_http_dep(url, fetch_cache).await
+        crate::sources::http::resolve_http_dep(url, fetch_cache).await
     }
     #[cfg(not(feature = "http-tarball"))]
     {
@@ -78,14 +78,14 @@ async fn resolve_http_dep(
 // a resolver is disabled the cache alias falls back to `DedupCache<()>`, which
 // has the same shape so the struct literal still compiles.
 #[cfg(feature = "native-git")]
-use crate::resolver::git::GitCloneCache;
+use crate::sources::git::GitCloneCache;
 #[cfg(feature = "http-tarball")]
-use crate::resolver::http::HttpFetchCache;
+use crate::sources::http::HttpFetchCache;
 
 #[cfg(not(feature = "native-git"))]
-type GitCloneCache = crate::resolver::common::DedupCache<()>;
+type GitCloneCache = crate::sources::common::DedupCache<()>;
 #[cfg(not(feature = "http-tarball"))]
-type HttpFetchCache = crate::resolver::common::DedupCache<()>;
+type HttpFetchCache = crate::sources::common::DedupCache<()>;
 
 // Re-export edge types
 pub use super::edges::{
@@ -94,8 +94,6 @@ pub use super::edges::{
 // Node-type propagation and graph placement live in their own passes;
 // re-exported here for the callers that historically reached them through
 // builder.
-#[cfg(feature = "http-tarball")]
-use super::file::process_file_dep;
 pub use super::node_types::{compute_node_types, update_node_type_from_edge};
 pub use super::placement::process_dependency_with_resolved;
 pub(crate) use super::placement::{
@@ -335,6 +333,62 @@ fn skip_optional_or_unsupported<E>(
         spec: edge.spec.clone(),
         reason,
     })
+}
+
+/// Read a local source, then apply its result in the graph-owning driver.
+#[cfg(feature = "http-tarball")]
+async fn process_file_dep<E>(
+    graph: &mut DependencyGraph,
+    node_index: NodeIndex,
+    conflict_parent: NodeIndex,
+    edge: &DependencyEdgeInfo,
+    path_spec: &str,
+) -> Result<std::ops::ControlFlow<ProcessResult, ResolvedPackage>, ResolveError<E>> {
+    use crate::model::manifest::NodeManifest;
+    use crate::sources::file::{FileSource, FileSourceError, read_file_source};
+    use std::ops::ControlFlow;
+    // Base dir is the on-disk source for root/workspace/link nodes, or
+    // the parent of the `file:<abs>` tarball URL stamped on a transitive
+    // file-tarball dep's manifest. Registry nodes have no valid base.
+    let node = graph.get_node(node_index);
+    let base = node
+        .filter(|n| n.is_root() || n.is_workspace() || n.is_link())
+        .map(|n| n.path.clone())
+        .or_else(|| {
+            let NodeManifest::Registry(m) = &node?.manifest else {
+                return None;
+            };
+            let url = m.dist.tarball.as_deref()?.strip_prefix("file:")?;
+            std::path::Path::new(url).parent().map(Path::to_path_buf)
+        })
+        .ok_or_else(|| ResolveError::Unsupported {
+            spec: edge.spec.clone(),
+            reason: "transitive file: deps inside a published registry package are not supported",
+        })?;
+
+    let result = read_file_source(base.join(path_spec)).await;
+    match result {
+        Ok(FileSource::Directory { path, package }) => {
+            let index = graph.add_node(PackageNode::link_from_package_json(path, *package));
+            graph.add_physical_edge(conflict_parent, index);
+            graph.mark_dependency_resolved(edge.edge_id, index);
+            Ok(ControlFlow::Break(ProcessResult::Created(index)))
+        }
+        Ok(FileSource::Tarball(package)) => Ok(ControlFlow::Continue(package)),
+        Err(FileSourceError::Access(_) | FileSourceError::Tarball(_))
+            if edge.edge_type == EdgeType::Optional =>
+        {
+            Ok(ControlFlow::Break(ProcessResult::Skipped))
+        }
+        Err(
+            FileSourceError::Access(source)
+            | FileSourceError::Tarball(source)
+            | FileSourceError::DirectoryManifest(source),
+        ) => Err(ResolveError::File {
+            spec: edge.spec.clone(),
+            source,
+        }),
+    }
 }
 
 /// # Returns
@@ -667,7 +721,7 @@ async fn resolve_override_file_tarball<E>(
                 reason: "file: directory overrides (symlink) are not supported — use a tarball (.tgz)",
             }),
             // Same local-tarball read+parse the normal file-dep resolver uses.
-            Ok(_) => match crate::resolver::tar::read_local_tarball_manifest(abs).await {
+            Ok(_) => match crate::sources::tar::read_local_tarball_manifest(abs).await {
                 Ok(m) => Ok(Some(Arc::new(m))),
                 Err(_) if *edge_type == EdgeType::Optional => Ok(None),
                 Err(source) => Err(file_err(source)),

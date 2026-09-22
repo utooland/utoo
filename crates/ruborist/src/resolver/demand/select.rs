@@ -2,6 +2,7 @@
 //! mutation. The testable core of the driver: given the store and an edge,
 //! decide whether to resolve now, skip, fail, or park + fetch.
 
+use crate::util::error::SharedError;
 use std::sync::Arc;
 
 use crate::model::manifest::{CoreVersionManifest, FullManifest, VersionsRef};
@@ -54,7 +55,7 @@ pub(super) enum EdgeStep {
     /// Optional dependency with no matching/available version — skip it.
     Skip,
     /// A recorded fetch failure; the caller skips (optional) or errors.
-    Fail(String),
+    Fail(SharedError),
     /// Park the edge on `wait`, then enqueue `fetch` to wake it later.
     Park { wait: WaitKey, fetch: FetchPlan },
 }
@@ -98,7 +99,9 @@ fn settled_step(
     spec: &str,
 ) -> Option<EdgeStep> {
     if let Some(error) = state.get_version_failure(name, lookup_key) {
-        return Some(EdgeStep::Fail(format!("{name}@{spec}: {error}")));
+        return Some(EdgeStep::Fail(
+            error.clone().context(format!("{name}@{spec}")),
+        ));
     }
     state
         .get_version_manifest(name, lookup_key)
@@ -152,7 +155,7 @@ fn select_full_manifest<RE>(
 
     // Otherwise resolve a version client-side from the package's cached source.
     match state.package(name) {
-        Some(PackageVersions::Failed(error)) => Ok(EdgeStep::Fail(format!("{name}: {error}"))),
+        Some(PackageVersions::Failed(error)) => Ok(EdgeStep::Fail(error.clone().context(name))),
         Some(PackageVersions::Full(full)) => {
             let full = Arc::clone(full);
             let Some(version) = resolve_version_from_versions::<RE>(
@@ -306,10 +309,10 @@ mod tests {
     #[test]
     fn recorded_failure_returns_fail() {
         let mut state = ManifestState::default();
-        state.fail_version("pkg", "^1.0.0", "boom".into());
+        state.fail_version("pkg", "^1.0.0", SharedError::from(anyhow::anyhow!("boom")));
         let e = edge("pkg", "^1.0.0", EdgeType::Prod);
         match select(&state, &e, ResolutionMode::Semver) {
-            EdgeStep::Fail(msg) => assert!(msg.contains("boom")),
+            EdgeStep::Fail(msg) => assert!(msg.to_string().contains("boom")),
             _ => panic!("expected Fail"),
         }
     }
@@ -333,10 +336,13 @@ mod tests {
     #[test]
     fn full_manifest_failure_returns_fail() {
         let mut state = ManifestState::default();
-        state.set_package("pkg".into(), PackageVersions::Failed("gone".into()));
+        state.set_package(
+            "pkg".into(),
+            PackageVersions::Failed(SharedError::from(anyhow::anyhow!("gone"))),
+        );
         let e = edge("pkg", "^1.0.0", EdgeType::Prod);
         match select(&state, &e, ResolutionMode::FullManifest) {
-            EdgeStep::Fail(msg) => assert!(msg.contains("gone")),
+            EdgeStep::Fail(msg) => assert!(msg.to_string().contains("gone")),
             _ => panic!("expected Fail"),
         }
     }
@@ -395,7 +401,7 @@ mod tests {
         let mut state = ManifestState::default();
         state.set_package(
             "pkg".into(),
-            PackageVersions::Failed("full fetch boom".into()),
+            PackageVersions::Failed(SharedError::from(anyhow::anyhow!("full fetch boom"))),
         );
         state.cache_version(
             "pkg".into(),

@@ -1,7 +1,7 @@
 //! `UnifiedRegistry`'s [`ManifestProvider`] implementation.
 //!
 //! Executes a single manifest job (full / version / extract) against the
-//! network and the persistent [`ManifestStore`](super::super::store::ManifestStore).
+//! network and the persistent [`ManifestStore`](super::store::ManifestStore).
 //! The demand BFS loop owns caching, waiters, and de-duplication; this module
 //! is the stateless I/O + parse boundary it drives.
 //!
@@ -14,12 +14,12 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use deno_semver::Version;
 
-use super::super::cache::{Versions, VersionsInfo};
-use super::super::manifest;
-use super::super::manifest_provider::{
+use super::UnifiedRegistry;
+use super::cache::{Versions, VersionsInfo};
+use super::manifest;
+use super::manifest_provider::{
     ManifestFullData, ManifestJob, ManifestJobDone, ManifestProvider, ProviderFullManifestBytes,
 };
-use super::UnifiedRegistry;
 use crate::model::manifest::{CoreVersionManifest, extract_core_version_off_runtime};
 use crate::resolver::semver::matches as semver_matches;
 use crate::traits::registry::RegistryError;

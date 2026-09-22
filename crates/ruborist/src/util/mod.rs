@@ -1,6 +1,7 @@
 //! Shared utility primitives for ruborist and downstream consumers.
 
 pub mod cpu;
+pub mod error;
 pub mod oncemap;
 
 pub use crate::model::util::{PackageNameStr, parse_package_spec, read_package_json};
