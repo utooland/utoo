@@ -19,7 +19,6 @@
 //! ```
 
 pub mod auth;
-pub mod binary;
 pub mod clean;
 pub mod clean_cache;
 pub mod config;
@@ -27,15 +26,12 @@ pub mod dependency_graph;
 pub mod execute;
 pub mod init;
 pub mod install;
-pub mod install_scheduler;
 pub mod oidc;
-pub mod package;
 pub mod package_management;
 pub mod pm_pack;
 pub mod provenance;
 pub mod publish;
 pub mod publish_manifest;
-pub mod rebuild;
 pub mod script;
 pub mod update;
 pub mod workspace;

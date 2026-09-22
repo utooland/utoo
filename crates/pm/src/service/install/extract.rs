@@ -32,7 +32,7 @@ use utoo_ruborist::tar::{
     commit_cache_dir_atomic, gzip_decompress, is_safe_tar_entry_path, normalize_entry_mode,
 };
 
-use super::process_lock::{lock_exclusive, sibling_lock_path};
+use crate::util::process_lock::{lock_exclusive, sibling_lock_path};
 
 /// Extract gzip tarball bytes and atomically commit them to `dest`.
 ///

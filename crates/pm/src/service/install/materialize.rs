@@ -10,8 +10,8 @@ use libc::clonefile;
 use serde::de::DeserializeOwned;
 use utoo_ruborist::manifest::IdentityView;
 
-use super::downloader::is_git_url;
-use super::process_lock::{lock_exclusive_sync, sibling_lock_path};
+use super::download::is_git_url;
+use crate::util::process_lock::{lock_exclusive_sync, sibling_lock_path};
 
 /// How a cached package's real contents are laid out under its cache dir.
 /// Derived from the resolved tarball URL so callers never pass a bare bool.
@@ -205,7 +205,7 @@ fn load_package_json_sync<T: DeserializeOwned>(path: &Path) -> Result<T> {
     let pkg_path = path.join("package.json");
     let content = std::fs::read_to_string(&pkg_path)
         .with_context(|| format!("Failed to read file {pkg_path:?}"))?;
-    super::json::parse_package_json_lenient(&content, &pkg_path)
+    crate::util::json::parse_package_json_lenient(&content, &pkg_path)
 }
 
 fn validate_name_version_sync(dst: &Path, name: &str, version: &str) -> bool {

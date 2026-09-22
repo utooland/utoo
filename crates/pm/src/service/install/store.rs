@@ -1,6 +1,6 @@
 //! Package cache layer: cache-path layout, install-time routing, and
-//! extracting tarball bytes. The network phase lives in [`super::downloader`];
-//! the raw gzip/tar primitive lives in [`super::extractor`].
+//! extracting tarball bytes. The network phase lives in [`super::download`];
+//! the raw gzip/tar primitive lives in [`super::extract`].
 //!
 //! Routing ([`resolve_cache_plan`]) classifies a lockfile entry by the host of
 //! its `resolved` URL: git deps and trusted-registry-host tarballs use the
@@ -19,10 +19,10 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 
-use super::cache::get_cache_dir;
-use super::downloader::is_git_url;
-use super::extractor::extract_and_write;
-use super::user_config::is_registry_tarball;
+use super::download::is_git_url;
+use super::extract::extract_and_write;
+use crate::util::cache::get_cache_dir;
+use crate::util::user_config::is_registry_tarball;
 
 /// Complete materialization input, retained across prefetch and authoritative
 /// installation. This is deliberately internal: the public resolver event
@@ -56,7 +56,7 @@ impl PackageSource {
     }
 
     fn cache_path(&self) -> PathBuf {
-        super::cache::versioned_cache_dir(&get_cache_dir())
+        crate::util::cache::versioned_cache_dir(&get_cache_dir())
             .join("packages")
             .join(&self.name)
             .join(&self.version)
@@ -65,9 +65,9 @@ impl PackageSource {
 
     fn verify(&self, bytes: &[u8]) -> Result<()> {
         if let Some(integrity) = &self.integrity {
-            super::integrity::verify_integrity(bytes, integrity)
+            crate::util::integrity::verify_integrity(bytes, integrity)
         } else if let Some(shasum) = &self.shasum {
-            super::integrity::verify_shasum(bytes, shasum)
+            crate::util::integrity::verify_shasum(bytes, shasum)
         } else {
             Ok(())
         }
@@ -169,7 +169,7 @@ pub async fn extract_non_registry_to_target(source: &PackageSource, target: &Pat
             .with_context(|| format!("failed to read tarball {tarball_url}"))?
     } else {
         let token = crate::service::auth::token_for_url(tarball_url).await;
-        super::downloader::download_bytes(tarball_url, token.as_deref())
+        super::download::download_bytes(tarball_url, token.as_deref())
             .await
             .with_context(|| format!("failed to download tarball {tarball_url}"))?
     };

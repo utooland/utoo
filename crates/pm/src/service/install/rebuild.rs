@@ -1,4 +1,4 @@
-use crate::service::package::PackageService;
+use crate::service::install::hooks::PackageService;
 use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::Result;

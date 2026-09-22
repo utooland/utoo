@@ -1,3 +1,4 @@
+use crate::service::install::bins;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -105,8 +106,7 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
     if package_info.has_bin_files() {
         let global_bin_dir =
             get_global_bin_dir(prefix).context("Failed to get global bin directory")?;
-        package_info
-            .link_to_global(&global_bin_dir)
+        bins::link_to_global(&package_info, &global_bin_dir)
             .await
             .with_context(|| {
                 format!(
@@ -168,8 +168,7 @@ pub async fn link_global_to_local(
             &package_info.name
         );
         let bin_dir = project_path.join("node_modules/.bin");
-        package_info
-            .link_to_target(&bin_dir)
+        bins::link_to_target(&package_info, &bin_dir)
             .await
             .with_context(|| {
                 format!(

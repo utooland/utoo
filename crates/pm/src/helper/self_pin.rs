@@ -8,12 +8,12 @@ use deno_semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::APP_VERSION;
+use crate::service::install::download::download_bytes;
+use crate::service::install::extract::extract_and_write;
 use crate::service::project::lock::resolve_package_spec_details;
 #[cfg(test)]
 use crate::util::cache::get_cache_dir;
 use crate::util::cache::get_self_pin_cache_dir;
-use crate::util::downloader::download_bytes;
-use crate::util::extractor::extract_and_write;
 use crate::util::integrity::{compute_integrity, verify_integrity, verify_shasum};
 use crate::util::process_lock::{lock_exclusive, sibling_lock_path};
 use crate::util::user_config::{init_registry, set_cache_dir};

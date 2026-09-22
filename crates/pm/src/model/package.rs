@@ -1,15 +1,13 @@
 use std::collections::HashMap;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use std::env;
 use std::path::{Path, PathBuf};
 use utoo_ruborist::manifest::{PackageInstallView, PackageJson, PublishConfig};
 
 use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
 use crate::util::json::load_package_json;
-use crate::util::platform_const::PATH_SEPARATOR;
 use crate::util::user_config::get_or_load_package_json;
-use crate::{service::script::ScriptService, util::linker::link};
 
 /// Known npm lifecycle hook names.
 ///
@@ -225,44 +223,6 @@ impl PackageInfo {
             scripts: pkg.scripts.clone(),
             name: pkg.name.clone(),
         })
-    }
-
-    pub async fn link_to_target(&self, target_bin_dir: &Path) -> Result<()> {
-        // Link each binary file
-        for (bin_name, relative_path) in &self.bin_files {
-            let target_path = self.path.join(relative_path);
-            let link_path = target_bin_dir.join(bin_name);
-
-            tracing::debug!("Linking global binary: {bin_name} -> {relative_path}");
-
-            // Ensure target file is executable
-            ScriptService::ensure_executable(&target_path)
-                .await
-                .context("Failed to ensure binary is executable")?;
-
-            // Create symbolic link
-            link(&target_path, &link_path)
-                .await
-                .context("Failed to create symbolic link")?;
-        }
-
-        Ok(())
-    }
-
-    pub async fn link_to_global(&self, global_bin_dir: &Path) -> Result<()> {
-        self.link_to_target(global_bin_dir).await?;
-
-        // Update PATH environment variable for current process
-        if let Ok(current_path) = env::var("PATH") {
-            let global_bin_str = global_bin_dir.to_string_lossy().into_owned();
-            if !current_path.contains(&global_bin_str) {
-                let new_path = format!("{global_bin_str}{PATH_SEPARATOR}{current_path}");
-                unsafe { env::set_var("PATH", new_path) };
-                tracing::debug!("Updated PATH environment variable");
-            }
-        }
-
-        Ok(())
     }
 }
 

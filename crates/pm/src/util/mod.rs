@@ -18,10 +18,7 @@
 
 pub mod cache;
 pub mod cli_enum;
-pub mod cloner;
 pub mod config_file;
-pub mod downloader;
-pub mod extractor;
 pub mod format_print;
 pub mod git_resolver;
 pub mod http;
@@ -33,7 +30,6 @@ pub mod linker;
 pub mod logger;
 pub mod manifest_store;
 pub mod npmrc;
-pub mod package_cache;
 pub mod platform_const;
 pub mod presenter;
 pub mod process_lock;
