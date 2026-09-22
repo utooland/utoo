@@ -364,11 +364,11 @@ async fn async_main() -> Result<()> {
     let root_ignore_scripts = cli.ignore_scripts || get_ignore_scripts().await;
 
     // Auto update: check cache → update or refresh in background
-    init_auto_update().await;
+    let auto_update = init_auto_update().await;
 
     // Separate command polling from startup so debug builds keep their
     // temporaries within the Windows main-thread stack limit.
-    async {
+    let result = async {
         match cli.command {
             Some(Commands::Clean { pattern, yes }) => {
                 let confirmation = ConfirmationPolicy::from(yes);
@@ -541,7 +541,9 @@ async fn async_main() -> Result<()> {
 
         Ok(())
     }
-    .await
+    .await;
+    auto_update.finish().await;
+    result
 }
 
 fn has_flag_before_delimiter(args: &[String], flag: &str) -> bool {
