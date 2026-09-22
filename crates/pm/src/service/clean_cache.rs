@@ -4,7 +4,9 @@ use anyhow::Result;
 use utoo_ruborist::util::{PackageNameStr, parse_package_spec};
 
 use crate::fs;
-use crate::util::cache::{get_cache_dir, get_self_pin_cache_dir, matches_pattern};
+use crate::util::cache::{
+    get_cache_dir, get_self_pin_cache_dir, matches_pattern, versioned_cache_dir,
+};
 use crate::util::process_lock::{lock_exclusive, sibling_lock_path};
 
 const SELF_PIN_LOGICAL_PREFIX: &str = "_utoo-self-";
@@ -112,49 +114,56 @@ async fn collect_cache_entries_at(
     // view of the dedicated sibling root. This keeps exact clean operations
     // from also deleting a permissive private-registry package with that name.
     if !reserves_self_pin_logical_namespace(pkg_pattern) {
-        // Read all package information
-        let mut entries = if fs::try_exists(&cache_dir).await? {
-            Some(fs::read_dir(&cache_dir).await?)
-        } else {
-            None
-        };
-        while let Some(entry) = match &mut entries {
-            Some(entries) => entries.next_entry().await?,
-            None => None,
-        } {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
+        for cache_dir in [
+            cache_dir.to_path_buf(),
+            versioned_cache_dir(cache_dir).join("packages"),
+        ] {
+            // Read all package information
+            let mut entries = if fs::try_exists(&cache_dir).await? {
+                Some(fs::read_dir(&cache_dir).await?)
+            } else {
+                None
+            };
+            while let Some(entry) = match &mut entries {
+                Some(entries) => entries.next_entry().await?,
+                None => None,
+            } {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
 
-            if name_str.is_scoped() {
-                // Handle scoped packages
-                let mut pkg_entries = fs::read_dir(entry.path()).await?;
-                while let Some(pkg_entry) = pkg_entries.next_entry().await? {
-                    let pkg_name = pkg_entry.file_name();
-                    let full_pkg_name = format!("{}/{}", name_str, pkg_name.to_string_lossy());
+                if name_str.is_scoped() {
+                    // Handle scoped packages
+                    let mut pkg_entries = fs::read_dir(entry.path()).await?;
+                    while let Some(pkg_entry) = pkg_entries.next_entry().await? {
+                        let pkg_name = pkg_entry.file_name();
+                        let full_pkg_name = format!("{}/{}", name_str, pkg_name.to_string_lossy());
 
-                    if matches_pattern(&full_pkg_name, pkg_pattern) {
-                        tracing::debug!("full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}");
+                        if matches_pattern(&full_pkg_name, pkg_pattern) {
+                            tracing::debug!(
+                                "full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}"
+                            );
+                            collect_matching_versions(
+                                &pkg_entry.path(),
+                                full_pkg_name,
+                                version_pattern,
+                                CacheEntryKind::Package,
+                                &mut to_delete,
+                            )
+                            .await?;
+                        }
+                    }
+                } else {
+                    // Handle regular packages
+                    if matches_pattern(&name_str, pkg_pattern) {
                         collect_matching_versions(
-                            &pkg_entry.path(),
-                            full_pkg_name,
+                            &entry.path(),
+                            name_str.to_string(),
                             version_pattern,
                             CacheEntryKind::Package,
                             &mut to_delete,
                         )
                         .await?;
                     }
-                }
-            } else {
-                // Handle regular packages
-                if matches_pattern(&name_str, pkg_pattern) {
-                    collect_matching_versions(
-                        &entry.path(),
-                        name_str.to_string(),
-                        version_pattern,
-                        CacheEntryKind::Package,
-                        &mut to_delete,
-                    )
-                    .await?;
                 }
             }
         }

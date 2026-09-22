@@ -10,6 +10,9 @@ use serde_json::Value;
 use tar::Archive;
 use tempfile::tempdir;
 
+#[path = "cli_contract/sources.rs"]
+mod sources;
+
 fn utoo() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_utoo"));
     command.env("NO_UPDATE_NOTIFIER", "1");
