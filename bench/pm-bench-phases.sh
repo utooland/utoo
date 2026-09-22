@@ -104,6 +104,15 @@ cat > "$METRICS_WRAPPER" <<'METRICS_EOF'
 METRICS_FILE="$1"; shift
 TIME_TMP=$(mktemp)
 
+# Optional loopback registry telemetry, outside the measured command. Warmup
+# fills its snapshot; timed runs freeze it and reject any upstream cache miss.
+if [ -n "${BENCH_REGISTRY_STATS:-}" ]; then
+  if ! curl -fsS "$BENCH_REGISTRY_STATS/reset" > /dev/null; then
+    rm -f "$TIME_TMP"
+    exit 1
+  fi
+fi
+
 # --- snapshot network BEFORE the command (cheap: one read of /proc/net/dev) ---
 snap_net_rx=0; snap_net_tx=0
 if [ -r /proc/net/dev ]; then
@@ -136,6 +145,32 @@ else
   WALL_S=$(awk -F': ' '/Elapsed \(wall clock\)/ {n=split($NF,p,":"); s=0; for(i=1;i<=n;i++) s=s*60+p[i]; print s}' "$TIME_TMP")
 fi
 
+if [ "$EXIT_CODE" -ne 0 ]; then
+  cat "$TIME_TMP" >&2
+fi
+
+# Keep exact HTTP body volume and observed request concurrency next to each
+# time/RSS sample. Public-registry runs keep the existing metrics unchanged.
+if [ -n "${BENCH_REGISTRY_STATS:-}" ]; then
+  NETWORK_TMP=$(mktemp)
+  if curl -fsS "$BENCH_REGISTRY_STATS/stats" > "$NETWORK_TMP"; then
+    cat "$NETWORK_TMP" >> "${METRICS_FILE%.jsonl}_network.jsonl"
+    echo >> "${METRICS_FILE%.jsonl}_network.jsonl"
+    if ! node -e '
+      const stats = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      if (!stats.frozen || stats.active || stats.upstream_requests || stats.offline_misses) {
+        console.error("Invalid frozen-registry sample:", stats);
+        process.exit(1);
+      }
+    ' "$NETWORK_TMP"; then
+      [ "$EXIT_CODE" -ne 0 ] || EXIT_CODE=1
+    fi
+  else
+    [ "$EXIT_CODE" -ne 0 ] || EXIT_CODE=1
+  fi
+  rm -f "$NETWORK_TMP"
+fi
+
 # --- snapshot network AFTER, compute delta ---
 net_rx=0; net_tx=0
 if [ -r /proc/net/dev ]; then
@@ -144,10 +179,10 @@ if [ -r /proc/net/dev ]; then
   net_tx=$(( cur_net_tx - snap_net_tx ))
 fi
 
-printf '{"wall_s":%s,"rss":%d,"user_s":%s,"sys_s":%s,"page_major":%d,"page_minor":%d,"vol_ctx":%d,"invol_ctx":%d,"net_rx":%d,"net_tx":%d}\n' \
+printf '{"wall_s":%s,"rss":%d,"user_s":%s,"sys_s":%s,"page_major":%d,"page_minor":%d,"vol_ctx":%d,"invol_ctx":%d,"net_rx":%d,"net_tx":%d,"exit_code":%d}\n' \
   "${WALL_S:-0}" "${RSS:-0}" "${USER_S:-0}" "${SYS_S:-0}" "${PG_MAJOR:-0}" "${PG_MINOR:-0}" \
   "${VOL_CTX:-0}" "${INVOL_CTX:-0}" \
-  "${net_rx:-0}" "${net_tx:-0}" >> "$METRICS_FILE"
+  "${net_rx:-0}" "${net_tx:-0}" "$EXIT_CODE" >> "$METRICS_FILE"
 rm -f "$TIME_TMP"
 exit $EXIT_CODE
 METRICS_EOF
@@ -371,11 +406,14 @@ seed_for_phase() {
   cd "$PROJECT_DIR"
   case "$phase:$pm" in
     p3_*:utoo|p4_*:utoo|p3_*:utoo-npm|p4_*:utoo-npm|p3_*:utoo-next|p4_*:utoo-next|p3_*:utoo-alt|p4_*:utoo-alt)
-      if [ ! -f package-lock.json ] && [ ! -f "$LOCK_STASH/package-lock.json" ]; then
+      if [ ! -f "$LOCK_STASH/package-lock.json" ]; then
         echo -e "  ${CYAN}seed: generating package-lock.json (baseline-pinned when available)${NC}"
+        # Earlier p0/p1 rounds may have left the candidate's lock behind.
+        # Generate the shared input with the designated baseline exactly once.
+        rm -f package-lock.json
         retry 3 bash -c "$(seed_lockfile_cmd "$pm") >> '$seed_log' 2>&1" || return 1
+        [ -f package-lock.json ] && cp -f package-lock.json "$LOCK_STASH/package-lock.json"
       fi
-      [ -f package-lock.json ] && cp -f package-lock.json "$LOCK_STASH/package-lock.json"
       ;;
     p3_*:bun|p4_*:bun)
       if [ ! -f bun.lock ] && [ ! -f "$LOCK_STASH/bun.lock" ]; then
@@ -509,6 +547,10 @@ run_phase_matrix() {
     p1_* | p4_*) runs=$RUNS_CHEAP ;;
   esac
 
+  if [ -n "${BENCH_REGISTRY_STATS:-}" ]; then
+    curl -fsS "$BENCH_REGISTRY_STATS/thaw" > /dev/null
+  fi
+
   # Seed every PM's state up front; only cells that seeded OK join the rounds.
   local -a live_pms=()
   local pm
@@ -519,6 +561,7 @@ run_phase_matrix() {
       printf 'set -eo pipefail\ncd %s\n%s\n' "$PROJECT_DIR" "$($cmd_fn "$pm")" \
         > "$RESULTS_DIR/cmd_${phase}_${pm}.sh"
       : > "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_metrics.jsonl"
+      : > "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_metrics_network.jsonl"
     else
       echo -e "  ${RED}$pm $phase seed failed after retries — skipping this cell${NC}"
       printf '{"failed":"seed"}\n' > "$RESULTS_DIR/${PROJECT}_${phase}_${pm}_failed.json"
@@ -539,6 +582,10 @@ run_phase_matrix() {
     bash "$RESULTS_DIR/cmd_${phase}_${pm}.sh" \
       > "$RESULTS_DIR/warmup_${phase}_${pm}.log" 2>&1 || true
   done
+
+  if [ -n "${BENCH_REGISTRY_STATS:-}" ]; then
+    curl -fsS "$BENCH_REGISTRY_STATS/freeze" > /dev/null
+  fi
 
   local r
   for ((r = 1; r <= runs; r++)); do
@@ -589,6 +636,10 @@ run_phase_matrix() {
         rows = fs.readFileSync(`${base}_metrics.jsonl`, "utf8")
           .trim().split("\n").filter(Boolean).map(JSON.parse);
       } catch {}
+      if (rows.some(row => row.exit_code !== 0)) {
+        fs.writeFileSync(`${base}_failed.json`, JSON.stringify({ failed: "run" }));
+        continue;
+      }
       const times = rows.map(r => Number(r.wall_s)).filter(t => t > 0);
       if (!times.length) {
         fs.writeFileSync(`${base}_failed.json`, JSON.stringify({ failed: "run" }));
