@@ -60,7 +60,8 @@ pub enum BuildEvent<'a> {
 /// - Send to UI (WASM)
 ///
 /// # Example
-/// ```ignore
+/// ```
+/// use utoo_ruborist::progress::{EventReceiver, BuildEvent};
 /// struct MyReceiver;
 ///
 /// impl EventReceiver for MyReceiver {

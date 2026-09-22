@@ -10784,6 +10784,7 @@ dependencies = [
  "sha1",
  "sha2",
  "strum",
+ "syn 2.0.106",
  "tar",
  "tempfile",
  "term_size",

@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Representative routes: install/update → `service::install` ·
-//! run → `service::script` · publish → `service::{publish,pm_pack}` ·
+//! run → `service::lifecycle` · publish/pack → `service::publish` ·
 //! deps/list → `service::dependency_graph` · config → `service::config`.
 
 pub mod clean;

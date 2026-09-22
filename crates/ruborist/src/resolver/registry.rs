@@ -111,9 +111,16 @@ impl<E: std::error::Error + 'static> std::error::Error for ResolveError<E> {
 /// * `spec` - Version specification (semver range, dist-tag, exact version, or npm alias)
 ///
 /// # Example
-/// ```ignore
+/// ```no_run
+/// use utoo_ruborist::registry::resolve_package;
+/// use utoo_ruborist::service::UnifiedRegistry;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let registry = UnifiedRegistry::builder().registry("https://registry.npmjs.org").build();
 /// let resolved = resolve_package(&registry, "lodash", "^4.0.0").await?;
 /// println!("Resolved to {}@{}", resolved.name, resolved.version);
+/// # Ok(())
+/// # }
 /// ```
 pub async fn resolve_package<P: ManifestProvider>(
     provider: &P,

@@ -745,10 +745,18 @@ async fn resolve_override_file_tarball<E>(
 /// * `peer_deps` - How to handle peer dependencies
 ///
 /// # Example
-/// ```ignore
-/// let mut graph = DependencyGraph::new(path, package_json);
-/// // Add initial dependency edges to root...
-/// build_deps(&mut graph, &registry, PeerDeps::Include).await?;
+/// ```no_run
+/// use utoo_ruborist::graph::DependencyGraph;
+/// use utoo_ruborist::builder::PeerDeps;
+/// use utoo_ruborist::resolver::builder::build_deps;
+/// use utoo_ruborist::service::UnifiedRegistry;
+///
+/// // The caller supplies a graph with its root and initial dependency edges.
+/// async fn build(mut graph: DependencyGraph) -> anyhow::Result<DependencyGraph> {
+///     let registry = UnifiedRegistry::builder().registry("https://registry.npmjs.org").build();
+///     build_deps(&mut graph, &registry, PeerDeps::Include).await?;
+///     Ok(graph)
+/// }
 /// ```
 pub async fn build_deps<R>(
     graph: &mut DependencyGraph,
@@ -802,10 +810,18 @@ where
 /// * `receiver` - Event receiver for handling build events
 ///
 /// # Example
-/// ```ignore
-/// let config = BuildDepsConfig::default().with_concurrency(50);
+/// ```no_run
+/// use utoo_ruborist::graph::DependencyGraph;
+/// use utoo_ruborist::progress::NoopReceiver;
+/// use utoo_ruborist::resolver::builder::{BuildDepsConfig, build_deps_with_config};
+/// use utoo_ruborist::service::UnifiedRegistry;
 ///
-/// build_deps_with_config(&mut graph, &registry, config, &receiver).await?;
+/// async fn build(mut graph: DependencyGraph) -> anyhow::Result<DependencyGraph> {
+///     let registry = UnifiedRegistry::builder().registry("https://registry.npmjs.org").build();
+///     let config = BuildDepsConfig::default().with_concurrency(50);
+///     build_deps_with_config(&mut graph, &registry, config, &NoopReceiver).await?;
+///     Ok(graph)
+/// }
 /// ```
 /// Demand-driven dependency resolution: a single BFS loop that schedules
 /// manifest jobs through the [`ManifestProvider`] while owning the per-run
@@ -853,9 +869,17 @@ where
 /// * `registry` - Registry client for fetching packages
 ///
 /// # Example
-/// ```ignore
-/// let pkg: PackageJson = serde_json::from_str(&pkg_content)?;
+/// ```no_run
+/// use utoo_ruborist::manifest::PackageJson;
+/// use utoo_ruborist::resolver::builder::resolve;
+/// use utoo_ruborist::service::UnifiedRegistry;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let pkg: PackageJson = serde_json::from_str(r#"{"name":"example","dependencies":{"lodash":"^4.0.0"}}"#)?;
+/// let registry = UnifiedRegistry::builder().registry("https://registry.npmjs.org").build();
 /// let lock = resolve(&pkg, &registry).await?;
+/// # Ok(())
+/// # }
 /// ```
 pub async fn resolve<R>(
     pkg: &PackageJson,

@@ -138,7 +138,7 @@ fn main() {
     }
 }
 
-// Construct the large future outside main's frame before entering block_on.
+// Construct the large CLI future in a separate frame before polling it.
 // Debug builds otherwise retain its stack temporaries while polling the CLI.
 #[inline(never)]
 fn cli_future() -> std::pin::Pin<Box<impl std::future::Future<Output = Result<()>>>> {
@@ -458,7 +458,7 @@ async fn async_main() -> Result<()> {
                 } else {
                     service::init::InitOutput::Human
                 };
-                service::init::init(mode, output, None).await?;
+                service::init::init(mode, output, &std::env::current_dir()?).await?;
                 log_time_end("package.json created");
                 if invocation::json() {
                     let path = std::env::current_dir()?.join("package.json");

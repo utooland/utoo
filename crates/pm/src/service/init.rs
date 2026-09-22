@@ -13,15 +13,11 @@ pub enum InitOutput {
     Machine,
 }
 
-/// Initialize a new package.json file in the given directory (or current directory).
+/// Initialize a new package.json file in the supplied directory.
 ///
 /// `mode` determines whether package metadata is prompted for or defaulted.
-/// If `cwd` is `None`, uses `std::env::current_dir()`.
-pub async fn init(mode: InitMode, output: InitOutput, cwd: Option<&Path>) -> Result<()> {
-    let cwd = match cwd {
-        Some(p) => p.to_path_buf(),
-        None => std::env::current_dir()?,
-    };
+pub async fn init(mode: InitMode, output: InitOutput, cwd: &Path) -> Result<()> {
+    let cwd = cwd.to_path_buf();
     let package_json_path = cwd.join("package.json");
 
     if package_json_path.exists() {
@@ -219,7 +215,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("package.json"), "{}").unwrap();
 
-        let result = init(InitMode::Defaults, InitOutput::Human, Some(dir.path())).await;
+        let result = init(InitMode::Defaults, InitOutput::Human, dir.path()).await;
         assert!(result.is_err());
         assert!(
             result
@@ -232,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn test_init_yes_creates_valid_package_json() {
         let dir = tempfile::tempdir().unwrap();
-        init(InitMode::Defaults, InitOutput::Human, Some(dir.path()))
+        init(InitMode::Defaults, InitOutput::Human, dir.path())
             .await
             .unwrap();
 

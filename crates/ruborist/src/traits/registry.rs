@@ -87,48 +87,24 @@ pub struct VersionsInfo {
     pub dist_tags: HashMap<String, String>,
 }
 
-/// Registry client trait for fetching package information.
+/// Registry capability and error contract retained for existing clients.
 ///
-/// This trait handles package metadata fetching from the registry with support
-/// for both traditional (full manifest) and semver-supporting registries.
-///
-/// # Registry Types
-///
-/// 1. **Traditional registries (npm)**: Only support fetching full package manifests
-///    - Use `fetch_full_manifest` to get all versions
-///    - Version resolution is done client-side
-///
-/// 2. **Semver-supporting registries (npmmirror, etc.)**: Support direct version queries
-///    - Can fetch specific version manifest via `registry/package/^1.0.0`
-///    - More efficient as no client-side version resolution needed
-///
-/// # Implementation Guide
-///
-/// - Override `supports_semver_resolution()` to return `true` if your registry supports it
-/// - Override `fetch_version_manifest()` if your registry supports semver queries
-/// - The `resolve_package()` method automatically chooses the best strategy
+/// Set `supports_semver_resolution()` for registries that accept range queries.
+/// Actual fetching is expressed as manifest jobs through
+/// [`ManifestProvider`](crate::service::ManifestProvider); version selection
+/// chooses full or version metadata according to this capability.
 ///
 /// # Example Implementation
-/// ```ignore
+/// ```
+/// use utoo_ruborist::traits::registry::RegistryClient;
+/// use utoo_ruborist::registry::RegistryError;
+///
 /// struct SemverSupportingRegistry;
-///
 /// impl RegistryClient for SemverSupportingRegistry {
-///     type Error = MyError;
-///
-///     fn supports_semver_resolution(&self) -> bool {
-///         true // This registry supports semver queries
-///     }
-///
-///     async fn fetch_full_manifest(&self, name: &str) -> Result<FullManifest, Self::Error> {
-///         // Fetch full manifest...
-///     }
-///
-///     async fn fetch_version_manifest(&self, name: &str, spec: &str)
-///         -> Result<VersionManifest, Self::Error>
-///     {
-///         // Fetch specific version via registry/name/spec
-///     }
+///     type Error = RegistryError;
+///     fn supports_semver_resolution(&self) -> bool { true }
 /// }
+/// assert!(SemverSupportingRegistry.supports_semver_resolution());
 /// ```
 pub trait RegistryClient {
     /// Error type for registry operations.

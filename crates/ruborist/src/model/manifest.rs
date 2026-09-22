@@ -31,11 +31,15 @@ use crate::util::spawn_cpu;
 /// a single function body — the lifetime never escapes.
 ///
 /// Construct via the `From` impls (defined alongside each source type):
-/// ```ignore
-/// // From a freshly-fetched manifest:
-/// let view = VersionsRef::from(&*full_manifest);
-/// // From the 304-path versions cache:
-/// let view = VersionsRef::from(&*versions_info);
+/// ```
+/// use utoo_ruborist::manifest::{FullManifest, VersionsRef};
+/// use utoo_ruborist::service::VersionsInfo;
+///
+/// fn views(manifest: &FullManifest, cached: &VersionsInfo) {
+///     let fresh = VersionsRef::from(manifest);
+///     let revalidated = VersionsRef::from(cached);
+///     assert_eq!(fresh.versions, revalidated.versions);
+/// }
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct VersionsRef<'a> {

@@ -1,22 +1,14 @@
-//! Business-logic layer — the work behind each CLI command.
+//! Reusable project operations, installation, lifecycle and publication.
 //!
-//! [`crate::cmd`] assembles args and calls in here; this layer orchestrates
-//! [`crate::util`] (I/O, cache, linker, http) and `utoo_ruborist` (resolution).
+//! `project` discovers roots, edits manifests, validates and persists locks.
+//! `install` owns prefetch scheduling, lock-driven materialization, bins,
+//! binary rewriting, dependency hooks and build-tool preparation.
+//! `lifecycle` selects packages and orders stages; `script` only builds the
+//! supplied npm environment, runs a child, captures output and waits for it.
+//! `publish` owns packing, manifest rewriting, provenance and upload outcomes.
 //!
-//! ```text
-//!   install pipeline:
-//!     install ─► dependency_graph ─► install_scheduler ─► package ─► rebuild
-//!     (omit/flags)  (lock via         (bounded download/    (collect +
-//!                    ruborist)          extract/clone)        run lifecycle)
-//!                                            │                    │
-//!                                         binary            script (exec/
-//!                                    (mirror env+rewrite)    node_gyp/lifecycle)
-//!
-//!   publish:    publish ─► publish_manifest ─► pm_pack ─► auth · oidc
-//!   workspace:  workspace · init · clean · clean_cache · update · execute
-//!               · package_management (utx)
-//!   config:     config (+util::config_file) · auth · oidc
-//! ```
+//! Callers supply paths and policies. CLI parsing, process cwd changes,
+//! handoff and exit decisions belong to `cmd`/`main`.
 
 pub mod auth;
 pub mod clean;
