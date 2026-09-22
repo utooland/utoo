@@ -576,7 +576,7 @@ if [ "$(uname -s)" = "Linux" ] && [ -d /dev/shm ]; then
     || { echo -e "${RED}FAIL: explicit cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
   [ -d "$XDEV_DISK/proj/node_modules/is-odd" ] \
     || { echo -e "${RED}FAIL: is-odd missing (explicit xdev)${NC}"; xdev_cleanup; exit 1; }
-  [ -d "$XDEV_SHM/cache" ] \
+  [ -d "$XDEV_SHM/cache.utoo-v2/packages" ] \
     || { echo -e "${RED}FAIL: explicit cache dir not used at $XDEV_SHM/cache${NC}"; xdev_cleanup; exit 1; }
   echo -e "${GREEN}PASS: explicit cross-device cache copies, install OK${NC}"
 
