@@ -44,6 +44,7 @@ pub struct PackageClone<'a> {
     pub version: &'a str,
     pub tarball_url: &'a str,
     pub cache: &'a Path,
+    pub source_key: &'a str,
     pub target: &'a Path,
     pub policy: ClonePolicy,
 }
@@ -297,10 +298,14 @@ fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout, policy: ClonePolicy) 
 /// dedup and counting.
 pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
     let lock_path = sibling_lock_path(req.target, ".clone.lock")?;
-    let _lock = lock_exclusive_sync(&lock_path)?;
+    let mut lock = lock_exclusive_sync(&lock_path)?;
 
     if req.target.try_exists()? {
-        if validate_name_version_sync(req.target, req.name, req.version) {
+        if validate_name_version_sync(req.target, req.name, req.version)
+            && lock
+                .read_contents()
+                .is_ok_and(|source| source == req.source_key)
+        {
             return Ok(false);
         }
         if let Err(e) = std::fs::remove_dir_all(req.target) {
@@ -311,12 +316,16 @@ pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
             );
         }
     }
+    // Keep provenance in the existing per-target lock file, not in shared
+    // package contents. A partial write is a cache miss on the next attempt.
+    lock.write_contents(b"")?;
     clone_sync(
         req.cache,
         req.target,
         CacheLayout::from_tarball_url(req.tarball_url),
         req.policy,
     )?;
+    lock.write_contents(req.source_key.as_bytes())?;
     Ok(true)
 }
 
@@ -376,6 +385,7 @@ mod tests {
             version: "4.17.21",
             tarball_url: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
             cache: &cache_dir,
+            source_key: "fixture-source",
             target: &dst_dir,
             policy: ClonePolicy::Shared,
         })?;
@@ -402,6 +412,7 @@ mod tests {
             version: "2.11.2",
             tarball_url: "https://registry.npmjs.org/canvas/-/canvas-2.11.2.tgz",
             cache: &cache_dir,
+            source_key: "fixture-source",
             target: &dst_dir,
             policy: ClonePolicy::Private,
         })?;
