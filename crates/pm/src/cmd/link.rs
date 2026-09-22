@@ -2,19 +2,21 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::cmd::install::install;
+use crate::cmd::project::update_cwd_to_project;
 use crate::error::{CliError, classify};
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
-use crate::helper::workspace::update_cwd_to_project;
 use crate::model::cli_output::{
     LinkDirection, LinkEntry, LinkPartialResult, LinkResult, PartialResult,
 };
 use crate::model::package::PackageInfo;
+use crate::service::install::{InstallOptions, InstallService};
+use crate::util::cli_enum::ReifyMode;
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::invocation;
 use crate::util::linker::link;
 use crate::util::logger::log_time_end;
 use crate::util::presenter::emit;
+use crate::util::user_config::get_omit;
 use crate::util::user_config::resolve_global_prefix;
 
 /// Entry point for the `link` command.
@@ -81,9 +83,16 @@ pub async fn link_current_to_global(cwd: &Path, prefix: Option<&str>) -> Result<
     }
 
     // Install dependencies
-    install(ScriptPolicy::Run, &project_path)
-        .await
-        .context("Failed to prepare dependencies for package to link")?;
+    let omit = get_omit();
+    InstallService::install(&InstallOptions {
+        root: &project_path,
+        omit: &omit,
+        scripts: ScriptPolicy::Run,
+        mode: ReifyMode::Incremental,
+        output: super::install::script_output(),
+    })
+    .await
+    .context("Failed to prepare dependencies for package to link")?;
 
     let global_package_path = get_global_package_dir(prefix)?.join(&package_info.name);
     // link local project to global package

@@ -7,8 +7,8 @@ use bytes::Bytes;
 use deno_semver::Version;
 use serde::{Deserialize, Serialize};
 
-use super::lock::resolve_package_spec_details;
 use crate::constants::APP_VERSION;
+use crate::service::project::lock::resolve_package_spec_details;
 #[cfg(test)]
 use crate::util::cache::get_cache_dir;
 use crate::util::cache::get_self_pin_cache_dir;

@@ -6,13 +6,13 @@ use clap::Args;
 use utoo_ruborist::lock::PackageLock;
 use utoo_ruborist::spec::PackageSpec;
 
+use crate::cmd::project::init_project_root;
 use crate::helper::migrate::{FromPm, migrate_from_pnpm};
-use crate::helper::workspace::init_project_root;
 use crate::model::cli_output::{
     DependencyOperation, DependencyScope, DependencySummary, InstallResult, PackageVersion,
     UninstallResult,
 };
-use crate::service::install::InstallService;
+use crate::service::install::{InstallOptions, InstallService};
 use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::{
     InstallScope, OmitType, PackageAction, ReifyMode, SaveType, ScriptPolicy,
@@ -410,30 +410,35 @@ pub async fn update_packages(
     scripts: ScriptPolicy,
     save_type: SaveType,
 ) -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    let root = init_project_root(&cwd).await?;
     let omit = get_omit();
     InstallService::update_packages(
         action,
         specs,
         workspace,
-        scripts,
         save_type,
-        &omit,
-        script_output(),
+        &InstallOptions {
+            root: &root,
+            omit: &omit,
+            scripts,
+            mode: ReifyMode::Incremental,
+            output: script_output(),
+        },
     )
     .await
 }
 
-pub async fn install(scripts: ScriptPolicy, root_path: &Path) -> Result<()> {
-    install_with_mode(scripts, root_path, ReifyMode::Incremental).await
-}
-
-pub async fn install_with_mode(
-    scripts: ScriptPolicy,
-    root_path: &Path,
-    mode: ReifyMode,
-) -> Result<()> {
+pub async fn install(scripts: ScriptPolicy, root: &Path) -> Result<()> {
     let omit = get_omit();
-    InstallService::install_with_mode(scripts, root_path, &omit, mode, script_output()).await
+    InstallService::install(&InstallOptions {
+        root,
+        omit: &omit,
+        scripts,
+        mode: ReifyMode::Incremental,
+        output: script_output(),
+    })
+    .await
 }
 
 pub async fn install_global_package(
@@ -454,7 +459,7 @@ pub async fn install_global_package(
         .await
 }
 
-fn script_output() -> ScriptOutput {
+pub(super) fn script_output() -> ScriptOutput {
     if invocation::json() {
         ScriptOutput::Machine
     } else {

@@ -7,8 +7,8 @@ use anyhow::{Context, Result};
 use glob::glob;
 use utoo_ruborist::util::PackageNameStr;
 
-use crate::helper::lock::Package;
-use crate::helper::ruborist_context::Context as FsContext;
+use crate::service::project::context::Context as FsContext;
+use crate::service::project::lock::Package;
 
 /// Remove a symlink with platform-specific handling.
 ///

@@ -1,9 +1,11 @@
+use crate::cmd::project::init_project_root;
+use crate::service::install::{InstallOptions, InstallService};
 use crate::service::update::clean_package_lock;
 use crate::util::cli_enum::{ReifyMode, ScriptPolicy};
 use crate::util::install_progress::DownloadBaseline;
 use crate::util::invocation;
 use crate::util::presenter::emit;
-use crate::{cmd::install::install_with_mode, helper::workspace::init_project_root};
+use crate::util::user_config::get_omit;
 use anyhow::{Context, Result};
 use clap::Args;
 
@@ -45,7 +47,15 @@ pub async fn update(args: UpdateArgs, scripts: ScriptPolicy) -> Result<()> {
     } else {
         ReifyMode::Incremental
     };
-    install_with_mode(scripts, &root_path, mode).await?;
+    let omit = get_omit();
+    InstallService::install(&InstallOptions {
+        root: &root_path,
+        omit: &omit,
+        scripts,
+        mode,
+        output: super::install::script_output(),
+    })
+    .await?;
 
     if !machine {
         return Ok(());

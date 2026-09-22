@@ -7,47 +7,21 @@ use anyhow::{Context, Result};
 use std::env;
 use std::path::{Path, PathBuf};
 
-use super::ruborist_context::Context as FsContext;
-
-/// Find a workspace by name or path.
-pub async fn find_workspace_path(cwd: &Path, workspace: &str) -> Result<PathBuf> {
-    let workspaces = FsContext::discovery()
-        .find_workspaces(cwd)
-        .await
-        .context("Failed to find workspaces")?;
-    for ws in workspaces {
-        // Try exact name match
-        if ws.name == workspace {
-            return Ok(ws.path);
-        }
-
-        // Try absolute path match
-        if ws.path.to_string_lossy() == workspace {
-            return Ok(ws.path);
-        }
-
-        // Try relative path match
-        if let Ok(relative) = ws.path.strip_prefix(cwd)
-            && relative.to_string_lossy() == workspace
-        {
-            return Ok(ws.path);
-        }
-    }
-    anyhow::bail!("Workspace '{workspace}' not found")
-}
+#[cfg(test)]
+use crate::service::project::context::Context as FsContext;
 
 /// Resolve the workspace root and change into it.
 ///
 /// This is the standard entry point for commands that operate on the
 /// project root (install, update, deps, etc.).
 pub async fn init_project_root(cwd: &Path) -> Result<PathBuf> {
-    let root_dir = FsContext::discovery().find_root_path(cwd).await?;
+    let root_dir = crate::service::project::discovery::project_root(cwd).await?;
     chdir_if_needed(cwd, root_dir, "workspace root")
 }
 
 /// Update current working directory to project directory (closest package.json).
 pub async fn update_cwd_to_project(cwd: &Path) -> Result<PathBuf> {
-    let project_dir = FsContext::discovery().find_project_path(cwd).await?;
+    let project_dir = crate::service::project::discovery::package_directory(cwd).await?;
     chdir_if_needed(cwd, project_dir, "project")
 }
 

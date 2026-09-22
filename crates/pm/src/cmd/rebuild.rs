@@ -1,5 +1,5 @@
-use crate::helper::lock::ensure_package_lock;
 use crate::model::cli_output::{DependencyOperation, RebuildResult, RebuildSummary};
+use crate::service::project::lock::ensure_package_lock;
 use crate::service::rebuild::RebuildService;
 use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::ScriptPolicy;

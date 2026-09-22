@@ -1,5 +1,5 @@
 use crate::helper::deps::{compute_topological_layers, find_cycle_groups};
-use crate::helper::tree_builder::TreeBuilder;
+use crate::service::workspace_builder::TreeBuilder;
 use crate::util::cache::matches_pattern;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -78,16 +78,7 @@ pub struct WorkspaceService;
 impl WorkspaceService {
     /// Build workspace topology by analyzing dependencies between workspaces
     pub async fn build_workspace_topology(cwd: &Path) -> Result<WorkspaceTopology> {
-        let mut builder = TreeBuilder::new(cwd);
-        builder.build_workspace_tree().await?;
-
-        let Some(graph) = &builder.ideal_tree else {
-            return Ok(WorkspaceTopology {
-                edges: Vec::new(),
-                topology: Vec::new(),
-                nodes: Vec::new(),
-            });
-        };
+        let graph = TreeBuilder::new(cwd).build_workspace_tree().await?;
 
         // Get all workspace nodes (excluding links)
         let workspace_nodes = graph.get_workspace_nodes();

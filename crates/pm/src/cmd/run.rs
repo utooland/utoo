@@ -3,9 +3,9 @@ use colored::Colorize;
 use std::process::Stdio;
 use std::time::Instant;
 
+use crate::cmd::project::update_cwd_to_project;
 use crate::error::{CliError, ErrorKind};
 use crate::helper::fuzzy_select;
-use crate::helper::workspace::update_cwd_to_project;
 use crate::model::cli_output::{
     CapturedOutput, CustomResult, ErrorDetails, ExecutionStatus, LifecycleExecution, PartialResult,
     ProcessExecution, RunPartialResult, RunResult, SkippedExecution,
@@ -95,8 +95,16 @@ pub async fn run_fallback(
             invocation::set_command("custom", None);
             return run_custom_machine(script_name, &configured_command, &script_args).await;
         }
-        config_service.execute_command(script_name, &script_args)?;
-        return Ok(());
+        let mut parts = configured_command.split_whitespace();
+        let program = parts.next().ok_or_else(|| {
+            anyhow::anyhow!("Invalid command alias for '{script_name}': '{configured_command}'")
+        })?;
+        let status = tokio::process::Command::new(program)
+            .args(parts)
+            .args(&script_args)
+            .status()
+            .await?;
+        return Err(super::CommandExit(status.code().unwrap_or(1)).into());
     }
 
     // If no custom command found, try to run as script

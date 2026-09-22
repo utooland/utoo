@@ -25,7 +25,7 @@ use anyhow::{Context as _, Result, bail};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::spec::{Catalogs, Protocol, resolve_catalog_spec, resolve_workspace_spec};
 
-use crate::helper::ruborist_context::Context;
+use crate::service::project::context::Context;
 use crate::util::config_file::Config;
 
 /// Return a normalized clone of `pkg` with publish-time overrides applied and

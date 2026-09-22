@@ -3,7 +3,7 @@ use colored::Colorize;
 use dialoguer::FuzzySelect;
 use std::path::Path;
 
-use crate::helper::ruborist_context::Context as FsContext;
+use crate::service::project::context::Context as FsContext;
 use crate::util::user_config::get_or_load_package_json;
 use utoo_ruborist::manifest::PackageJson;
 

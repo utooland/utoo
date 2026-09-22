@@ -62,6 +62,9 @@ fn main() {
         .block_on(async_main());
 
     if let Err(e) = result {
+        if let Some(exit) = e.downcast_ref::<cmd::CommandExit>() {
+            process::exit(exit.0);
+        }
         let category = classify(&e);
         // A failed package script propagates its own exit status so
         // `utoo run <script>` mirrors the script: a non-zero `exit N` becomes
@@ -143,7 +146,7 @@ async fn async_main() -> Result<()> {
     if !json_requested && args.len() > 1 && (args[1] == "-h" || args[1] == "--help") {
         let config = Config::load(ConfigScope::Local).await?;
         let config_service = ConfigService::new(config);
-        config_service.print_help()?;
+        cmd::help::print_help(&config_service)?;
         return Ok(());
     }
 

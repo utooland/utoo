@@ -1,5 +1,5 @@
-use crate::helper::ruborist_context::Context as FsContext;
 use crate::model::package::{LifecycleHook, LifecycleScripts, PackageInfo};
+use crate::service::project::context::Context as FsContext;
 use crate::util::cli_enum::ScriptPolicy;
 use crate::util::install_progress::{mark_downloads_done, track_script};
 use crate::util::logger::{PROGRESS_BAR, finish_progress_bar, log_progress, start_progress_bar};
