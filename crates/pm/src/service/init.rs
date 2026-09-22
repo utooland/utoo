@@ -31,10 +31,12 @@ pub async fn init(mode: InitMode, output: InitOutput, cwd: Option<&Path>) -> Res
     let cwd_clone = cwd.clone();
     let pkg = match mode {
         InitMode::Defaults => {
-            tokio::task::spawn_blocking(move || build_default_package(&cwd_clone)).await?
+            utoo_ruborist::util::task::spawn_blocking(move || build_default_package(&cwd_clone))
+                .await?
         }
         InitMode::Interactive => {
-            tokio::task::spawn_blocking(move || build_interactive_package(&cwd_clone)).await??
+            utoo_ruborist::util::task::spawn_blocking(move || build_interactive_package(&cwd_clone))
+                .await??
         }
     };
 
@@ -48,7 +50,7 @@ pub async fn init(mode: InitMode, output: InitOutput, cwd: Option<&Path>) -> Res
     }
 
     if mode.requires_interaction() {
-        let confirmed = tokio::task::spawn_blocking(|| {
+        let confirmed = utoo_ruborist::util::task::spawn_blocking(|| {
             let confirm: String = Input::new()
                 .with_prompt("Is this OK?")
                 .default("yes".to_string())

@@ -313,6 +313,91 @@ fn emit_segment(segment: &[u8], sink: Option<&OutputSink>) {
     }
 }
 
+/// A child and any directories/locks it uses share one lifetime. Panic cleanup
+/// also reaps asynchronously; dropping a Child alone only requests a kill.
+struct RunningChild {
+    child: Option<tokio::process::Child>,
+    resources: Vec<Arc<dyn Send + Sync>>,
+}
+impl Drop for RunningChild {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let resources = std::mem::take(&mut self.resources);
+            utoo_ruborist::util::task::spawn(async move {
+                let _resources = resources;
+                let _ = child.start_kill();
+                if let Err(error) = child.wait().await {
+                    tracing::debug!("Failed to reap script: {error}");
+                }
+            });
+        }
+    }
+}
+
+async fn run_owned(
+    cmd: Command,
+    capture: bool,
+    sink: Option<OutputSink>,
+    resources: Vec<Arc<dyn Send + Sync>>,
+) -> Result<std::process::Output> {
+    let mut cmd = tokio::process::Command::from(cmd);
+    cmd.kill_on_drop(true);
+    if capture {
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+    } else {
+        cmd.stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+    }
+    let child = cmd.spawn().context("Failed to spawn script")?;
+    wait_owned(child, sink, resources).await
+}
+
+async fn wait_owned(
+    child: tokio::process::Child,
+    sink: Option<OutputSink>,
+    resources: Vec<Arc<dyn Send + Sync>>,
+) -> Result<std::process::Output> {
+    let (owner, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let runner = utoo_ruborist::util::task::spawn(async move {
+        let mut running = RunningChild {
+            child: Some(child),
+            resources,
+        };
+        let child = running.child.as_mut().expect("running child");
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let result = tokio::select! {
+            result = async {
+                tokio::join!(
+                    child.wait(),
+                    drain_tapped(stdout, sink.clone()),
+                    drain_tapped(stderr, sink),
+                )
+            } => {
+                let (status, stdout, stderr) = result;
+                Ok(std::process::Output {
+                    status: status.context("Failed to wait for script")?, stdout, stderr,
+                })
+            }
+            _ = cancelled => {
+                // Dropping the pipe drains closes our readers; descendants
+                // cannot keep cancellation waiting for a pipe EOF.
+                let _ = child.start_kill();
+                child.wait().await.context("Failed to reap cancelled script")?;
+                Err(anyhow::anyhow!("Script execution cancelled"))
+            }
+        };
+        running.child.take(); // Already reaped, so no Drop cleanup is needed.
+        result
+    });
+    let result = runner.await.context("Script task failed")?;
+    drop(owner);
+    result
+}
+
 /// npm environment supplied by the operation that owns script execution.
 #[derive(Clone)]
 pub struct ScriptEnvironment {
@@ -334,6 +419,7 @@ pub struct PreparedTools {
 pub struct ScriptService {
     environment: Arc<ScriptEnvironment>,
     tools: PreparedTools,
+    resources: Vec<Arc<dyn Send + Sync>>,
 }
 
 impl ScriptService {
@@ -341,6 +427,7 @@ impl ScriptService {
         Self {
             environment: Arc::new(environment),
             tools: PreparedTools::default(),
+            resources: Vec::new(),
         }
     }
 
@@ -354,6 +441,7 @@ impl ScriptService {
         Self {
             environment: self.environment.clone(),
             tools,
+            resources: self.resources.clone(),
         }
     }
     pub fn with_prefix(&self, prefix: Option<&str>) -> Self {
@@ -362,7 +450,27 @@ impl ScriptService {
         Self {
             environment: Arc::new(environment),
             tools: self.tools.clone(),
+            resources: self.resources.clone(),
         }
+    }
+    pub(crate) fn with_resource(&self, resource: Arc<dyn Send + Sync>) -> Self {
+        let mut executor = self.clone();
+        executor.resources.push(resource);
+        executor
+    }
+
+    async fn inherited(&self, cmd: Command) -> Result<std::process::ExitStatus> {
+        Ok(run_owned(cmd, false, None, self.resources.clone())
+            .await?
+            .status)
+    }
+
+    async fn captured(
+        &self,
+        cmd: Command,
+        sink: Option<&OutputSink>,
+    ) -> Result<std::process::Output> {
+        run_owned(cmd, true, sink.cloned(), self.resources.clone()).await
     }
 
     pub async fn execute_script(
@@ -395,7 +503,8 @@ impl ScriptService {
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit());
 
-                let status = Self::run_inherited(cmd)
+                let status = self
+                    .inherited(cmd)
                     .await
                     .context("Failed to execute script")?;
 
@@ -412,7 +521,8 @@ impl ScriptService {
                 // can show what a slow, silent script is doing, while the full
                 // text is still collected for the failure dump / debug log.
                 let started = std::time::Instant::now();
-                let captured = Self::run_captured(cmd, sink.as_ref())
+                let captured = self
+                    .captured(cmd, sink.as_ref())
                     .await
                     .context("Failed to execute script")?;
 
@@ -470,55 +580,29 @@ impl ScriptService {
         Ok(())
     }
 
-    /// Run `cmd` with stdout/stderr piped, draining both concurrently so the
-    /// pipes can't fill and deadlock the child. Each output segment is fed to
-    /// `sink` (for the long-run heartbeat) while the raw bytes are collected into
-    /// a [`std::process::Output`], so callers keep the same failure-dump /
-    /// debug-log behaviour they had with `.output()`.
-    pub(crate) async fn run_inherited(mut cmd: Command) -> Result<std::process::ExitStatus> {
-        cmd.stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit());
-        Ok(tokio::process::Command::from(cmd)
-            .kill_on_drop(true)
-            .status()
-            .await?)
+    pub(crate) async fn run_inherited(cmd: Command) -> Result<std::process::ExitStatus> {
+        Ok(run_owned(cmd, false, None, Vec::new()).await?.status)
     }
 
     pub(crate) async fn run_captured(
         cmd: Command,
         sink: Option<&OutputSink>,
     ) -> Result<std::process::Output> {
-        let mut child = tokio::process::Command::from(cmd)
-            .kill_on_drop(true)
-            // Null stdin, matching the replaced `.output()`: a dependency script
-            // that reads stdin must get immediate EOF, not inherit the user's
-            // terminal — otherwise it blocks forever waiting for input it'll
-            // never get, hanging the install (and holding a concurrency slot).
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to spawn script")?;
+        run_owned(cmd, true, sink.cloned(), Vec::new()).await
+    }
 
-        // Drain both pipes and wait for the child concurrently on this one task
-        // (no `tokio::spawn`): the drains keep the pipes from filling while
-        // `wait` runs, and joining in place avoids the spawn overhead and the
-        // `JoinError` path entirely. Take the pipe handles first so the only
-        // borrow of `child` inside `join!` is `wait`.
-        let stdout_pipe = child.stdout.take();
-        let stderr_pipe = child.stderr.take();
-        let (status, stdout, stderr) = tokio::join!(
-            child.wait(),
-            drain_tapped(stdout_pipe, sink.cloned()),
-            drain_tapped(stderr_pipe, sink.cloned()),
-        );
+    pub(crate) async fn run_captured_with_resource(
+        cmd: Command,
+        resource: Option<Arc<dyn Send + Sync>>,
+    ) -> Result<std::process::Output> {
+        run_owned(cmd, true, None, resource.into_iter().collect()).await
+    }
 
-        Ok(std::process::Output {
-            status: status.context("Failed to wait for script")?,
-            stdout,
-            stderr,
-        })
+    #[cfg(windows)]
+    pub(crate) async fn wait_inherited(
+        child: tokio::process::Child,
+    ) -> Result<std::process::ExitStatus> {
+        Ok(wait_owned(child, None, Vec::new()).await?.status)
     }
 
     async fn collect_bin_paths(package: &PackageInfo) -> Result<Vec<PathBuf>> {
@@ -586,7 +670,8 @@ impl ScriptService {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
 
-        let status = Self::run_inherited(cmd)
+        let status = self
+            .inherited(cmd)
             .await
             .context("Failed to execute custom script")?;
 
@@ -621,7 +706,7 @@ impl ScriptService {
             &cmd_content,
         )
         .await?;
-        Self::run_captured(cmd, None)
+        self.captured(cmd, None)
             .await
             .context("Failed to execute custom script")
     }
@@ -685,6 +770,51 @@ mod tests {
         assert!(result.status.success());
         assert_eq!(result.stdout, vec![65; 262144]);
         assert_eq!(result.stderr, vec![66; 262144]);
+    }
+
+    #[tokio::test]
+    async fn cancelled_script_reaps_child_before_releasing_resources() {
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let ready = std::sync::Mutex::new(Some(ready));
+        let sink: OutputSink = Arc::new(move |line| {
+            if let Some(ready) = ready.lock().unwrap().take() {
+                ready.send(line.parse::<u32>().unwrap()).unwrap();
+            }
+        });
+        struct Resource(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for Resource {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+        let (released, release) = tokio::sync::oneshot::channel();
+        let mut command = Command::new("node");
+        command.args(["-e", "console.log(process.pid);setInterval(()=>{},1000)"]);
+        let owner = tokio::spawn(run_owned(
+            command,
+            true,
+            Some(sink),
+            vec![Arc::new(Resource(Some(released)))],
+        ));
+        let pid = started.await.unwrap();
+        owner.abort();
+        let _ = owner.await;
+        tokio::time::timeout(Duration::from_secs(10), release)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut check = Command::new("node");
+        check.args([
+            "-e",
+            &format!("try{{process.kill({pid},0);process.exit(1)}}catch{{process.exit(0)}}"),
+        ]);
+        assert!(
+            ScriptService::run_captured(check, None)
+                .await
+                .unwrap()
+                .status
+                .success()
+        );
     }
 
     #[cfg(unix)]

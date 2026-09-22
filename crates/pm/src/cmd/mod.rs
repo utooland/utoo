@@ -29,6 +29,7 @@ pub mod pm_pack;
 pub mod publish;
 pub mod rebuild;
 pub mod run;
+pub mod self_pin;
 pub mod update;
 pub mod view;
 pub mod whoami;

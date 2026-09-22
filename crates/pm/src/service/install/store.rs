@@ -163,7 +163,7 @@ pub async fn extract_non_registry_to_target(source: &PackageSource, target: &Pat
     let tarball_url = &source.tarball_url;
     let bytes: Bytes = if let Some(abs) = tarball_url.strip_prefix("file:") {
         let abs = abs.to_string();
-        tokio::task::spawn_blocking(move || std::fs::read(&abs).map(Bytes::from))
+        utoo_ruborist::util::task::spawn_blocking(move || std::fs::read(&abs).map(Bytes::from))
             .await
             .context("file tarball read task failed")?
             .with_context(|| format!("failed to read tarball {tarball_url}"))?
@@ -176,10 +176,12 @@ pub async fn extract_non_registry_to_target(source: &PackageSource, target: &Pat
 
     source.verify(&bytes)?;
     let target = target.to_path_buf();
-    tokio::task::spawn_blocking(move || utoo_ruborist::tar::extract_tarball_to_dir(&bytes, &target))
-        .await
-        .context("direct-extract task failed")?
-        .with_context(|| format!("failed to extract tarball {tarball_url}"))
+    utoo_ruborist::util::task::spawn_blocking(move || {
+        utoo_ruborist::tar::extract_tarball_to_dir(&bytes, &target)
+    })
+    .await
+    .context("direct-extract task failed")?
+    .with_context(|| format!("failed to extract tarball {tarball_url}"))
 }
 
 /// Look up an already extracted registry package cache.

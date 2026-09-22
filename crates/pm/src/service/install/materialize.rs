@@ -197,7 +197,8 @@ mod hardlink_clone {
     pub async fn clone_dir(src: &Path, dst: &Path, policy: ClonePolicy) -> Result<()> {
         let src = src.to_path_buf();
         let dst = dst.to_path_buf();
-        tokio::task::spawn_blocking(move || clone_dir_sync(&src, &dst, policy)).await?
+        utoo_ruborist::util::task::spawn_blocking(move || clone_dir_sync(&src, &dst, policy))
+            .await?
     }
 }
 

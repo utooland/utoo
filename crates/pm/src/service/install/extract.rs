@@ -38,37 +38,36 @@ use crate::util::process_lock::{lock_exclusive, sibling_lock_path};
 ///
 /// Skips if the `_resolved` marker already exists (warm cache).
 pub async fn extract_and_write(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
+    write_cache_slot(dest, move |dest| extract_tarball_sync(gzip_bytes, dest)).await
+}
+
+async fn write_cache_slot(
+    dest: &Path,
+    write: impl FnOnce(&Path) -> Result<()> + Send + 'static,
+) -> Result<()> {
     let lock_path = sibling_lock_path(dest, ".lock")?;
-    let _lock = lock_exclusive(&lock_path).await?;
-
-    // Check if already resolved (warm cache scenario)
-    let resolved_path = dest.join("_resolved");
-    if crate::fs::try_exists(&resolved_path).await? {
-        tracing::debug!("Extract skipped, already resolved: {}", dest.display());
-        return Ok(());
-    }
-
-    // A `dest` that exists *without* `_resolved` predates the staging
-    // protocol (e.g. a slot partially written by an older pm killed
-    // mid-extract). By the atomic-commit contract it can never become
-    // valid on its own, so clear it before re-extracting — otherwise the
-    // final rename would lose to the stale dir (ENOTEMPTY) and the slot
-    // would stay broken forever.
-    match crate::fs::remove_dir_all(dest).await {
-        Ok(()) => {
-            tracing::warn!(
+    let lock = lock_exclusive(&lock_path).await?;
+    let dest = dest.to_path_buf();
+    utoo_ruborist::util::spawn_cpu(move || {
+        let _lock = lock;
+        if dest.join("_resolved").exists() {
+            return Ok(());
+        }
+        match fs::remove_dir_all(&dest) {
+            Ok(()) => tracing::warn!(
                 "Cleared stale cache slot without _resolved marker: {}",
                 dest.display()
-            );
+            ),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("Failed to clear stale cache slot: {}", dest.display())
+                });
+            }
         }
-        Err(e) if e.kind() == ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(e)
-                .with_context(|| format!("Failed to clear stale cache slot: {}", dest.display()));
-        }
-    }
-
-    extract_tarball(gzip_bytes, dest).await
+        write(&dest)
+    })
+    .await
 }
 
 /// Tarball entry recorded during the parse pass, deferred until parallel
@@ -82,28 +81,6 @@ struct ExtractedEntry {
     data: Bytes,
     #[cfg_attr(not(unix), allow(dead_code))]
     mode: u32,
-}
-
-/// Extract tarball using libdeflate for decompression + rayon for parallel writes.
-///
-/// Uses rayon::spawn (not tokio blocking pool) to avoid thread storms.
-/// Rayon's global pool is configured with sufficient stack size at startup.
-async fn extract_tarball(gzip_bytes: Bytes, dest: &Path) -> Result<()> {
-    let dest_owned = dest.to_path_buf();
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    rayon::spawn(move || {
-        let result = extract_tarball_sync(gzip_bytes, &dest_owned);
-        if tx.send(result).is_err() {
-            tracing::warn!(
-                "Extract result for {} discarded: receiver dropped",
-                dest_owned.display()
-            );
-        }
-    });
-
-    rx.await.with_context(|| "Extract task panicked")?
 }
 
 /// Synchronous extraction: decompress, then stage + atomically commit, all
@@ -291,6 +268,46 @@ mod tests {
             tar.finish().unwrap();
         }
         tar_data
+    }
+
+    #[tokio::test]
+    async fn cancellation_holds_the_slot_lock_until_the_writer_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("slot");
+        let lock_path = sibling_lock_path(&dest, ".lock").unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task = tokio::spawn(async move {
+            write_cache_slot(&dest, move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        task.abort();
+        let _ = task.await;
+        let contender = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        let early = contender.try_lock();
+        release_tx.send(()).unwrap();
+        utoo_ruborist::util::task::wait_for_idle().await;
+        assert!(
+            early.is_err(),
+            "cancelled waiter released a running writer's lock"
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || contender.lock()),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     }
 
     #[tokio::test]

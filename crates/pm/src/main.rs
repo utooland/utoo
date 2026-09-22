@@ -14,7 +14,7 @@ use crate::cmd::view::view;
 use crate::constants::{APP_NAME, APP_VERSION};
 use crate::error::{CliError, ErrorKind, classify};
 use crate::helper::auto_update::init_auto_update;
-use crate::helper::self_pin::handoff_if_needed;
+use crate::helper::self_pin::prepare_handoff;
 use crate::model::cli_output::{
     CompletionsResult, ErrorDetails, HelpResult, HelpTarget, InitResult, RequestedPackage,
     RequiredBy, VersionResult,
@@ -60,7 +60,12 @@ fn main() {
         .worker_threads(worker_threads)
         .build()
         .expect("failed to build tokio runtime")
-        .block_on(cli_future());
+        .block_on(async {
+            let result = cli_future().await;
+            utoo_ruborist::util::task::wait_for_idle().await;
+            util::manifest_store::finish_pending_writers().await;
+            result
+        });
 
     if let Err(e) = result {
         if let Some(exit) = e.downcast_ref::<cmd::CommandExit>() {
@@ -259,14 +264,15 @@ async fn async_main() -> Result<()> {
         });
     }
 
-    if cli.uses_project_package_manager() {
-        handoff_if_needed(
+    if cli.uses_project_package_manager()
+        && let Some(prepared) = prepare_handoff(
             &std::env::current_dir()?,
-            &args[1..],
             cli.registry.clone(),
             cli.cache_dir.clone(),
         )
-        .await?;
+        .await?
+    {
+        cmd::self_pin::handoff(prepared, &args[1..]).await?;
     }
 
     // Handle completions early to avoid unnecessary initialization (tracing, registry, auto-update)

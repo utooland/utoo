@@ -443,6 +443,7 @@ where
     let mut queues = FetchQueues::default();
     let mut fetches: FuturesUnordered<FetchFuture> = FuturesUnordered::new();
 
+    let result = async {
     let root_idx = graph.root_index;
     let mut current_level = vec![root_idx];
     let mut visited = HashSet::from([root_idx]);
@@ -545,6 +546,9 @@ where
     }
 
     Ok(())
+    }.await;
+    while fetches.next().await.is_some() {}
+    result
 }
 
 // ---- Orchestration: state transitions over the store + queue ----
@@ -626,14 +630,9 @@ where
     R::Error: Send,
 {
     Box::pin(async move {
-        tokio::spawn(fetch_registry_manifest_inner(registry, request))
+        crate::util::task::spawn_owned(fetch_registry_manifest_inner(registry, request))
             .await
-            .map_err(|error| {
-                if error.is_panic() {
-                    std::panic::resume_unwind(error.into_panic());
-                }
-                SharedError::from(anyhow::Error::new(error))
-            })
+            .map_err(|error| SharedError::from(anyhow::Error::new(error)))
     })
 }
 

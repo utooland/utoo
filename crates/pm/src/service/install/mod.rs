@@ -5,6 +5,7 @@ pub(crate) mod bins;
 pub(crate) mod download;
 pub(crate) mod extract;
 mod hooks;
+mod lease;
 mod materialize;
 pub(crate) mod rebuild;
 mod scheduler;
@@ -294,6 +295,7 @@ struct MaterializedTool {
     root: std::path::PathBuf,
     lock: utoo_ruborist::lock::PackageLock,
     counts: scheduler::InstallCounts,
+    lease: std::sync::Arc<lease::InstallLease>,
 }
 
 pub struct InstallService;
@@ -472,7 +474,7 @@ impl InstallService {
         scripts: ScriptPolicy,
         output: ScriptOutput,
     ) -> Result<()> {
-        let installed = Self::materialize_global_package(npm_spec, prefix).await?;
+        let installed = Self::materialize_global_package(npm_spec, prefix, false).await?;
         Self::finish_global_package(
             installed,
             prefix,
@@ -486,6 +488,7 @@ impl InstallService {
     async fn materialize_global_package(
         npm_spec: &str,
         prefix: Option<&str>,
+        cleanup: bool,
     ) -> Result<MaterializedTool> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
@@ -500,7 +503,9 @@ impl InstallService {
             root_path.display()
         );
 
-        let scheduler_handle = scheduler::InstallSchedulerHandle::start();
+        let lease = lease::InstallLease::acquire(root_path.clone(), cleanup).await?;
+        let scheduler_handle =
+            scheduler::InstallSchedulerHandle::with_resource(Some(lease.clone()));
         let scheduler = scheduler_handle.scheduler();
 
         let install_result: Result<_> = async {
@@ -591,6 +596,7 @@ impl InstallService {
             root: root_path,
             lock,
             counts,
+            lease,
         })
     }
 
@@ -605,7 +611,9 @@ impl InstallService {
             root: root_path,
             lock,
             counts,
+            lease,
         } = installed;
+        let executor = executor.with_resource(lease.clone());
         // Dependency lifecycle only: the shared queue knows only
         // preinstall/install/postinstall. Add the root package explicitly
         // because roots are not dependency entries in the lock, but leave its
@@ -620,7 +628,7 @@ impl InstallService {
         packages.push((root_lifecycle, false));
         if !packages.is_empty() {
             let queues = PackageService::create_execution_queues_with_options(packages, scripts)?;
-            PackageService::execute_queues_with_options(executor, queues, scripts, output).await?;
+            PackageService::execute_queues_with_options(&executor, queues, scripts, output).await?;
         }
 
         // Link the tool's own bin into the global bin dir.
@@ -630,6 +638,7 @@ impl InstallService {
             .await
             .context("Failed to link binary files to global")?;
 
+        lease.commit();
         print_install_counts(counts.cloned, counts.reused, counts.downloaded);
         Ok(())
     }

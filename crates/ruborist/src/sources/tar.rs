@@ -210,7 +210,7 @@ pub(crate) fn parse_tarball_manifest(
 /// resolution so both read local tarballs the same way.
 pub(crate) async fn read_local_tarball_manifest(abs: PathBuf) -> Result<CoreVersionManifest> {
     let pinned = format!("file:{}", abs.display());
-    tokio::task::spawn_blocking(move || -> Result<CoreVersionManifest> {
+    crate::util::task::spawn_blocking(move || -> Result<CoreVersionManifest> {
         let bytes = std::fs::read(&abs)
             .with_context(|| format!("failed to read tarball {}", abs.display()))?;
         parse_tarball_manifest(&bytes, pinned)

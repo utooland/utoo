@@ -68,14 +68,11 @@ pub async fn ensure_package_lock(root_path: &Path) -> Result<PackageLock> {
         tracing::debug!("Resolving dependencies");
         let lock = Context::build_deps(root_path.to_path_buf()).await?;
 
-        // Write to disk asynchronously in background
-        let path = root_path.to_path_buf();
-        let lock_clone = lock.clone();
-        tokio::spawn(async move {
-            if let Err(e) = save_package_lock(&path, &lock_clone).await {
-                tracing::warn!("Failed to save package-lock.json: {e}");
-            }
-        });
+        // Persistence belongs to this operation; report opportunistic write
+        // failure without detaching a task that can outlive CLI shutdown.
+        if let Err(error) = save_package_lock(root_path, &lock).await {
+            tracing::warn!("Failed to save package-lock.json: {error}");
+        }
 
         return Ok(lock);
     }

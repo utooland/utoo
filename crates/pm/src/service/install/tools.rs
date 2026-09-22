@@ -2,7 +2,7 @@
 
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context, Result};
 use utoo_ruborist::util::oncemap::OnceMap;
@@ -77,16 +77,7 @@ async fn prepare_node_gyp(executor: &ScriptService) -> Result<PreparedTools> {
     };
     let ready = PREPARED
         .get_or_try_init(key, || {
-            PREPARING.scope(root.clone(), async {
-                let result = bootstrap_node_gyp(executor).await;
-                if result.is_err() {
-                    // A failed tool is never reused. Preserve the primary bootstrap error.
-                    if let Err(error) = crate::fs::remove_dir_all(&root).await {
-                        tracing::debug!("Failed to clean incomplete node-gyp: {error}");
-                    }
-                }
-                result
-            })
+            PREPARING.scope(root.clone(), bootstrap_node_gyp(executor))
         })
         .await?;
     Ok((*ready).clone())
@@ -95,7 +86,7 @@ async fn prepare_node_gyp(executor: &ScriptService) -> Result<PreparedTools> {
 async fn bootstrap_node_gyp(executor: &ScriptService) -> Result<PreparedTools> {
     let prefix = executor.environment().prefix.as_deref();
     // Materialize the entire production tree before running any bootstrap hook.
-    let installed = InstallService::materialize_global_package("node-gyp", prefix).await?;
+    let installed = InstallService::materialize_global_package("node-gyp", prefix, true).await?;
     let package = PackageInfo::from_path(&installed.root).await?;
     let entry = package
         .bin_files
@@ -105,7 +96,7 @@ async fn bootstrap_node_gyp(executor: &ScriptService) -> Result<PreparedTools> {
     let program = installed.root.join(&entry.1);
     // A private bin directory makes node-gyp callable by its own and its
     // dependencies' hooks without advertising a successful global install yet.
-    let bootstrap_bins = tempfile::tempdir()?;
+    let bootstrap_bins = Arc::new(tempfile::tempdir()?);
     bins::link_to_target(&package, bootstrap_bins.path()).await?;
     let provisional = PreparedTools {
         node_gyp: Some(program.clone()),
@@ -113,7 +104,9 @@ async fn bootstrap_node_gyp(executor: &ScriptService) -> Result<PreparedTools> {
     };
     let mut environment = executor.environment().clone();
     environment.scope = InstallScope::Global;
-    let bootstrap = ScriptService::new(environment).with_tools(provisional);
+    let bootstrap = ScriptService::new(environment)
+        .with_tools(provisional)
+        .with_resource(bootstrap_bins);
     InstallService::finish_global_package(
         installed,
         prefix,

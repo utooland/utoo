@@ -14,8 +14,8 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use async_trait::async_trait;
@@ -29,6 +29,30 @@ use crate::util::json::{read_json_file, write_compact_sync};
 /// Opportunistic writer backlog. If disk stalls beyond this, new cache writes
 /// are dropped instead of letting resolver memory grow without bound.
 const MANIFEST_WRITE_QUEUE_CAPACITY: usize = 1024;
+static FINISHING_WRITERS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// Called after operation owners have dropped their stores. Joining runs on a
+/// blocking worker; dropping a store never stalls an async runtime thread.
+pub async fn finish_pending_writers() {
+    loop {
+        let handles =
+            std::mem::take(&mut *FINISHING_WRITERS.lock().unwrap_or_else(|e| e.into_inner()));
+        if handles.is_empty() {
+            return;
+        }
+        if let Err(error) = tokio::task::spawn_blocking(move || {
+            for handle in handles {
+                if handle.join().is_err() {
+                    tracing::debug!("Manifest store writer panicked");
+                }
+            }
+        })
+        .await
+        {
+            tracing::debug!("Failed to join manifest writers: {error}");
+        }
+    }
+}
 
 pub struct DiskManifestStore {
     cache_dir: PathBuf,
@@ -99,14 +123,6 @@ impl ManifestStore for DiskManifestStore {
     }
 }
 
-impl Drop for DiskManifestStore {
-    fn drop(&mut self) {
-        if let Some(writer) = self.writer.take() {
-            writer.join();
-        }
-    }
-}
-
 enum ManifestWriteJob {
     Versions {
         path: PathBuf,
@@ -119,8 +135,8 @@ enum ManifestWriteJob {
 }
 
 struct ManifestWriter {
-    tx: SyncSender<ManifestWriteJob>,
-    handle: JoinHandle<()>,
+    tx: Option<SyncSender<ManifestWriteJob>>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl ManifestWriter {
@@ -141,11 +157,17 @@ impl ManifestWriter {
                 }
             })
             .expect("failed to spawn manifest store writer");
-        Self { tx, handle }
+        Self {
+            tx: Some(tx),
+            handle: Some(handle),
+        }
     }
 
     fn enqueue(&self, job: ManifestWriteJob) {
-        match self.tx.try_send(job) {
+        let Some(tx) = &self.tx else {
+            return;
+        };
+        match tx.try_send(job) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 tracing::debug!("Manifest store writer queue full; dropping cache write");
@@ -155,11 +177,17 @@ impl ManifestWriter {
             }
         }
     }
+}
 
-    fn join(self) {
-        drop(self.tx);
-        if self.handle.join().is_err() {
-            tracing::debug!("Manifest store writer panicked");
+impl Drop for ManifestWriter {
+    fn drop(&mut self) {
+        // Close admission first. The writer drains accepted jobs before exit.
+        self.tx.take();
+        if let Some(handle) = self.handle.take() {
+            FINISHING_WRITERS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(handle);
         }
     }
 }
@@ -198,8 +226,34 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn drop_flushes_queued_manifest_writes() {
+    #[tokio::test]
+    async fn drop_does_not_join_a_busy_writer() {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv().unwrap();
+        let (tx, _rx) = mpsc::sync_channel(1);
+        let writer = ManifestWriter {
+            tx: Some(tx),
+            handle: Some(handle),
+        };
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let dropper = std::thread::spawn(move || {
+            drop(writer);
+            dropped_tx.send(()).unwrap();
+        });
+        let dropped = dropped_rx.recv_timeout(std::time::Duration::from_secs(1));
+        release_tx.send(()).unwrap();
+        dropper.join().unwrap();
+        assert!(dropped.is_ok(), "drop blocked on the busy writer");
+        finish_pending_writers().await;
+    }
+
+    #[tokio::test]
+    async fn explicit_close_flushes_queued_manifest_writes() {
         let dir = tempdir().unwrap();
         let cache_root;
         {
@@ -229,6 +283,7 @@ mod tests {
             );
         }
 
+        finish_pending_writers().await;
         let versions: VersionsInfo =
             serde_json::from_slice(&std::fs::read(cache_root.join("pkg/versions.json")).unwrap())
                 .unwrap();
@@ -257,6 +312,7 @@ mod tests {
                 }),
             );
         }
+        finish_pending_writers().await;
         let first = DiskManifestStore::new(cache.clone(), "https://first.example/");
         let second = DiskManifestStore::new(cache, "https://second.example");
         assert!(first.load_version_manifest("pkg", "1.0.0").await.is_some());

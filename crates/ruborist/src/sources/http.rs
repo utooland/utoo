@@ -122,7 +122,7 @@ pub(crate) async fn resolve_http_dep(
     let manifest = dedup_init(fetch_cache, url_owned.clone(), move || async move {
         let bytes = download_tarball(&url_owned).await?;
         let url_for_blocking = url_owned.clone();
-        tokio::task::spawn_blocking(move || parse_tarball_manifest(&bytes, url_for_blocking))
+        crate::util::task::spawn_blocking(move || parse_tarball_manifest(&bytes, url_for_blocking))
             .await
             .context("http tarball manifest parse task failed")?
     })
