@@ -70,7 +70,8 @@ pub async fn run(
             let script_args_refs = script_args
                 .as_ref()
                 .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
-            ScriptService::run_script(&updated_cwd, &script_name, None, script_args_refs).await
+            ScriptService::run_script(&updated_cwd, &script_name, None, script_args_refs, missing)
+                .await
         }
         ResolvedWorkspaces::Layers { layers, paths } => {
             ScriptService::run_in_layers(&layers, &paths, &script_name, missing, script_args).await
@@ -345,7 +346,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = ScriptService::run_script(dir.path(), "nonexistent", None, None).await;
+        let result =
+            ScriptService::run_script(dir.path(), "nonexistent", None, None, MissingScript::Fail)
+                .await;
         assert!(result.is_err());
         assert!(
             result
@@ -364,7 +367,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = ScriptService::run_script(dir.path(), "test", None, None).await;
+        let result =
+            ScriptService::run_script(dir.path(), "test", None, None, MissingScript::Fail).await;
         assert!(result.is_err());
     }
 }
