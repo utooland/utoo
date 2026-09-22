@@ -240,6 +240,9 @@ async fn reify_packages(
                             .await
                         {
                             if is_optional {
+                                // A failed reinstall must not leave an older
+                                // target eligible for this run's lifecycle hooks.
+                                prepare_reify_target(&target_path, ReifyMode::Force).await?;
                                 tracing::warn!(
                                     "Optional dependency {name} failed (ignored): {e:#}"
                                 );

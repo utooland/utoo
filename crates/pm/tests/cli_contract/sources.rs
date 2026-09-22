@@ -270,3 +270,34 @@ fn clean_removes_legacy_and_verified_package_caches() {
     assert!(!legacy.exists());
     assert!(!verified.exists());
 }
+
+#[test]
+fn failed_optional_reinstall_does_not_run_retained_hooks() {
+    let mut registry = mockito::Server::new();
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    let manifest = json!({"name":"fixture","version":"1.0.0","scripts":{"install":"node -e \"require('fs').writeFileSync('../../hook-ran', 'yes')\""}});
+    let tarball = registry
+        .mock("GET", "/fixture.tgz")
+        .with_body(archive(&manifest, "invalid"))
+        .expect_at_least(1)
+        .create();
+    locked_project(
+        &project,
+        &format!("{}/fixture.tgz", registry.url()),
+        Some(&integrity(b"wrong")),
+        true,
+    );
+    let installed = project.join("node_modules/fixture");
+    fs::create_dir_all(&installed).unwrap();
+    fs::write(installed.join("package.json"), manifest.to_string()).unwrap();
+    assert_success(
+        &command(&project, &fixture.path().join("cache"), &registry.url())
+            .arg("install")
+            .output()
+            .unwrap(),
+    );
+    assert!(!project.join("hook-ran").exists());
+    assert!(!installed.exists());
+    tarball.assert();
+}
