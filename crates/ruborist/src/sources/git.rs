@@ -6,7 +6,7 @@
 //!
 //! Remote transport is delegated to `git` instead of linking gitoxide's
 //! reqwest/rustls transport into the package-manager binary. The blocking
-//! clone and filesystem copy are run in a `tokio::task::spawn_blocking` thread
+//! clone and filesystem copy are run in a `crate::util::task::spawn_blocking` thread
 //! so the async executor is never blocked.
 
 #[cfg(unix)]
@@ -377,7 +377,7 @@ pub async fn ensure_repo_cached(
     let name_owned = name.to_string();
 
     dedup_init(clone_cache, key, || async move {
-        tokio::task::spawn_blocking(move || {
+        crate::util::task::spawn_blocking(move || {
             clone_repo_blocking(
                 &cache_dir,
                 &clone_url,

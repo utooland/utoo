@@ -52,7 +52,7 @@ fn open_lock_file(lock_path: &Path) -> Result<File> {
 /// Acquire an exclusive process lock without blocking an async executor thread.
 pub async fn lock_exclusive(lock_path: &Path) -> Result<ProcessLock> {
     let lock_path = lock_path.to_path_buf();
-    tokio::task::spawn_blocking(move || lock_exclusive_sync(&lock_path))
+    utoo_ruborist::util::task::spawn_blocking(move || lock_exclusive_sync(&lock_path))
         .await
         .context("Lock task failed")?
 }

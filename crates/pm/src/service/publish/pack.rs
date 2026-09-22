@@ -81,7 +81,7 @@ pub async fn pack(
     // collect_pack_files uses ignore::WalkBuilder which does synchronous I/O.
     // Run on a blocking thread to avoid stalling the tokio runtime.
     let package_root_owned = package_root.to_path_buf();
-    let collected = tokio::task::spawn_blocking({
+    let collected = utoo_ruborist::util::task::spawn_blocking({
         // Publish-time main/types/bin overrides affect npm's always-included
         // referenced files, so file selection must use the packed manifest.
         let data = packed_manifest.to_value();
@@ -106,7 +106,7 @@ pub async fn pack(
         .collect();
 
     // create_tarball reads each file via std::fs — also blocking I/O.
-    let tar_data = tokio::task::spawn_blocking(move || {
+    let tar_data = utoo_ruborist::util::task::spawn_blocking(move || {
         create_tarball(&package_root_owned, &collected, pkg_json_override)
     })
     .await??;

@@ -443,7 +443,15 @@ impl LifecycleService {
 
         let mut failed_names = Vec::new();
         let mut separator_printed = false;
-        while let Some(outcome) = join_set.join_next().await.transpose()? {
+        let mut task_error = None;
+        while let Some(outcome) = join_set.join_next().await {
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    task_error.get_or_insert(error);
+                    continue;
+                }
+            };
             let WorkspaceOutcome::Ran {
                 name,
                 header,
@@ -461,6 +469,9 @@ impl LifecycleService {
             if !success {
                 failed_names.push(name);
             }
+        }
+        if let Some(error) = task_error {
+            return Err(error.into());
         }
         Ok(failed_names)
     }

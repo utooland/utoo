@@ -62,6 +62,7 @@ fn main() {
         .expect("failed to build tokio runtime")
         .block_on(async {
             let result = cli_future().await;
+            utoo_ruborist::util::task::wait_for_idle().await;
             util::manifest_store::finish_pending_writers().await;
             result
         });

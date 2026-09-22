@@ -8,6 +8,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use utoo_ruborist::progress::{BuildEvent, EventReceiver, PackageTarballInfo};
 use utoo_ruborist::util::error::SharedError;
+use utoo_ruborist::util::{spawn_cpu, task};
 
 use crate::service::auth;
 use crate::service::install::download::download_bytes;
@@ -71,12 +72,12 @@ enum Command {
     PrefetchDownload(PackageSource),
     EnsureClone(CloneSpec, CloneResponder),
     Shutdown,
+    Cancel,
 }
 
 /// Completion report for one pipeline stage (cache-resolve / download /
 /// extract / clone), fed back into the scheduler loop via `handle_report`.
-/// Async stages arrive on `async_ops`; the rayon clone stage arrives on
-/// `clone_done_rx`.
+/// Each stage is owned until completion, including its Rayon work.
 enum StageReport {
     CacheResolved {
         spec: CloneSpec,
@@ -124,16 +125,24 @@ pub(crate) struct InstallScheduler {
 
 pub(crate) struct InstallSchedulerHandle {
     scheduler: InstallScheduler,
-    handle: tokio::task::JoinHandle<InstallCounts>,
+    handle: Option<tokio::task::JoinHandle<InstallCounts>>,
 }
 
 impl InstallSchedulerHandle {
     pub(crate) fn start() -> Self {
+        Self::with_resource(None)
+    }
+
+    pub(crate) fn with_resource(resource: Option<Arc<dyn Send + Sync>>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let handle = tokio::spawn(async move { SchedulerState::new(rx).run().await });
+        let handle = task::spawn(async move {
+            let mut state = SchedulerState::new(rx);
+            state.resource = resource;
+            state.run().await
+        });
         Self {
             scheduler: InstallScheduler { tx },
-            handle,
+            handle: Some(handle),
         }
     }
 
@@ -143,15 +152,23 @@ impl InstallSchedulerHandle {
 
     /// Signal shutdown, wait for in-flight work to drain, and return the
     /// scheduler's own install counts.
-    pub(crate) async fn shutdown(self) -> InstallCounts {
+    pub(crate) async fn shutdown(mut self) -> InstallCounts {
         let _ = self.scheduler.tx.send(Command::Shutdown);
-        match self.handle.await {
+        match self.handle.take().expect("scheduler owner").await {
             Ok(counts) => counts,
             Err(e) => {
                 tracing::warn!("Install scheduler task failed: {e}");
                 InstallCounts::default()
             }
         }
+    }
+}
+
+impl Drop for InstallSchedulerHandle {
+    fn drop(&mut self) {
+        // Also runs when the shutdown future itself is cancelled. The actor
+        // stops admission, wakes waiters, and owns already started work to EOF.
+        let _ = self.scheduler.tx.send(Command::Cancel);
     }
 }
 
@@ -246,6 +263,8 @@ where
 struct SchedulerState {
     rx: mpsc::UnboundedReceiver<Command>,
     shutdown: bool,
+    cancelled: bool,
+    resource: Option<Arc<dyn Send + Sync>>,
     download_limit: usize,
     extract_limit: usize,
     clone_limit: usize,
@@ -263,8 +282,6 @@ struct SchedulerState {
     clone_waiters: HashMap<PathBuf, Vec<CloneResponder>>,
     blocked_by_parent: HashMap<PathBuf, Vec<CloneSpec>>,
     clone_queue: VecDeque<ReadyClone>,
-    clone_done_tx: mpsc::UnboundedSender<StageReport>,
-    clone_done_rx: mpsc::UnboundedReceiver<StageReport>,
     async_ops: FuturesUnordered<tokio::task::JoinHandle<StageReport>>,
     counts: InstallCounts,
     git_clones: Arc<utoo_ruborist::git::GitCloneCache>,
@@ -272,10 +289,11 @@ struct SchedulerState {
 
 impl SchedulerState {
     fn new(rx: mpsc::UnboundedReceiver<Command>) -> Self {
-        let (clone_done_tx, clone_done_rx) = mpsc::unbounded_channel();
         Self {
             rx,
             shutdown: false,
+            cancelled: false,
+            resource: None,
             download_limit: get_manifests_concurrency_limit_sync().max(1),
             extract_limit: extract_concurrency_limit(),
             clone_limit: clone_concurrency_limit(),
@@ -293,8 +311,6 @@ impl SchedulerState {
             clone_waiters: HashMap::new(),
             blocked_by_parent: HashMap::new(),
             clone_queue: VecDeque::new(),
-            clone_done_tx,
-            clone_done_rx,
             async_ops: FuturesUnordered::new(),
             counts: InstallCounts::default(),
             git_clones: Arc::default(),
@@ -303,51 +319,45 @@ impl SchedulerState {
 
     async fn run(mut self) -> InstallCounts {
         loop {
-            self.pump_downloads();
-            self.pump_extracts();
-            self.pump_direct_extracts();
-            self.pump_clones();
+            if !self.cancelled {
+                self.pump_downloads();
+                self.pump_extracts();
+                self.pump_direct_extracts();
+                self.pump_clones();
+            }
 
             if self.shutdown && self.is_idle() {
                 break;
             }
 
             tokio::select! {
-                command = self.rx.recv(), if !self.shutdown => {
+                command = self.rx.recv(), if !self.rx.is_closed() || !self.rx.is_empty() => {
                     match command {
-                        Some(Command::PrefetchDownload(package)) => {
+                        Some(Command::PrefetchDownload(package)) if !self.shutdown => {
                             self.ensure_download(package, None);
                         }
-                        Some(Command::EnsureClone(spec, responder)) => {
+                        Some(Command::EnsureClone(spec, responder)) if !self.shutdown => {
                             self.queue_clone(spec, Some(responder));
                         }
-                        Some(Command::Shutdown) | None => {
-                            self.shutdown = true;
+                        Some(Command::EnsureClone(_, responder)) => {
+                            let _ = responder.send(Err(SharedError::from(anyhow!("install scheduler stopped"))));
                         }
+                        Some(Command::PrefetchDownload(_)) => {}
+                        Some(Command::Shutdown) => self.shutdown = true,
+                        Some(Command::Cancel) | None => self.cancel("install cancelled"),
                     }
                 }
                 done = self.async_ops.next(), if !self.async_ops.is_empty() => {
                     match done {
-                        Some(Ok(done)) => self.handle_report(done),
-                        // A JoinError means a stage task panicked: it produced no
-                        // StageReport, so its active-set slot and the responder
-                        // waiting on it can't be cleaned up by key. Rather than
-                        // leak the slot and hang the awaiting `ensure_clone`
-                        // forever, fail loudly — drain every pending responder
-                        // with an error and stop, so the install aborts cleanly.
+                        Some(Ok(done)) if !self.cancelled => self.handle_report(done),
                         Some(Err(e)) => {
-                            tracing::error!("Install scheduler worker panicked: {e}");
-                            self.fail_pending("install scheduler worker panicked");
-                            break;
+                            tracing::error!("Install scheduler worker failed: {e}");
+                            self.cancel("install scheduler worker panicked");
                         }
-                        None => {}
+                        _ => {}
                     }
                 }
-                done = self.clone_done_rx.recv() => {
-                    if let Some(done) = done {
-                        self.handle_report(done);
-                    }
-                }
+                else => self.cancel("install scheduler stopped"),
             }
         }
 
@@ -355,7 +365,32 @@ impl SchedulerState {
         self.counts
     }
 
+    fn cancel(&mut self, message: &str) {
+        self.shutdown = true;
+        self.cancelled = true;
+        self.fail_pending(message);
+        self.download_queue.clear();
+        self.extract_queue.clear();
+        self.direct_extract_queue.clear();
+        self.clone_queue.clear();
+        self.fetch_waiters.clear();
+        self.blocked_by_parent.clear();
+    }
+
+    fn spawn_stage(&self, future: impl std::future::Future<Output = StageReport> + Send + 'static) {
+        let resource = self.resource.clone();
+        self.async_ops.push(task::spawn(async move {
+            let _resource = resource;
+            future.await
+        }));
+    }
+
     fn is_idle(&self) -> bool {
+        if self.cancelled {
+            // A panicked worker cannot report its active key. Actual task
+            // ownership, not bookkeeping, determines cancellation completion.
+            return self.async_ops.is_empty();
+        }
         self.download_queue.is_empty()
             && self.extract_queue.is_empty()
             && self.direct_extract_queue.is_empty()
@@ -403,7 +438,7 @@ impl SchedulerState {
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
         let task_spec = spec.clone();
         let git_clones = Arc::clone(&self.git_clones);
-        self.async_ops.push(tokio::spawn(async move {
+        self.spawn_stage(async move {
             let result = resolve_cache_plan(
                 &task_spec.package.name,
                 &task_spec.package.tarball_url,
@@ -412,7 +447,7 @@ impl SchedulerState {
             .await
             .map_err(SharedError::from);
             StageReport::CacheResolved { spec, result }
-        }));
+        });
     }
 
     fn ensure_download(&mut self, package: PackageSource, waiter: Option<CloneSpec>) {
@@ -452,7 +487,7 @@ impl SchedulerState {
             |key| done.contains_key(key),
         );
         for (package, _key) in admitted {
-            self.async_ops.push(tokio::spawn(async move {
+            self.spawn_stage(async move {
                 let result = match registry_cache_lookup(&package).await {
                     Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
                     Ok(None) => {
@@ -465,7 +500,7 @@ impl SchedulerState {
                     Err(e) => Err(SharedError::from(e)),
                 };
                 StageReport::Download { package, result }
-            }));
+            });
         }
     }
 
@@ -479,12 +514,12 @@ impl SchedulerState {
             |key| done.contains_key(key),
         );
         for (downloaded, key) in admitted {
-            self.async_ops.push(tokio::spawn(async move {
+            self.spawn_stage(async move {
                 let result = extract_to_cache(&downloaded.package, downloaded.bytes)
                     .await
                     .map_err(SharedError::from);
                 StageReport::Extract { key, result }
-            }));
+            });
         }
     }
 
@@ -498,9 +533,8 @@ impl SchedulerState {
             |key| done.contains(key),
         );
         for (job, target) in admitted {
-            let clone_done_tx = self.clone_done_tx.clone();
-            rayon::spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.spawn_stage(async move {
+                let result = spawn_cpu(move || {
                     clone_package_sync(&PackageClone {
                         name: &job.spec.package.name,
                         version: &job.spec.package.version,
@@ -511,11 +545,9 @@ impl SchedulerState {
                         policy: job.spec.policy,
                     })
                     .map_err(SharedError::from)
-                }))
-                .unwrap_or_else(|_| {
-                    Err(SharedError::from(anyhow!("install clone worker panicked")))
-                });
-                let _ = clone_done_tx.send(StageReport::Clone { target, result });
+                })
+                .await;
+                StageReport::Clone { target, result }
             });
         }
     }
@@ -534,12 +566,12 @@ impl SchedulerState {
             |key| done.contains(key),
         );
         for (spec, target) in admitted {
-            self.async_ops.push(tokio::spawn(async move {
+            self.spawn_stage(async move {
                 let result = extract_non_registry_to_target(&spec.package, &spec.target)
                     .await
                     .map_err(SharedError::from);
                 StageReport::DirectExtract { target, result }
-            }));
+            });
         }
     }
 
@@ -685,6 +717,73 @@ fn extract_concurrency_limit() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancellation_wakes_waiters_and_drains_started_workers() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut state = SchedulerState::new(rx);
+        let (waiter, response) = oneshot::channel();
+        state
+            .clone_waiters
+            .insert(PathBuf::from("target"), vec![waiter]);
+        let (release, blocked) = oneshot::channel();
+        state.spawn_stage(async move {
+            blocked.await.unwrap();
+            StageReport::DirectExtract {
+                target: PathBuf::from("target"),
+                result: Ok(()),
+            }
+        });
+        // This work must never be admitted after cancellation.
+        state
+            .download_queue
+            .push_back(package("unstarted", "1.0.0"));
+        state.cancel("install cancelled");
+        let actor = task::spawn(state.run());
+        assert!(
+            response
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
+        assert!(!actor.is_finished());
+        release.send(()).unwrap();
+        actor.await.unwrap();
+        drop(tx);
+    }
+
+    #[tokio::test]
+    async fn worker_panic_preserves_other_workers_until_they_finish() {
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let mut state = SchedulerState::new(rx);
+        let (waiter, response) = oneshot::channel();
+        state
+            .clone_waiters
+            .insert(PathBuf::from("target"), vec![waiter]);
+        let (release, blocked) = oneshot::channel();
+        state.spawn_stage(async { panic!("controlled worker panic") });
+        state.spawn_stage(async move {
+            blocked.await.unwrap();
+            StageReport::DirectExtract {
+                target: PathBuf::from("target"),
+                result: Ok(()),
+            }
+        });
+        let actor = task::spawn(state.run());
+        assert!(
+            response
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("panicked")
+        );
+        assert!(!actor.is_finished());
+        release.send(()).unwrap();
+        actor.await.unwrap();
+    }
 
     fn package(name: &str, version: &str) -> PackageSource {
         PackageSource {
