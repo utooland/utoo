@@ -2,7 +2,7 @@
 
 use std::env;
 use std::path::Path;
-use std::process::Command;
+use tokio::process::Command;
 
 use anyhow::Result;
 use tokio::sync::OnceCell;
@@ -11,8 +11,19 @@ use super::ScriptService;
 use crate::model::package::PackageInfo;
 use crate::util::platform_const::PATH_SEPARATOR;
 
-/// Cached result of node-gyp availability check and installation
-static NODE_GYP_ENSURED: OnceCell<Result<bool, String>> = OnceCell::const_new();
+/// Only successful preparation is cached; failures and cancellation may retry.
+static NODE_GYP_ENSURED: OnceCell<bool> = OnceCell::const_new();
+
+fn bootstrap_command() -> Result<Command> {
+    let mut command = Command::new(env::current_exe()?);
+    command
+        .args(["i", "-g", "node-gyp"])
+        .env(crate::helper::auto_update::INTERNAL_UPDATE_ENV, "1")
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    Ok(command)
+}
 
 impl ScriptService {
     /// Check if node-gyp exists in PATH by searching directories
@@ -30,34 +41,24 @@ impl ScriptService {
     /// Uses OnceCell to ensure installation happens only once, even with concurrent calls.
     pub async fn ensure_node_gyp() -> Result<bool> {
         let result = NODE_GYP_ENSURED
-            .get_or_init(|| async {
+            .get_or_try_init(|| async {
                 if Self::has_node_gyp_in_path() {
                     tracing::debug!("node-gyp found in PATH");
                     return Ok(true);
                 }
 
                 tracing::debug!("node-gyp not found in PATH, installing globally");
-                let status = Command::new("ut")
-                    .args(["i", "-g", "node-gyp"])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-
-                match status {
-                    Ok(s) if s.success() => {
-                        tracing::debug!("node-gyp installed successfully");
-                        Ok(true)
-                    }
-                    Ok(s) => Err(format!("Failed to install node-gyp globally: {s}")),
-                    Err(e) => Err(format!("Failed to run node-gyp installation: {e}")),
-                }
+                let status = bootstrap_command()?.status().await?;
+                anyhow::ensure!(
+                    status.success(),
+                    "Failed to install node-gyp globally: {status}"
+                );
+                tracing::debug!("node-gyp installed successfully");
+                Ok::<_, anyhow::Error>(true)
             })
             .await;
 
-        match result {
-            Ok(v) => Ok(*v),
-            Err(e) => anyhow::bail!("{e}"),
-        }
+        result.copied()
     }
 
     pub fn is_node_gyp_pkg(package: &PackageInfo) -> bool {
@@ -76,6 +77,16 @@ mod tests {
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn bootstrap_uses_current_executable() {
+        let command = bootstrap_command().unwrap();
+        assert_eq!(command.as_std().get_program(), env::current_exe().unwrap());
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            ["i", "-g", "node-gyp"]
+        );
+    }
 
     #[test]
     fn test_has_node_gyp_in_path_found() {
