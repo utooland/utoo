@@ -32,11 +32,13 @@ use crate::model::RunMode;
 use crate::model::cli_output::ErrorDetails;
 use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
-use crate::model::publish_payload::{PublishPayload, PublishPayloadInput};
 use crate::service::auth;
 use crate::service::oidc;
-use crate::service::pm_pack;
-use crate::service::provenance;
+use crate::service::publish::payload::{PublishPayload, PublishPayloadInput};
+mod manifest;
+pub(crate) mod pack;
+mod payload;
+pub(crate) mod provenance;
 use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::cli_enum::{ProvenancePolicy, PublishAccess};
 use crate::util::format_print::print_pack_details;
@@ -60,7 +62,7 @@ pub struct PublishOptions<'a> {
 
 /// Result returned to the cmd layer after a successful publish.
 pub struct PublishResult {
-    pub pack: pm_pack::PackResult,
+    pub pack: pack::PackResult,
     pub tag: String,
     pub registry: String,
 }
@@ -92,7 +94,7 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
 
     // Always pack in memory — dry-run only skips the registry PUT.
     let pack_result =
-        pm_pack::pack(opts.executor, &opts.package_info.path, opts.script_output).await?;
+        pack::pack(opts.executor, &opts.package_info.path, opts.script_output).await?;
 
     let tarball_data = &pack_result.tarball_data;
     let shasum = compute_shasum(tarball_data);

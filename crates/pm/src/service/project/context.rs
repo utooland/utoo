@@ -41,6 +41,10 @@ pub(crate) type Registry = UnifiedRegistry;
 pub(crate) struct Context;
 
 impl Context {
+    pub async fn lifecycle(init_cwd: &Path) -> crate::service::lifecycle::LifecycleService {
+        crate::service::lifecycle::LifecycleService::new(Self::scripts(init_cwd).await)
+    }
+
     /// Snapshot operation-level configuration once; the executor only consumes it.
     pub async fn scripts(init_cwd: &Path) -> crate::service::script::ScriptService {
         use crate::service::script::{ScriptEnvironment, ScriptService};

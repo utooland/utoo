@@ -12,7 +12,8 @@ use crate::model::cli_output::{
 };
 use crate::model::package::PackageInfo;
 use crate::service::config::ConfigService;
-use crate::service::script::{MachineLifecycleOutcome, MissingScript, ScriptService};
+use crate::service::lifecycle::{MachineLifecycleOutcome, MissingScript};
+use crate::service::script::ScriptService;
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
@@ -70,11 +71,17 @@ pub async fn run(
             let script_args_refs = script_args
                 .as_ref()
                 .map(|args| args.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
-            ScriptService::run_script(&updated_cwd, &script_name, None, script_args_refs, missing)
-                .await
+            crate::service::lifecycle::LifecycleService::run_script(
+                &updated_cwd,
+                &script_name,
+                None,
+                script_args_refs,
+                missing,
+            )
+            .await
         }
         ResolvedWorkspaces::Layers { layers, paths } => {
-            crate::service::project::context::Context::scripts(&updated_cwd)
+            crate::service::project::context::Context::lifecycle(&updated_cwd)
                 .await
                 .run_in_layers(&layers, &paths, &script_name, missing, script_args)
                 .await
@@ -132,7 +139,7 @@ async fn run_machine(
     match resolved {
         ResolvedWorkspaces::Current => {
             let package = PackageInfo::load(root).await?;
-            let outcome = crate::service::project::context::Context::scripts(root)
+            let outcome = crate::service::project::context::Context::lifecycle(root)
                 .await
                 .run_lifecycle_machine(&package, script, &args, None, missing)
                 .await;
@@ -147,7 +154,7 @@ async fn run_machine(
                     let args = args.clone();
                     Some(async move {
                         let package = PackageInfo::load(&path).await?;
-                        let outcome = crate::service::project::context::Context::scripts(root)
+                        let outcome = crate::service::project::context::Context::lifecycle(root)
                             .await
                             .run_lifecycle_machine(&package, script, &args, Some(&name), missing)
                             .await;
@@ -353,9 +360,14 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            ScriptService::run_script(dir.path(), "nonexistent", None, None, MissingScript::Fail)
-                .await;
+        let result = crate::service::lifecycle::LifecycleService::run_script(
+            dir.path(),
+            "nonexistent",
+            None,
+            None,
+            MissingScript::Fail,
+        )
+        .await;
         assert!(result.is_err());
         assert!(
             result
@@ -374,8 +386,14 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            ScriptService::run_script(dir.path(), "test", None, None, MissingScript::Fail).await;
+        let result = crate::service::lifecycle::LifecycleService::run_script(
+            dir.path(),
+            "test",
+            None,
+            None,
+            MissingScript::Fail,
+        )
+        .await;
         assert!(result.is_err());
     }
 }

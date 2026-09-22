@@ -13,7 +13,8 @@ use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
 use utoo_ruborist::lock::{LockPackage, PackageLock};
 use utoo_ruborist::manifest::ScriptsView;
 
-use crate::service::script::{LifecycleSink, MissingScript, ScriptOutput, ScriptService};
+use crate::service::lifecycle::{LifecycleSink, MissingScript};
+use crate::service::script::{ScriptOutput, ScriptService};
 use crate::service::workspace::{ResolvedWorkspaces, WorkspaceFilter, WorkspaceService};
 
 /// npm install lifecycle ordered by event chain, each expanding to
@@ -150,7 +151,7 @@ impl PackageService {
         for &event in NPM_INSTALL_EVENTS {
             let result = match output {
                 ScriptOutput::Machine => {
-                    executor
+                    crate::service::lifecycle::LifecycleService::new(executor.clone())
                         .run_lifecycle(
                             package,
                             event,
@@ -161,7 +162,7 @@ impl PackageService {
                         .await
                 }
                 ScriptOutput::Verbose | ScriptOutput::Silent => {
-                    executor
+                    crate::service::lifecycle::LifecycleService::new(executor.clone())
                         .run_lifecycle(
                             package,
                             event,

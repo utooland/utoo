@@ -11,7 +11,7 @@ use utoo_ruborist::manifest::PackageJson;
 
 use crate::model::package::LifecycleHook;
 use crate::model::package::PackageInfo;
-use crate::service::publish_manifest::normalize_publish_manifest;
+use crate::service::publish::manifest::normalize_publish_manifest;
 use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::integrity::compute_integrity;
 use crate::util::json::load_package_json;
