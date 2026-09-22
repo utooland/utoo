@@ -11,9 +11,9 @@ use tokio::task::JoinSet;
 
 use super::ScriptService;
 use super::exec::{ScriptFailure, status_exit_code};
-use crate::helper::workspace::find_workspace_path;
 use crate::model::cli_output::{CapturedOutput, ExecutionStatus, LifecycleExecution};
 use crate::model::package::PackageInfo;
+use crate::service::project::discovery::find_workspace_path;
 use crate::util::format_print::{
     announce_script, print_hook_done, print_layer_separator, print_multi_workspace_header,
     print_workspace_result,

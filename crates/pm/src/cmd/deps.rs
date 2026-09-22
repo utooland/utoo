@@ -1,15 +1,13 @@
 use std::path::Path;
-use std::time::Instant;
 
 use anyhow::{Context as _, Result};
-use utoo_ruborist::lock::PackageLock;
 
-use crate::helper::lock::save_package_lock;
-use crate::helper::ruborist_context::Context;
-use crate::helper::workspace::init_project_root;
+use crate::cmd::project::init_project_root;
 use crate::model::cli_output::{DependenciesSummary, DepsResult, WorkspaceSummary};
+use crate::service::project::resolve_and_save_lock;
 use crate::service::workspace::WorkspaceService;
-use crate::util::logger::{finish_progress_bar, log_time_end, start_progress_bar};
+use crate::util::logger::ProgressReceiver;
+use crate::util::logger::log_time_end;
 use crate::util::presenter::emit;
 
 /// Entry point for the `deps` command.
@@ -30,7 +28,7 @@ pub async fn run(workspace_only: bool) -> Result<()> {
             },
         }
     } else {
-        let lock = build_deps(&root_path).await?;
+        let lock = resolve_and_save_lock(&root_path, ProgressReceiver).await?;
         DepsResult::Dependencies {
             output_path: root_path
                 .join("package-lock.json")
@@ -43,20 +41,6 @@ pub async fn run(workspace_only: bool) -> Result<()> {
     };
     log_time_end("deps resolved");
     emit("deps", &output, || Ok(()))
-}
-
-pub async fn build_deps(cwd: &Path) -> Result<PackageLock> {
-    start_progress_bar();
-    let resolve_start = Instant::now();
-
-    let lock = Context::build_deps(cwd.to_path_buf()).await?;
-
-    finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
-
-    // Save to disk
-    save_package_lock(cwd, &lock).await?;
-
-    Ok(lock)
 }
 
 pub async fn build_workspace(cwd: &Path) -> Result<crate::service::workspace::WorkspaceJson> {

@@ -10,9 +10,9 @@ use utoo_ruborist::registry::resolve_package;
 use utoo_ruborist::runtime::install_runtime_from_map;
 use utoo_ruborist::spec::{PackageSpec, Protocol, resolve_catalog_spec};
 
-use super::ruborist_context::Context;
-use super::workspace::find_workspace_path;
+use super::discovery::find_workspace_path;
 use crate::fs;
+use crate::service::project::context::Context;
 use crate::util::cli_enum::{PackageAction, SaveType};
 use crate::util::git_resolver::{resolve_git_spec, resolve_github_spec};
 use crate::util::json::{load_package_lock_json_from_path, read_json_file};

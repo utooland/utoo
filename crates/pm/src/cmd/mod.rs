@@ -32,3 +32,17 @@ pub mod run;
 pub mod update;
 pub mod view;
 pub mod whoami;
+
+pub mod help;
+pub mod project;
+
+/// A command's raw exit status; main owns the process exit after cleanup.
+#[derive(Debug)]
+pub(crate) struct CommandExit(pub i32);
+
+impl std::fmt::Display for CommandExit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "command exited with status {}", self.0)
+    }
+}
+impl std::error::Error for CommandExit {}

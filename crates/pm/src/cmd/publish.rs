@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use utoo_ruborist::manifest::PackageJson;
 use utoo_ruborist::spec::Protocol;
 
-use crate::helper::workspace::{init_project_root, update_cwd_to_project};
+use crate::cmd::project::{init_project_root, update_cwd_to_project};
 use crate::model::RunMode;
 use crate::model::cli_output::{
     PackFile, PartialResult, PublishPartialResult, PublishResult, PublishedPackage,

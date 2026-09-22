@@ -5,17 +5,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::cmd::deps::build_deps;
 use crate::fs;
 use crate::helper::global_bin::{get_global_bin_dir, get_global_package_dir};
-use crate::helper::lock::{
-    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
-    resolve_package_spec_details, save_package_lock, update_package_json,
-};
-use crate::helper::ruborist_context::Context;
-use crate::helper::workspace::init_project_root;
 use crate::model::package::PackageInfo;
 use crate::service::package::PackageService;
+use crate::service::project::context::Context;
+use crate::service::project::lock::{
+    Package, UpdatePackageJsonOptions, extract_package_name, group_by_depth, is_pkg_lock_outdated,
+    resolve_package_spec_details, update_package_json,
+};
+use crate::service::project::resolve_and_save_lock;
 use crate::service::rebuild::RebuildService;
 use crate::service::script::ScriptOutput;
 use crate::util::cli_enum::{OmitType, PackageAction, ReifyMode, SaveType};
@@ -269,21 +268,13 @@ async fn reify_packages(
     Ok(())
 }
 
-async fn resolve_package_lock_with_scheduler(
-    root_path: &Path,
-    scheduler: super::install_scheduler::InstallScheduler,
-) -> Result<utoo_ruborist::lock::PackageLock> {
-    let (resolved_root, pkg) =
-        utoo_ruborist::service::read_root_manifest(root_path, Context::glob()).await?;
-    let options = Context::install_deps_options(resolved_root.clone(), scheduler).await;
-    let lock = utoo_ruborist::service::build_deps(options, pkg).await?;
-
-    // Persist at the resolved workspace root the lock was built against (not the
-    // caller's possibly-nested `root_path`), so the lockfile and its root-relative
-    // `resolved` paths stay consistent with where it lives.
-    save_package_lock(&resolved_root, &lock).await?;
-
-    Ok(lock)
+/// Explicit project installation inputs, shared by command adapters and tools.
+pub struct InstallOptions<'a> {
+    pub root: &'a Path,
+    pub omit: &'a HashSet<OmitType>,
+    pub scripts: ScriptPolicy,
+    pub mode: ReifyMode,
+    pub output: ScriptOutput,
 }
 
 pub struct InstallService;
@@ -297,31 +288,26 @@ impl InstallService {
         action: PackageAction,
         specs: &[&str],
         workspace: Option<String>,
-        scripts: ScriptPolicy,
         save_type: SaveType,
-        omit: &HashSet<OmitType>,
-        output: ScriptOutput,
+        options: &InstallOptions<'_>,
     ) -> Result<()> {
         tracing::debug!(
             "update packages: {:?} {:?} {:?} {:?}",
             action,
             specs,
             &workspace,
-            scripts
+            options.scripts
         );
 
         if specs.is_empty() {
             return Err(anyhow::anyhow!("No package specifications provided"));
         }
 
-        let cwd = std::env::current_dir().context("Failed to get current directory")?;
-
-        // Update working directory to project root (if in workspace)
-        let root_path = init_project_root(&cwd).await?;
+        let root_path = options.root;
 
         // Update package.json and package-lock.json for all packages in batch
         update_package_json(&UpdatePackageJsonOptions {
-            cwd: &root_path,
+            cwd: root_path,
             action,
             specs,
             workspace: workspace.as_deref(),
@@ -331,33 +317,25 @@ impl InstallService {
         .context("Failed to update package.json")?;
 
         // Rebuild dependencies - the result will be used by install() via ensure_package_lock()
-        build_deps(&root_path)
+        resolve_and_save_lock(root_path, crate::util::logger::ProgressReceiver)
             .await
             .context("Failed to build package-lock.json")?;
 
-        Self::install(scripts, &root_path, omit, output)
+        Self::install(options)
             .await
             .context("Failed to install packages")?;
 
         Ok(())
     }
 
-    pub async fn install(
-        scripts: ScriptPolicy,
-        root_path: &Path,
-        omit: &HashSet<OmitType>,
-        output: ScriptOutput,
-    ) -> Result<()> {
-        Self::install_with_mode(scripts, root_path, omit, ReifyMode::Incremental, output).await
-    }
-
-    pub async fn install_with_mode(
-        scripts: ScriptPolicy,
-        root_path: &Path,
-        omit: &HashSet<OmitType>,
-        mode: ReifyMode,
-        output: ScriptOutput,
-    ) -> Result<()> {
+    pub async fn install(options: &InstallOptions<'_>) -> Result<()> {
+        let InstallOptions {
+            root: root_path,
+            omit,
+            scripts,
+            mode,
+            output,
+        } = *options;
         print_proxy_env_hint_once();
         install_progress::start_install_run();
         let lock_path = root_path.join("package-lock.json");
@@ -379,17 +357,17 @@ impl InstallService {
             };
             (lock, false)
         } else {
-            start_progress_bar();
-            let resolve_start = Instant::now();
-            let lock = match resolve_package_lock_with_scheduler(root_path, scheduler.clone()).await
-            {
+            let receiver = super::install_scheduler::InstallEventReceiver::new(
+                crate::util::logger::ProgressReceiver,
+                scheduler.clone(),
+            );
+            let lock = match resolve_and_save_lock(root_path, receiver).await {
                 Ok(lock) => lock,
                 Err(e) => {
                     scheduler_handle.shutdown().await;
                     return Err(e);
                 }
             };
-            finish_progress_bar("package-lock.json resolved", Some(resolve_start.elapsed()));
             (lock, true)
         };
 
@@ -529,8 +507,14 @@ impl InstallService {
             // `<prefix>/lib/node_modules/<name>/node_modules`, not beside it.
             start_progress_bar();
             let resolve_start = Instant::now();
-            let mut options =
-                Context::install_deps_options(root_path.clone(), scheduler.clone()).await;
+            let mut options = Context::deps_options(
+                root_path.clone(),
+                super::install_scheduler::InstallEventReceiver::new(
+                    crate::util::logger::ProgressReceiver,
+                    scheduler.clone(),
+                ),
+            )
+            .await;
             // A package tarball may contain its publisher's lockfile. It does
             // not govern consumers, so never seed a global install from it.
             options.baseline = None;

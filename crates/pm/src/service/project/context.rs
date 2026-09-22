@@ -8,7 +8,6 @@ use utoo_ruborist::workspace::WorkspaceDiscovery;
 
 use crate::fs;
 use crate::service::auth;
-use crate::service::install_scheduler::{InstallEventReceiver, InstallScheduler};
 use crate::util::cache::get_cache_dir;
 use crate::util::json::load_package_lock_json_from_path;
 use crate::util::logger::ProgressReceiver;
@@ -67,15 +66,6 @@ impl Context {
             catalogs,
             baseline,
         }
-    }
-
-    /// Create BuildDepsOptions that forwards package events to the install scheduler.
-    pub async fn install_deps_options(
-        cwd: PathBuf,
-        scheduler: InstallScheduler,
-    ) -> BuildDepsOptions<GlobImpl, InstallEventReceiver<ProgressReceiver>> {
-        let receiver = InstallEventReceiver::new(ProgressReceiver, scheduler);
-        Self::deps_options(cwd, receiver).await
     }
 
     /// Resolve the dependency tree with a plain ProgressReceiver, returning the

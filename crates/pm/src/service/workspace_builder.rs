@@ -12,7 +12,7 @@ use utoo_ruborist::builder::{
 use utoo_ruborist::graph::{DependencyGraph, EdgeType};
 use utoo_ruborist::runtime::install_runtime_from_map;
 
-use crate::helper::ruborist_context::Context as FsContext;
+use crate::service::project::context::Context as FsContext;
 use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
 
 /// TreeBuilder - builds workspace dependency graph.
@@ -21,15 +21,11 @@ use crate::util::user_config::{get_or_load_package_json, get_peer_deps};
 /// For full dependency resolution, use ruborist's `build_deps` API.
 pub struct TreeBuilder {
     path: PathBuf,
-    pub ideal_tree: Option<DependencyGraph>,
 }
 
 impl TreeBuilder {
     pub fn new<P: Into<PathBuf>>(path: P) -> Self {
-        Self {
-            path: path.into(),
-            ideal_tree: None,
-        }
+        Self { path: path.into() }
     }
 
     async fn init_runtime(&self, graph: &mut DependencyGraph) -> Result<()> {
@@ -110,7 +106,7 @@ impl TreeBuilder {
     /// Build workspace tree (only resolves workspace dependencies, not external packages).
     ///
     /// This is used for workspace topology analysis, not full dependency resolution.
-    pub async fn build_workspace_tree(&mut self) -> Result<()> {
+    pub async fn build_workspace_tree(&self) -> Result<DependencyGraph> {
         let mut graph = self.init_tree().await?;
 
         // Build a map of workspace nodes for quick lookup
@@ -144,7 +140,6 @@ impl TreeBuilder {
             graph.mark_dependency_resolved(edge_id, dep_workspace_idx);
         }
 
-        self.ideal_tree = Some(graph);
-        Ok(())
+        Ok(graph)
     }
 }

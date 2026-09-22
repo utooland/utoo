@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::install::InstallService;
 use super::script::ScriptOutput;
-use crate::helper::lock::resolve_package_spec;
+use crate::service::project::lock::resolve_package_spec;
 use crate::util::cli_enum::ScriptPolicy;
 
 /// Package management service for handling package installation and caching
