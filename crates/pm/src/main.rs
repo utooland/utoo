@@ -138,7 +138,7 @@ fn main() {
     }
 }
 
-// Construct the large future outside main's frame before entering block_on.
+// Construct the large CLI future in a separate frame before polling it.
 // Debug builds otherwise retain its stack temporaries while polling the CLI.
 #[inline(never)]
 fn cli_future() -> std::pin::Pin<Box<impl std::future::Future<Output = Result<()>>>> {
