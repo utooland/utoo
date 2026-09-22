@@ -86,6 +86,7 @@ pub struct MachineLifecycleOutcome {
 
 impl ScriptService {
     pub async fn run_lifecycle_machine(
+        &self,
         package: &PackageInfo,
         event: &str,
         args: &[&str],
@@ -127,13 +128,9 @@ impl ScriptService {
                 format!("{script} {}", step_args.join(" "))
             };
             let started = Instant::now();
-            let captured = Self::execute_custom_script_captured(
-                package,
-                step_name,
-                &script,
-                step_args.to_vec(),
-            )
-            .await;
+            let captured = self
+                .execute_custom_script_captured(package, step_name, &script, step_args.to_vec())
+                .await;
             let duration_ms = started.elapsed().as_millis() as u64;
             let execution = match captured {
                 Ok(output) => LifecycleExecution {
@@ -202,6 +199,7 @@ impl ScriptService {
     /// `Fail` bails, `Skip` skips the chain, and `AllowHooks` runs available
     /// pre/post hooks independently. Absent pre/post scripts are always skipped.
     pub async fn run_lifecycle(
+        &self,
         package: &PackageInfo,
         event: &str,
         args: &[&str],
@@ -243,7 +241,7 @@ impl ScriptService {
                     // `✓ <hook> [Xs]` marker when it finishes. (The silent
                     // dependency-script path, which shows nothing, is where the
                     // heartbeat earns its keep — see `logger::ScriptHeartbeat`.)
-                    Self::execute_custom_script(package, step_name, &content, step_args.to_vec())
+                    self.execute_custom_script(package, step_name, &content, step_args.to_vec())
                         .await
                         .with_context(|| format!("Failed to execute {step_name}"))?;
                     if *timed {
@@ -263,13 +261,14 @@ impl ScriptService {
                         step_args.join(" ")
                     )
                     .expect("writing a lifecycle header to String cannot fail");
-                    let cap = Self::execute_custom_script_captured(
-                        package,
-                        step_name,
-                        &content,
-                        step_args.to_vec(),
-                    )
-                    .await?;
+                    let cap = self
+                        .execute_custom_script_captured(
+                            package,
+                            step_name,
+                            &content,
+                            step_args.to_vec(),
+                        )
+                        .await?;
                     append_captured(body, &cap.stdout, &cap.stderr);
                     if !cap.status.success() {
                         anyhow::bail!("Failed to execute {step_name}");
@@ -277,26 +276,27 @@ impl ScriptService {
                 }
                 LifecycleSink::Machine => {
                     let started = Instant::now();
-                    let cap = Self::execute_custom_script_captured(
-                        package,
-                        step_name,
-                        &content,
-                        step_args.to_vec(),
-                    )
-                    .await
-                    .map_err(|error| {
-                        ScriptFailure::failed_to_start(
+                    let cap = self
+                        .execute_custom_script_captured(
                             package,
                             step_name,
-                            if step_args.is_empty() {
-                                content.clone()
-                            } else {
-                                format!("{content} {}", step_args.join(" "))
-                            },
-                            started.elapsed(),
-                            &error,
+                            &content,
+                            step_args.to_vec(),
                         )
-                    })?;
+                        .await
+                        .map_err(|error| {
+                            ScriptFailure::failed_to_start(
+                                package,
+                                step_name,
+                                if step_args.is_empty() {
+                                    content.clone()
+                                } else {
+                                    format!("{content} {}", step_args.join(" "))
+                                },
+                                started.elapsed(),
+                                &error,
+                            )
+                        })?;
                     if !cap.status.success() {
                         return Err(ScriptFailure::lifecycle(
                             package,
@@ -341,17 +341,19 @@ impl ScriptService {
         let package = PackageInfo::load(&package_path).await?;
         let args = script_args.unwrap_or_default();
 
-        Self::run_lifecycle(
-            &package,
-            script_name,
-            &args,
-            LifecycleSink::Stream {
-                workspace_label: workspace,
-                timed: false,
-            },
-            missing,
-        )
-        .await?;
+        crate::service::project::context::Context::scripts(cwd)
+            .await
+            .run_lifecycle(
+                &package,
+                script_name,
+                &args,
+                LifecycleSink::Stream {
+                    workspace_label: workspace,
+                    timed: false,
+                },
+                missing,
+            )
+            .await?;
 
         Ok(())
     }
@@ -361,6 +363,7 @@ impl ScriptService {
     /// Same-layer workspaces execute concurrently; output is captured per
     /// workspace and printed grouped as each finishes (stream-as-complete).
     pub async fn run_in_layers(
+        &self,
         layers: &[Vec<String>],
         paths: &HashMap<String, PathBuf>,
         script_name: &str,
@@ -375,16 +378,16 @@ impl ScriptService {
         print_multi_workspace_header(script_name, layers);
 
         for (layer_index, layer) in layers.iter().enumerate() {
-            let failed_names = Self::run_layer(
-                layer,
-                paths,
-                script_name,
-                missing,
-                script_args.as_deref(),
-                layer_index,
-                layer_count,
-            )
-            .await?;
+            let failed_names = self
+                .run_layer(
+                    layer,
+                    paths,
+                    script_name,
+                    missing,
+                    script_args.as_deref(),
+                    (layer_index, layer_count),
+                )
+                .await?;
             anyhow::ensure!(
                 failed_names.is_empty(),
                 "Script execution failed in layer {}: {}",
@@ -400,13 +403,13 @@ impl ScriptService {
     /// captured script, print each result as it completes (separator before
     /// the first), and return the names that failed.
     async fn run_layer(
+        &self,
         layer: &[String],
         paths: &HashMap<String, PathBuf>,
         script_name: &str,
         missing: MissingScript,
         script_args: Option<&[String]>,
-        layer_index: usize,
-        layer_count: usize,
+        (layer_index, layer_count): (usize, usize),
     ) -> Result<Vec<String>> {
         let workspaces_to_run: Vec<_> = layer
             .iter()
@@ -422,8 +425,10 @@ impl ScriptService {
             let script_name = script_name.to_string();
             let script_args = script_args.map(<[String]>::to_vec);
 
+            let executor = self.clone();
             join_set.spawn(async move {
                 run_script_captured(
+                    &executor,
                     &ws_path,
                     &script_name,
                     &workspace_name,
@@ -470,6 +475,7 @@ enum WorkspaceOutcome {
 }
 
 async fn run_script_captured(
+    executor: &ScriptService,
     workspace_dir: &Path,
     script_name: &str,
     workspace_name: &str,
@@ -497,7 +503,7 @@ async fn run_script_captured(
             .map(|s| s.as_str())
             .collect();
 
-        ScriptService::run_lifecycle(
+        executor.run_lifecycle(
             &package,
             script_name,
             &args_refs,

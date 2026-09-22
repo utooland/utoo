@@ -40,7 +40,7 @@ struct VersionCache {
     last_update_failed: Option<u64>,
 }
 
-const INTERNAL_UPDATE_ENV: &str = "UTOO_INTERNAL_UPDATE";
+pub(crate) const INTERNAL_UPDATE_ENV: &str = "UTOO_INTERNAL_UPDATE";
 
 const CACHE_TTL_SECS: u64 = 3600; // 1 hour
 const UPDATE_RETRY_COOLDOWN_SECS: u64 = 86400; // 24 hours

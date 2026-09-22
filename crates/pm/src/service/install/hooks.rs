@@ -71,7 +71,13 @@ pub struct PackageService;
 impl PackageService {
     pub async fn process_project_hooks(root_path: &Path, output: ScriptOutput) -> Result<()> {
         let package_info = PackageInfo::load(root_path).await?;
-        Self::run_install_lifecycle(&package_info, None, output).await
+        Self::run_install_lifecycle(
+            &FsContext::scripts(root_path).await,
+            &package_info,
+            None,
+            output,
+        )
+        .await
     }
 
     /// Walk workspaces in topological order so a downstream workspace can
@@ -103,7 +109,13 @@ impl PackageService {
                 let package = by_name.remove(&name).with_context(|| {
                     format!("workspace {name} present in topology but missing from workspace map")
                 })?;
-                Self::run_install_lifecycle(&package, Some(&name), output).await?;
+                Self::run_install_lifecycle(
+                    &FsContext::scripts(root_path).await,
+                    &package,
+                    Some(&name),
+                    output,
+                )
+                .await?;
             }
         }
 
@@ -130,6 +142,7 @@ impl PackageService {
     }
 
     async fn run_install_lifecycle(
+        executor: &ScriptService,
         package: &PackageInfo,
         workspace_label: Option<&str>,
         output: ScriptOutput,
@@ -137,27 +150,29 @@ impl PackageService {
         for &event in NPM_INSTALL_EVENTS {
             let result = match output {
                 ScriptOutput::Machine => {
-                    ScriptService::run_lifecycle(
-                        package,
-                        event,
-                        &[],
-                        LifecycleSink::Machine,
-                        MissingScript::AllowHooks,
-                    )
-                    .await
+                    executor
+                        .run_lifecycle(
+                            package,
+                            event,
+                            &[],
+                            LifecycleSink::Machine,
+                            MissingScript::AllowHooks,
+                        )
+                        .await
                 }
                 ScriptOutput::Verbose | ScriptOutput::Silent => {
-                    ScriptService::run_lifecycle(
-                        package,
-                        event,
-                        &[],
-                        LifecycleSink::Stream {
-                            workspace_label,
-                            timed: true,
-                        },
-                        MissingScript::AllowHooks,
-                    )
-                    .await
+                    executor
+                        .run_lifecycle(
+                            package,
+                            event,
+                            &[],
+                            LifecycleSink::Stream {
+                                workspace_label,
+                                timed: true,
+                            },
+                            MissingScript::AllowHooks,
+                        )
+                        .await
                 }
             };
             result.with_context(|| match workspace_label {
@@ -390,6 +405,7 @@ impl PackageService {
 
     /// Execute queues with bins_only parameter support
     pub async fn execute_queues_with_options(
+        executor: &ScriptService,
         queues: ExecutionQueues,
         scripts: ScriptPolicy,
         output: ScriptOutput,
@@ -411,15 +427,26 @@ impl PackageService {
             }
 
             // Execute preinstall scripts in parallel
-            Self::execute_script_queue(&queues.preinstall, LifecycleHook::Preinstall, output)
-                .await?;
+            Self::execute_script_queue(
+                executor,
+                &queues.preinstall,
+                LifecycleHook::Preinstall,
+                output,
+            )
+            .await?;
 
             Self::execute_binary_linking(&queues.bin_linking).await?;
 
-            Self::execute_script_queue(&queues.install, LifecycleHook::Install, output).await?;
-
-            Self::execute_script_queue(&queues.postinstall, LifecycleHook::Postinstall, output)
+            Self::execute_script_queue(executor, &queues.install, LifecycleHook::Install, output)
                 .await?;
+
+            Self::execute_script_queue(
+                executor,
+                &queues.postinstall,
+                LifecycleHook::Postinstall,
+                output,
+            )
+            .await?;
 
             if total_scripts > 0 {
                 finish_progress_bar("scripts executed", Some(scripts_start.elapsed()));
@@ -431,6 +458,7 @@ impl PackageService {
     /// Execute script queue for a specific script type
     /// Queue contains (PackageInfo, is_optional) tuples where is_optional indicates edge type
     async fn execute_script_queue(
+        executor: &ScriptService,
         queue: &[(Rc<PackageInfo>, bool)],
         hook: LifecycleHook,
         output: ScriptOutput,
@@ -459,7 +487,8 @@ impl PackageService {
                         } else {
                             ScriptOutput::Silent
                         };
-                        let result = ScriptService::execute_script(
+                        let result = super::tools::execute_hook(
+                            executor,
                             &package,
                             hook,
                             script_output,
@@ -982,6 +1011,7 @@ mod tests {
 
         // Should not panic or error, even though the bin file does not exist
         let result = PackageService::execute_queues_with_options(
+            &FsContext::scripts(std::path::Path::new(".")).await,
             queues,
             ScriptPolicy::Run,
             ScriptOutput::Verbose,
@@ -1482,6 +1512,7 @@ mod tests {
         let queue_optional: Vec<(Rc<PackageInfo>, bool)> =
             vec![(Rc::new(package_info.clone()), true)];
         let result = PackageService::execute_script_queue(
+            &FsContext::scripts(std::path::Path::new(".")).await,
             &queue_optional,
             LifecycleHook::Postinstall,
             ScriptOutput::Verbose,
@@ -1495,6 +1526,7 @@ mod tests {
         // Test with is_optional = false: should return error
         let queue_required: Vec<(Rc<PackageInfo>, bool)> = vec![(Rc::new(package_info), false)];
         let result = PackageService::execute_script_queue(
+            &FsContext::scripts(std::path::Path::new(".")).await,
             &queue_required,
             LifecycleHook::Postinstall,
             ScriptOutput::Verbose,

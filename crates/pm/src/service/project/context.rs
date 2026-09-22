@@ -41,6 +41,20 @@ pub(crate) type Registry = UnifiedRegistry;
 pub(crate) struct Context;
 
 impl Context {
+    /// Snapshot operation-level configuration once; the executor only consumes it.
+    pub async fn scripts(init_cwd: &Path) -> crate::service::script::ScriptService {
+        use crate::service::script::{ScriptEnvironment, ScriptService};
+        ScriptService::new(ScriptEnvironment {
+            init_cwd: init_cwd.to_path_buf(),
+            prefix: crate::util::user_config::resolve_global_prefix(None).await,
+            path: std::env::var_os("PATH").unwrap_or_default(),
+            scope: crate::util::user_config::get_install_scope(),
+            extra: crate::service::install::binary::get_envs()
+                .cloned()
+                .unwrap_or_default(),
+        })
+    }
+
     /// Create BuildDepsOptions with a custom event receiver.
     pub async fn deps_options<R: utoo_ruborist::progress::EventReceiver>(
         cwd: PathBuf,

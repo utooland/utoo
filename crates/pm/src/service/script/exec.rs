@@ -1,7 +1,8 @@
 //! Command construction and execution primitives for package scripts.
 
 use std::borrow::Cow;
-use std::env;
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::io::{self, Write as _};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -18,10 +19,9 @@ use crate::model::cli_output::{
     CAPTURED_OUTPUT_TAIL_LIMIT, CapturedOutput, ErrorDetails, ExecutionStatus, LifecycleExecution,
 };
 use crate::model::package::{LifecycleHook, PackageInfo};
-use crate::service::install::binary::get_envs;
+use crate::util::cli_enum::InstallScope;
 use crate::util::format_print::announce_script;
 use crate::util::platform_const::PATH_SEPARATOR;
-use crate::util::user_config::get_install_scope;
 
 /// A consumer for a script's captured output, one call per output segment. The
 /// executor stays unaware of *who* consumes the lines (here it's the progress
@@ -30,14 +30,15 @@ pub(crate) type OutputSink = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Build a `Command` with the standard npm env vars for script execution.
 async fn build_script_command(
+    environment: &ScriptEnvironment,
+    tools: &PreparedTools,
     package: &PackageInfo,
     script_name: &str,
     script_content: &str,
 ) -> Result<Command> {
-    let bin_paths = ScriptService::collect_bin_paths(package).await?;
-    let env_path = ScriptService::build_path_env(&bin_paths);
-    let init_cwd =
-        env::current_dir().context("failed to read current working directory for INIT_CWD")?;
+    let mut bin_paths = ScriptService::collect_bin_paths(package).await?;
+    bin_paths.extend(tools.bin_dirs.iter().cloned());
+    let env_path = ScriptService::build_path_env(&bin_paths, &environment.path);
 
     let mut cmd = Command::new("sh");
     cmd.arg("-c")
@@ -45,19 +46,13 @@ async fn build_script_command(
         .current_dir(&package.path)
         .env("PATH", env_path)
         .env("npm_lifecycle_event", script_name)
-        .env("INIT_CWD", init_cwd)
+        .env("INIT_CWD", &environment.init_cwd)
         .env("npm_package_json", package.path.join("package.json"))
-        .env("npm_config_global", get_install_scope().as_env_value());
+        .env("npm_config_global", environment.scope.as_env_value());
 
-    if let Some(envs) = get_envs() {
-        tracing::debug!(
-            "Injecting {} binary mirror envs for {}",
-            envs.len(),
-            package.name
-        );
-        for (key, value) in envs {
-            cmd.env(key, value);
-        }
+    cmd.envs(&environment.extra);
+    if let Some(node_gyp) = &tools.node_gyp {
+        cmd.env("npm_config_node_gyp", node_gyp);
     }
 
     // Restore the default SIGPIPE disposition in the child. The parent
@@ -278,7 +273,9 @@ async fn drain_tapped<R: tokio::io::AsyncRead + Unpin>(
     // it without limit — the full bytes still land in `raw` for the dump.
     const MAX_SEGMENT: usize = 4 * 1024;
     let mut segment: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 8 * 1024];
+    // Keep pipe buffers out of the nested installation/lifecycle futures.
+    // Inline arrays inflate every caller and exhaust the Windows debug stack.
+    let mut chunk = vec![0u8; 8 * 1024];
     loop {
         match reader.read(&mut chunk).await {
             Ok(0) => break,
@@ -316,10 +313,60 @@ fn emit_segment(segment: &[u8], sink: Option<&OutputSink>) {
     }
 }
 
-pub struct ScriptService;
+/// npm environment supplied by the operation that owns script execution.
+#[derive(Clone)]
+pub struct ScriptEnvironment {
+    pub init_cwd: PathBuf,
+    pub path: OsString,
+    pub scope: InstallScope,
+    pub extra: BTreeMap<String, String>,
+    pub prefix: Option<String>,
+}
+
+/// Tool paths prepared by install/pack/publish before invoking a hook.
+#[derive(Clone, Default, Debug)]
+pub struct PreparedTools {
+    pub node_gyp: Option<PathBuf>,
+    pub bin_dirs: Vec<PathBuf>,
+}
+
+#[derive(Clone)]
+pub struct ScriptService {
+    environment: Arc<ScriptEnvironment>,
+    tools: PreparedTools,
+}
 
 impl ScriptService {
+    pub fn new(environment: ScriptEnvironment) -> Self {
+        Self {
+            environment: Arc::new(environment),
+            tools: PreparedTools::default(),
+        }
+    }
+
+    pub fn environment(&self) -> &ScriptEnvironment {
+        &self.environment
+    }
+    pub fn tools(&self) -> &PreparedTools {
+        &self.tools
+    }
+    pub fn with_tools(&self, tools: PreparedTools) -> Self {
+        Self {
+            environment: self.environment.clone(),
+            tools,
+        }
+    }
+    pub fn with_prefix(&self, prefix: Option<&str>) -> Self {
+        let mut environment = (*self.environment).clone();
+        environment.prefix = prefix.map(str::to_owned);
+        Self {
+            environment: Arc::new(environment),
+            tools: self.tools.clone(),
+        }
+    }
+
     pub async fn execute_script(
+        &self,
         package: &PackageInfo,
         hook: LifecycleHook,
         output: ScriptOutput,
@@ -338,11 +385,9 @@ impl ScriptService {
                 announce_script(None, script, "");
             }
 
-            if Self::is_node_gyp_pkg(package) {
-                Self::ensure_node_gyp().await?;
-            }
-
-            let mut cmd = build_script_command(package, hook.into(), script).await?;
+            let mut cmd =
+                build_script_command(&self.environment, &self.tools, package, hook.into(), script)
+                    .await?;
             tracing::debug!("Executing command: {cmd:?}");
 
             if output == ScriptOutput::Verbose {
@@ -350,8 +395,7 @@ impl ScriptService {
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit());
 
-                let status = tokio::process::Command::from(cmd)
-                    .status()
+                let status = Self::run_inherited(cmd)
                     .await
                     .context("Failed to execute script")?;
 
@@ -431,8 +475,22 @@ impl ScriptService {
     /// `sink` (for the long-run heartbeat) while the raw bytes are collected into
     /// a [`std::process::Output`], so callers keep the same failure-dump /
     /// debug-log behaviour they had with `.output()`.
-    async fn run_captured(cmd: Command, sink: Option<&OutputSink>) -> Result<std::process::Output> {
+    pub(crate) async fn run_inherited(mut cmd: Command) -> Result<std::process::ExitStatus> {
+        cmd.stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit());
+        Ok(tokio::process::Command::from(cmd)
+            .kill_on_drop(true)
+            .status()
+            .await?)
+    }
+
+    pub(crate) async fn run_captured(
+        cmd: Command,
+        sink: Option<&OutputSink>,
+    ) -> Result<std::process::Output> {
         let mut child = tokio::process::Command::from(cmd)
+            .kill_on_drop(true)
             // Null stdin, matching the replaced `.output()`: a dependency script
             // that reads stdin must get immediate EOF, not inherit the user's
             // terminal — otherwise it blocks forever waiting for input it'll
@@ -480,9 +538,9 @@ impl ScriptService {
         Ok(bin_paths)
     }
 
-    fn build_path_env(bin_paths: &[PathBuf]) -> String {
+    fn build_path_env(bin_paths: &[PathBuf], original: &std::ffi::OsStr) -> String {
         let path_separator = PATH_SEPARATOR;
-        let original_path = env::var("PATH").unwrap_or_default();
+        let original_path = original.to_string_lossy();
         let additional_paths = bin_paths
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
@@ -502,6 +560,7 @@ impl ScriptService {
     }
 
     pub async fn execute_custom_script(
+        &self,
         package: &PackageInfo,
         script_name: &str,
         script_content: &str,
@@ -515,13 +574,19 @@ impl ScriptService {
 
         let cmd_content = join_script_args(script_content, &script_args);
 
-        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
+        let mut cmd = build_script_command(
+            &self.environment,
+            &self.tools,
+            package,
+            script_name,
+            &cmd_content,
+        )
+        .await?;
         cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
 
-        let status = tokio::process::Command::from(cmd)
-            .status()
+        let status = Self::run_inherited(cmd)
             .await
             .context("Failed to execute custom script")?;
 
@@ -540,6 +605,7 @@ impl ScriptService {
     /// Like [`Self::execute_custom_script`], but captures stdout/stderr
     /// instead of streaming to the terminal.
     pub async fn execute_custom_script_captured(
+        &self,
         package: &PackageInfo,
         script_name: &str,
         script_content: &str,
@@ -547,13 +613,15 @@ impl ScriptService {
     ) -> Result<std::process::Output> {
         let cmd_content = join_script_args(script_content, &script_args);
 
-        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
-        cmd.stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-
-        tokio::process::Command::from(cmd)
-            .output()
+        let cmd = build_script_command(
+            &self.environment,
+            &self.tools,
+            package,
+            script_name,
+            &cmd_content,
+        )
+        .await?;
+        Self::run_captured(cmd, None)
             .await
             .context("Failed to execute custom script")
     }
@@ -569,6 +637,55 @@ mod tests {
 
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn executor_uses_supplied_npm_environment() {
+        let root = tempdir().unwrap();
+        let initial = tempdir().unwrap();
+        let package = PackageInfo {
+            path: root.path().to_path_buf(),
+            name: "fixture".into(),
+            bin_files: vec![],
+            scripts: Default::default(),
+            lifecycle_scripts: Default::default(),
+        };
+        let executor = ScriptService::new(ScriptEnvironment {
+            init_cwd: initial.path().to_path_buf(),
+            path: std::env::var_os("PATH").unwrap_or_default(),
+            scope: InstallScope::Global,
+            prefix: None,
+            extra: BTreeMap::from([("PM_TEST_ENV".into(), "provided".into())]),
+        });
+        let result = executor.execute_custom_script_captured(&package, "test", r#"node -e "process.stdout.write(JSON.stringify([process.cwd(),process.env.INIT_CWD,process.env.npm_lifecycle_event,process.env.npm_config_global,process.env.PM_TEST_ENV]))""#, vec![]).await.unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let values: Vec<String> = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(
+            std::fs::canonicalize(&values[0]).unwrap(),
+            std::fs::canonicalize(root.path()).unwrap()
+        );
+        assert_eq!(values[1], initial.path().to_string_lossy());
+        assert_eq!(&values[2..], ["test", "true", "provided"]);
+    }
+
+    #[tokio::test]
+    async fn captured_process_drains_both_full_pipes_before_waiting() {
+        let mut command = Command::new("node");
+        command.args(["-e", "process.stdout.write(Buffer.alloc(262144,65));process.stderr.write(Buffer.alloc(262144,66))"]);
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            ScriptService::run_captured(command, None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(result.status.success());
+        assert_eq!(result.stdout, vec![65; 262144]);
+        assert_eq!(result.stderr, vec![66; 262144]);
+    }
 
     #[cfg(unix)]
     #[test]

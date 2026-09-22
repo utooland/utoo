@@ -16,13 +16,13 @@ use crate::util::invocation;
 use crate::util::presenter::emit;
 
 /// Execute a package binary
-pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
+pub async fn execute_package(cwd: &Path, command: &str, args: Vec<String>) -> Result<()> {
     tracing::debug!("Executing command: {command} with args: {args:?}");
 
     // First, try to find the binary in local node_modules/.bin directories
-    if let Some(binary_path) = find_binary(command).await? {
+    if let Some(binary_path) = find_binary_in_hierarchy(cwd, command).await? {
         tracing::debug!("Found binary at: {}", binary_path.display());
-        return execute_binary(command, &binary_path, args, ExecutableSource::Local).await;
+        return execute_binary(cwd, command, &binary_path, args, ExecutableSource::Local).await;
     }
 
     // If not found locally, try to install the package to cache
@@ -40,7 +40,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
         ScriptOutput::Verbose
     };
     let package_cache_dir =
-        PackageManagementService::install_package_to_cache(package_name, output).await?;
+        PackageManagementService::install_package_to_cache(cwd, package_name, output).await?;
 
     // Try to find the binary in the cached package
     // utoo -x eslint --version
@@ -49,7 +49,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
     match find_binary_in_cache(&package_cache_dir).await {
         Ok(Some(binary_path)) => {
             tracing::debug!("Found binary in cache at: {}", binary_path.display());
-            execute_binary(command, &binary_path, args, ExecutableSource::Cache).await
+            execute_binary(cwd, command, &binary_path, args, ExecutableSource::Cache).await
         }
         Ok(None) => {
             tracing::error!("No executable found in bin directory for package '{package_name}'");
@@ -67,6 +67,7 @@ pub async fn execute_package(command: &str, args: Vec<String>) -> Result<()> {
 
 /// Execute the binary with given arguments
 async fn execute_binary(
+    cwd: &Path,
     requested: &str,
     binary_path: &Path,
     args: Vec<String>,
@@ -99,20 +100,19 @@ async fn execute_binary(
             )
         }
     };
-    cmd.args(&args);
+    cmd.args(&args).current_dir(cwd);
 
     if invocation::json() {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let cwd = std::env::current_dir()?;
         let command = command_prefix
             .into_iter()
             .chain(args)
             .collect::<Vec<_>>()
             .join(" ");
         let started = Instant::now();
-        let output = match cmd.output() {
+        let output = match crate::service::script::ScriptService::run_captured(cmd, None).await {
             Ok(output) => output,
             Err(error) => {
                 let execution = ProcessExecution {
@@ -173,7 +173,10 @@ async fn execute_binary(
         cmd.stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
-        let status = cmd.status()?;
+        let status = tokio::process::Command::from(cmd)
+            .kill_on_drop(true)
+            .status()
+            .await?;
 
         if status.success() {
             Ok(())
@@ -190,13 +193,6 @@ fn status_exit_code(status: &std::process::ExitStatus) -> i32 {
         return 128 + signal;
     }
     status.code().unwrap_or(1)
-}
-
-/// Find `command` in `node_modules/.bin`, searching up from the cwd — the
-/// standard mechanism for running a locally-installed tool's bin shim.
-async fn find_binary(command: &str) -> Result<Option<PathBuf>> {
-    let current_dir = std::env::current_dir()?;
-    find_binary_in_hierarchy(&current_dir, command).await
 }
 
 /// Find the binary of a tool freshly installed into the utx cache: return the

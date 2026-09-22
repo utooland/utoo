@@ -7,8 +7,7 @@
 
 mod exec;
 mod lifecycle;
-mod node_gyp;
 
-pub(crate) use exec::script_failure_details;
-pub use exec::{ScriptExit, ScriptService};
+pub(crate) use exec::{OutputSink, script_failure_details};
+pub use exec::{PreparedTools, ScriptEnvironment, ScriptExit, ScriptService};
 pub use lifecycle::{LifecycleSink, MachineLifecycleOutcome, MissingScript, ScriptOutput};

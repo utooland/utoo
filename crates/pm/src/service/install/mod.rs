@@ -9,6 +9,7 @@ mod materialize;
 pub(crate) mod rebuild;
 mod scheduler;
 mod store;
+pub(crate) mod tools;
 
 use crate::util::cli_enum::ScriptPolicy;
 use anyhow::{Context as _, Result};
@@ -30,7 +31,7 @@ use crate::service::project::lock::{
     resolve_package_spec_details, update_package_json,
 };
 use crate::service::project::resolve_and_save_lock;
-use crate::service::script::ScriptOutput;
+use crate::service::script::{ScriptOutput, ScriptService};
 use crate::util::cli_enum::{OmitType, PackageAction, ReifyMode, SaveType};
 use crate::util::install_progress;
 use crate::util::json::load_package_lock_json_from_path;
@@ -289,6 +290,12 @@ pub struct InstallOptions<'a> {
     pub output: ScriptOutput,
 }
 
+struct MaterializedTool {
+    root: std::path::PathBuf,
+    lock: utoo_ruborist::lock::PackageLock,
+    counts: scheduler::InstallCounts,
+}
+
 pub struct InstallService;
 
 fn global_install_root(prefix: Option<&str>, name: &str) -> Result<std::path::PathBuf> {
@@ -459,11 +466,27 @@ impl InstallService {
     /// dependency lifecycle hooks (`preinstall`/`install`/`postinstall`) but not
     /// project-only hooks (`prepare`/`prepublish`) or root dev dependencies.
     pub async fn install_global_package(
+        executor: &ScriptService,
         npm_spec: &str,
         prefix: Option<&str>,
         scripts: ScriptPolicy,
         output: ScriptOutput,
     ) -> Result<()> {
+        let installed = Self::materialize_global_package(npm_spec, prefix).await?;
+        Self::finish_global_package(
+            installed,
+            prefix,
+            scripts,
+            output,
+            &executor.with_prefix(prefix),
+        )
+        .await
+    }
+
+    async fn materialize_global_package(
+        npm_spec: &str,
+        prefix: Option<&str>,
+    ) -> Result<MaterializedTool> {
         print_proxy_env_hint_once();
         install_progress::start_install_run();
         let resolved = resolve_package_spec_details(npm_spec).await?;
@@ -564,6 +587,25 @@ impl InstallService {
         let counts = scheduler_handle.shutdown().await;
         let lock = install_result?;
 
+        Ok(MaterializedTool {
+            root: root_path,
+            lock,
+            counts,
+        })
+    }
+
+    async fn finish_global_package(
+        installed: MaterializedTool,
+        prefix: Option<&str>,
+        scripts: ScriptPolicy,
+        output: ScriptOutput,
+        executor: &ScriptService,
+    ) -> Result<()> {
+        let MaterializedTool {
+            root: root_path,
+            lock,
+            counts,
+        } = installed;
         // Dependency lifecycle only: the shared queue knows only
         // preinstall/install/postinstall. Add the root package explicitly
         // because roots are not dependency entries in the lock, but leave its
@@ -578,7 +620,7 @@ impl InstallService {
         packages.push((root_lifecycle, false));
         if !packages.is_empty() {
             let queues = PackageService::create_execution_queues_with_options(packages, scripts)?;
-            PackageService::execute_queues_with_options(queues, scripts, output).await?;
+            PackageService::execute_queues_with_options(executor, queues, scripts, output).await?;
         }
 
         // Link the tool's own bin into the global bin dir.

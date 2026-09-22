@@ -143,6 +143,7 @@ async fn publish_one(
         .unwrap_or_else(get_registry);
     let package_info = PackageInfo::from_package_json(package_root, &pkg)?;
     let result = publish_service::publish(&PublishOptions {
+        executor: &crate::service::project::context::Context::scripts(package_root).await,
         package_info: &package_info,
         registry: &registry,
         tag: &tag,

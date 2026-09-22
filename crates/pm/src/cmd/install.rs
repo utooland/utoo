@@ -455,8 +455,14 @@ pub async fn install_global_package(
     let prefix = resolve_global_prefix(prefix).await;
 
     // Dispatch to service
-    InstallService::install_global_package(npm_spec, prefix.as_deref(), scripts, script_output())
-        .await
+    InstallService::install_global_package(
+        &crate::service::project::context::Context::scripts(&std::env::current_dir()?).await,
+        npm_spec,
+        prefix.as_deref(),
+        scripts,
+        script_output(),
+    )
+    .await
 }
 
 pub(super) fn script_output() -> ScriptOutput {

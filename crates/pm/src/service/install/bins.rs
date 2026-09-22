@@ -1,13 +1,9 @@
 //! Executable normalization and package bin links.
-use crate::{
-    fs,
-    model::package::PackageInfo,
-    util::{linker::link, platform_const::PATH_SEPARATOR},
-};
+use crate::{fs, model::package::PackageInfo, util::linker::link};
 use anyhow::{Context, Result};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::{env, path::Path};
+use std::path::Path;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub async fn link_to_target(package: &PackageInfo, target_bin_dir: &Path) -> Result<()> {
@@ -34,16 +30,6 @@ pub async fn link_to_target(package: &PackageInfo, target_bin_dir: &Path) -> Res
 
 pub async fn link_to_global(package: &PackageInfo, global_bin_dir: &Path) -> Result<()> {
     link_to_target(package, global_bin_dir).await?;
-
-    // Update PATH environment variable for current process
-    if let Ok(current_path) = env::var("PATH") {
-        let global_bin_str = global_bin_dir.to_string_lossy().into_owned();
-        if !current_path.contains(&global_bin_str) {
-            let new_path = format!("{global_bin_str}{PATH_SEPARATOR}{current_path}");
-            unsafe { env::set_var("PATH", new_path) };
-            tracing::debug!("Updated PATH environment variable");
-        }
-    }
 
     Ok(())
 }
