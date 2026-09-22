@@ -62,14 +62,17 @@ enum Value<V> {
 /// A concurrent map that ensures each key's work is done exactly once.
 ///
 /// # Example
-/// ```ignore
-/// let map: OnceMap<String, Vec<u8>> = OnceMap::new();
+/// ```no_run
+/// use utoo_ruborist::util::oncemap::OnceMap;
 ///
-/// // Multiple tasks can call get_or_try_init concurrently.
-/// // Only one will actually fetch, others will wait.
-/// let result = map.get_or_try_init("react", || async {
-///     fetch_package("react").await
-/// }).await;
+/// # async fn example() -> Result<(), std::io::Error> {
+/// let map: OnceMap<String, Vec<u8>> = OnceMap::new();
+/// // Only one caller reads the package; concurrent callers await its result.
+/// let bytes = map.get_or_try_init("react".to_owned(), || async {
+///     tokio_fs_ext::read("react.tgz").await
+/// }).await?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct OnceMap<K, V> {
     map: DashMap<K, Value<V>>,

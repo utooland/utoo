@@ -28,18 +28,29 @@
 //!
 //! # Usage
 //!
-//! ```ignore
-//! use utoo_ruborist::service::{build_deps, BuildDepsOptions};
+//! ```no_run
+//! use std::path::PathBuf;
+//! use utoo_ruborist::builder::PeerDeps;
+//! use utoo_ruborist::progress::NoopReceiver;
+//! use utoo_ruborist::service::{build_deps, read_root_manifest, BuildDepsOptions, NoopGlob, UnifiedRegistry};
 //!
-//! let package_lock = build_deps(BuildDepsOptions {
-//!     cwd: PathBuf::from("."),
-//!     registry_url: "https://registry.npmmirror.com".to_string(),
+//! # async fn example() -> anyhow::Result<()> {
+//! let cwd = PathBuf::from("/project");
+//! let (cwd, package) = read_root_manifest(&cwd, NoopGlob).await?;
+//! let lock = build_deps(BuildDepsOptions {
+//!     cwd,
+//!     registry: UnifiedRegistry::builder().registry("https://registry.npmjs.org").build(),
 //!     cache_dir: None,
 //!     concurrency: 20,
 //!     peer_deps: PeerDeps::Include,
-//!     glob: my_glob,
-//!     receiver: my_receiver,
-//! }).await?;
+//!     glob: NoopGlob, // Supply a Glob implementation for projects with workspaces.
+//!     receiver: NoopReceiver,
+//!     catalogs: Default::default(),
+//!     baseline: None, // Supply a previously read PackageLock to reuse its layout.
+//! }, package).await?;
+//! let json = serde_json::to_string_pretty(&lock)?;
+//! # Ok(())
+//! # }
 //! ```
 
 mod api;

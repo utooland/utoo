@@ -54,11 +54,12 @@ mod provider;
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Using builder pattern
+/// ```
+/// use std::sync::Arc;
+/// use utoo_ruborist::service::{NoopStore, UnifiedRegistry};
 /// let registry = UnifiedRegistry::builder()
-///     .registry("https://registry.npmmirror.com")
-///     .store(Arc::new(MyManifestStore::new()))
+///     .registry("https://registry.npmjs.org")
+///     .store(Arc::new(NoopStore))
 ///     .build();
 /// ```
 pub struct UnifiedRegistry {
