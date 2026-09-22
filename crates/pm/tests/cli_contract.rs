@@ -1166,3 +1166,50 @@ fn if_present_skips_missing_main_and_hooks_in_human_and_json_modes() {
         }
     }
 }
+
+#[test]
+fn internal_update_and_pinned_child_suppress_force_update() {
+    let mut registry = mockito::Server::new();
+    let latest = registry.mock("GET", "/utoo/latest").expect(0).create();
+    for marker in ["UTOO_INTERNAL_UPDATE", "UTOO_SELF_PIN_VERSION"] {
+        let project = tempdir().unwrap();
+        fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let mut cmd = utoo();
+        cmd.current_dir(project.path())
+            .env("CI", "1")
+            .env("UTOO_SELF_PIN", "0")
+            .env("UTOO_FORCE_UPDATE", "1")
+            .env(marker, "1")
+            .env("HOME", project.path())
+            .env("USERPROFILE", project.path())
+            .env("XDG_CONFIG_HOME", project.path())
+            .args([
+                "--registry",
+                &registry.url(),
+                "run",
+                "absent",
+                "--if-present",
+            ]);
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            cmd.env_remove(key);
+        }
+        let output = cmd.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    latest.assert();
+}
