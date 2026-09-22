@@ -298,11 +298,13 @@ fn clone_sync(src: &Path, dst: &Path, layout: CacheLayout, policy: ClonePolicy) 
 /// dedup and counting.
 pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
     let lock_path = sibling_lock_path(req.target, ".clone.lock")?;
-    let _lock = lock_exclusive_sync(&lock_path)?;
+    let mut lock = lock_exclusive_sync(&lock_path)?;
 
     if req.target.try_exists()? {
         if validate_name_version_sync(req.target, req.name, req.version)
-            && std::fs::read_to_string(&lock_path).is_ok_and(|source| source == req.source_key)
+            && lock
+                .read_contents()
+                .is_ok_and(|source| source == req.source_key)
         {
             return Ok(false);
         }
@@ -316,14 +318,14 @@ pub fn clone_package_sync(req: &PackageClone<'_>) -> Result<bool> {
     }
     // Keep provenance in the existing per-target lock file, not in shared
     // package contents. A partial write is a cache miss on the next attempt.
-    std::fs::write(&lock_path, b"")?;
+    lock.write_contents(b"")?;
     clone_sync(
         req.cache,
         req.target,
         CacheLayout::from_tarball_url(req.tarball_url),
         req.policy,
     )?;
-    std::fs::write(&lock_path, req.source_key)?;
+    lock.write_contents(req.source_key.as_bytes())?;
     Ok(true)
 }
 
