@@ -122,6 +122,7 @@ pub async fn handoff_if_needed(
             executable.display()
         );
     }
+    crate::util::manifest_store::finish_pending_writers().await;
     handoff(&executable, args, &pin.version, lock)
 }
 

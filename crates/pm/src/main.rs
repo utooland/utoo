@@ -60,7 +60,11 @@ fn main() {
         .worker_threads(worker_threads)
         .build()
         .expect("failed to build tokio runtime")
-        .block_on(cli_future());
+        .block_on(async {
+            let result = cli_future().await;
+            util::manifest_store::finish_pending_writers().await;
+            result
+        });
 
     if let Err(e) = result {
         if let Some(exit) = e.downcast_ref::<cmd::CommandExit>() {
