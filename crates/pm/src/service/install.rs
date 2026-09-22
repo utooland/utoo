@@ -26,6 +26,7 @@ use crate::util::linker::link;
 use crate::util::logger::{
     PROGRESS_BAR, finish_progress_bar, log_progress, print_install_counts, start_progress_bar,
 };
+use crate::util::package_cache::PackageSource;
 use crate::util::proxy_env::print_proxy_env_hint_once;
 use utoo_ruborist::builder::DevDeps;
 use utoo_ruborist::compat::{is_cpu_compatible, is_os_compatible};
@@ -226,15 +227,16 @@ async fn reify_packages(
                     // Check if this is an optional dependency
                     let is_optional = package.is_optional();
 
+                    let source = PackageSource {
+                        name: name.clone(),
+                        version,
+                        tarball_url: resolved,
+                        integrity: package.integrity.clone(),
+                        shasum: None,
+                    };
                     clone_tasks.push(async move {
                         if let Err(e) = scheduler
-                            .ensure_clone(
-                                name.clone(),
-                                version,
-                                resolved,
-                                target_path.clone(),
-                                policy,
-                            )
+                            .ensure_clone(source, target_path.clone(), policy)
                             .await
                         {
                             if is_optional {
@@ -415,7 +417,7 @@ impl InstallService {
                         name: &name,
                         version,
                         tarball_url: Some(resolved),
-                        integrity: None,
+                        integrity: package.integrity.as_deref(),
                         os: package.os.as_ref(),
                         cpu: package.cpu.as_ref(),
                     });
@@ -497,9 +499,13 @@ impl InstallService {
 
             scheduler
                 .ensure_clone(
-                    resolved.name.clone(),
-                    resolved.version.clone(),
-                    resolved.tarball_url.clone(),
+                    PackageSource {
+                        name: resolved.name.clone(),
+                        version: resolved.version.clone(),
+                        tarball_url: resolved.tarball_url.clone(),
+                        integrity: resolved.integrity.clone(),
+                        shasum: resolved.shasum.clone(),
+                    },
                     root_path.clone(),
                     ClonePolicy::Private,
                 )
