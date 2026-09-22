@@ -50,7 +50,13 @@ pub fn process_dependency_with_resolved(
     resolved: &ResolvedPackage,
     config: &BuildDepsConfig,
 ) -> ProcessResult {
-    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+    // Other edges in this level may have filled a compatible slot while this
+    // manifest was being fetched. Preserve ordinary range/alias reuse; only
+    // conditional or source overrides need the exact resolved identity below.
+    if let Some(reused) = try_reuse_dependency(graph, node_index, edge_info) {
+        return reused;
+    }
+    match graph.find_resolved_node(node_index, &edge_info.name, &resolved.manifest) {
         FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
             place_new_node(graph, conflict_parent, edge_info, resolved, config)
@@ -114,4 +120,53 @@ where
     let resolved = ResolvedPackage::from_manifest(edge.name.clone(), manifest);
     receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
     process_dependency_with_resolved(graph, parent, edge, &resolved, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::graph::PackageNode;
+    use crate::model::node::EdgeType;
+    use crate::model::package_json::PackageJson;
+    use std::path::PathBuf;
+
+    #[test]
+    fn fetched_manifest_reuses_a_compatible_slot_including_aliases() {
+        for real_name in ["ms", "raw-body"] {
+            let mut graph = DependencyGraph::from_package_json(
+                PathBuf::from("/project"),
+                PackageJson::new("root", "1.0.0"),
+            );
+            let root = graph.root_index;
+            let existing = graph.add_node(PackageNode::from_version_manifest(
+                "ms".into(),
+                PathBuf::from("/project/node_modules/ms"),
+                Arc::new(CoreVersionManifest {
+                    name: real_name.into(),
+                    version: "2.1.3".into(),
+                    ..Default::default()
+                }),
+            ));
+            graph.add_physical_edge(root, existing);
+            let edge = DependencyEdgeInfo {
+                edge_id: graph.add_dependency_edge(root, "ms", "^2.1.3", EdgeType::Prod),
+                name: "ms".into(),
+                spec: "^2.1.3".into(),
+                edge_type: EdgeType::Prod,
+            };
+            let resolved = ResolvedPackage::from_manifest(
+                "ms",
+                Arc::new(CoreVersionManifest {
+                    name: "ms".into(),
+                    version: "2.1.4".into(),
+                    ..Default::default()
+                }),
+            );
+            assert!(matches!(
+                process_dependency_with_resolved(&mut graph, root, &edge, &resolved, &BuildDepsConfig::default()),
+                ProcessResult::Reused(index) if index == existing
+            ));
+            assert_eq!(graph.graph.node_count(), 2);
+        }
+    }
 }

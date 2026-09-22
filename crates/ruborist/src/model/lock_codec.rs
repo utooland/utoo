@@ -26,6 +26,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 
 use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::manifest::{CoreVersionManifest, Dist};
@@ -115,6 +116,7 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
         let node = PackageNode::from_version_manifest(slot_name, root_path.join(&key), manifest);
         let index = graph.add_node(node);
         graph.add_physical_edge(parent_index, index);
+        graph.seeded_nodes.insert(index);
         path_index.insert(key.clone(), index);
         seeded.push((key, index, pkg));
     }
@@ -125,6 +127,45 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
     for (key, index, pkg) in seeded {
         seed_resolved_edges(graph, &key, index, pkg, &path_index);
     }
+}
+
+/// Check a lock against the root's current override policy without changing
+/// the lock format. Conditional/source rules which cannot be proven from a
+/// pinned target force resolution. Workspace dependency maps are checked by
+/// the caller; their recorded physical context participates in rule matching.
+pub fn lock_satisfies_overrides(
+    lock: &PackageLock,
+    root: &crate::model::package_json::PackageJson,
+    root_path: &Path,
+) -> bool {
+    let mut graph = DependencyGraph::from_package_json(root_path.to_path_buf(), root.clone());
+    lock_to_graph(&mut graph, lock, root_path);
+    let paths = graph
+        .graph
+        .node_indices()
+        .filter_map(|index| {
+            rel_lock_path(&graph.graph[index].path, root_path).map(|path| (path, index))
+        })
+        .collect();
+    if let Some(pkg) = lock.packages.get("") {
+        let root_index = graph.root_index;
+        seed_resolved_edges(&mut graph, "", root_index, pkg, &paths);
+    }
+    graph.graph.edge_references().all(|edge| {
+        let crate::model::graph::GraphEdge::Dependency(dep) = edge.weight() else {
+            return true;
+        };
+        if dep.valid {
+            return true;
+        }
+        // Importer aliases are validated after their transitive edges are
+        // seeded. Recheck those edges now, without mistaking a removed alias
+        // override for a currently declared alias occupying the same slot.
+        let from = edge.source();
+        rel_lock_path(&graph.graph[from].path, root_path)
+            .and_then(|path| resolve_dep_target(&paths, &path, &dep.name))
+            .is_some_and(|target| graph.lock_target_matches(from, &dep.name, &dep.spec, target))
+    })
 }
 
 /// Normalize a lockfile path to its POSIX form (npm lock keys use `/`). Borrows
@@ -163,9 +204,13 @@ fn seed_resolved_edges(
         for (dep_name, dep_spec) in deps.into_iter().flatten() {
             let edge_id = graph.add_dependency_edge(index, dep_name, dep_spec, edge_type);
             if let Some(target) = resolve_dep_target(path_index, path, dep_name) {
-                graph.mark_dependency_resolved(edge_id, target);
+                if graph.lock_target_matches(index, dep_name, dep_spec, target) {
+                    graph.mark_dependency_resolved(edge_id, target);
+                }
             } else {
-                tracing::debug!("seed: unresolved {dep_name} from {path:?}");
+                // Preserve the lock's skipped optional/peer/link edge. Only
+                // invalidated targets enter resolution again.
+                graph.mark_dependency_skipped(edge_id);
             }
         }
     }
@@ -317,6 +362,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn override_policy_invalidates_only_affected_locked_edges() {
+        let root_path = PathBuf::from("/project");
+        let mut root = PackageJson::new("root", "1.0.0");
+        root.dependencies = Some(HashMap::from([
+            ("a".into(), "1.0.0".into()),
+            ("c".into(), "1.0.0".into()),
+        ]));
+        let lock = PackageLock::new(
+            "root",
+            "1.0.0",
+            HashMap::from([
+                ("".into(), root_entry(&[("a", "1.0.0"), ("c", "1.0.0")])),
+                ("node_modules/a".into(), lock_entry("1.0.0", &[("b", "^1")])),
+                ("node_modules/b".into(), lock_entry("1.0.0", &[])),
+                ("node_modules/c".into(), lock_entry("1.0.0", &[])),
+            ]),
+        );
+        assert!(lock_satisfies_overrides(&lock, &root, &root_path));
+        for rule in [
+            serde_json::json!({"b":"2.0.0"}),
+            serde_json::json!({"a":{"b":"2.0.0"}}),
+            serde_json::json!({"b@^1":"2.0.0"}),
+        ] {
+            root.overrides = Some(rule);
+            assert!(!lock_satisfies_overrides(&lock, &root, &root_path));
+            let mut graph = DependencyGraph::from_package_json(root_path.clone(), root.clone());
+            lock_to_graph(&mut graph, &lock, &root_path);
+            let a = graph
+                .get_physical_children(graph.root_index)
+                .into_iter()
+                .find(|&index| graph.graph[index].name == "a")
+                .unwrap();
+            assert!(
+                graph
+                    .get_dependency_edges(a)
+                    .iter()
+                    .any(|(_, dep)| dep.name == "b" && !dep.valid)
+            );
+            assert!(matches!(
+                graph.find_compatible_node(graph.root_index, "c", "1.0.0"),
+                FindResult::Reuse(_)
+            ));
+        }
+        root.overrides = None;
+        let mut overridden = lock;
+        overridden
+            .packages
+            .get_mut("node_modules/b")
+            .unwrap()
+            .version = Some("2.0.0".into());
+        assert!(
+            !lock_satisfies_overrides(&overridden, &root, &root_path),
+            "removed rule must restore the original range"
+        );
+    }
+
+    #[test]
     fn test_parent_lock_path() {
         assert_eq!(parent_lock_path("node_modules/lodash"), "");
         assert_eq!(
@@ -372,6 +474,79 @@ mod tests {
             ),
             ..LockPackage::default()
         }
+    }
+
+    #[test]
+    fn declared_alias_keeps_semver_slot_reuse_after_lock_import() {
+        let root_path = PathBuf::from("/proj");
+        let deps = [("ms", "npm:raw-body@2.1.3"), ("debug", "^4")];
+        let mut root = PackageJson::new("root", "1.0.0");
+        root.dependencies = root_entry(&deps).dependencies;
+        let mut alias = lock_entry("2.1.3", &[]);
+        alias.name = Some("raw-body".into());
+        let lock = PackageLock::new(
+            "root",
+            "1.0.0",
+            HashMap::from([
+                ("".into(), root_entry(&deps)),
+                ("node_modules/ms".into(), alias),
+                (
+                    "node_modules/debug".into(),
+                    lock_entry("4.4.3", &[("ms", "^2.1.3")]),
+                ),
+            ]),
+        );
+        assert!(lock_satisfies_overrides(&lock, &root, &root_path));
+        let (graph, _) = seed_and_settle(&deps, &lock);
+        let find = |name| {
+            graph
+                .get_physical_children(graph.root_index)
+                .into_iter()
+                .find(|&index| graph.graph[index].name == name)
+                .unwrap()
+        };
+        let alias = find("ms");
+        let debug = find("debug");
+        assert_eq!(
+            graph.find_compatible_node(debug, "ms", "^2.1.3"),
+            FindResult::Reuse(alias)
+        );
+        assert!(!matches!(
+            graph.find_compatible_node(debug, "ms", "^3"),
+            FindResult::Reuse(_)
+        ));
+        assert!(!matches!(
+            graph.find_compatible_node(debug, "ms", "npm:ms@2.1.3"),
+            FindResult::Reuse(_)
+        ));
+    }
+
+    #[test]
+    fn removed_alias_override_does_not_validate_an_old_slot() {
+        let root_path = PathBuf::from("/proj");
+        let deps = [("debug", "^4")];
+        let mut root = PackageJson::new("root", "1.0.0");
+        root.dependencies = root_entry(&deps).dependencies;
+        let mut old_override = lock_entry("2.1.3", &[]);
+        old_override.name = Some("raw-body".into());
+        let lock = PackageLock::new(
+            "root",
+            "1.0.0",
+            HashMap::from([
+                ("".into(), root_entry(&deps)),
+                ("node_modules/ms".into(), old_override),
+                (
+                    "node_modules/debug".into(),
+                    lock_entry("4.4.3", &[("ms", "^2.1.3")]),
+                ),
+            ]),
+        );
+        root.overrides = Some(serde_json::json!({"ms": "npm:raw-body@2.1.3"}));
+        assert!(lock_satisfies_overrides(&lock, &root, &root_path));
+        root.overrides = None;
+        assert!(!lock_satisfies_overrides(&lock, &root, &root_path));
+        root.overrides = Some(serde_json::json!({"ms": "npm:different-package@2.1.3"}));
+        assert!(!lock_satisfies_overrides(&lock, &root, &root_path));
     }
 
     /// Build a graph seeded from `lock`, then settle the root's live importer
@@ -537,9 +712,9 @@ mod tests {
         assert!(
             matches!(
                 graph.find_compatible_node(root, "a", "^2.0.0"),
-                FindResult::Conflict(_)
+                FindResult::New(_)
             ),
-            "bumped spec must conflict with the seeded version"
+            "an unreferenced seeded slot can be replaced by the bumped version"
         );
 
         // Stand in for the BFS placing a@2.0.0 at the root slot.
