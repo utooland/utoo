@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
@@ -63,28 +64,29 @@ enum CachedRelease {
     Invalid(anyhow::Error),
 }
 
-/// Switch dependency-changing project commands to the exact Utoo version in
-/// the nearest ancestor `package.json` containing `packageManager: "utoo@…"`.
-///
-/// A successful handoff replaces the current process on Unix and exits with
-/// the child status on Windows, so this only returns when no switch is needed
-/// or provisioning fails.
-pub async fn handoff_if_needed(
+pub(crate) struct PreparedHandoff {
+    pub executable: PathBuf,
+    pub version: String,
+    pub lock: Arc<crate::util::process_lock::ProcessLock>,
+}
+
+/// Prepare the exact pinned release. Process replacement and exit policy are
+/// owned by the CLI after its asynchronous work has drained.
+pub async fn prepare_handoff(
     cwd: &Path,
-    args: &[String],
     registry: Option<String>,
     cache_dir: Option<String>,
-) -> Result<()> {
+) -> Result<Option<PreparedHandoff>> {
     if self_pin_disabled() {
-        return Ok(());
+        return Ok(None);
     }
     let Some(pin) = find_project_pin(cwd).await? else {
-        return Ok(());
+        return Ok(None);
     };
     validate_exact_version(&pin)?;
     if pin.version == APP_VERSION || handoff_version().as_deref() == Some(pin.version.as_str()) {
         SELF_PIN_ACTIVE.store(true, Ordering::Relaxed);
-        return Ok(());
+        return Ok(None);
     }
 
     // Resolve the configured cache before network initialization so a warm pin
@@ -95,12 +97,14 @@ pub async fn handoff_if_needed(
     let target = platform_target(std::env::consts::OS, std::env::consts::ARCH)?;
     let cache_path = release_cache_path_for(&target, &pin.version)?;
     let lock_path = sibling_lock_path(&cache_path, ".self-pin.lock")?;
-    let lock = lock_exclusive(&lock_path).await?;
-    let executable = match cached_release_at(&cache_path, &target, &pin.version).await? {
+    let lock = Arc::new(lock_exclusive(&lock_path).await?);
+    let executable = match cached_release_at(&cache_path, &target, &pin.version, Some(lock.clone()))
+        .await?
+    {
         CachedRelease::Valid(executable) => executable,
         CachedRelease::Missing => {
             init_registry(registry).await?;
-            provision_release_at(&cache_path, &target, &pin.version).await?
+            provision_release_at(&cache_path, &target, &pin.version, lock.clone()).await?
         }
         CachedRelease::Invalid(validation_error) => {
             let recovery_context = format!(
@@ -110,20 +114,16 @@ pub async fn handoff_if_needed(
             init_registry(registry)
                 .await
                 .context(recovery_context.clone())?;
-            provision_release_at(&cache_path, &target, &pin.version)
+            provision_release_at(&cache_path, &target, &pin.version, lock.clone())
                 .await
                 .context(recovery_context)?
         }
     };
-    if !crate::util::invocation::quiet() {
-        eprintln!(
-            "utoo: using pinned utoo@{} from {}",
-            pin.version,
-            executable.display()
-        );
-    }
-    crate::util::manifest_store::finish_pending_writers().await;
-    handoff(&executable, args, &pin.version, lock)
+    Ok(Some(PreparedHandoff {
+        executable,
+        version: pin.version,
+        lock,
+    }))
 }
 
 pub fn is_active() -> bool {
@@ -233,12 +233,13 @@ async fn cached_release_at(
     cache_path: &Path,
     target: &PlatformTarget,
     version: &str,
+    resource: Option<Arc<dyn Send + Sync>>,
 ) -> Result<CachedRelease> {
     if crate::fs::try_exists(cache_path.join("_resolved")).await?
         && crate::fs::try_exists(cache_path.join("_utoo-self-pin.json")).await?
     {
         return Ok(
-            match validate_cached_release(cache_path, target, version).await {
+            match validate_cached_release(cache_path, target, version, resource).await {
                 Ok(executable) => CachedRelease::Valid(executable),
                 Err(error) => CachedRelease::Invalid(error),
             },
@@ -251,6 +252,7 @@ async fn provision_release_at(
     cache_path: &Path,
     target: &PlatformTarget,
     version: &str,
+    resource: Arc<dyn Send + Sync>,
 ) -> Result<PathBuf> {
     if !crate::util::invocation::quiet() {
         eprintln!("utoo: provisioning pinned utoo@{version}...");
@@ -288,8 +290,8 @@ async fn provision_release_at(
     extract_and_write(archive, cache_path)
         .await
         .with_context(|| format!("Failed to cache pinned release {spec}"))?;
-    write_cache_metadata(cache_path, target, version).await?;
-    validate_cached_release(cache_path, target, version).await
+    write_cache_metadata(cache_path, target, version, Some(resource.clone())).await?;
+    validate_cached_release(cache_path, target, version, Some(resource)).await
 }
 
 fn verify_release_archive(
@@ -310,6 +312,7 @@ async fn validate_cached_release(
     cache_path: &Path,
     target: &PlatformTarget,
     version: &str,
+    resource: Option<Arc<dyn Send + Sync>>,
 ) -> Result<PathBuf> {
     let package_root = cache_path.join("package");
     let manifest_path = package_root.join("package.json");
@@ -340,7 +343,7 @@ async fn validate_cached_release(
     let executable_bytes = crate::fs::read(&executable).await?;
     verify_integrity(&executable_bytes, &metadata.executable_integrity)
         .with_context(|| format!("Pinned executable is corrupt: {}", executable.display()))?;
-    validate_executable_version(&executable, version).await?;
+    validate_executable_version(&executable, version, resource).await?;
     Ok(executable)
 }
 
@@ -348,9 +351,10 @@ async fn write_cache_metadata(
     cache_path: &Path,
     target: &PlatformTarget,
     version: &str,
+    resource: Option<Arc<dyn Send + Sync>>,
 ) -> Result<()> {
     let executable = release_executable(cache_path, target).await?;
-    validate_executable_version(&executable, version).await?;
+    validate_executable_version(&executable, version, resource).await?;
     let metadata = CacheMetadata {
         executable_integrity: compute_integrity(&crate::fs::read(&executable).await?),
     };
@@ -373,14 +377,22 @@ async fn release_executable(cache_path: &Path, target: &PlatformTarget) -> Resul
     Ok(executable)
 }
 
-async fn validate_executable_version(executable: &Path, version: &str) -> Result<()> {
-    let output = tokio::process::Command::new(executable)
+async fn validate_executable_version(
+    executable: &Path,
+    version: &str,
+    resource: Option<Arc<dyn Send + Sync>>,
+) -> Result<()> {
+    let mut command = Command::new(executable);
+    command
         .arg("--version")
         .env(HANDOFF_ENV, version)
-        .env_remove("UTOO_MANAGED_PACKAGE_ROOT")
-        .output()
-        .await
-        .with_context(|| format!("Failed to inspect pinned Utoo at {}", executable.display()))?;
+        .env_remove("UTOO_MANAGED_PACKAGE_ROOT");
+    let output =
+        crate::service::script::ScriptService::run_captured_with_resource(command, resource)
+            .await
+            .with_context(|| {
+                format!("Failed to inspect pinned Utoo at {}", executable.display())
+            })?;
     if !output.status.success() {
         bail!(
             "Pinned Utoo at {} failed its version check with {}",
@@ -396,46 +408,6 @@ async fn validate_executable_version(executable: &Path, version: &str) -> Result
         );
     }
     Ok(())
-}
-
-#[cfg(unix)]
-fn handoff(
-    executable: &Path,
-    args: &[String],
-    version: &str,
-    _lock: crate::util::process_lock::ProcessLock,
-) -> Result<()> {
-    use std::os::unix::process::CommandExt;
-
-    let error = Command::new(executable)
-        .args(args)
-        .env(HANDOFF_ENV, version)
-        .env_remove("UTOO_MANAGED_PACKAGE_ROOT")
-        .exec();
-    Err(error).with_context(|| format!("Failed to start pinned Utoo at {}", executable.display()))
-}
-
-#[cfg(windows)]
-fn handoff(
-    executable: &Path,
-    args: &[String],
-    version: &str,
-    lock: crate::util::process_lock::ProcessLock,
-) -> Result<()> {
-    let mut child = Command::new(executable)
-        .args(args)
-        .env(HANDOFF_ENV, version)
-        .env_remove("UTOO_MANAGED_PACKAGE_ROOT")
-        .spawn()
-        .with_context(|| format!("Failed to start pinned Utoo at {}", executable.display()))?;
-    // Windows cannot replace the current process. Keep the slot stable until
-    // CreateProcess has opened the executable, then release it before waiting
-    // so the pinned child can run `utoo clean` without deadlocking its parent.
-    drop(lock);
-    let status = child
-        .wait()
-        .with_context(|| format!("Failed to wait for pinned Utoo at {}", executable.display()))?;
-    std::process::exit(status.code().unwrap_or(1));
 }
 
 #[cfg(test)]
@@ -597,7 +569,7 @@ mod tests {
         std::fs::write(cache_path.join("_utoo-self-pin.json"), b"not json").unwrap();
 
         assert!(matches!(
-            cached_release_at(&cache_path, &target, "1.1.8")
+            cached_release_at(&cache_path, &target, "1.1.8", None)
                 .await
                 .unwrap(),
             CachedRelease::Invalid(_)
@@ -629,7 +601,7 @@ mod tests {
         .unwrap();
 
         assert!(matches!(
-            cached_release_at(&cache_path, &target, "1.1.8")
+            cached_release_at(&cache_path, &target, "1.1.8", None)
                 .await
                 .unwrap(),
             CachedRelease::Invalid(_)

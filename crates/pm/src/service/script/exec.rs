@@ -352,6 +352,14 @@ async fn run_owned(
             .stderr(std::process::Stdio::inherit());
     }
     let child = cmd.spawn().context("Failed to spawn script")?;
+    wait_owned(child, sink, resources).await
+}
+
+async fn wait_owned(
+    child: tokio::process::Child,
+    sink: Option<OutputSink>,
+    resources: Vec<Arc<dyn Send + Sync>>,
+) -> Result<std::process::Output> {
     let (owner, cancelled) = tokio::sync::oneshot::channel::<()>();
     let runner = utoo_ruborist::util::task::spawn(async move {
         let mut running = RunningChild {
@@ -581,6 +589,20 @@ impl ScriptService {
         sink: Option<&OutputSink>,
     ) -> Result<std::process::Output> {
         run_owned(cmd, true, sink.cloned(), Vec::new()).await
+    }
+
+    pub(crate) async fn run_captured_with_resource(
+        cmd: Command,
+        resource: Option<Arc<dyn Send + Sync>>,
+    ) -> Result<std::process::Output> {
+        run_owned(cmd, true, None, resource.into_iter().collect()).await
+    }
+
+    #[cfg(windows)]
+    pub(crate) async fn wait_inherited(
+        child: tokio::process::Child,
+    ) -> Result<std::process::ExitStatus> {
+        Ok(wait_owned(child, None, Vec::new()).await?.status)
     }
 
     async fn collect_bin_paths(package: &PackageInfo) -> Result<Vec<PathBuf>> {
