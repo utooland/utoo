@@ -44,6 +44,7 @@ use crate::util::integrity::compute_shasum;
 
 /// Options for publishing a package, resolved by the cmd layer.
 pub struct PublishOptions<'a> {
+    pub executor: &'a ScriptService,
     pub package_info: &'a PackageInfo,
     pub registry: &'a str,
     pub tag: &'a str,
@@ -80,7 +81,8 @@ pub enum WebAuth {
 
 pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
     // Run prepublishOnly lifecycle script
-    ScriptService::execute_script(
+    crate::service::install::tools::execute_hook(
+        opts.executor,
         opts.package_info,
         LifecycleHook::PrepublishOnly,
         opts.script_output,
@@ -89,7 +91,8 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
     .await?;
 
     // Always pack in memory — dry-run only skips the registry PUT.
-    let pack_result = pm_pack::pack(&opts.package_info.path, opts.script_output).await?;
+    let pack_result =
+        pm_pack::pack(opts.executor, &opts.package_info.path, opts.script_output).await?;
 
     let tarball_data = &pack_result.tarball_data;
     let shasum = compute_shasum(tarball_data);
@@ -184,14 +187,16 @@ pub async fn publish(opts: &PublishOptions<'_>) -> Result<PublishOutcome> {
         registry: opts.registry.to_string(),
     };
     let lifecycle_result = async {
-        ScriptService::execute_script(
+        crate::service::install::tools::execute_hook(
+            opts.executor,
             opts.package_info,
             LifecycleHook::Publish,
             opts.script_output,
             None,
         )
         .await?;
-        ScriptService::execute_script(
+        crate::service::install::tools::execute_hook(
+            opts.executor,
             opts.package_info,
             LifecycleHook::Postpublish,
             opts.script_output,

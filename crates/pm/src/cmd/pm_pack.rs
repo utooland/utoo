@@ -23,7 +23,12 @@ pub async fn pack(path: Option<String>, mode: RunMode) -> Result<()> {
     } else {
         ScriptOutput::Verbose
     };
-    let result = pack_service::pack(&package_root, output).await?;
+    let result = pack_service::pack(
+        &crate::service::project::context::Context::scripts(&std::env::current_dir()?).await,
+        &package_root,
+        output,
+    )
+    .await?;
 
     let tarball_path = match mode {
         RunMode::DryRun => None,

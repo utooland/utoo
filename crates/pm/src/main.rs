@@ -398,7 +398,7 @@ async fn async_main() -> Result<()> {
             list_dependencies(&cwd, &package).await?;
         }
         Some(Commands::Execute { command, args }) => {
-            service::execute::execute_package(&command, args).await?;
+            service::execute::execute_package(&std::env::current_dir()?, &command, args).await?;
         }
         Some(Commands::Run {
             script,

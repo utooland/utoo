@@ -13,6 +13,9 @@ use tempfile::tempdir;
 #[path = "cli_contract/sources.rs"]
 mod sources;
 
+#[path = "cli_contract/tools.rs"]
+mod tools;
+
 fn utoo() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_utoo"));
     command.env("NO_UPDATE_NOTIFIER", "1");

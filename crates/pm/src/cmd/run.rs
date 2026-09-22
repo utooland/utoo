@@ -74,7 +74,10 @@ pub async fn run(
                 .await
         }
         ResolvedWorkspaces::Layers { layers, paths } => {
-            ScriptService::run_in_layers(&layers, &paths, &script_name, missing, script_args).await
+            crate::service::project::context::Context::scripts(&updated_cwd)
+                .await
+                .run_in_layers(&layers, &paths, &script_name, missing, script_args)
+                .await
         }
     }
 }
@@ -99,11 +102,9 @@ pub async fn run_fallback(
         let program = parts.next().ok_or_else(|| {
             anyhow::anyhow!("Invalid command alias for '{script_name}': '{configured_command}'")
         })?;
-        let status = tokio::process::Command::new(program)
-            .args(parts)
-            .args(&script_args)
-            .status()
-            .await?;
+        let mut command = std::process::Command::new(program);
+        command.args(parts).args(&script_args);
+        let status = ScriptService::run_inherited(command).await?;
         return Err(super::CommandExit(status.code().unwrap_or(1)).into());
     }
 
@@ -131,8 +132,10 @@ async fn run_machine(
     match resolved {
         ResolvedWorkspaces::Current => {
             let package = PackageInfo::load(root).await?;
-            let outcome =
-                ScriptService::run_lifecycle_machine(&package, script, &args, None, missing).await;
+            let outcome = crate::service::project::context::Context::scripts(root)
+                .await
+                .run_lifecycle_machine(&package, script, &args, None, missing)
+                .await;
             collect_machine_outcome(outcome, &package, None, &mut completed, &mut skipped)?;
         }
         ResolvedWorkspaces::Layers { layers, paths } => {
@@ -144,14 +147,10 @@ async fn run_machine(
                     let args = args.clone();
                     Some(async move {
                         let package = PackageInfo::load(&path).await?;
-                        let outcome = ScriptService::run_lifecycle_machine(
-                            &package,
-                            script,
-                            &args,
-                            Some(&name),
-                            missing,
-                        )
-                        .await;
+                        let outcome = crate::service::project::context::Context::scripts(root)
+                            .await
+                            .run_lifecycle_machine(&package, script, &args, Some(&name), missing)
+                            .await;
                         Ok::<_, anyhow::Error>((name, package, outcome))
                     })
                 }))
@@ -274,7 +273,7 @@ async fn run_custom_machine(name: &str, configured: &str, args: &[String]) -> Re
         .collect::<Vec<_>>()
         .join(" ");
     let started = Instant::now();
-    let output = tokio::process::Command::from(command).output().await;
+    let output = ScriptService::run_captured(command, None).await;
     let execution = match output {
         Ok(output) => ProcessExecution {
             command: full_command,

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::install::InstallService;
 use super::script::ScriptOutput;
@@ -34,6 +34,7 @@ impl PackageManagementService {
     /// The directory is purely an internal addressing key — nothing parses it
     /// back (see `execute.rs`, which only searches under the returned path).
     pub async fn install_package_to_cache(
+        cwd: &Path,
         package_name: &str,
         output: ScriptOutput,
     ) -> Result<PathBuf> {
@@ -54,6 +55,7 @@ impl PackageManagementService {
 
         tracing::debug!("Installing package {name} to cache...");
         InstallService::install_global_package(
+            &crate::service::project::context::Context::scripts(cwd).await,
             package_name,
             Some(package_cache_dir.to_string_lossy().into_owned().as_str()),
             ScriptPolicy::Run,

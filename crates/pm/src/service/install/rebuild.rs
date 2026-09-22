@@ -27,7 +27,13 @@ impl RebuildService {
         if !packages.is_empty() {
             let execution_queues =
                 PackageService::create_execution_queues_with_options(packages, scripts)?;
-            PackageService::execute_queues_with_options(execution_queues, scripts, output).await?;
+            PackageService::execute_queues_with_options(
+                &crate::service::project::context::Context::scripts(root_path).await,
+                execution_queues,
+                scripts,
+                output,
+            )
+            .await?;
         }
 
         // bins_only mode does not execute project or workspace hooks

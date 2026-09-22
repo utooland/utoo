@@ -9,28 +9,33 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn archive(manifest: &Value, marker: &str) -> Vec<u8> {
+    archive_with_files(&[
+        ("package.json", manifest.to_string()),
+        ("marker.txt", marker.to_string()),
+    ])
+}
+
+pub(super) fn archive_with_files(files: &[(&str, String)]) -> Vec<u8> {
     let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
-    for (path, body) in [
-        ("package/package.json", manifest.to_string()),
-        ("package/marker.txt", marker.to_string()),
-    ] {
+    for (path, body) in files {
         let mut header = tar::Header::new_gnu();
         header.set_size(body.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
-        tar.append_data(&mut header, path, body.as_bytes()).unwrap();
+        tar.append_data(&mut header, format!("package/{path}"), body.as_bytes())
+            .unwrap();
     }
     tar.into_inner().unwrap().finish().unwrap()
 }
 
-fn integrity(bytes: &[u8]) -> String {
+pub(super) fn integrity(bytes: &[u8]) -> String {
     format!(
         "sha512-{}",
         base64::engine::general_purpose::STANDARD.encode(Sha512::digest(bytes))
     )
 }
 
-fn command(project: &Path, cache: &Path, registry: &str) -> Command {
+pub(super) fn command(project: &Path, cache: &Path, registry: &str) -> Command {
     let mut cmd = utoo();
     cmd.current_dir(project)
         .env("CI", "1")
@@ -56,7 +61,7 @@ fn command(project: &Path, cache: &Path, registry: &str) -> Command {
     cmd
 }
 
-fn project_at(path: &Path, manifest: Value, packages: Value) {
+pub(super) fn project_at(path: &Path, manifest: Value, packages: Value) {
     fs::create_dir_all(path).unwrap();
     fs::write(path.join("package.json"), manifest.to_string()).unwrap();
     let mut entries = packages.as_object().unwrap().clone();
@@ -88,7 +93,7 @@ fn locked_project(path: &Path, url: &str, digest: Option<&str>, optional: bool) 
     project_at(path, root, json!({"node_modules/fixture": entry}));
 }
 
-fn assert_success(output: &Output) {
+pub(super) fn assert_success(output: &Output) {
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
