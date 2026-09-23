@@ -4,7 +4,7 @@ use super::util::{merge_json_objects, parse_package_spec};
 use serde_json::Value;
 
 /// A single override rule specifying version replacement.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverrideRule {
     /// Package name to override
     pub name: String,

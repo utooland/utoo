@@ -12,6 +12,68 @@ use super::override_rule::OverrideRule;
 use crate::resolver::semver::matches;
 
 impl DependencyGraph {
+    /// Sharing a node also shares its dependency subtree. Each nested rule must
+    /// have the same remaining parent conditions under both paths, including
+    /// rules that only become active further down the subtree.
+    pub(crate) fn has_compatible_descendant_overrides(
+        &self,
+        from: NodeIndex,
+        candidate: NodeIndex,
+    ) -> bool {
+        let Some(overrides) = &self.overrides else {
+            return true;
+        };
+        if self.get_physical_parent(candidate) == Some(from)
+            || overrides.rules.iter().all(|rule| rule.parent.is_none())
+        {
+            return true;
+        }
+
+        let node = &self.graph[candidate];
+        if [
+            node.manifest.dependencies(),
+            node.manifest.optional_dependencies(),
+            node.manifest.peer_dependencies(),
+            node.is_workspace()
+                .then(|| node.manifest.dev_dependencies())
+                .flatten(),
+        ]
+        .into_iter()
+        .flatten()
+        .all(|deps| deps.is_empty())
+        {
+            return true;
+        }
+
+        let existing_chain = self.collect_parent_chain(candidate);
+        let mut requested_chain = self.collect_parent_chain(from);
+        requested_chain.push((node.name.clone(), node.version.clone()));
+
+        overrides.rules.iter().all(|rule| {
+            let mut parents = Vec::new();
+            let mut parent = rule.parent.as_deref();
+            while let Some(rule) = parent {
+                parents.push(rule);
+                parent = rule.parent.as_deref();
+            }
+            parents.reverse();
+
+            let matched_prefix = |chain: &[(String, String)]| {
+                let mut matched = 0;
+                for (name, version) in chain {
+                    if let Some(rule) = parents.get(matched)
+                        && rule.name == *name
+                        && (rule.spec == "*" || matches(&rule.spec, version))
+                    {
+                        matched += 1;
+                    }
+                }
+                matched
+            };
+            matched_prefix(&existing_chain) == matched_prefix(&requested_chain)
+        })
+    }
+
     /// Collect the physical parent chain from a node up to root (excluding root).
     ///
     /// Returns the chain in order from outermost to innermost.
@@ -171,6 +233,7 @@ mod tests {
     use crate::model::graph::{FindResult, PackageNode};
     use crate::model::manifest::CoreVersionManifest;
     use crate::model::package_json::PackageJson;
+    use crate::resolver::reuse::{ReuseResult, find_resolved_node};
 
     fn create_pkg(name: &str, version: &str) -> PackageJson {
         PackageJson::new(name, version)
@@ -182,6 +245,85 @@ mod tests {
             version: version.to_string(),
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn reuse_checks_descendant_override_context_in_both_lookup_paths() {
+        let url = "https://example.com/shared.tgz";
+        for (overrides, can_reuse) in [
+            (
+                json!({ "consumer": { "shared": { "inner": "2.0.0" } } }),
+                false,
+            ),
+            (
+                json!({ "consumer": { "shared": { "bridge": { "inner": "2.0.0" } } } }),
+                false,
+            ),
+            (
+                json!({ "consumer@^2.0.0": { "shared": { "inner": "2.0.0" } } }),
+                true,
+            ),
+            (
+                json!({ "unrelated": { "shared": { "inner": "2.0.0" } } }),
+                true,
+            ),
+            (json!({ "shared": { "inner": "2.0.0" } }), true),
+            (json!({ "inner": "2.0.0" }), true),
+        ] {
+            let pkg = PackageJson::from_value(&json!({
+                "name": "root", "version": "1.0.0", "overrides": overrides
+            }))
+            .unwrap();
+            let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
+            let consumer = graph.add_node(PackageNode::from_version_manifest(
+                "consumer".into(),
+                PathBuf::from("node_modules/consumer"),
+                create_version_manifest("consumer", "1.0.0"),
+            ));
+            graph.add_physical_edge(graph.root_index, consumer);
+            let mut manifest = CoreVersionManifest {
+                name: "shared".into(),
+                version: "1.0.0".into(),
+                dependencies: Some([("inner".into(), "1.0.0".into())].into()),
+                ..Default::default()
+            };
+            manifest.dist.tarball = Some(url.into());
+            let manifest = Arc::new(manifest);
+            let shared = graph.add_node(PackageNode::from_version_manifest(
+                "shared".into(),
+                PathBuf::from("node_modules/shared"),
+                manifest.clone(),
+            ));
+            graph.add_physical_edge(graph.root_index, shared);
+            let expected = if can_reuse {
+                FindResult::Reuse(shared)
+            } else {
+                FindResult::Conflict(consumer)
+            };
+            for spec in [url, "^1.0.0"] {
+                assert_eq!(
+                    graph.find_compatible_node(consumer, "shared", spec),
+                    expected,
+                    "{overrides}"
+                );
+            }
+            let expected = if can_reuse {
+                ReuseResult::Reuse(shared)
+            } else {
+                ReuseResult::Install(consumer)
+            };
+            for spec in [url, "^1.0.0", "latest"] {
+                assert_eq!(
+                    find_resolved_node(&graph, consumer, "shared", spec, &manifest),
+                    expected,
+                    "{overrides}"
+                );
+            }
+            assert_eq!(
+                find_resolved_node(&graph, graph.root_index, "shared", url, &manifest),
+                ReuseResult::Reuse(shared)
+            );
+        }
     }
 
     #[test]

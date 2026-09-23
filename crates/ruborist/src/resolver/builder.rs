@@ -12,13 +12,14 @@
 //! demand (no separate preload phase), overlapping network I/O with graph
 //! construction.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
 
-use crate::model::graph::{DependencyGraph, FindResult, PackageNode};
+use crate::model::graph::{DependencyGraph, PackageNode};
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::EdgeType;
 use crate::model::package_json::PackageJson;
@@ -97,11 +98,12 @@ pub use super::edges::{
 #[cfg(feature = "http-tarball")]
 use super::file::process_file_dep;
 pub use super::node_types::{compute_node_types, update_node_type_from_edge};
+use super::placement::place_resolved_dependency;
 pub use super::placement::process_dependency_with_resolved;
 pub(crate) use super::placement::{
-    chain_err, handle_resolved_registry_manifest, place_new_node, reuse_existing_node,
-    try_reuse_dependency,
+    chain_err, handle_resolved_registry_manifest, reuse_existing_node, try_reuse_dependency,
 };
+use super::reuse::{ResolvedDependency, ReuseResult, find_reusable_node};
 pub use crate::model::node::{DevDeps, PeerDeps};
 
 /// Default number of concurrent manifest fetches for the demand resolver.
@@ -347,11 +349,11 @@ pub async fn process_dependency<R: ManifestProvider>(
     config: &BuildDepsConfig,
 ) -> Result<ProcessResult, ResolveError<R::Error>> {
     // Find installation location
-    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
-        FindResult::Reuse(existing_index) => {
+    match find_reusable_node(graph, node_index, &edge_info.name, &edge_info.spec) {
+        ReuseResult::Reuse(existing_index) => {
             Ok(reuse_existing_node(graph, edge_info, existing_index))
         }
-        FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
+        ReuseResult::Install(conflict_parent) => {
             // Parse spec once and exhaustively route by variant.
             // The exhaustive match ensures the compiler forces a decision for any
             // new PackageSpec variant — no silent fall-through to the wrong resolver.
@@ -413,7 +415,7 @@ pub async fn process_dependency<R: ManifestProvider>(
                     }
                     #[cfg(not(feature = "http-tarball"))]
                     {
-                        let _ = path;
+                        let _ = (path, conflict_parent);
                         return Err(ResolveError::Unsupported {
                             spec: edge_info.spec.clone(),
                             reason: "file:/link:/portal: deps require the 'http-tarball' feature",
@@ -474,16 +476,15 @@ pub async fn process_dependency<R: ManifestProvider>(
             )
             .await?
             {
-                Some(manifest) => ResolvedPackage::from_manifest(manifest.name.clone(), manifest),
-                None => resolved,
+                Some(overridden) => overridden,
+                None => ResolvedDependency {
+                    spec: Cow::Borrowed(&edge_info.spec),
+                    manifest: resolved.manifest,
+                },
             };
 
-            Ok(place_new_node(
-                graph,
-                conflict_parent,
-                edge_info,
-                &resolved,
-                config,
+            Ok(place_resolved_dependency(
+                graph, node_index, edge_info, &resolved, config,
             ))
         }
     }
@@ -556,8 +557,8 @@ async fn resolve_remote_spec<R: ManifestProvider>(
 /// registry version, which used to turn `file:x.tgz` overrides into bogus 404s).
 /// Shared by the demand driver and [`process_dependency`].
 ///
-/// Always yields a *manifest* (or `None` to fall back to the original), so the
-/// callers place it like any registry node and stay agnostic of the protocol.
+/// Returns the final target spec alongside its manifest (or `None` to fall back
+/// to the original). Placement uses this target without selecting rules again.
 /// `file:` *directory* overrides would need a self-placed Link node the manifest
 /// contract can't carry, so they are an explicit error. With `state`, the
 /// per-run manifest cache single-flights the override across sibling edges.
@@ -569,7 +570,7 @@ pub(crate) async fn resolve_override<R: ManifestProvider>(
     resolved_version: &str,
     config: &BuildDepsConfig,
     mut state: Option<&mut ManifestState>,
-) -> Result<Option<Arc<CoreVersionManifest>>, ResolveError<R::Error>> {
+) -> Result<Option<ResolvedDependency<'static>>, ResolveError<R::Error>> {
     let Some(override_spec) = graph.check_override(parent, &edge.name, Some(resolved_version))
     else {
         return Ok(None);
@@ -578,7 +579,10 @@ pub(crate) async fn resolve_override<R: ManifestProvider>(
     if let Some(state) = state.as_deref_mut()
         && let Some(cached) = state.get_version_manifest(&edge.name, &override_spec)
     {
-        return Ok(Some(cached));
+        return Ok(Some(ResolvedDependency {
+            spec: Cow::Owned(override_spec),
+            manifest: cached,
+        }));
     }
 
     tracing::debug!(
@@ -625,9 +629,16 @@ pub(crate) async fn resolve_override<R: ManifestProvider>(
         return Ok(None);
     };
     if let Some(state) = state {
-        state.cache_version(edge.name.clone(), override_spec, Arc::clone(&manifest));
+        state.cache_version(
+            edge.name.clone(),
+            override_spec.clone(),
+            Arc::clone(&manifest),
+        );
     }
-    Ok(Some(manifest))
+    Ok(Some(ResolvedDependency {
+        spec: Cow::Owned(override_spec),
+        manifest,
+    }))
 }
 
 /// Resolve a `file:` override target to a manifest, relative to the root project

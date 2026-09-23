@@ -12,6 +12,8 @@
 //! attached workspace members, and settled `workspace:` edges. `lock_to_graph`
 //! then inserts every regular (non-root, non-link) lock entry as a pinned node
 //! with a synthetic manifest, and seeds its recorded dep edges as resolved.
+//! Unchanged importer edges affected by recorded overrides also keep their
+//! locked targets. Changed override inputs require a fresh resolution.
 //!
 //! The BFS then only enqueues the live unresolved edges; its reuse probe
 //! ([`try_reuse_dependency`]) matches them against seeded nodes with no I/O. A
@@ -27,9 +29,10 @@ use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
 
-use crate::model::graph::{DependencyGraph, PackageNode};
+use crate::model::graph::{DependencyEdge, DependencyGraph, PackageNode};
 use crate::model::manifest::{CoreVersionManifest, Dist};
 use crate::model::node::EdgeType;
+use crate::model::override_rule::Overrides;
 use crate::model::package_lock::{License, LockPackage, PackageLock};
 
 /// Seed `graph` with the resolved tree encoded by `lock` (the inverse of
@@ -41,6 +44,26 @@ use crate::model::package_lock::{License, LockPackage, PackageLock};
 /// up by their lockfile path and used as physical parents for the entries that
 /// nest under them, but never recreated.
 pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path: &Path) {
+    // Seeded transitive edges are already resolved, so a changed override must
+    // invalidate the baseline before any of those subtrees can be reused.
+    // Parse the recorded inputs to compare resolved `$dependency` references too.
+    let locked_overrides = Overrides::parse(
+        serde_json::to_value(lock.packages.get("")).expect("lockfile root must serialize"),
+    );
+    let current_rules = graph
+        .overrides
+        .as_ref()
+        .map(|overrides| overrides.rules.as_slice())
+        .unwrap_or_default();
+    let locked_rules = locked_overrides
+        .as_ref()
+        .map(|overrides| overrides.rules.as_slice())
+        .unwrap_or_default();
+    if current_rules != locked_rules {
+        tracing::debug!("seed: override rules changed, resolving a fresh tree");
+        return;
+    }
+
     // Map a lockfile path (e.g. `""`, `node_modules/a`, `packages/ws`) to the
     // node that occupies it. Pre-populated with the importers the caller built
     // (root + workspace members) so nested entries can find their parent.
@@ -52,6 +75,31 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
         {
             path_index.insert(key, ws_index);
         }
+    }
+
+    let importers: Vec<_> = lock
+        .packages
+        .iter()
+        .filter_map(|(path, pkg)| {
+            let key = to_lock_key(path);
+            path_index.get(key.as_ref()).map(|&index| (key, index, pkg))
+        })
+        .collect();
+    if !graph.override_names.is_empty()
+        && importers.iter().any(|(key, index, pkg)| {
+            let node = &graph.graph[*index];
+            (!node.is_root()
+                && (node.name != pkg.get_name(key) || node.version != pkg.get_version()))
+                || graph.get_dependency_edges(*index).iter().any(|(_, edge)| {
+                    graph.override_names.contains(&edge.name)
+                        && !matches_locked_requirement(edge, pkg)
+                })
+        })
+    {
+        // Workspace identity and importer requirements also select conditional
+        // overrides. Their old targets cannot validate a changed input.
+        tracing::debug!("seed: override inputs changed, resolving a fresh tree");
+        return;
     }
 
     // Normalize every lock key to its POSIX form up front and key the whole
@@ -125,6 +173,38 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
     for (key, index, pkg) in seeded {
         seed_resolved_edges(graph, &key, index, pkg, &path_index);
     }
+
+    // An unchanged importer requirement and unchanged override inputs identify
+    // the locked resolution, even when a dist-tag has moved or a conditional
+    // override selected a version outside its original selector range.
+    for (key, index, pkg) in importers {
+        let resolved: Vec<_> = graph
+            .get_dependency_edges(index)
+            .into_iter()
+            .filter_map(|(edge_id, edge)| {
+                if edge.valid
+                    || !graph.override_names.contains(&edge.name)
+                    || !matches_locked_requirement(edge, pkg)
+                {
+                    return None;
+                }
+                resolve_dep_target(&path_index, &key, &edge.name).map(|target| (edge_id, target))
+            })
+            .collect();
+        for (edge_id, target) in resolved {
+            graph.mark_dependency_resolved(edge_id, target);
+        }
+    }
+}
+
+fn matches_locked_requirement(edge: &DependencyEdge, pkg: &LockPackage) -> bool {
+    let dependencies = match edge.edge_type {
+        EdgeType::Prod => &pkg.dependencies,
+        EdgeType::Dev => &pkg.dev_dependencies,
+        EdgeType::Peer => &pkg.peer_dependencies,
+        EdgeType::Optional => &pkg.optional_dependencies,
+    };
+    dependencies.as_ref().and_then(|deps| deps.get(&edge.name)) == Some(&edge.spec)
 }
 
 /// Normalize a lockfile path to its POSIX form (npm lock keys use `/`). Borrows
