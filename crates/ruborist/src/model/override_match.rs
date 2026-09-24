@@ -413,6 +413,7 @@ mod tests {
     use crate::model::manifest::CoreVersionManifest;
     use crate::model::node::EdgeType;
     use crate::model::package_json::PackageJson;
+    use crate::resolver::reuse::{ReuseResult, find_resolved_node};
 
     fn create_pkg(name: &str, version: &str) -> PackageJson {
         PackageJson::new(name, version)
@@ -502,12 +503,12 @@ mod tests {
                 ..Default::default()
             };
             let expected = if can_replace {
-                FindResult::New(graph.root_index)
+                ReuseResult::Install(graph.root_index)
             } else {
-                FindResult::Conflict(consumer)
+                ReuseResult::Install(consumer)
             };
             assert_eq!(
-                graph.find_resolved_node(consumer, "shared", "^1.0.0", &replacement),
+                find_resolved_node(&graph, consumer, "shared", "^1.0.0", "2.0.0", &replacement),
                 expected,
                 "{overrides}"
             );
@@ -574,14 +575,21 @@ mod tests {
                     "{overrides}"
                 );
             }
+            let expected = if can_reuse {
+                ReuseResult::Reuse(shared)
+            } else {
+                ReuseResult::Install(consumer)
+            };
+            for spec in [url, "^1.0.0", "latest"] {
+                assert_eq!(
+                    find_resolved_node(&graph, consumer, "shared", spec, spec, &manifest),
+                    expected,
+                    "{overrides}"
+                );
+            }
             assert_eq!(
-                graph.find_resolved_node(consumer, "shared", "^1.0.0", &manifest),
-                expected,
-                "{overrides}"
-            );
-            assert_eq!(
-                graph.find_resolved_node(graph.root_index, "shared", "^1.0.0", &manifest),
-                FindResult::Reuse(shared)
+                find_resolved_node(&graph, graph.root_index, "shared", url, url, &manifest),
+                ReuseResult::Reuse(shared)
             );
         }
     }

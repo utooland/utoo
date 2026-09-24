@@ -1,6 +1,5 @@
 //! Dependency graph data structure using petgraph.
 
-use deno_semver::VersionReq;
 use petgraph::Direction::{Incoming, Outgoing};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -13,8 +12,6 @@ use super::manifest::{CoreVersionManifest, NodeManifest};
 use super::node::{EdgeType, NodeType};
 use super::override_rule::Overrides;
 use super::package_json::PackageJson;
-use crate::resolver::semver::{matches, normalize_spec};
-use crate::spec::Protocol;
 
 /// Package node in the dependency graph.
 #[derive(Debug, Clone)]
@@ -431,6 +428,13 @@ impl DependencyGraph {
         self.resolution_required.contains_key(&edge)
     }
 
+    /// Whether an invalidated dependency previously resolved to this node.
+    pub(crate) fn is_invalidated_target(&self, node: NodeIndex) -> bool {
+        self.resolution_required
+            .values()
+            .any(|target| *target == Some(node))
+    }
+
     pub(crate) fn invalidate_dependency(&mut self, edge: EdgeIndex) {
         if let Some(GraphEdge::Dependency(dep)) = self.graph.edge_weight_mut(edge) {
             self.resolution_required.insert(edge, dep.to);
@@ -620,142 +624,47 @@ impl DependencyGraph {
         false
     }
 
-    /// Find compatible node in parent chain for dependency resolution.
+    /// Find the nearest visible node installed under a dependency name.
     ///
-    /// For unconditional overrides (spec == "*"), uses the override target_spec.
-    /// Reuse also checks conditional overrides against the existing node's
-    /// version before accepting a compatible package.
-    pub fn find_compatible_node(
-        &self,
-        from: NodeIndex,
-        name: &str,
-        version_spec: &str,
-    ) -> FindResult {
-        // Check for unconditional override (spec == "*", no resolved version yet)
-        let effective_spec = if let Some(target) = self.check_override(from, name, None) {
-            tracing::debug!(
-                "Using unconditional override for {}@{} => {}",
-                name,
-                version_spec,
-                target
-            );
-            target
-        } else {
-            version_spec.to_string()
-        };
-
-        // Start with the requester's own node_modules, including nested nodes
-        // seeded from a lockfile, before looking in ancestor directories.
-        self.find_in_parent_chain(from, name, None, |child| {
-            let spec = effective_spec.as_str();
-            let matches_candidate = |spec: &str| match Protocol::strip_prefix(spec) {
-                // HTTP tarballs are identified by their source URL, not the
-                // version declared in their package.json.
-                Some((Protocol::Http, _)) => child
-                    .manifest
-                    .dist()
-                    .is_some_and(|dist| dist.tarball.as_deref() == Some(spec)),
-                _ => matches(spec, &child.version),
-            };
-            // Compare the selected target with the package, not the requested
-            // spec: a range and an exact version can select the same package.
-            matches_candidate(spec)
-                && self
-                    .check_override(from, name, Some(&child.version))
-                    .is_none_or(|target| match Protocol::strip_prefix(&target) {
-                        Some((Protocol::Http, _)) => matches_candidate(&target),
-                        None | Some((Protocol::NpmAlias, _)) => {
-                            let (target_name, target_range) = normalize_spec(name, &target);
-                            child.manifest.name() == target_name
-                                && VersionReq::parse_from_npm(&target_range).is_ok_and(|req| {
-                                    // A dist-tag needs registry resolution;
-                                    // the candidate's version cannot identify it.
-                                    req.tag().is_none() && matches(&target_range, &child.version)
-                                })
-                        }
-                        _ => target == spec,
-                    })
-        })
-    }
-
-    /// Find an existing copy of the final manifest after overrides have resolved.
-    /// Do not recheck the original spec or apply overrides to the target again.
-    /// The original spec only determines which scopes restrict slot replacement.
-    pub(crate) fn find_resolved_node(
-        &self,
-        from: NodeIndex,
-        name: &str,
-        version_spec: &str,
-        manifest: &CoreVersionManifest,
-    ) -> FindResult {
-        self.find_in_parent_chain(from, name, Some((version_spec, manifest)), |child| {
-            child.manifest.name() == manifest.name
-                && child.version == manifest.version
-                && child
-                    .manifest
-                    .dist()
-                    .is_some_and(|dist| dist.tarball == manifest.dist.tarball)
-        })
-    }
-
-    /// Search the requester's node_modules and then its ancestors. A nearer
-    /// incompatible package shadows matching packages higher in the tree.
-    fn find_in_parent_chain(
-        &self,
-        from: NodeIndex,
-        name: &str,
-        replacement: Option<(&str, &CoreVersionManifest)>,
-        matches_candidate: impl Fn(&PackageNode) -> bool,
-    ) -> FindResult {
+    /// Search the requester's own node_modules before its physical ancestors.
+    /// The first candidate shadows all higher nodes; compatibility is decided
+    /// by the resolver, independently of this topology lookup.
+    pub(crate) fn lookup_dependency(&self, from: NodeIndex, name: &str) -> DependencyLookup {
         let mut current = from;
         loop {
-            // Probe the per-parent name index — O(depth) total instead of a
-            // linear scan over every physical child per ancestor level.
-            if let Some(child_idx) = self.find_physical_child(current, name) {
-                let child = &self.graph[child_idx];
-                if matches_candidate(child)
-                    && self.has_compatible_descendant_overrides(from, child_idx)
-                {
-                    return FindResult::Reuse(child_idx);
-                }
-                // A changed global override can vacate a locked slot. Place its
-                // replacement there so sibling consumers can still share it.
-                // Scoped rules need the requester's parent context instead.
-                if replacement.is_some_and(|(spec, manifest)| {
-                    self.can_replace_override_target(from, current, name, spec, manifest)
-                }) && self
-                    .resolution_required
-                    .values()
-                    .any(|target| *target == Some(child_idx))
-                    && !self.reachable_nodes().contains(&child_idx)
-                {
-                    return FindResult::New(current);
-                }
-                tracing::debug!(
-                    "found conflict deps {} got {}, conflict at {:?}",
-                    name,
-                    child.version,
-                    child_idx
-                );
-                return FindResult::Conflict(from);
+            // Probe the per-parent name index: O(depth), without scanning
+            // every physical child at each ancestor level.
+            if let Some(child) = self.find_physical_child(current, name) {
+                return DependencyLookup::Found(child);
             }
             match self.get_physical_parent(current) {
                 Some(parent) => current = parent,
-                None => return FindResult::New(current),
+                None => {
+                    return DependencyLookup::Missing {
+                        install_parent: current,
+                    };
+                }
             }
         }
     }
 }
 
-/// Result of finding a compatible node.
+/// Result of the public compatibility lookup API.
+/// Resolver internals use `DependencyLookup` and make reuse decisions separately.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FindResult {
-    /// Can reuse existing node
     Reuse(NodeIndex),
-    /// Conflict found, install under this parent
     Conflict(NodeIndex),
-    /// Need to install under this parent (usually root)
     New(NodeIndex),
+}
+
+/// Topology lookup result, before any dependency matching or override selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DependencyLookup {
+    /// The nearest node installed under the requested name.
+    Found(NodeIndex),
+    /// No visible node exists; a new package can be hoisted to this parent.
+    Missing { install_parent: NodeIndex },
 }
 
 #[cfg(test)]
@@ -883,259 +792,60 @@ mod tests {
     }
 
     #[test]
-    fn test_find_compatible_node_reuse() {
-        let pkg = create_pkg("root", "1.0.0");
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Add lodash@4.17.21 under root
-        let lodash = PackageNode::from_version_manifest(
-            "lodash".to_string(),
-            PathBuf::from("node_modules/lodash"),
-            create_version_manifest("lodash", "4.17.21"),
-        );
-        let lodash_idx = graph.add_node(lodash);
-        graph.add_physical_edge(graph.root_index, lodash_idx);
-
-        // Should reuse existing lodash when spec matches
-        let result = graph.find_compatible_node(graph.root_index, "lodash", "^4.17.0");
-        assert_eq!(result, FindResult::Reuse(lodash_idx));
-    }
-
-    #[test]
-    fn test_find_compatible_http_tarball() {
-        for url in [
-            "http://example.com/shared.tgz",
-            "https://pkg.pr.new/shared@commit",
-        ] {
-            let other_url = format!("{url}?other");
-            for (resolved, can_reuse) in [
-                (Some(url), true),
-                (Some(other_url.as_str()), false),
-                (None, false),
-            ] {
-                let mut graph = DependencyGraph::from_package_json(
-                    PathBuf::from("."),
-                    create_pkg("root", "1.0.0"),
-                );
-                let mut manifest = CoreVersionManifest {
-                    name: "shared".to_string(),
-                    version: "1.0.0".to_string(),
-                    ..Default::default()
-                };
-                manifest.dist.tarball = resolved.map(str::to_string);
-                let shared = graph.add_node(PackageNode::from_version_manifest(
-                    "shared".to_string(),
-                    PathBuf::from("node_modules/shared"),
-                    Arc::new(manifest),
-                ));
-                graph.add_physical_edge(graph.root_index, shared);
-                let consumer = graph.add_node(PackageNode::from_version_manifest(
-                    "consumer".to_string(),
-                    PathBuf::from("node_modules/consumer"),
-                    create_version_manifest("consumer", "1.0.0"),
-                ));
-                graph.add_physical_edge(graph.root_index, consumer);
-
-                let expected = if can_reuse {
-                    FindResult::Reuse(shared)
-                } else {
-                    FindResult::Conflict(consumer)
-                };
-                assert_eq!(
-                    graph.find_compatible_node(consumer, "shared", url),
-                    expected,
-                    "requested {url}, resolved {resolved:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_find_compatible_node_conflict() {
-        let pkg = create_pkg("root", "1.0.0");
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Add lodash@3.10.1 under root
-        let lodash = PackageNode::from_version_manifest(
-            "lodash".to_string(),
-            PathBuf::from("node_modules/lodash"),
-            create_version_manifest("lodash", "3.10.1"),
-        );
-        let lodash_idx = graph.add_node(lodash);
-        graph.add_physical_edge(graph.root_index, lodash_idx);
-
-        // Should find conflict when spec doesn't match
-        let result = graph.find_compatible_node(graph.root_index, "lodash", "^4.17.0");
-        assert_eq!(result, FindResult::Conflict(graph.root_index));
-    }
-
-    #[test]
-    fn test_conditional_override_matches_candidate_version_and_source() {
-        let url = "https://registry.example.com/shared-1.0.0.tgz";
-        for (target, manifest_name, resolved, can_reuse) in [
-            ("1.0.0", "shared", Some(url), true),
-            ("~1.0.0", "shared", Some(url), true),
-            ("2.0.0", "shared", Some(url), false),
-            ("npm:shared@1.0.0", "shared", Some(url), true),
-            ("npm:patched@1.0.0", "shared", Some(url), false),
-            ("npm:@scope/shared@1.0.0", "@scope/shared", Some(url), true),
-            ("latest", "shared", Some(url), false),
-            (url, "shared", Some(url), true),
-            (
-                "https://example.com/patched.tgz",
-                "shared",
-                Some(url),
-                false,
-            ),
-            (url, "shared", None, false),
-        ] {
-            let pkg = PackageJson::from_value(&serde_json::json!({
-                "name": "root", "version": "1.0.0",
-                "overrides": { "shared@^1.0.0": target }
-            }))
-            .unwrap();
-            let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-            let mut manifest = CoreVersionManifest {
-                name: manifest_name.to_string(),
-                version: "1.0.0".to_string(),
-                ..Default::default()
-            };
-            manifest.dist.tarball = resolved.map(str::to_string);
-            let shared = graph.add_node(PackageNode::from_version_manifest(
-                "shared".to_string(),
-                PathBuf::from("node_modules/shared"),
-                Arc::new(manifest),
-            ));
-            graph.add_physical_edge(graph.root_index, shared);
-
-            let expected = if can_reuse {
-                FindResult::Reuse(shared)
-            } else {
-                FindResult::Conflict(graph.root_index)
-            };
-            for spec in ["^1.0.0", "latest"] {
-                assert_eq!(
-                    graph.find_compatible_node(graph.root_index, "shared", spec),
-                    expected,
-                    "request {spec}, override {target}, candidate {manifest_name}@1.0.0 from {resolved:?}",
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_find_resolved_node_matches_manifest_identity() {
-        let url = "https://registry.example.com/shared-2.0.0.tgz";
-        let mut resolved = CoreVersionManifest {
-            name: "shared".to_string(),
-            version: "2.0.0".to_string(),
-            ..Default::default()
-        };
-        resolved.dist.tarball = Some(url.to_string());
-
-        for (name, version, source, can_reuse) in [
-            ("shared", "2.0.0", Some(url), true),
-            ("other", "2.0.0", Some(url), false),
-            ("shared", "1.0.0", Some(url), false),
-            (
-                "shared",
-                "2.0.0",
-                Some("https://example.com/patched.tgz"),
-                false,
-            ),
-            ("shared", "2.0.0", None, false),
-        ] {
-            let pkg = PackageJson::from_value(&serde_json::json!({
-                "name": "root", "version": "1.0.0",
-                "overrides": { "shared@^1.0.0": "latest" }
-            }))
-            .unwrap();
-            let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-            let mut candidate = CoreVersionManifest {
-                name: name.to_string(),
-                version: version.to_string(),
-                ..Default::default()
-            };
-            candidate.dist.tarball = source.map(str::to_string);
-            let shared = graph.add_node(PackageNode::from_version_manifest(
-                "shared".to_string(),
-                PathBuf::from("node_modules/shared"),
-                Arc::new(candidate),
-            ));
-            graph.add_physical_edge(graph.root_index, shared);
-
-            assert_eq!(
-                graph.find_compatible_node(graph.root_index, "shared", "^1.0.0"),
-                FindResult::Conflict(graph.root_index),
-            );
-            let expected = if can_reuse {
-                FindResult::Reuse(shared)
-            } else {
-                FindResult::Conflict(graph.root_index)
-            };
-            assert_eq!(
-                graph.find_resolved_node(graph.root_index, "shared", "^1.0.0", &resolved),
-                expected,
-                "candidate {name}@{version} from {source:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn test_find_compatible_node_new() {
-        let pkg = create_pkg("root", "1.0.0");
-        let graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Should return New when no existing node found
-        let result = graph.find_compatible_node(graph.root_index, "lodash", "^4.17.0");
-        assert_eq!(result, FindResult::New(graph.root_index));
-    }
-
-    #[test]
-    fn test_find_compatible_node_nested() {
-        let pkg = create_pkg("root", "1.0.0");
-        let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
-
-        // Add express under root
-        let express = PackageNode::from_version_manifest(
-            "express".to_string(),
-            PathBuf::from("node_modules/express"),
-            create_version_manifest("express", "4.18.0"),
-        );
-        let express_idx = graph.add_node(express);
-        graph.add_physical_edge(graph.root_index, express_idx);
-
-        // Add lodash@4.17.21 under root
-        let lodash = PackageNode::from_version_manifest(
-            "lodash".to_string(),
-            PathBuf::from("node_modules/lodash"),
-            create_version_manifest("lodash", "4.17.21"),
-        );
-        let lodash_idx = graph.add_node(lodash);
-        graph.add_physical_edge(graph.root_index, lodash_idx);
-
-        // From express, should find lodash in parent (root)
-        let result = graph.find_compatible_node(express_idx, "lodash", "^4.17.0");
-        assert_eq!(result, FindResult::Reuse(lodash_idx));
-
-        let nested_idx = graph.add_node(PackageNode::from_version_manifest(
-            "lodash".to_string(),
-            PathBuf::from("node_modules/express/node_modules/lodash"),
-            create_version_manifest("lodash", "3.10.1"),
+    fn test_lookup_dependency_returns_nearest_candidate() {
+        let mut graph =
+            DependencyGraph::from_package_json(PathBuf::from("."), create_pkg("root", "1.0.0"));
+        let consumer = graph.add_node(PackageNode::from_version_manifest(
+            "consumer".to_string(),
+            PathBuf::from("node_modules/consumer"),
+            create_version_manifest("consumer", "1.0.0"),
         ));
-        graph.add_physical_edge(express_idx, nested_idx);
+        graph.add_physical_edge(graph.root_index, consumer);
+        let shared = graph.add_node(PackageNode::from_version_manifest(
+            "shared".to_string(),
+            PathBuf::from("node_modules/shared"),
+            create_version_manifest("shared", "2.0.0"),
+        ));
+        graph.add_physical_edge(graph.root_index, shared);
 
-        // The nested copy wins even when an ancestor also satisfies the range.
-        for spec in ["^3.0.0", "*"] {
+        assert_eq!(
+            graph.lookup_dependency(consumer, "shared"),
+            DependencyLookup::Found(shared)
+        );
+
+        let nested = graph.add_node(PackageNode::from_version_manifest(
+            "shared".to_string(),
+            PathBuf::from("node_modules/consumer/node_modules/shared"),
+            create_version_manifest("shared", "1.0.0"),
+        ));
+        graph.add_physical_edge(consumer, nested);
+
+        // Lookup describes visibility only: the nearer node shadows root,
+        // regardless of its version or source.
+        assert_eq!(
+            graph.lookup_dependency(consumer, "shared"),
+            DependencyLookup::Found(nested)
+        );
+    }
+
+    #[test]
+    fn test_lookup_dependency_missing_returns_highest_parent() {
+        let mut graph =
+            DependencyGraph::from_package_json(PathBuf::from("."), create_pkg("root", "1.0.0"));
+        let consumer = graph.add_node(PackageNode::from_version_manifest(
+            "consumer".to_string(),
+            PathBuf::from("node_modules/consumer"),
+            create_version_manifest("consumer", "1.0.0"),
+        ));
+        graph.add_physical_edge(graph.root_index, consumer);
+
+        for from in [graph.root_index, consumer] {
             assert_eq!(
-                graph.find_compatible_node(express_idx, "lodash", spec),
-                FindResult::Reuse(nested_idx)
+                graph.lookup_dependency(from, "missing"),
+                DependencyLookup::Missing {
+                    install_parent: graph.root_index,
+                }
             );
         }
-        // An incompatible nested copy hides the otherwise compatible ancestor.
-        assert_eq!(
-            graph.find_compatible_node(express_idx, "lodash", "^4.17.0"),
-            FindResult::Conflict(express_idx)
-        );
     }
 }
