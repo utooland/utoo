@@ -2,6 +2,7 @@
 //! fetch pipeline, and feeds resolved manifests back into the graph. Owns the
 //! per-run [`ManifestState`] store and [`FetchQueues`] scheduler.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -18,6 +19,7 @@ use crate::resolver::builder::{
 };
 use crate::resolver::edges::{DependencyEdgeInfo, collect_unresolved_edges};
 use crate::resolver::registry::ResolveError;
+use crate::resolver::reuse::ResolvedDependency;
 use crate::resolver::semver::normalize_spec;
 use crate::service::ManifestProvider;
 use crate::spec::SpecStr;
@@ -305,7 +307,7 @@ where
             } = placement;
             match resolution {
                 Resolution::Registry(manifest) => {
-                    let manifest = self
+                    let resolved = self
                         .apply_override(graph, state, parent, &edge, manifest)
                         .await?;
                     let processed = handle_resolved_registry_manifest(
@@ -313,7 +315,7 @@ where
                         self.receiver,
                         parent,
                         &edge,
-                        manifest,
+                        resolved,
                         self.config,
                     );
                     handle_processed(graph, self.receiver, parent, &edge, &processed, next_level);
@@ -336,7 +338,7 @@ where
         Ok(())
     }
 
-    /// Apply a dependency override for `edge`, returning the manifest to install.
+    /// Apply an override, retaining the final spec for placement's reuse check.
     ///
     /// The override is routed through the per-run manifest cache so sibling
     /// edges sharing the same override resolve it once (single-flight within the
@@ -344,14 +346,14 @@ where
     /// is pinned in the lockfile and seeded by the reuse path, so it isn't
     /// re-resolved on the next install either. Falls back to the original
     /// manifest when no override applies or the override fails to resolve.
-    async fn apply_override(
+    async fn apply_override<'a>(
         &self,
         graph: &mut DependencyGraph,
         state: &mut ManifestState,
         parent: NodeIndex,
-        edge: &DependencyEdgeInfo,
+        edge: &'a DependencyEdgeInfo,
         manifest: Arc<CoreVersionManifest>,
-    ) -> Result<Arc<CoreVersionManifest>, ResolveError<R::Error>> {
+    ) -> Result<ResolvedDependency<'a>, ResolveError<R::Error>> {
         match resolve_override(
             graph,
             self.registry,
@@ -365,7 +367,10 @@ where
         .map_err(|inner| chain_err(graph, parent, edge, inner))?
         {
             Some(overridden) => Ok(overridden),
-            None => Ok(manifest),
+            None => Ok(ResolvedDependency {
+                spec: Cow::Borrowed(&edge.spec),
+                manifest,
+            }),
         }
     }
 
@@ -521,6 +526,11 @@ where
         // order, discovering the next level as nodes are created.
         ctx.place_level(graph, &mut state, &mut placements, &mut next_level)
             .await?;
+        for node in graph.take_revalidation_nodes() {
+            if !next_level.contains(&node) {
+                next_level.push(node);
+            }
+        }
 
         receiver.on_event(BuildEvent::LevelComplete {
             next_level_count: next_level.len(),

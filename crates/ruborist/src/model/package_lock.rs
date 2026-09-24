@@ -139,6 +139,11 @@ pub struct LockPackage {
     pub has_install_script: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Vec<String>>,
+    /// Root override inputs used to validate reuse of locked resolutions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolutions: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link: Option<bool>,
 }
@@ -282,7 +287,8 @@ pub fn serialize_to_packages(
     graph: &DependencyGraph,
     root_path: &Path,
 ) -> (HashMap<String, LockPackage>, i32) {
-    serialize_to_packages_filtered(graph, root_path, None)
+    let reachable = graph.has_redundant_nodes.then(|| graph.reachable_nodes());
+    serialize_to_packages_filtered(graph, root_path, reachable.as_ref())
 }
 
 /// Serialize the graph, optionally restricting output to a set of reachable
@@ -401,6 +407,11 @@ fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> L
     };
 
     collect_edge_deps(graph, node_index, &mut pkg);
+
+    if let Some(overrides) = &graph.overrides {
+        pkg.overrides = overrides.package.get("overrides").cloned();
+        pkg.resolutions = overrides.package.get("resolutions").cloned();
+    }
 
     pkg
 }
