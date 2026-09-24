@@ -12,6 +12,8 @@
 //! attached workspace members, and settled `workspace:` edges. `lock_to_graph`
 //! then inserts every regular (non-root, non-link) lock entry as a pinned node
 //! with a synthetic manifest, and seeds its recorded dep edges as resolved.
+//! Unchanged importer edges affected by recorded overrides also keep their
+//! locked targets. Changed override inputs revalidate only affected edges.
 //!
 //! The BFS then only enqueues the live unresolved edges; its reuse probe
 //! ([`try_reuse_dependency`]) matches them against seeded nodes with no I/O. A
@@ -27,9 +29,10 @@ use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
 
-use crate::model::graph::{DependencyGraph, PackageNode};
+use crate::model::graph::{DependencyEdge, DependencyGraph, PackageNode};
 use crate::model::manifest::{CoreVersionManifest, Dist};
 use crate::model::node::EdgeType;
+use crate::model::override_rule::Overrides;
 use crate::model::package_lock::{License, LockPackage, PackageLock};
 
 /// Seed `graph` with the resolved tree encoded by `lock` (the inverse of
@@ -41,6 +44,36 @@ use crate::model::package_lock::{License, LockPackage, PackageLock};
 /// up by their lockfile path and used as physical parents for the entries that
 /// nest under them, but never recreated.
 pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path: &Path) {
+    // Compare parsed inputs, including resolved `$dependency` references. Missing
+    // metadata requires revalidation, but must not discard unrelated locked pins.
+    let locked_overrides = Overrides::parse(
+        serde_json::to_value(lock.packages.get("")).expect("lockfile root must serialize"),
+    );
+    let current_rules = graph
+        .overrides
+        .as_ref()
+        .map(|overrides| overrides.rules.as_slice())
+        .unwrap_or_default()
+        .to_vec();
+    let locked_rules = locked_overrides
+        .as_ref()
+        .map(|overrides| overrides.rules.as_slice())
+        .unwrap_or_default();
+    let overrides_unchanged = current_rules == locked_rules;
+    let mut changed_rules: Vec<_> = current_rules
+        .iter()
+        .filter(|rule| !locked_rules.contains(rule))
+        .chain(
+            locked_rules
+                .iter()
+                .filter(|rule| !current_rules.contains(rule)),
+        )
+        .cloned()
+        .collect();
+    if !overrides_unchanged && changed_rules.is_empty() {
+        changed_rules.clone_from(&current_rules);
+    }
+
     // Map a lockfile path (e.g. `""`, `node_modules/a`, `packages/ws`) to the
     // node that occupies it. Pre-populated with the importers the caller built
     // (root + workspace members) so nested entries can find their parent.
@@ -53,6 +86,38 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
             path_index.insert(key, ws_index);
         }
     }
+
+    let importers: Vec<_> = lock
+        .packages
+        .iter()
+        .filter_map(|(path, pkg)| {
+            let key = to_lock_key(path);
+            path_index.get(key.as_ref()).map(|&index| (key, index, pkg))
+        })
+        .collect();
+    let previous_importers: HashMap<_, _> = importers
+        .iter()
+        .filter_map(|(key, index, pkg)| {
+            let node = &graph.graph[*index];
+            let previous = (pkg.get_name(key), pkg.get_version());
+            (!node.is_root() && (node.name != previous.0 || node.version != previous.1))
+                .then_some((*index, previous))
+        })
+        .collect();
+    let changed_requirements: HashSet<_> = importers
+        .iter()
+        .flat_map(|(_, index, pkg)| {
+            graph
+                .get_dependency_edges(*index)
+                .into_iter()
+                .filter_map(|(edge_id, edge)| {
+                    (graph.override_names.contains(&edge.name)
+                        && !matches_locked_requirement(edge, pkg))
+                    .then_some(edge_id)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
     // Normalize every lock key to its POSIX form up front and key the whole
     // seeding pass off that. `path_index` already holds the importers under
@@ -125,6 +190,105 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
     for (key, index, pkg) in seeded {
         seed_resolved_edges(graph, &key, index, pkg, &path_index);
     }
+
+    // An unchanged importer requirement and unchanged override inputs identify
+    // the locked resolution, even when a dist-tag has moved or a conditional
+    // override selected a version outside its original selector range.
+    for (key, index, pkg) in importers {
+        let chain = graph.collect_parent_chain(index);
+        let resolved: Vec<_> = graph
+            .get_dependency_edges(index)
+            .into_iter()
+            .filter_map(|(edge_id, edge)| {
+                if edge.valid
+                    || !graph.override_names.contains(&edge.name)
+                    || !matches_locked_requirement(edge, pkg)
+                    || !graph.override_rules_affect_dependency(locked_rules, edge, &chain, false)
+                    || graph.override_rules_affect_dependency(&changed_rules, edge, &chain, false)
+                {
+                    return None;
+                }
+                resolve_dep_target(&path_index, &key, &edge.name).map(|target| (edge_id, target))
+            })
+            .collect();
+        for (edge_id, target) in resolved {
+            graph.mark_dependency_resolved(edge_id, target);
+        }
+    }
+
+    if changed_rules.is_empty() && previous_importers.is_empty() && changed_requirements.is_empty()
+    {
+        return;
+    }
+
+    let mut invalidated = Vec::new();
+    for node in graph.graph.node_indices() {
+        let chain = graph.collect_parent_chain(node);
+        let mut previous_chain = Vec::new();
+        let mut ancestor = Some(node);
+        while let Some(index) = ancestor {
+            let package = &graph.graph[index];
+            if !package.is_root() {
+                previous_chain.push(
+                    previous_importers
+                        .get(&index)
+                        .cloned()
+                        .unwrap_or_else(|| (package.name.clone(), package.version.clone())),
+                );
+            }
+            ancestor = graph.get_physical_parent(index);
+        }
+        previous_chain.reverse();
+        for (edge_id, edge) in graph.get_dependency_edges(node) {
+            if graph.is_workspace_target(edge) {
+                continue;
+            }
+            // A package already under this requester keeps its parent context;
+            // revalidate its affected descendants without refetching the parent.
+            let include_parent_scopes = graph.find_physical_child(node, &edge.name).is_none();
+            let affected = graph.override_rules_affect_dependency(
+                &changed_rules,
+                edge,
+                &chain,
+                include_parent_scopes,
+            ) || graph.override_rules_affect_dependency(
+                &changed_rules,
+                edge,
+                &previous_chain,
+                include_parent_scopes,
+            ) || (chain != previous_chain
+                && current_rules.iter().chain(locked_rules).any(|rule| {
+                    let rule = std::slice::from_ref(rule);
+                    graph.override_rules_affect_dependency(
+                        rule,
+                        edge,
+                        &chain,
+                        include_parent_scopes,
+                    ) != graph.override_rules_affect_dependency(
+                        rule,
+                        edge,
+                        &previous_chain,
+                        include_parent_scopes,
+                    )
+                }));
+            if affected || changed_requirements.contains(&edge_id) {
+                invalidated.push(edge_id);
+            }
+        }
+    }
+    for edge in invalidated {
+        graph.invalidate_dependency(edge);
+    }
+}
+
+fn matches_locked_requirement(edge: &DependencyEdge, pkg: &LockPackage) -> bool {
+    let dependencies = match edge.edge_type {
+        EdgeType::Prod => &pkg.dependencies,
+        EdgeType::Dev => &pkg.dev_dependencies,
+        EdgeType::Peer => &pkg.peer_dependencies,
+        EdgeType::Optional => &pkg.optional_dependencies,
+    };
+    dependencies.as_ref().and_then(|deps| deps.get(&edge.name)) == Some(&edge.spec)
 }
 
 /// Normalize a lockfile path to its POSIX form (npm lock keys use `/`). Borrows

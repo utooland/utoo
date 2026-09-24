@@ -521,6 +521,11 @@ where
         // order, discovering the next level as nodes are created.
         ctx.place_level(graph, &mut state, &mut placements, &mut next_level)
             .await?;
+        for node in graph.take_revalidation_nodes() {
+            if !next_level.contains(&node) {
+                next_level.push(node);
+            }
+        }
 
         receiver.on_event(BuildEvent::LevelComplete {
             next_level_count: next_level.len(),

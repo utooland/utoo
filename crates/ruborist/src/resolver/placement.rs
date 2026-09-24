@@ -37,6 +37,9 @@ pub(crate) fn try_reuse_dependency(
     parent: NodeIndex,
     edge: &DependencyEdgeInfo,
 ) -> Option<ProcessResult> {
+    if graph.requires_resolution(edge.edge_id) {
+        return None;
+    }
     match graph.find_compatible_node(parent, &edge.name, &edge.spec) {
         FindResult::Reuse(existing_index) => Some(reuse_existing_node(graph, edge, existing_index)),
         FindResult::Conflict(_) | FindResult::New(_) => None,
@@ -50,7 +53,17 @@ pub fn process_dependency_with_resolved(
     resolved: &ResolvedPackage,
     config: &BuildDepsConfig,
 ) -> ProcessResult {
-    match graph.find_compatible_node(node_index, &edge_info.name, &edge_info.spec) {
+    // Preserve compatible range reuse if another edge placed a package while
+    // this edge was resolving. Unresolved override tags cannot pass this check.
+    if let Some(reused) = try_reuse_dependency(graph, node_index, edge_info) {
+        return reused;
+    }
+    match graph.find_resolved_node(
+        node_index,
+        &edge_info.name,
+        &edge_info.spec,
+        &resolved.manifest,
+    ) {
         FindResult::Reuse(existing_index) => reuse_existing_node(graph, edge_info, existing_index),
         FindResult::Conflict(conflict_parent) | FindResult::New(conflict_parent) => {
             place_new_node(graph, conflict_parent, edge_info, resolved, config)
@@ -114,4 +127,52 @@ where
     let resolved = ResolvedPackage::from_manifest(edge.name.clone(), manifest);
     receiver.on_event(BuildEvent::PackageResolved((&*resolved.manifest).into()));
     process_dependency_with_resolved(graph, parent, edge, &resolved, config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::graph::PackageNode;
+    use crate::model::node::EdgeType;
+    use crate::model::package_json::PackageJson;
+
+    #[test]
+    fn placement_preserves_compatible_range_reuse() {
+        let mut graph =
+            DependencyGraph::from_package_json(".".into(), PackageJson::new("root", "1.0.0"));
+        let root = graph.root_index;
+        let shared = graph.add_node(PackageNode::from_version_manifest(
+            "shared".to_string(),
+            "node_modules/shared".into(),
+            Arc::new(CoreVersionManifest {
+                name: "shared".to_string(),
+                version: "1.0.0".to_string(),
+                ..Default::default()
+            }),
+        ));
+        graph.add_physical_edge(root, shared);
+        let edge = DependencyEdgeInfo {
+            edge_id: graph.add_dependency_edge(root, "shared", "^1.0.0", EdgeType::Prod),
+            name: "shared".to_string(),
+            spec: "^1.0.0".to_string(),
+            edge_type: EdgeType::Prod,
+        };
+        let resolved = ResolvedPackage::from_manifest(
+            "shared",
+            Arc::new(CoreVersionManifest {
+                name: "shared".to_string(),
+                version: "1.1.0".to_string(),
+                ..Default::default()
+            }),
+        );
+        let result = process_dependency_with_resolved(
+            &mut graph,
+            root,
+            &edge,
+            &resolved,
+            &BuildDepsConfig::default(),
+        );
+        assert!(matches!(result, ProcessResult::Reused(index) if index == shared));
+        assert_eq!(graph.graph.node_count(), 2);
+    }
 }

@@ -5,13 +5,227 @@
 //! node's physical parent chain and deciding whether a rule applies. Kept out
 //! of `graph.rs` so the graph file stays focused on the data structure.
 
+use std::collections::HashSet;
+
+use deno_semver::VersionReq;
 use petgraph::graph::NodeIndex;
 
-use super::graph::DependencyGraph;
+use super::graph::{DependencyEdge, DependencyGraph, GraphEdge};
+use super::manifest::CoreVersionManifest;
 use super::override_rule::OverrideRule;
-use crate::resolver::semver::matches;
+use crate::resolver::semver::{matches, normalize_spec};
+
+/// Only concrete registry ranges can prove that a selector cannot apply.
+/// Tags and remote sources still need resolution to determine their version.
+fn selector_may_match_requirement(name: &str, selector: &str, spec: &str) -> bool {
+    if selector == "*" {
+        return true;
+    }
+    let (_, spec) = normalize_spec(name, spec);
+    let (Ok(selector), Ok(requirement)) = (
+        VersionReq::parse_from_npm(selector),
+        VersionReq::parse_from_npm(&spec),
+    ) else {
+        return true;
+    };
+    selector.tag().is_some() || requirement.tag().is_some() || selector.intersects(&requirement)
+}
 
 impl DependencyGraph {
+    /// Different override contexts may produce identical dependency results.
+    /// Wait until resolution is complete before discarding provisional copies:
+    /// an unresolved child could still contain an affected descendant.
+    pub(crate) fn deduplicate_override_subtrees(&mut self) {
+        if self
+            .overrides
+            .as_ref()
+            .is_none_or(|overrides| overrides.rules.iter().all(|rule| rule.parent.is_none()))
+        {
+            return;
+        }
+        let nodes: Vec<_> = self.graph.node_indices().collect();
+        for node in nodes {
+            let Some(parent) = self.get_physical_parent(node) else {
+                continue;
+            };
+            let mut ancestor = self.get_physical_parent(parent);
+            while let Some(index) = ancestor {
+                if let Some(candidate) = self.find_physical_child(index, &self.graph[node].name) {
+                    // The nearest same-name package shadows all higher copies.
+                    if self.resolved_subtrees_match(node, candidate) {
+                        for edge in self.graph.edge_weights_mut() {
+                            if let GraphEdge::Dependency(dep) = edge
+                                && dep.to == Some(node)
+                            {
+                                dep.to = Some(candidate);
+                            }
+                        }
+                        self.has_redundant_nodes = true;
+                    }
+                    break;
+                }
+                ancestor = self.get_physical_parent(index);
+            }
+        }
+    }
+
+    fn resolved_subtrees_match(&self, left: NodeIndex, right: NodeIndex) -> bool {
+        let mut pending = vec![(left, right)];
+        let mut seen = HashSet::new();
+        while let Some((left, right)) = pending.pop() {
+            if left == right || !seen.insert((left, right)) {
+                continue;
+            }
+            let a = &self.graph[left];
+            let b = &self.graph[right];
+            let source = a.manifest.dist().and_then(|dist| dist.tarball.as_deref());
+            if a.is_workspace()
+                || a.is_link()
+                || b.is_workspace()
+                || b.is_link()
+                || a.manifest.name() != b.manifest.name()
+                || a.version != b.version
+                || source.is_none()
+                || source != b.manifest.dist().and_then(|dist| dist.tarball.as_deref())
+            {
+                return false;
+            }
+            let left_edges = self.get_dependency_edges(left);
+            let right_edges = self.get_dependency_edges(right);
+            if left_edges.len() != right_edges.len() {
+                return false;
+            }
+            for (_, edge) in left_edges {
+                let Some((_, other)) = right_edges.iter().find(|(_, other)| {
+                    edge.name == other.name
+                        && edge.edge_type == other.edge_type
+                        && edge.spec == other.spec
+                }) else {
+                    return false;
+                };
+                match (edge.to, other.to) {
+                    (Some(a), Some(b)) if edge.valid && other.valid => pending.push((a, b)),
+                    (None, None) => {}
+                    _ => return false,
+                }
+            }
+        }
+        true
+    }
+
+    /// Reuse immediately when both paths have the same remaining rule conditions.
+    /// Otherwise resolve separate subtrees first; `deduplicate_override_subtrees`
+    /// can share them once their effective dependency results are known.
+    pub(crate) fn has_compatible_descendant_overrides(
+        &self,
+        from: NodeIndex,
+        candidate: NodeIndex,
+    ) -> bool {
+        let Some(overrides) = &self.overrides else {
+            return true;
+        };
+        if self.get_physical_parent(candidate) == Some(from)
+            || overrides.rules.iter().all(|rule| rule.parent.is_none())
+        {
+            return true;
+        }
+
+        let node = &self.graph[candidate];
+        if [
+            node.manifest.dependencies(),
+            node.manifest.optional_dependencies(),
+            node.manifest.peer_dependencies(),
+            node.is_workspace()
+                .then(|| node.manifest.dev_dependencies())
+                .flatten(),
+        ]
+        .into_iter()
+        .flatten()
+        .all(|deps| deps.is_empty())
+        {
+            return true;
+        }
+
+        let existing_chain = self.collect_parent_chain(candidate);
+        let mut requested_chain = self.collect_parent_chain(from);
+        requested_chain.push((node.name.clone(), node.version.clone()));
+
+        self.descendant_override_contexts_match(&existing_chain, &requested_chain)
+    }
+
+    /// An unused locked slot is safe only if moving the replacement there
+    /// preserves its own override scope and the rules for its descendants.
+    pub(crate) fn can_replace_override_target(
+        &self,
+        from: NodeIndex,
+        location: NodeIndex,
+        name: &str,
+        spec: &str,
+        manifest: &CoreVersionManifest,
+    ) -> bool {
+        let Some(overrides) = &self.overrides else {
+            return true;
+        };
+        let mut requested_chain = self.collect_parent_chain(from);
+        let mut placement_chain = self.collect_parent_chain(location);
+        if overrides.rules.iter().any(|rule| {
+            rule.name == name
+                && selector_may_match_requirement(name, &rule.spec, spec)
+                && self.matches_parent_chain_for_rule(rule, &requested_chain)
+                    != self.matches_parent_chain_for_rule(rule, &placement_chain)
+        }) {
+            return false;
+        }
+
+        if [
+            &manifest.dependencies,
+            &manifest.optional_dependencies,
+            &manifest.peer_dependencies,
+        ]
+        .into_iter()
+        .flatten()
+        .all(|deps| deps.is_empty())
+        {
+            return true;
+        }
+        requested_chain.push((name.to_owned(), manifest.version.clone()));
+        placement_chain.push((name.to_owned(), manifest.version.clone()));
+        self.descendant_override_contexts_match(&placement_chain, &requested_chain)
+    }
+
+    fn descendant_override_contexts_match(
+        &self,
+        existing_chain: &[(String, String)],
+        requested_chain: &[(String, String)],
+    ) -> bool {
+        let Some(overrides) = &self.overrides else {
+            return true;
+        };
+        overrides.rules.iter().all(|rule| {
+            let mut parents = Vec::new();
+            let mut parent = rule.parent.as_deref();
+            while let Some(rule) = parent {
+                parents.push(rule);
+                parent = rule.parent.as_deref();
+            }
+            parents.reverse();
+
+            let matched_prefix = |chain: &[(String, String)]| {
+                let mut matched = 0;
+                for (name, version) in chain {
+                    if let Some(rule) = parents.get(matched)
+                        && rule.name == *name
+                        && (rule.spec == "*" || matches(&rule.spec, version))
+                    {
+                        matched += 1;
+                    }
+                }
+                matched
+            };
+            matched_prefix(existing_chain) == matched_prefix(requested_chain)
+        })
+    }
+
     /// Collect the physical parent chain from a node up to root (excluding root).
     ///
     /// Returns the chain in order from outermost to innermost.
@@ -24,7 +238,7 @@ impl DependencyGraph {
     /// "express": { "body-parser": { "debug": "4.0.0" } }
     /// meaning debug should be overridden when its parent is body-parser AND
     /// body-parser's parent is express.
-    fn collect_parent_chain(&self, from: NodeIndex) -> Vec<(String, String)> {
+    pub(crate) fn collect_parent_chain(&self, from: NodeIndex) -> Vec<(String, String)> {
         let mut chain = Vec::new();
         let mut current = from;
 
@@ -45,6 +259,33 @@ impl DependencyGraph {
 
         chain.reverse();
         chain
+    }
+
+    /// A changed rule can affect its leaf or any package that introduces one
+    /// of its parent scopes. Other branches keep their locked resolutions.
+    pub(crate) fn override_rules_affect_dependency(
+        &self,
+        rules: &[OverrideRule],
+        edge: &DependencyEdge,
+        chain: &[(String, String)],
+        include_parent_scopes: bool,
+    ) -> bool {
+        rules.iter().any(|rule| {
+            if rule.name == edge.name
+                && self.matches_parent_chain_for_rule(rule, chain)
+                && selector_may_match_requirement(&edge.name, &rule.spec, &edge.spec)
+            {
+                return true;
+            }
+            // Parent scopes match the final package version, which another
+            // override can place outside the original dependency requirement.
+            include_parent_scopes
+                && std::iter::successors(rule.parent.as_deref(), |parent| parent.parent.as_deref())
+                    .any(|parent| {
+                        parent.name == edge.name
+                            && self.matches_parent_chain_for_rule(parent, chain)
+                    })
+        })
     }
 
     /// Check if an override rule applies.
@@ -170,6 +411,7 @@ mod tests {
     use super::*;
     use crate::model::graph::{FindResult, PackageNode};
     use crate::model::manifest::CoreVersionManifest;
+    use crate::model::node::EdgeType;
     use crate::model::package_json::PackageJson;
 
     fn create_pkg(name: &str, version: &str) -> PackageJson {
@@ -182,6 +424,166 @@ mod tests {
             version: version.to_string(),
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn leaf_selector_applicability_uses_requirement_ranges() {
+        for (selector, spec, expected) in [
+            ("^9.0.0", "^1.0.0", false),
+            ("^9.0.0", "npm:other@^1.0.0", false),
+            ("^9.0.0", "^1.0.0 || ^2.0.0", false),
+            ("<1.0.0", ">=1.0.0", false),
+            ("^1.1.0", "^1.0.0", true),
+            ("^9.0.0", "^1.0.0 || ^9.0.0", true),
+            ("^1.0.0-beta.1", "1.0.0-beta.2", true),
+            ("*", "^1.0.0", true),
+            ("^9.0.0", "latest", true),
+            ("^9.0.0", "https://example.com/shared.tgz", true),
+        ] {
+            assert_eq!(
+                selector_may_match_requirement("shared", selector, spec),
+                expected,
+                "{selector} against {spec}"
+            );
+        }
+    }
+
+    #[test]
+    fn unused_locked_slot_preserves_relevant_override_scopes() {
+        for (overrides, has_dependencies, can_replace) in [
+            (
+                json!({ "shared": "2.0.0", "unrelated": { "unused": "2.0.0" } }),
+                true,
+                true,
+            ),
+            (json!({ "unrelated": { "shared": "2.0.0" } }), false, true),
+            (
+                json!({ "consumer": { "shared@^9.0.0": "9.0.0" } }),
+                false,
+                true,
+            ),
+            (json!({ "consumer": { "shared": "2.0.0" } }), false, false),
+            (
+                json!({ "consumer": { "shared": { "inner": "2.0.0" } } }),
+                true,
+                false,
+            ),
+            (
+                json!({ "consumer": { "shared@^2.0.0": { "inner": "2.0.0" } } }),
+                true,
+                false,
+            ),
+            (json!({ "shared": { "inner": "2.0.0" } }), true, true),
+        ] {
+            let pkg = PackageJson::from_value(&json!({
+                "name": "root", "version": "1.0.0", "overrides": overrides
+            }))
+            .unwrap();
+            let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
+            let consumer = graph.add_node(PackageNode::from_version_manifest(
+                "consumer".into(),
+                PathBuf::from("node_modules/consumer"),
+                create_version_manifest("consumer", "1.0.0"),
+            ));
+            graph.add_physical_edge(graph.root_index, consumer);
+            let shared = graph.add_node(PackageNode::from_version_manifest(
+                "shared".into(),
+                PathBuf::from("node_modules/shared"),
+                create_version_manifest("shared", "1.0.0"),
+            ));
+            graph.add_physical_edge(graph.root_index, shared);
+            let edge = graph.add_dependency_edge(consumer, "shared", "^1.0.0", EdgeType::Prod);
+            graph.mark_dependency_resolved(edge, shared);
+            graph.invalidate_dependency(edge);
+            let replacement = CoreVersionManifest {
+                name: "shared".into(),
+                version: "2.0.0".into(),
+                dependencies: has_dependencies.then(|| [("inner".into(), "1.0.0".into())].into()),
+                ..Default::default()
+            };
+            let expected = if can_replace {
+                FindResult::New(graph.root_index)
+            } else {
+                FindResult::Conflict(consumer)
+            };
+            assert_eq!(
+                graph.find_resolved_node(consumer, "shared", "^1.0.0", &replacement),
+                expected,
+                "{overrides}"
+            );
+        }
+    }
+
+    #[test]
+    fn reuse_checks_descendant_override_context_in_both_lookup_paths() {
+        let url = "https://example.com/shared.tgz";
+        for (overrides, can_reuse) in [
+            (
+                json!({ "consumer": { "shared": { "inner": "2.0.0" } } }),
+                false,
+            ),
+            (
+                json!({ "consumer": { "shared": { "bridge": { "inner": "2.0.0" } } } }),
+                false,
+            ),
+            (
+                json!({ "consumer@^2.0.0": { "shared": { "inner": "2.0.0" } } }),
+                true,
+            ),
+            (
+                json!({ "unrelated": { "shared": { "inner": "2.0.0" } } }),
+                true,
+            ),
+            (json!({ "shared": { "inner": "2.0.0" } }), true),
+            (json!({ "inner": "2.0.0" }), true),
+        ] {
+            let pkg = PackageJson::from_value(&json!({
+                "name": "root", "version": "1.0.0", "overrides": overrides
+            }))
+            .unwrap();
+            let mut graph = DependencyGraph::from_package_json(PathBuf::from("."), pkg);
+            let consumer = graph.add_node(PackageNode::from_version_manifest(
+                "consumer".into(),
+                PathBuf::from("node_modules/consumer"),
+                create_version_manifest("consumer", "1.0.0"),
+            ));
+            graph.add_physical_edge(graph.root_index, consumer);
+            let mut manifest = CoreVersionManifest {
+                name: "shared".into(),
+                version: "1.0.0".into(),
+                dependencies: Some([("inner".into(), "1.0.0".into())].into()),
+                ..Default::default()
+            };
+            manifest.dist.tarball = Some(url.into());
+            let manifest = Arc::new(manifest);
+            let shared = graph.add_node(PackageNode::from_version_manifest(
+                "shared".into(),
+                PathBuf::from("node_modules/shared"),
+                manifest.clone(),
+            ));
+            graph.add_physical_edge(graph.root_index, shared);
+            let expected = if can_reuse {
+                FindResult::Reuse(shared)
+            } else {
+                FindResult::Conflict(consumer)
+            };
+            for spec in [url, "^1.0.0"] {
+                assert_eq!(
+                    graph.find_compatible_node(consumer, "shared", spec),
+                    expected,
+                    "{overrides}"
+                );
+            }
+            assert_eq!(
+                graph.find_resolved_node(consumer, "shared", "^1.0.0", &manifest),
+                expected,
+                "{overrides}"
+            );
+            assert_eq!(
+                graph.find_resolved_node(graph.root_index, "shared", "^1.0.0", &manifest),
+                FindResult::Reuse(shared)
+            );
+        }
     }
 
     #[test]
