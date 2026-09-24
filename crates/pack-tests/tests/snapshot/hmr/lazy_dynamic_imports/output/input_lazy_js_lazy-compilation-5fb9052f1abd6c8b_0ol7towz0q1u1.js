@@ -3,8 +3,7 @@
 
 __turbopack_context__.v([
   "input_lazy_08yucs-jth3jq.js",
-  "input_lazy_1e6hr55eqor41.js",
-  "input_lazy_js_lazy-compilation-5fb9052f1abd6c8b_177wt53nxflpx.js"
+  "input_lazy_1e6hr55eqor41.js"
 ]);
 }),
 ]);
