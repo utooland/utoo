@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/concatenate_modules/reexport-shared-import-context/input/List.js"],"sourcesContent":["export const FormListContext = { value: \"context\" };\nexport const ProFormList = { value: \"list\" };\n"],"names":["FormListContext","value","ProFormList"],"mappings":"AAAO,MAAMA,kBAAkB;IAAEC,OAAO;AAAU;AAC3C,MAAMC,cAAc;IAAED,OAAO;AAAO"}},
+    {"offset": {"line": 30, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/concatenate_modules/reexport-shared-import-context/input/main.js"],"sourcesContent":["import * as ui from \"./outer2\";\n\nglobalThis.reexportedValues = Object.keys(ui).reduce((values, name) => {\n  values[name] = ui[name].value;\n  return values;\n}, {});\n"],"names":[],"mappings":";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;AAAA;;AAEA,WAAW,gBAAgB,GAAG,OAAO,IAAI,CAAC,+KAAI,MAAM,CAAC,CAAC,QAAQ;IAC5D,MAAM,CAAC,KAAK,GAAG,6KAAE,CAAC,KAAK,CAAC,KAAK;IAC7B,OAAO;AACT,GAAG,CAAC"}}]
+}
