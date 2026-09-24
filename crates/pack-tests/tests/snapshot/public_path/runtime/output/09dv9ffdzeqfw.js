@@ -27,8 +27,8 @@ __turbopack_context__.s([
 61, ((__turbopack_context__) => {
 "use strict";
 
-globalThis.publicPath = globalThis.__ASSET_BASE__;
-const activePublicPath = globalThis.publicPath;
+__turbopack_context__.runtimePublicPath = globalThis.__ASSET_BASE__;
+const activePublicPath = __turbopack_context__.runtimePublicPath;
 __turbopack_context__.s([
     "f",
     0,
@@ -37,4 +37,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=0clvvreq9nj5m.js.map
+//# sourceMappingURL=0ik5m9jyjydqd.js.map

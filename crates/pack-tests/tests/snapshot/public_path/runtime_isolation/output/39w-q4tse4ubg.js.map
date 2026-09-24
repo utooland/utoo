@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/runtime_isolation/input/first.js"],"sourcesContent":["export const value = \"first\";\n"],"names":["value"],"mappings":"AAAO,MAAMA,QAAQ"}}]
+}

@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 13, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/public_path/runtime_isolation/input/index.js"],"sourcesContent":["globalThis.__runtimePublicPathTest = {\n  loadFirst: () => import(\"./first.js\"),\n  loadSecond: () => import(\"./second.js\"),\n  setPublicPath(path) {\n    __webpack_public_path__ = path;\n  },\n  getPublicPath() {\n    return __webpack_public_path__;\n  },\n};\n"],"names":["globalThis","__runtimePublicPathTest","loadFirst","loadSecond","setPublicPath","path","runtimePublicPath","getPublicPath"],"mappings":"AAAAA,WAAWC,uBAAuB,GAAG;IACnCC,WAAW;IACXC,YAAY;IACZC,eAAcC,IAAI;QAChBC,sBAAAA,iBAAuB,GAAGD;IAC5B;IACAE;QACE,OAAOD,sBAAAA,iBAAuB;IAChC;AACF"}}]
+}

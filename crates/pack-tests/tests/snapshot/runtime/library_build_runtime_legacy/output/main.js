@@ -772,6 +772,17 @@ function _type_of(obj) {
     contextPrototype.z = requireStub;
     // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
     contextPrototype.g = __utoo_global__;
+    // Each runtime keeps its own public path. Other applications on the page may
+    // change the global path after this runtime has started.
+    var runtimePublicPath = typeof __utoo_global__ !== 'undefined' ? __utoo_global__.publicPath : undefined;
+    Object.defineProperty(contextPrototype, 'runtimePublicPath', {
+        get: function get() {
+            return runtimePublicPath;
+        },
+        set: function set(value) {
+            runtimePublicPath = value;
+        }
+    });
     var cachedAutomaticPublicPath;
     function getAutomaticPublicPath() {
         if (cachedAutomaticPublicPath !== undefined) {
@@ -795,13 +806,13 @@ function _type_of(obj) {
     }
     /**
  * Gets the public path for runtime assets.
- * Checks globalThis.publicPath and falls back to "/".
+ * Uses this runtime's public path and falls back to "/".
  */ function getPublicPath(mode) {
         if (mode === 'auto') {
             return getAutomaticPublicPath();
         }
-        if (typeof __utoo_global__ !== 'undefined' && typeof __utoo_global__.publicPath === 'string') {
-            var publicPath = __utoo_global__.publicPath;
+        if (typeof runtimePublicPath === 'string') {
+            var publicPath = runtimePublicPath;
             return publicPath.endsWith('/') ? publicPath : "".concat(publicPath, "/");
         }
         return '/';
