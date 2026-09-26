@@ -1,0 +1,20 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/main.js",
+        "name": "main"
+      },
+      {
+        "import": "input/list-entry.js",
+        "name": "list-entry"
+      }
+    ],
+    "optimization": {
+      "concatenateModules": true,
+      "minify": false,
+      "moduleIds": "named",
+      "mangleExportNames": true
+    }
+  }
+}
