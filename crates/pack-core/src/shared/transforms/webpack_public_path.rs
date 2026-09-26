@@ -13,8 +13,8 @@ use turbopack_ecmascript::{CustomTransformer, TransformContext};
 
 use super::{EcmascriptTransformStage, get_ecma_transform_rule};
 
-/// Returns a rule that maps webpack's runtime public path global onto utoopack's
-/// existing runtime public path hook.
+/// Returns a rule that maps webpack's runtime public path global onto the
+/// current utoopack runtime's public path.
 pub fn get_webpack_public_path_transform_rule() -> ModuleRule {
     get_ecma_transform_rule(
         Box::new(WebpackPublicPathTransformer {}),
@@ -97,20 +97,20 @@ impl WebpackPublicPathVisitor {
         sym == &atom!("__webpack_public_path__") && ctxt == self.unresolved_ctxt
     }
 
-    fn global_public_path_member(&self, span: swc_core::common::Span) -> MemberExpr {
+    fn runtime_public_path_member(&self, span: swc_core::common::Span) -> MemberExpr {
         MemberExpr {
             span,
             obj: Box::new(Expr::Ident(Ident::new(
-                atom!("globalThis"),
+                atom!("__turbopack_context__"),
                 span,
-                self.unresolved_ctxt,
+                SyntaxContext::empty(),
             ))),
-            prop: MemberProp::Ident(IdentName::new(atom!("publicPath"), span)),
+            prop: MemberProp::Ident(IdentName::new(atom!("runtimePublicPath"), span)),
         }
     }
 
-    fn global_public_path_expr(&self, span: swc_core::common::Span) -> Expr {
-        Expr::Member(self.global_public_path_member(span))
+    fn runtime_public_path_expr(&self, span: swc_core::common::Span) -> Expr {
+        Expr::Member(self.runtime_public_path_member(span))
     }
 }
 
@@ -121,7 +121,7 @@ impl VisitMut for WebpackPublicPathVisitor {
                 if self.is_webpack_public_path(&binding_ident.id.sym, binding_ident.id.ctxt) =>
             {
                 assign_expr.left = AssignTarget::Simple(SimpleAssignTarget::Member(
-                    self.global_public_path_member(binding_ident.id.span),
+                    self.runtime_public_path_member(binding_ident.id.span),
                 ));
             }
             _ => {
@@ -136,7 +136,7 @@ impl VisitMut for WebpackPublicPathVisitor {
         if let Expr::Ident(ident) = expr
             && self.is_webpack_public_path(&ident.sym, ident.ctxt)
         {
-            *expr = self.global_public_path_expr(ident.span);
+            *expr = self.runtime_public_path_expr(ident.span);
             return;
         }
 

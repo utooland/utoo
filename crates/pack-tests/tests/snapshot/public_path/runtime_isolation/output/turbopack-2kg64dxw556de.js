@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["24sp90rpsmplw.js"],"runtimeModuleIds":[59]}
+    {"otherChunks":["25qxv1z5_qn_7.js"],"runtimeModuleIds":[70]}
 ]);
 (() => {
 var chunksToRegister = globalThis["TURBOPACK"];
@@ -10,13 +10,13 @@ if (chunksToRegister === undefined) {
     return;
 }
 
-var CHUNK_BASE_PATH = "/";
+var CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
-var RUNTIME_PUBLIC_PATH = "/";
+var RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
 const SUPPORT_COMPONENT_CHUNKS = false;
 var ASSET_SUFFIX = "";
-var CROSS_ORIGIN = "anonymous";
+var CROSS_ORIGIN = null;
 var CHUNK_LOAD_RETRY_MAX_ATTEMPTS = 1;
 var CHUNK_LOAD_RETRY_BASE_DELAY_MS = 200;
 var CHUNK_LOAD_RETRY_MAX_JITTER_MS = 400;
@@ -542,6 +542,15 @@ contextPrototype.U = relativeURL;
 contextPrototype.z = requireStub;
 // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
 contextPrototype.g = globalThis;
+// Each runtime keeps its own public path. Other applications on the page may
+// change the global path after this runtime has started.
+let runtimePublicPath = typeof globalThis !== 'undefined' ? globalThis.publicPath : undefined;
+Object.defineProperty(contextPrototype, 'runtimePublicPath', {
+    get: ()=>runtimePublicPath,
+    set: (value)=>{
+        runtimePublicPath = value;
+    }
+});
 let cachedAutomaticPublicPath;
 function getAutomaticPublicPath() {
     if (cachedAutomaticPublicPath !== undefined) {
@@ -565,13 +574,13 @@ function getAutomaticPublicPath() {
 }
 /**
  * Gets the public path for runtime assets.
- * Checks globalThis.publicPath and falls back to "/".
+ * Uses this runtime's public path and falls back to "/".
  */ function getPublicPath(mode) {
     if (mode === 'auto') {
         return getAutomaticPublicPath();
     }
-    if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === 'string') {
-        const publicPath = globalThis.publicPath;
+    if (typeof runtimePublicPath === 'string') {
+        const publicPath = runtimePublicPath;
         return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
     }
     return '/';
@@ -1303,4 +1312,4 @@ chunksToRegister.forEach(registerChunk);
 })();
 
 
-//# sourceMappingURL=1cghx4023gj8h.js.map
+//# sourceMappingURL=3u1uqq3w-6ie5.js.map

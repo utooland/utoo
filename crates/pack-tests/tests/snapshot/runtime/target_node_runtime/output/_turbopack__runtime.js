@@ -522,6 +522,15 @@ contextPrototype.U = relativeURL;
 contextPrototype.z = requireStub;
 // Make `globalThis` available to the module in a way that cannot be shadowed by a local variable.
 contextPrototype.g = globalThis;
+// Each runtime keeps its own public path. Other applications on the page may
+// change the global path after this runtime has started.
+let runtimePublicPath = typeof globalThis !== 'undefined' ? globalThis.publicPath : undefined;
+Object.defineProperty(contextPrototype, 'runtimePublicPath', {
+    get: ()=>runtimePublicPath,
+    set: (value)=>{
+        runtimePublicPath = value;
+    }
+});
 let cachedAutomaticPublicPath;
 function getAutomaticPublicPath() {
     if (cachedAutomaticPublicPath !== undefined) {
@@ -545,13 +554,13 @@ function getAutomaticPublicPath() {
 }
 /**
  * Gets the public path for runtime assets.
- * Checks globalThis.publicPath and falls back to "/".
+ * Uses this runtime's public path and falls back to "/".
  */ function getPublicPath(mode) {
     if (mode === 'auto') {
         return getAutomaticPublicPath();
     }
-    if (typeof globalThis !== 'undefined' && typeof globalThis.publicPath === 'string') {
-        const publicPath = globalThis.publicPath;
+    if (typeof runtimePublicPath === 'string') {
+        const publicPath = runtimePublicPath;
         return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
     }
     return '/';
