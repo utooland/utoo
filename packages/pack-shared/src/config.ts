@@ -334,6 +334,13 @@ export interface ConfigComplete {
           exclude?: string[];
         };
     concatenateModules?: boolean;
+    /**
+     * Share one browser runtime asset across production application entries.
+     * Reduces duplicated runtime code and lets pages reuse the cached runtime,
+     * but adds a request compared with an inline runtime for a single entry.
+     * Defaults to `false`; ignored in development, Node.js, and library builds.
+     */
+    sharedRuntime?: boolean;
     removeUnusedExports?: boolean;
     removeUnusedImports?: boolean;
     nestedAsyncChunking?: boolean;

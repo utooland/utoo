@@ -642,6 +642,7 @@ pub struct ClientChunkingContextOptions {
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
+    pub shared_runtime: Vc<bool>,
     pub shared_runtime_chunk: Vc<bool>,
     pub debug_ids: Vc<bool>,
     pub should_use_absolute_url_references: Vc<bool>,
@@ -668,6 +669,7 @@ pub async fn get_client_chunking_context(
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
+        shared_runtime,
         shared_runtime_chunk,
         debug_ids,
         should_use_absolute_url_references,
@@ -776,6 +778,7 @@ pub async fn get_client_chunking_context(
     } else {
         let split_chunks = &config.optimization().await?.split_chunks;
         let style_groups_algorithm = config.css_chunking_algorithm().owned().await?;
+        let shared_runtime = *shared_runtime.await?;
 
         let (ecmascript_chunking_config, css_chunking_config) = (
             split_chunks.as_ref().and_then(|sc| sc.get("js")).map_or(
@@ -811,6 +814,8 @@ pub async fn get_client_chunking_context(
                 css_chunking_config,
             )
             .chunk_content_hashing(ContentHashing::Direct { length: 13 })
+            .shared_runtime(shared_runtime)
+            .emit_entry_bootstrap(shared_runtime)
             .module_merging(*scope_hoisting.await?);
     }
 

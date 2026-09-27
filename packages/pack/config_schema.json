@@ -1435,6 +1435,13 @@
             "null"
           ]
         },
+        "sharedRuntime": {
+          "description": "Share one browser runtime asset across production application entries. Reduces duplicated runtime code and enables cache reuse across pages, but adds a request for a single entry. Defaults to false; ignored in development, Node.js, and library builds.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "splitChunks": {
           "description": "Split chunks configuration",
           "type": [

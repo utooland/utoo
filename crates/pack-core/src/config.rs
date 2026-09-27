@@ -577,6 +577,8 @@ pub struct OptimizationConfig {
     /// improving caching.
     #[serde(default)]
     pub concatenate_modules: Option<bool>,
+    /// Share the browser runtime across production application entries. Defaults to false.
+    pub shared_runtime: Option<bool>,
     /// Defaults to false in development mode, true in production mode.
     pub remove_unused_exports: Option<bool>,
     /// Defaults to false in development mode, true in production mode.
@@ -2075,6 +2077,18 @@ impl Config {
                 .optimization
                 .as_ref()
                 .map(|op| op.concatenate_modules.unwrap_or(false))
+                .unwrap_or(false),
+        }))
+    }
+
+    #[turbo_tasks::function]
+    pub async fn shared_runtime(&self, mode: Vc<Mode>) -> Result<Vc<bool>> {
+        Ok(Vc::cell(match *mode.await? {
+            Mode::Development => false,
+            Mode::Production => self
+                .optimization
+                .as_ref()
+                .and_then(|optimization| optimization.shared_runtime)
                 .unwrap_or(false),
         }))
     }

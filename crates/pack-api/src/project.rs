@@ -1356,6 +1356,7 @@ impl Project {
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
+            shared_runtime: config.shared_runtime(mode),
             // Per-entry graphs cannot see which runtime helpers another entry may require.
             shared_runtime_chunk: self.per_entry_module_graph(),
             debug_ids: Vc::cell(false),

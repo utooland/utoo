@@ -8,7 +8,8 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::{FxIndexMap, NonLocalValue, ResolvedVc, TryJoinIterExt, Vc, trace::TraceRawVcs};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_browser::ecmascript::{
-    EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList,
+    EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptBrowserRuntimeChunk,
+    EcmascriptDevChunkList,
 };
 use turbopack_core::{
     asset::Asset,
@@ -28,7 +29,7 @@ pub struct AssetIntermediateInfo {
     pub chunks: Vec<WebpackStatsChunk>,
     pub entrypoints: Vec<(RcStr, WebpackStatsEntrypoint)>,
     pub modules: Vec<WebpackStatsModule>,
-    pub dev_chunk_list: Option<RcStr>,
+    pub additional_initial_chunk: Option<RcStr>,
 }
 
 #[turbo_tasks::value(transparent)]
@@ -96,7 +97,7 @@ pub async fn get_asset_intermediate_info(
     let mut local_chunks = vec![];
     let mut local_entrypoints = vec![];
     let mut local_modules = vec![];
-    let mut local_dev_chunk_list = None;
+    let mut local_additional_initial_chunk = None;
 
     if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserEvaluateChunk>(asset) {
         let entry_path_full = chunk.path().await?;
@@ -269,21 +270,17 @@ pub async fn get_asset_intermediate_info(
         ));
     }
 
-    if let Some(chunk_list) = ResolvedVc::try_downcast_type::<EcmascriptDevChunkList>(asset) {
-        let chunk_list_path_full = chunk_list.path().await?;
-        let chunk_list_ident = dist_root
-            .await?
-            .get_relative_path_to(&chunk_list_path_full)
-            .unwrap_or_else(|| chunk_list_path_full.path.clone());
-        let chunk_list_ident = normalize_stats_path(chunk_list_ident);
+    if ResolvedVc::try_downcast_type::<EcmascriptDevChunkList>(asset).is_some()
+        || ResolvedVc::try_downcast_type::<EcmascriptBrowserRuntimeChunk>(asset).is_some()
+    {
         local_chunks.push(WebpackStatsChunk {
             size: asset_len,
-            files: vec![chunk_list_ident.clone()],
-            id: chunk_list_ident.clone(),
+            files: vec![path.clone()],
+            id: path.clone(),
             ..Default::default()
         });
 
-        local_dev_chunk_list = Some(chunk_list_ident);
+        local_additional_initial_chunk = Some(path.clone());
     }
 
     if let Some(chunk) = ResolvedVc::try_downcast_type::<CssChunk>(asset) {
@@ -375,7 +372,7 @@ pub async fn get_asset_intermediate_info(
         chunks: local_chunks,
         entrypoints: local_entrypoints,
         modules: local_modules,
-        dev_chunk_list: local_dev_chunk_list,
+        additional_initial_chunk: local_additional_initial_chunk,
     }
     .cell())
 }
@@ -432,9 +429,9 @@ pub async fn generate_webpack_stats(
         }
     }
 
-    // Endpoint output groups preserve which evaluate entry owns each development chunk list.
-    // Associating these lists after flattening all output assets made every entrypoint include
-    // every other page's HMR bootstrap in multi-page builds.
+    // Associate development chunk lists and shared runtimes with their owning entrypoints.
+    // Only inspect each endpoint's direct output assets: flattening references here would also
+    // attach worker runtimes and other pages' HMR bootstraps to unrelated entrypoints.
     for group in entry_asset_groups.await?.iter().copied() {
         let group = group.await?;
         let group_entrypoints: FxIndexMap<_, _> = group
@@ -443,10 +440,10 @@ pub async fn generate_webpack_stats(
             .flat_map(|info| info.entrypoints.iter())
             .map(|(name, _)| (name.clone(), ()))
             .collect();
-        let group_chunk_lists: FxIndexMap<_, _> = group
+        let group_initial_chunks: FxIndexMap<_, _> = group
             .iter()
             .filter_map(|asset| asset_info_by_asset.get(asset))
-            .filter_map(|info| info.dev_chunk_list.as_ref())
+            .filter_map(|info| info.additional_initial_chunk.as_ref())
             .map(|name| (name.clone(), ()))
             .collect();
 
@@ -454,13 +451,13 @@ pub async fn generate_webpack_stats(
             let Some(entrypoint) = entrypoints.get_mut(entrypoint_name) else {
                 continue;
             };
-            for dev_chunk_list in group_chunk_lists.keys() {
-                if entrypoint.chunks.contains(dev_chunk_list) {
+            for initial_chunk in group_initial_chunks.keys() {
+                if entrypoint.chunks.contains(initial_chunk) {
                     continue;
                 }
-                entrypoint.chunks.push(dev_chunk_list.clone());
+                entrypoint.chunks.push(initial_chunk.clone());
                 entrypoint.assets.push(WebpackStatsEntrypointAssets {
-                    name: dev_chunk_list.clone(),
+                    name: initial_chunk.clone(),
                 });
             }
         }

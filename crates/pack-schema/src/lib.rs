@@ -664,6 +664,13 @@ pub struct SchemaOptimizationConfig {
     )]
     pub concatenate_modules: Option<bool>,
 
+    /// Share the browser runtime across production application entries
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(
+        description = "Share one browser runtime asset across production application entries. Reduces duplicated runtime code and enables cache reuse across pages, but adds a request for a single entry. Defaults to false; ignored in development, Node.js, and library builds."
+    )]
+    pub shared_runtime: Option<bool>,
+
     /// Whether to remove unused exports
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
