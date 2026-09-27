@@ -110,6 +110,7 @@ async function buildInternal(
       },
       {
         persistentCaching,
+        isShortSession: true,
         turbopackMemoryEviction,
         smallPreallocation,
         turbopackGc: bundleOptions.config.turbopackGc,
