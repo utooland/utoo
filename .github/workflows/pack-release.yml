@@ -426,7 +426,7 @@ jobs:
     with:
       candidate_mode: npm
       pack_spec: ${{ needs.publish.outputs.version }}
-      suite: all
+      suite: release
       harness_repository: utooland/utoo-ecosystem-ci
       harness_ref: main
 
