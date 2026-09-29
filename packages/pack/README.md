@@ -131,6 +131,22 @@ builds keep their existing naming rules. A deployment's complete URL also includ
 its public path and any query parameters, so short chunk names alone do not
 guarantee a particular URL length limit.
 
+Set `optimization.sharedRuntime: true` to emit one browser runtime asset shared
+across production application entries. This reduces duplicated runtime code in
+multi-entry builds and lets pages reuse the cached runtime. Each entry keeps its
+own small bootstrap script. The option defaults to `false` because separating the
+runtime adds a request for a single entry; it does not apply to development,
+Node.js, or library builds.
+
+```json
+{
+  "mode": "production",
+  "optimization": {
+    "sharedRuntime": true
+  }
+}
+```
+
 ## 🛠️ Development
 
 ### Prerequisites

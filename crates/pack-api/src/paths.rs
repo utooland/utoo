@@ -4,7 +4,9 @@ use turbo_rcstr::RcStr;
 use turbo_tasks::{ReadRef, ResolvedVc, TryFlatJoinIterExt, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::HashAlgorithm;
-use turbopack_browser::ecmascript::{EcmascriptBrowserEvaluateChunk, EcmascriptDevChunkList};
+use turbopack_browser::ecmascript::{
+    EcmascriptBrowserEvaluateChunk, EcmascriptBrowserRuntimeChunk, EcmascriptDevChunkList,
+};
 use turbopack_core::{
     asset::{Asset, no_hash_salt},
     output::{OutputAsset, OutputAssets},
@@ -88,7 +90,7 @@ pub async fn all_paths_in_root(
 ///
 /// Evaluate chunks load their referenced JavaScript chunks through the
 /// Turbopack runtime. HTML only needs to include non-JS referenced assets
-/// eagerly, plus the evaluate chunk itself.
+/// eagerly, plus the evaluate chunk itself and a separate runtime chunk when present.
 #[turbo_tasks::function]
 pub async fn initial_paths_in_root(
     assets: Vc<OutputAssets>,
@@ -102,6 +104,12 @@ pub async fn initial_paths_in_root(
         if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserEvaluateChunk>(asset)
         {
             push_non_js_chunks_data_paths(&mut paths, chunk.chunks_data().await?).await?;
+            let path = chunk.path().await?;
+            push_asset_path(&mut paths, &root, &path);
+            continue;
+        }
+
+        if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBrowserRuntimeChunk>(asset) {
             let path = chunk.path().await?;
             push_asset_path(&mut paths, &root, &path);
             continue;
