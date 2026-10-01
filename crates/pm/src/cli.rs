@@ -23,10 +23,16 @@ use crate::constants::cmd::{
 use crate::constants::{APP_ABOUT, APP_NAME, APP_VERSION};
 use crate::util::cli_enum::PublishAccess;
 
-pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
-    // Most common on Unix-like systems.
-    let shell_path = std::env::var("SHELL").ok()?;
-    let name = shell_path.rsplit('/').next().unwrap_or(shell_path.as_str());
+/// Map a shell executable path (e.g. the value of `$SHELL`) to a supported
+/// shell, returning `None` for shells that must be selected explicitly.
+///
+/// Kept as a pure helper so detection can be unit-tested without touching
+/// process-global environment variables. Note: unlike
+/// `clap_complete::Shell::from_shell_path` (which uses `file_stem` and would
+/// also auto-detect PowerShell/Elvish), a trailing slash like `/bin/bash/`
+/// deliberately yields no basename and thus `None`.
+fn detect_shell_from_path(shell_path: &str) -> Option<clap_complete::Shell> {
+    let name = shell_path.rsplit('/').next().unwrap_or(shell_path);
 
     match name {
         "bash" => Some(clap_complete::Shell::Bash),
@@ -35,6 +41,12 @@ pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
         // Leave PowerShell + Elvish to explicit flags; auto-detect tends to be unreliable.
         _ => None,
     }
+}
+
+pub fn detect_shell_from_env() -> Option<clap_complete::Shell> {
+    // Most common on Unix-like systems.
+    let shell_path = std::env::var("SHELL").ok()?;
+    detect_shell_from_path(&shell_path)
 }
 
 #[derive(Parser)]
@@ -377,6 +389,53 @@ mod tests {
     fn test_cli_debug_assert() {
         // Validates that the clap command definition has no conflicts or issues
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn test_detect_shell_from_path_bash() {
+        for path in ["/bin/bash", "/usr/bin/bash", "bash"] {
+            assert_eq!(
+                detect_shell_from_path(path),
+                Some(clap_complete::Shell::Bash),
+                "path: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_shell_from_path_zsh() {
+        for path in ["/usr/bin/zsh", "/bin/zsh", "zsh"] {
+            assert_eq!(
+                detect_shell_from_path(path),
+                Some(clap_complete::Shell::Zsh),
+                "path: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_shell_from_path_fish() {
+        for path in ["/opt/homebrew/bin/fish", "/usr/bin/fish", "fish"] {
+            assert_eq!(
+                detect_shell_from_path(path),
+                Some(clap_complete::Shell::Fish),
+                "path: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_detect_shell_from_path_unsupported_returns_none() {
+        for path in [
+            "/usr/bin/tcsh",
+            "/bin/sh",
+            "csh",
+            "powershell",
+            "",
+            "/bin/bash/",
+        ] {
+            assert_eq!(detect_shell_from_path(path), None, "path: {path}");
+        }
     }
 
     #[test]
