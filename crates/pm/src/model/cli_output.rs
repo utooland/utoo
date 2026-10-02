@@ -509,6 +509,13 @@ pub struct ConfigSetResult {
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
+pub struct ConfigDeleteResult {
+    pub key: String,
+    pub scope: String,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ConfigGetResult {
     pub values: BTreeMap<String, Value>,
     pub source: String,
@@ -706,6 +713,12 @@ config_success_schema!(
     "list",
     ConfigListResult
 );
+config_success_schema!(
+    ConfigDeleteSuccessSchema,
+    ConfigDeleteSubcommand,
+    "delete",
+    ConfigDeleteResult
+);
 
 #[derive(JsonSchema)]
 #[serde(untagged)]
@@ -732,6 +745,7 @@ enum CliOutputSchema {
     ConfigSet(ConfigSetSuccessSchema),
     ConfigGet(ConfigGetSuccessSchema),
     ConfigList(ConfigListSuccessSchema),
+    ConfigDelete(ConfigDeleteSuccessSchema),
     Init(InitSuccessSchema),
     Completions(CompletionsSuccessSchema),
     Custom(CustomSuccessSchema),
