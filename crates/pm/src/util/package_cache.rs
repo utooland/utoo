@@ -17,11 +17,59 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use sha2::{Digest, Sha256};
 
 use super::cache::get_cache_dir;
 use super::downloader::is_git_url;
 use super::extractor::extract_and_write;
 use super::user_config::is_registry_tarball;
+
+/// Complete materialization input, retained across prefetch and authoritative
+/// installation. This is deliberately internal: the public resolver event
+/// and lockfile formats remain unchanged.
+#[derive(Clone, Debug)]
+pub(crate) struct PackageSource {
+    pub name: String,
+    pub version: String,
+    pub tarball_url: String,
+    pub integrity: Option<String>,
+    pub shasum: Option<String>,
+}
+
+impl PackageSource {
+    pub fn key(&self) -> String {
+        format!("{}@{}:{}", self.name, self.version, self.fingerprint())
+    }
+
+    fn fingerprint(&self) -> String {
+        let mut hash = Sha256::new();
+        for part in [self.integrity.as_deref(), self.shasum.as_deref()] {
+            let part = part.unwrap_or("");
+            hash.update((part.len() as u64).to_le_bytes());
+            hash.update(part.as_bytes());
+        }
+        format!("{:x}", hash.finalize())
+    }
+
+    fn cache_path(&self) -> PathBuf {
+        super::cache::versioned_cache_dir(&get_cache_dir())
+            .join("packages")
+            .join(&self.name)
+            .join(&self.version)
+            .join(self.fingerprint())
+    }
+
+    fn verify(&self, bytes: &[u8]) -> Result<()> {
+        if let Some(integrity) = &self.integrity {
+            super::integrity::verify_integrity(bytes, integrity)
+        } else if let Some(shasum) = &self.shasum {
+            super::integrity::verify_shasum(bytes, shasum)
+        } else {
+            Ok(())
+        }
+        .with_context(|| format!("Failed to verify {}@{}", self.name, self.version))
+    }
+}
 
 /// Outcome of materializing a registry tarball into the cache. Returned so the
 /// caller (the install scheduler) keeps its own download/reuse counts instead
@@ -103,7 +151,8 @@ pub async fn resolve_cache_plan(name: &str, version: &str, tarball_url: &str) ->
 /// http(s) (with a registry auth token only when the host warrants one). The
 /// tarball is then extracted via [`extract_tarball_to_dir`], which strips the
 /// npm `package/` wrapper and writes no `_resolved` marker.
-pub async fn extract_non_registry_to_target(tarball_url: &str, target: &Path) -> Result<()> {
+pub async fn extract_non_registry_to_target(source: &PackageSource, target: &Path) -> Result<()> {
+    let tarball_url = &source.tarball_url;
     let bytes: Bytes = if let Some(abs) = tarball_url.strip_prefix("file:") {
         let abs = abs.to_string();
         tokio::task::spawn_blocking(move || std::fs::read(&abs).map(Bytes::from))
@@ -117,6 +166,7 @@ pub async fn extract_non_registry_to_target(tarball_url: &str, target: &Path) ->
             .with_context(|| format!("failed to download tarball {tarball_url}"))?
     };
 
+    source.verify(&bytes)?;
     let target = target.to_path_buf();
     tokio::task::spawn_blocking(move || utoo_ruborist::tar::extract_tarball_to_dir(&bytes, &target))
         .await
@@ -124,14 +174,9 @@ pub async fn extract_non_registry_to_target(tarball_url: &str, target: &Path) ->
         .with_context(|| format!("failed to extract tarball {tarball_url}"))
 }
 
-/// Return the registry cache path for a package version.
-pub fn registry_cache_path(name: &str, version: &str) -> PathBuf {
-    get_cache_dir().join(name).join(version)
-}
-
 /// Look up an already extracted registry package cache.
-pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<PathBuf>> {
-    let cache_path = registry_cache_path(name, version);
+pub async fn registry_cache_lookup(source: &PackageSource) -> Result<Option<PathBuf>> {
+    let cache_path = source.cache_path();
     if crate::fs::try_exists(&cache_path.join("_resolved"))
         .await
         .unwrap_or(false)
@@ -143,8 +188,9 @@ pub async fn registry_cache_lookup(name: &str, version: &str) -> Result<Option<P
 }
 
 /// Extract already downloaded registry tarball bytes into the package cache.
-pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result<ExtractOutcome> {
-    let cache_path = registry_cache_path(name, version);
+pub async fn extract_to_cache(source: &PackageSource, bytes: Bytes) -> Result<ExtractOutcome> {
+    source.verify(&bytes)?;
+    let cache_path = source.cache_path();
 
     if crate::fs::try_exists(&cache_path.join("_resolved")).await? {
         return Ok(ExtractOutcome::Reused(cache_path));
@@ -152,7 +198,7 @@ pub async fn extract_to_cache(name: &str, version: &str, bytes: Bytes) -> Result
 
     extract_and_write(bytes, &cache_path)
         .await
-        .with_context(|| format!("Extract {name}@{version} into {}", cache_path.display()))?;
+        .with_context(|| format!("Extract {} into {}", source.name, cache_path.display()))?;
 
     Ok(ExtractOutcome::Extracted(cache_path))
 }

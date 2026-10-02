@@ -38,7 +38,7 @@ fi
 cd ant-design-x
 
 rm -rf node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 time utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design-x${NC}"; exit 1; }
 utoo rebuild || { echo -e "${RED}FAIL: utoo rebuild failed for ant-design-x (next)${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design-x (next) cloned and installed${NC}"
@@ -86,7 +86,7 @@ if [ ! -d "ant-design" ]; then
   git clone --depth=1 --single-branch https://github.com/ant-design/ant-design.git
 fi
 cd ant-design
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 echo "Installing dependencies for ant-design..."
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for ant-design${NC}"; exit 1; }
 echo -e "${GREEN}PASS: ant-design cloned and installed${NC}"
@@ -375,7 +375,7 @@ rm -rf node_modules package-lock.json
 # Neither file: dep enters the global cache: the dir dep installs as a symlink
 # and the tarball dep is extracted directly into node_modules. Clean any slot a
 # prior pm build may have left so a stale entry can't mask a regression.
-rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg
+rm -rf ~/.cache/nm/local-dir-pkg ~/.cache/nm/local-tarball-pkg ~/.cache/nm.utoo-v2
 utoo install --ignore-scripts || { echo -e "${RED}FAIL: utoo install failed for file-deps${NC}"; exit 1; }
 for pkg in local-dir-pkg local-tarball-pkg local-link-pkg; do
     if [ ! -f "node_modules/$pkg/package.json" ]; then
@@ -576,7 +576,7 @@ if [ "$(uname -s)" = "Linux" ] && [ -d /dev/shm ]; then
     || { echo -e "${RED}FAIL: explicit cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
   [ -d "$XDEV_DISK/proj/node_modules/is-odd" ] \
     || { echo -e "${RED}FAIL: is-odd missing (explicit xdev)${NC}"; xdev_cleanup; exit 1; }
-  [ -d "$XDEV_SHM/cache" ] \
+  [ -d "$XDEV_SHM/cache.utoo-v2/packages" ] \
     || { echo -e "${RED}FAIL: explicit cache dir not used at $XDEV_SHM/cache${NC}"; xdev_cleanup; exit 1; }
   echo -e "${GREEN}PASS: explicit cross-device cache copies, install OK${NC}"
 
@@ -589,7 +589,7 @@ if [ "$(uname -s)" = "Linux" ] && [ -d /dev/shm ]; then
     || { echo -e "${RED}FAIL: default cross-device cache install failed${NC}"; xdev_cleanup; exit 1; }
   [ -d "$XDEV_SHM/proj/node_modules/is-odd" ] \
     || { echo -e "${RED}FAIL: is-odd missing (default xdev)${NC}"; xdev_cleanup; exit 1; }
-  [ -d "$XDEV_SHM/proj/node_modules/.cache/nm" ] \
+  [ -d "$XDEV_SHM/proj/node_modules/.cache/nm.utoo-v2/packages" ] \
     || { echo -e "${RED}FAIL: default cache not relocated to project node_modules/.cache/nm${NC}"; xdev_cleanup; exit 1; }
   echo -e "${GREEN}PASS: default cross-device cache relocated to project, install OK${NC}"
 
@@ -627,7 +627,8 @@ if (!pkg || pkg.hasInstallScript !== true) {
 ' "$SCRIPT_COPY_PROJECT/package-lock.json" \
     || { echo -e "${RED}FAIL: deasync lock entry lost hasInstallScript${NC}"; script_copy_cleanup; exit 1; }
 
-  SCRIPT_COPY_SOURCE="$SCRIPT_COPY_CACHE/deasync/0.1.30/package/package.json"
+  SCRIPT_COPY_SOURCES=("$SCRIPT_COPY_CACHE.utoo-v2/packages/deasync/0.1.30/"*/package/package.json)
+  SCRIPT_COPY_SOURCE="${SCRIPT_COPY_SOURCES[0]}"
   SCRIPT_COPY_TARGET="$SCRIPT_COPY_PROJECT/node_modules/deasync/package.json"
   [ -f "$SCRIPT_COPY_SOURCE" ] && [ -f "$SCRIPT_COPY_TARGET" ] \
     || { echo -e "${RED}FAIL: deasync source or target package.json missing${NC}"; script_copy_cleanup; exit 1; }
@@ -1541,7 +1542,7 @@ cat > package.json <<'PKGJSON'
 PKGJSON
 
 # Force a cold extract so the normalization path actually runs
-rm -rf ~/.cache/nm/google-protobuf
+rm -rf ~/.cache/nm/google-protobuf ~/.cache/nm.utoo-v2
 
 utoo install --ignore-scripts --registry=https://registry.npmjs.org \
   || { echo -e "${RED}FAIL: utoo install failed for perm-normalize-test${NC}"; popd; rm -rf "$PERM_DIR"; exit 1; }
@@ -1684,7 +1685,7 @@ echo -e "${GREEN}  ✓ PASS: utoo add -g works${NC}"
 echo -e "${YELLOW}Case: prod-reachable devDependency is not marked dev${NC}"
 cd e2e/pm/dev-prod-dedup
 rm -rf node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 utoo install --ignore-scripts --registry=https://registry.npmjs.org \
   || { echo -e "${RED}FAIL: utoo install failed for dev-prod-dedup${NC}"; exit 1; }
 node -e '
@@ -1714,7 +1715,7 @@ cd ../../../
 echo -e "${YELLOW}Case: package-lock.json reuse keeps existing tree stable${NC}"
 cd e2e/pm/lockfile-reuse
 rm -rf node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 # Restore the fixture manifest (a prior run may have added is-number to it).
 cat > package.json <<'PKG'
 {
@@ -1785,7 +1786,7 @@ cd ../../../
 echo -e "${YELLOW}Case: package-lock.json reuse prunes a removed dep${NC}"
 cd e2e/pm/lockfile-reuse
 rm -rf node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 cat > package.json <<'PKG'
 {
   "name": "lockfile-reuse",
@@ -1850,7 +1851,7 @@ cd ../../../
 echo -e "${YELLOW}Case: package-lock.json reuse warm re-install is a no-op${NC}"
 cd e2e/pm/lockfile-reuse
 rm -rf node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 cat > package.json <<'PKG'
 {
   "name": "lockfile-reuse",
@@ -1890,7 +1891,7 @@ cd ../../../
 echo -e "${YELLOW}Case: reuse bump past a transitive's range cold-resolves cleanly${NC}"
 cd e2e/pm/lockfile-reuse
 rm -rf node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 cat > package.json <<'PKG'
 {
   "name": "lockfile-reuse",
@@ -1955,7 +1956,7 @@ cd ../../../
 echo -e "${YELLOW}Case: lockfile reuse keeps workspace symlink${NC}"
 cd e2e/pm/lockfile-reuse-ws
 rm -rf node_modules packages/*/node_modules package-lock.json
-rm -rf ~/.cache/nm
+rm -rf ~/.cache/nm ~/.cache/nm.utoo-v2
 # Restore the fixture root manifest (a prior run may have added is-number).
 cat > package.json <<'PKG'
 {
@@ -2294,7 +2295,7 @@ if [ ! -f "$NPMRC_DIR/app/node_modules/npmrc-reg-pkg/package.json" ]; then
 fi
 # The tarball came from the configured (.npmrc) registry origin, so it is
 # trusted and must land in the shared cache (registry-tarball classification).
-if [ ! -d "$NPMRC_CACHE/npmrc-reg-pkg" ]; then
+if [ ! -d "$NPMRC_CACHE.utoo-v2/packages/npmrc-reg-pkg" ]; then
     echo -e "${RED}FAIL: npmrc-reg-pkg missing from the global cache (registry origin not trusted?)${NC}"
     npmrc_cleanup; exit 1
 fi
