@@ -29,7 +29,106 @@ async function main() {
     force: true,
   });
 
+  const binding = require(path.join(packRoot, "cjs", "binding.js"));
+  const registerWorkerScheduler = binding.registerWorkerScheduler;
+  const parallelPoolFilenames = new Set();
+  let forceCreationOrder = true;
+  let parallelCreations = 0;
+  binding.registerWorkerScheduler = (creator, terminator) =>
+    registerWorkerScheduler(
+      (creation) => {
+        if (forceCreationOrder) {
+          parallelPoolFilenames.add(creation.options.filename);
+          parallelCreations += 1;
+          // Different evaluator pools can finish booting out of request order. Delay the first
+          // creation so a second request exposes incorrect FIFO worker-id assignment.
+          if (parallelCreations === 1) {
+            setTimeout(() => creator(creation), 750);
+            return;
+          }
+        }
+        creator(creation);
+      },
+      terminator,
+    );
+
   const { build } = require("@utoo/pack");
+  // Start with empty evaluator pools. The separate projects request a webpack loader and
+  // PostCSS worker concurrently, so the startup-order check does not depend on graph traversal.
+  await Promise.all([
+    build({
+      config: {
+        mode: "development",
+        persistentCaching: false,
+        entry: [{ name: "sync", import: "./src/sync.js" }],
+        output: { path: "./regression-dist/parallel-sync", clean: true },
+        module: {
+          rules: {
+            "*.sync-txt": {
+              loaders: [require.resolve("./sync-loader.cjs")],
+              as: "*.js",
+            },
+          },
+        },
+        pluginRuntimeStrategy: "workerThreads",
+        sourceMaps: true,
+      },
+    }),
+    build({
+      config: {
+        mode: "development",
+        persistentCaching: false,
+        entry: [{ name: "async", import: "./src/async.js" }],
+        output: { path: "./regression-dist/parallel-async", clean: true },
+        pluginRuntimeStrategy: "workerThreads",
+        sourceMaps: true,
+      },
+    }),
+  ]);
+  forceCreationOrder = false;
+  assert.ok(
+    parallelPoolFilenames.size >= 2,
+    "expected parallel builds to create different evaluator worker pools",
+  );
+  console.log("verified evaluator worker isolation with delayed startup");
+
+  // The CLI builds both evaluator graphs within one project and enables persistent caching.
+  const combinedOutput = path.join(__dirname, "regression-dist", "combined");
+  await build({
+    config: {
+      mode: "development",
+      persistentCaching: true,
+      entry: [{ name: "main", import: "./src/index.js" }],
+      output: {
+        path: combinedOutput,
+        clean: true,
+      },
+      module: {
+        rules: {
+          "*.sync-txt": {
+            loaders: [require.resolve("./sync-loader.cjs")],
+            as: "*.js",
+          },
+        },
+      },
+      pluginRuntimeStrategy: "workerThreads",
+      sourceMaps: true,
+    },
+  });
+
+  const combinedJavaScript = collectJavaScriptFiles(combinedOutput)
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("\n");
+  assert.match(combinedJavaScript, /from-loader/, "missing webpack loader output");
+  const combinedCss = fs
+    .readdirSync(combinedOutput, { recursive: true })
+    .filter((file) => file.endsWith(".css"))
+    .map((file) => fs.readFileSync(path.join(combinedOutput, file), "utf8"))
+    .join("\n");
+  assert.match(combinedCss, /\.shared-runtime-repro/, "missing PostCSS output");
+  assert.match(combinedCss, /display:\s*flex/, "unexpected PostCSS output");
+  console.log("verified PostCSS and webpack loader isolation in one project");
+
   let buildError;
   try {
     // Separate builds make the shared-runtime overwrite deterministic: the asynchronous PostCSS
