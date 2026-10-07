@@ -74,6 +74,32 @@ function importModule(id) {
           }
         }
       },
+      S(groups, exportId = id) {
+        const bindings = [];
+        let index = 0;
+        while (index < groups.length) {
+          const head = groups[index++];
+          const source =
+            typeof head === "string" || typeof head === "number"
+              ? importModule(head)
+              : head;
+          const start = index;
+          while (index < groups.length && groups[index] !== 0) index++;
+          let entries = groups.slice(start, index++);
+          if (entries.length === 1) entries = entries[0].split(",");
+          for (let offset = 0; offset < entries.length; offset += 2) {
+            const name = entries[offset];
+            const importedName = entries[offset + 1];
+            const descriptor = Object.getOwnPropertyDescriptor(source, importedName);
+            if (descriptor && "value" in descriptor) {
+              bindings.push(name, 0, descriptor.value);
+            } else {
+              bindings.push(name, descriptor?.get ?? (() => source[importedName]));
+            }
+          }
+        }
+        this.s(bindings, exportId);
+      },
     });
   }
   return namespaces.get(id);

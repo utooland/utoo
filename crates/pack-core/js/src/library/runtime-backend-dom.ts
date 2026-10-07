@@ -45,7 +45,7 @@ function loadScript(
   loadedScripts.set(scriptUrl, promise);
   return promise;
 }
-contextPrototype.S = loadScript;
+contextPrototype.Q = loadScript;
 
 (() => {
   BACKEND = {
