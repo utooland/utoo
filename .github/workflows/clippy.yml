@@ -23,7 +23,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2026-07-29
+          toolchain: nightly-2026-08-20
           components: clippy
       # - name: Cache cargo
       #   uses: Swatinem/rust-cache@v2
