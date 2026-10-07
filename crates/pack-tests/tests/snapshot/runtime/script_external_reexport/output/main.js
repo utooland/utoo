@@ -136,6 +136,26 @@ function _ts_generator(thisArg, body) {
         };
     }
 }
+function _ts_values(o) {
+    var s = typeof Symbol === "function" && Symbol.iterator, m = s && o[s], i = 0;
+    if (m) {
+        return m.call(o);
+    }
+    if (o && typeof o.length === "number") {
+        return {
+            next: function() {
+                if (o && i >= o.length) {
+                    o = void 0;
+                }
+                return {
+                    value: o && o[i++],
+                    done: !o
+                };
+            }
+        };
+    }
+    throw new TypeError(s ? "Object is not iterable." : "Symbol.iterator is not defined.");
+}
 function _type_of(obj) {
     "@swc/helpers - typeof";
     return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj;
@@ -262,7 +282,7 @@ function _type_of(obj) {
                         writable: false
                     });
                 } else {
-                    throw new Error("unexpected tag: ".concat(tagOrFunction));
+                    throw new Error(`unexpected tag: ${tagOrFunction}`);
                 }
             } else {
                 var getterFn = tagOrFunction;
@@ -730,7 +750,7 @@ function _type_of(obj) {
             if (hasOwnProperty.call(map, id)) {
                 return map[id].module();
             }
-            var e = new Error("Cannot find module '".concat(id, "'"));
+            var e = new Error(`Cannot find module '${id}'`);
             e.code = 'MODULE_NOT_FOUND';
             throw e;
         }
@@ -742,7 +762,7 @@ function _type_of(obj) {
             if (hasOwnProperty.call(map, id)) {
                 return map[id].id();
             }
-            var e = new Error("Cannot find module '".concat(id, "'"));
+            var e = new Error(`Cannot find module '${id}'`);
             e.code = 'MODULE_NOT_FOUND';
             throw e;
         };
@@ -856,7 +876,7 @@ function _type_of(obj) {
     /**
  * Utility function to ensure all variants of an enum are handled.
  */ function invariant(never, computeMessage) {
-        throw new Error("Invariant: ".concat(computeMessage(never)));
+        throw new Error(`Invariant: ${computeMessage(never)}`);
     }
     /**
  * Constructs an error message for when a module factory is not available.
@@ -864,20 +884,20 @@ function _type_of(obj) {
         var instantiationReason;
         switch(sourceType){
             case 0:
-                instantiationReason = "as a runtime entry of chunk ".concat(sourceData);
+                instantiationReason = `as a runtime entry of chunk ${sourceData}`;
                 break;
             case 1:
-                instantiationReason = "because it was required from module ".concat(sourceData);
+                instantiationReason = `because it was required from module ${sourceData}`;
                 break;
             case 2:
                 instantiationReason = 'because of an HMR update';
                 break;
             default:
                 invariant(sourceType, function(sourceType) {
-                    return "Unknown source type: ".concat(sourceType);
+                    return `Unknown source type: ${sourceType}`;
                 });
         }
-        return "Module ".concat(moduleId, " was instantiated ").concat(instantiationReason, ", but the module factory is not available.");
+        return `Module ${moduleId} was instantiated ${instantiationReason}, but the module factory is not available.`;
     }
     /**
  * Returns a `file://` URL under a synthetic directory named after `root`
@@ -885,7 +905,7 @@ function _type_of(obj) {
  * The root name and path segments are percent-encoded so the result is always
  * a valid file URI.
  */ function placeholderFileUrl(modulePath, root) {
-        return "file:///".concat(encodeURIComponent(root !== null && root !== void 0 ? root : 'ROOT'), "/").concat(modulePath.split('/').map(encodeURIComponent).join('/'));
+        return `file:///${encodeURIComponent(root !== null && root !== void 0 ? root : 'ROOT')}/${modulePath.split('/').map(encodeURIComponent).join('/')}`;
     }
     /**
  * A stub function to make `require` available but non-functional in ESM.
@@ -936,7 +956,7 @@ function _type_of(obj) {
         }
         if (typeof runtimePublicPath === 'string') {
             var publicPath = runtimePublicPath;
-            return publicPath.endsWith('/') ? publicPath : "".concat(publicPath, "/");
+            return publicPath.endsWith('/') ? publicPath : `${publicPath}/`;
         }
         return '/';
     }
@@ -1121,7 +1141,7 @@ function _type_of(obj) {
         try {
             raw = thunk();
         } catch (err) {
-            throw new Error("Failed to load external module ".concat(id, ": ").concat(err));
+            throw new Error(`Failed to load external module ${id}: ${err}`);
         }
         if (!esm || raw.__esModule) {
             return raw;
@@ -1276,7 +1296,7 @@ function _type_of(obj) {
                 return resolve();
             };
             script.onerror = function() {
-                return reject(new Error("Failed to load script: ".concat(scriptUrl)));
+                return reject(new Error(`Failed to load script: ${scriptUrl}`));
             };
             document.head.appendChild(script);
         });
@@ -1322,7 +1342,7 @@ function _type_of(obj) {
     chunksToRegister.forEach(registerChunk);
     function factory() {
         var runtimeModuleIds = [
-            "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)"
+            "[project]/runtime/script_external_reexport/input/index.js [library-client] (ecmascript)"
         ];
         var _$exports;
         for(var i = 0; i < runtimeModuleIds.length; i++){
@@ -1341,108 +1361,19 @@ function _type_of(obj) {
     if ((typeof exports === "undefined" ? "undefined" : _type_of(exports)) === 'object' && (typeof module === "undefined" ? "undefined" : _type_of(module)) === 'object') {
         module.exports = factory();
     } else if ((typeof exports === "undefined" ? "undefined" : _type_of(exports)) === 'object') {
-        exports["LegacyLibrary"] = factory();
+        exports["ScriptReexport"] = factory();
     } else {
-        __utoo_global__["LegacyLibrary"] = factory();
+        __utoo_global__["ScriptReexport"] = factory();
     }
 })([
     [
         "main.js",
-        "[externals]/ExternalValue [external] (ExternalValue, global)",
-        function(__turbopack_context__) {
-            "use strict";
-            var mod = __utoo_global__["ExternalValue"];
-            __turbopack_context__.v(mod);
-        },
-        "[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)",
-        function(__turbopack_context__) {
-            __turbopack_context__.v(__turbopack_context__.p("auto") + "asset.36cae746.svg");
-        },
-        "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)",
-        function(__turbopack_context__) {
-            "use strict";
-            __turbopack_context__.S([
-                "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>",
-                "flag,V,globals,U,last,z,load,_,localGlobal,e,read,x",
-                0,
-                "[externals]/ExternalValue [external] (ExternalValue, global)",
-                "external,default",
-                0,
-                "[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)",
-                "asset,default"
-            ]);
-        },
-        "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>",
-        function(__turbopack_context__) {
-            "use strict";
-            var __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__ = __turbopack_context__.i("[externals]/ExternalValue [external] (ExternalValue, global)");
-            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)");
-            ;
-            ;
-            ;
-            var read = function read(value) {
-                var _ref;
-                return (_ref = value === null || value === void 0 ? void 0 : value.answer) !== null && _ref !== void 0 ? _ref : 42;
-            };
-            var flag = 1;
-            var load = function load() {
-                return Promise.resolve().then(function() {
-                    return __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/lazy.js [library-client] (ecmascript)");
-                }).then(function(module1) {
-                    return module1.answer;
-                });
-            };
-            function last(node) {
-                do {
-                    node = node.next;
-                }while (node.next);
-                return node.value;
-            }
-            function globals(self1, __utoo_global__1) {
-                return [
-                    __utoo_global__,
-                    self1,
-                    __utoo_global__1,
-                    {
-                        globalThis: __utoo_global__
-                    }
-                ];
-            }
-            function localGlobal(globalThis1) {
-                return {
-                    globalThis: globalThis1,
-                    property: ({
-                        globalThis: 7
-                    }).globalThis
-                };
-            }
-            __turbopack_context__.s([
-                "V",
-                0,
-                flag,
-                "U",
-                0,
-                globals,
-                "z",
-                0,
-                last,
-                "_",
-                0,
-                load,
-                "e",
-                0,
-                localGlobal,
-                "x",
-                0,
-                read
-            ]);
-        },
-        "[project]/runtime/library_build_runtime_legacy/input/lazy.js [library-client] (ecmascript)",
+        "[externals]/ScriptValue [external] (ScriptValue@https://example.test/external.js, script)",
         function(__turbopack_context__) {
             "use strict";
             return __turbopack_context__.a(function(__turbopack_handle_async_dependencies__, __turbopack_async_result__) {
                 var __gen = function() {
-                    var answer, e;
+                    var mod, e;
                     return _ts_generator(this, function(_state) {
                         switch(_state.label){
                             case 0:
@@ -1453,16 +1384,42 @@ function _type_of(obj) {
                                     3
                                 ]);
                                 return [
-                                    4,
-                                    Promise.resolve(43)
+                                    5,
+                                    _ts_values(function() {
+                                        var error;
+                                        return _ts_generator(this, function(_state) {
+                                            switch(_state.label){
+                                                case 0:
+                                                    if (typeof __utoo_global__["ScriptValue"] !== 'undefined') {
+                                                        return [
+                                                            2,
+                                                            __utoo_global__["ScriptValue"]
+                                                        ];
+                                                    }
+                                                    return [
+                                                        4,
+                                                        __turbopack_context__.Q("https://example.test/external.js")
+                                                    ];
+                                                case 1:
+                                                    _state.sent();
+                                                    if (typeof __utoo_global__["ScriptValue"] !== 'undefined') {
+                                                        return [
+                                                            2,
+                                                            __utoo_global__["ScriptValue"]
+                                                        ];
+                                                    }
+                                                    error = new Error('Loading script failed.\n(missing: "https://example.test/external.js")');
+                                                    error.name = 'ScriptExternalLoadError';
+                                                    error.type = 'missing';
+                                                    error.request = "https://example.test/external.js";
+                                                    throw error;
+                                            }
+                                        });
+                                    }())
                                 ];
                             case 1:
-                                answer = _state.sent();
-                                __turbopack_context__.s([
-                                    "answer",
-                                    0,
-                                    answer
-                                ]);
+                                mod = _state.sent();
+                                __turbopack_context__.n(__turbopack_context__.N(mod));
                                 __turbopack_async_result__();
                                 return [
                                     3,
@@ -1496,6 +1453,44 @@ function _type_of(obj) {
                     });
                 })('next');
             }, true);
+        },
+        "[project]/runtime/script_external_reexport/input/index.js [library-client] (ecmascript)",
+        function(__turbopack_context__) {
+            "use strict";
+            __turbopack_context__.S([
+                "[project]/runtime/script_external_reexport/input/index.js [library-client] (ecmascript) <locals>",
+                "loadExternal,f",
+                0,
+                "[project]/runtime/script_external_reexport/input/value.js [library-client] (ecmascript)",
+                "value,f"
+            ]);
+        },
+        "[project]/runtime/script_external_reexport/input/index.js [library-client] (ecmascript) <locals>",
+        function(__turbopack_context__) {
+            "use strict";
+            ;
+            function loadExternal() {
+                return Promise.resolve().then(function() {
+                    return __turbopack_context__.i("[externals]/ScriptValue [external] (ScriptValue@https://example.test/external.js, script)");
+                }).then(function(module1) {
+                    return module1.default;
+                });
+            }
+            __turbopack_context__.s([
+                "f",
+                0,
+                loadExternal
+            ]);
+        },
+        "[project]/runtime/script_external_reexport/input/value.js [library-client] (ecmascript)",
+        function(__turbopack_context__) {
+            "use strict";
+            var value = 17;
+            __turbopack_context__.s([
+                "f",
+                0,
+                value
+            ]);
         }
     ],
     [
@@ -1503,7 +1498,7 @@ function _type_of(obj) {
         {
             "otherChunks": [],
             "runtimeModuleIds": [
-                "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)"
+                "[project]/runtime/script_external_reexport/input/index.js [library-client] (ecmascript)"
             ]
         }
     ]

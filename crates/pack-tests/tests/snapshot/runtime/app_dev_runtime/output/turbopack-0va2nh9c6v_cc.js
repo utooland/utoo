@@ -1,9 +1,9 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+(globalThis["utooChunk_appDev"] || (globalThis["utooChunk_appDev"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["input_lazy_02ui_upl81q0l.js","input_index_0v35ad79qwm9a.js"],"runtimeModuleIds":["[project]/hmr/lazy_dynamic_imports/input/index.js [client] (ecmascript)"]}
+    {"otherChunks":["1ja8-rq9dyrks.js"],"runtimeModuleIds":[41]}
 ]);
 (() => {
-var chunksToRegister = globalThis["TURBOPACK"];
+var chunksToRegister = globalThis["utooChunk_appDev"];
 if (chunksToRegister === undefined) {
     chunksToRegister = [];
 } else if (!Array.isArray(chunksToRegister)) {
@@ -15,9 +15,9 @@ var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
 var RUNTIME_PUBLIC_PATH = "/";
 const SUPPORT_COMPONENT_CHUNKS = false;
-globalThis["TURBOPACK_CHUNK_UPDATE_LISTENERS"] ||= [];
+globalThis["utooChunk_appDev_CHUNK_UPDATE_LISTENERS"] ||= [];
 var CHUNK_UPDATE_LISTENERS = {
-    push: (registration) => globalThis["TURBOPACK_CHUNK_UPDATE_LISTENERS"].push(registration),
+    push: (registration) => globalThis["utooChunk_appDev_CHUNK_UPDATE_LISTENERS"].push(registration),
 };
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
@@ -35,7 +35,7 @@ var WORKER_FORWARDED_GLOBALS = [];
 /**
  * Describes why a module was instantiated.
  * Shared between browser and Node.js runtimes.
- */ var SourceType = function(SourceType) {
+ */ var SourceType = /*#__PURE__*/ function(SourceType) {
     /**
    * The module was instantiated because it was included in an evaluated chunk's
    * runtime.
@@ -2722,9 +2722,12 @@ function _eval({ code, url, map }) {
     // eslint-disable-next-line no-eval
     return eval(code);
 }
-globalThis["TURBOPACK"] = { push: registerChunk };
+globalThis["utooChunk_appDev"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
-var chunkListsToRegister = globalThis["TURBOPACK_CHUNK_LISTS"] || [];
-globalThis["TURBOPACK_CHUNK_LISTS"] = { push: registerChunkList };
+var chunkListsToRegister = globalThis["utooChunk_appDev_CHUNK_LISTS"] || [];
+globalThis["utooChunk_appDev_CHUNK_LISTS"] = { push: registerChunkList };
 chunkListsToRegister.forEach(registerChunkList);
 })();
+
+
+//# sourceMappingURL=0e79yx6truast.js.map
