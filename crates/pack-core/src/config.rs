@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, Vc, trace::TraceRawVcs};
+use turbo_tasks::{FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, Vc};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::{FileJsonContent, FileSystemPath};
 use turbopack::module_options::{
@@ -26,7 +26,8 @@ use turbopack_core::{
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::transform::{
-    OptionReactCompilerCompilationMode, ReactCompilerCompilationMode, ReactCompilerTarget,
+    OptionReactCompilerTransformOptions, ReactCompilerCompilationMode, ReactCompilerTarget,
+    ReactCompilerTransformOptions,
 };
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
@@ -593,9 +594,7 @@ pub struct OptimizationConfig {
 const DEFAULT_CSS_CHUNKING_GRAPH_REQUEST_COST: f32 = 100_000.0;
 const DEFAULT_CSS_CHUNKING_GRAPH_WEIGHT_DISTRIBUTION: f32 = 0.1;
 
-#[derive(
-    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
-)]
+#[derive(Clone, Debug, PartialEq, Deserialize, NonLocalValue, OperationValue, Encode, Decode)]
 #[serde(untagged)]
 pub enum CssChunkingConfig {
     Boolean(bool),
@@ -604,17 +603,7 @@ pub enum CssChunkingConfig {
 }
 
 #[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Deserialize,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, NonLocalValue, OperationValue, Encode, Decode,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum CssChunkingMode {
@@ -623,9 +612,7 @@ pub enum CssChunkingMode {
     Graph,
 }
 
-#[derive(
-    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
-)]
+#[derive(Clone, Debug, PartialEq, Deserialize, NonLocalValue, OperationValue, Encode, Decode)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum CssChunkingObject {
     Strict,
@@ -634,16 +621,7 @@ pub enum CssChunkingObject {
 }
 
 #[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Deserialize,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Clone, Debug, Default, PartialEq, Deserialize, NonLocalValue, OperationValue, Encode, Decode,
 )]
 #[serde(rename_all = "camelCase")]
 pub struct CssChunkingGraphOptions {
@@ -797,16 +775,7 @@ impl OutputCrossOriginLoading {
 }
 
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    Deserialize,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Clone, PartialEq, Eq, Debug, Deserialize, NonLocalValue, OperationValue, Encode, Decode,
 )]
 #[serde(
     tag = "type",
@@ -833,16 +802,7 @@ impl TryFrom<ConfigConditionQuery> for ConditionQuery {
 }
 
 #[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    Deserialize,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Clone, PartialEq, Eq, Debug, Deserialize, NonLocalValue, OperationValue, Encode, Decode,
 )]
 #[serde(
     tag = "type",
@@ -869,16 +829,7 @@ impl TryFrom<ConfigConditionContentType> for ConditionContentType {
 }
 
 #[derive(
-    Deserialize,
-    Clone,
-    PartialEq,
-    Eq,
-    Debug,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Deserialize, Clone, PartialEq, Eq, Debug, NonLocalValue, OperationValue, Encode, Decode,
 )]
 // We can end up with confusing behaviors if we silently ignore extra properties, since `Base` will
 // match nearly every object, since it has no required field.
@@ -1085,16 +1036,7 @@ pub struct ReactCompilerOptions {
 }
 
 #[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Serialize,
-    Deserialize,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Clone, Debug, PartialEq, Serialize, Deserialize, NonLocalValue, OperationValue, Encode, Decode,
 )]
 #[serde(untagged)]
 pub enum ReactCompilerOptionsOrBoolean {
@@ -1115,7 +1057,6 @@ pub struct ReactCompilerTargetConfig(ReactCompilerTarget);
     PartialEq,
     Serialize,
     Deserialize,
-    TraceRawVcs,
     NonLocalValue,
     OperationValue,
     Encode,
@@ -1290,9 +1231,7 @@ pub struct SwcPlugins(
 #[turbo_tasks::value(transparent)]
 pub struct OptionalMdxTransformOptions(Option<ResolvedVc<MdxTransformOptions>>);
 
-#[derive(
-    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
-)]
+#[derive(Clone, Debug, PartialEq, Deserialize, NonLocalValue, OperationValue, Encode, Decode)]
 #[serde(untagged)]
 pub enum MdxOptions {
     Boolean(bool),
@@ -1487,7 +1426,7 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn rust_react_compiler(&self) -> Vc<OptionReactCompilerCompilationMode> {
+    pub fn rust_react_compiler(&self) -> Vc<OptionReactCompilerTransformOptions> {
         let options = self.react_compiler.as_ref().or_else(|| {
             self.experimental
                 .as_ref()
@@ -1504,7 +1443,10 @@ impl Config {
             _ => None,
         };
 
-        Vc::cell(mode)
+        Vc::cell(mode.map(|compilation_mode| ReactCompilerTransformOptions {
+            compilation_mode,
+            ..Default::default()
+        }))
     }
 
     #[turbo_tasks::function]

@@ -5,7 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     FxIndexSet, NonLocalValue, OperationValue, OperationVc, ResolvedVc, State, TryFlatJoinIterExt,
-    TryJoinIterExt, ValueDefault, Vc, debug::ValueDebugFormat, trace::TraceRawVcs,
+    TryJoinIterExt, ValueDefault, Vc, debug::ValueDebugFormat,
 };
 use turbo_tasks_fs::{FileContent, FileSystemPath};
 use turbopack_core::{
@@ -28,9 +28,7 @@ unsafe impl OperationValue for MapEntry {}
 #[turbo_tasks::value(transparent, operation)]
 struct OptionMapEntry(Option<MapEntry>);
 
-#[derive(
-    Clone, TraceRawVcs, PartialEq, Eq, ValueDebugFormat, Debug, NonLocalValue, Encode, Decode,
-)]
+#[derive(Clone, PartialEq, Eq, ValueDebugFormat, Debug, NonLocalValue, Encode, Decode)]
 pub struct PathToOutputOperation(
     /// We need to use an operation for outputs as it's stored for later usage and we want to
     /// reconnect this operation when it's received from the map again.
@@ -41,18 +39,7 @@ pub struct PathToOutputOperation(
     FxHashMap<FileSystemPath, ExpandedOutputAssetsOperationSet>,
 );
 
-#[derive(
-    Clone,
-    Default,
-    TraceRawVcs,
-    PartialEq,
-    Eq,
-    ValueDebugFormat,
-    Debug,
-    NonLocalValue,
-    Encode,
-    Decode,
-)]
+#[derive(Clone, Default, PartialEq, Eq, ValueDebugFormat, Debug, NonLocalValue, Encode, Decode)]
 struct ExpandedOutputAssetsOperationSet(
     #[bincode(with = "turbo_bincode::indexset")] FxIndexSet<OperationVc<ExpandedOutputAssets>>,
 );

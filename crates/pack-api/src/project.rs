@@ -26,7 +26,6 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     Completion, Completions, FxIndexMap, NonLocalValue, OperationValue, OperationVc, ReadRef,
     ResolvedVc, State, TransientInstance, TryFlatJoinIterExt, TryJoinIterExt, Vc,
-    trace::TraceRawVcs,
 };
 use turbo_tasks_env::{EnvMap, ProcessEnv};
 use turbo_tasks_fs::{
@@ -96,7 +95,6 @@ use crate::{
     PartialEq,
     Eq,
     Hash,
-    TraceRawVcs,
     OperationValue,
     Encode,
     Decode,
@@ -278,16 +276,7 @@ async fn import_meta_env_base_url(config: ResolvedVc<Config>) -> Result<RcStr> {
 }
 
 #[derive(
-    Debug,
-    Deserialize,
-    Clone,
-    PartialEq,
-    Eq,
-    TraceRawVcs,
-    NonLocalValue,
-    OperationValue,
-    Encode,
-    Decode,
+    Debug, Deserialize, Clone, PartialEq, Eq, NonLocalValue, OperationValue, Encode, Decode,
 )]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOptions {

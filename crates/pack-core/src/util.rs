@@ -6,7 +6,7 @@ use dunce::{canonicalize, simplified};
 use regex::Regex;
 use serde::Deserialize;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{Vc, trace::TraceRawVcs};
+use turbo_tasks::Vc;
 use turbo_tasks_fs::FileSystem;
 use turbopack::{condition::ContextCondition, module_options::RuleCondition};
 
@@ -60,19 +60,7 @@ fn path_ends_with_segment_path(path: &str, segment_path: &str) -> bool {
 
 #[turbo_tasks::task_input]
 #[derive(
-    Default,
-    PartialEq,
-    Eq,
-    Clone,
-    Copy,
-    Debug,
-    TraceRawVcs,
-    Deserialize,
-    Hash,
-    PartialOrd,
-    Ord,
-    Encode,
-    Decode,
+    Default, PartialEq, Eq, Clone, Copy, Debug, Deserialize, Hash, PartialOrd, Ord, Encode, Decode,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Runtime {

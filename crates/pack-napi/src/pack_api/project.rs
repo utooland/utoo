@@ -53,7 +53,7 @@ use tracing_subscriber::{
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TransientInstance,
-    TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects, trace::TraceRawVcs,
+    TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects,
 };
 use turbo_tasks_backend::EvictionMode;
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
@@ -1089,7 +1089,7 @@ pub fn project_update_info_subscribe(
 
 #[turbo_tasks::task_input]
 #[napi(object)]
-#[derive(Clone, Debug, Eq, Hash, OperationValue, PartialEq, TraceRawVcs, Encode, Decode)]
+#[derive(Clone, Debug, Eq, Hash, OperationValue, PartialEq, Encode, Decode)]
 pub struct StackFrame {
     pub is_server: bool,
     pub is_internal: Option<bool>,

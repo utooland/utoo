@@ -46,30 +46,6 @@ impl ServerReferenceTransition {
 
 #[turbo_tasks::value_impl]
 impl Transition for ServerReferenceTransition {
-    #[turbo_tasks::function]
-    fn process_compile_time_info(
-        &self,
-        _compile_time_info: Vc<CompileTimeInfo>,
-    ) -> Vc<CompileTimeInfo> {
-        *self.server_compile_time_info
-    }
-
-    #[turbo_tasks::function]
-    fn process_module_options_context(
-        &self,
-        _module_options_context: Vc<ModuleOptionsContext>,
-    ) -> Vc<ModuleOptionsContext> {
-        *self.server_module_options_context
-    }
-
-    #[turbo_tasks::function]
-    fn process_resolve_options_context(
-        &self,
-        _resolve_options_context: Vc<ResolveOptionsContext>,
-    ) -> Vc<ResolveOptionsContext> {
-        *self.server_resolve_options_context
-    }
-
     /// Override process_context to use a server-specific layer.
     ///
     /// The default impl inherits the caller's layer (e.g. `[client]`), which
@@ -79,15 +55,9 @@ impl Transition for ServerReferenceTransition {
     #[turbo_tasks::function]
     async fn process_context(
         self: Vc<Self>,
-        module_asset_context: Vc<ModuleAssetContext>,
+        _module_asset_context: Vc<ModuleAssetContext>,
     ) -> Result<Vc<ModuleAssetContext>> {
-        let module_asset_context = module_asset_context.await?;
-        let compile_time_info =
-            self.process_compile_time_info(*module_asset_context.compile_time_info);
-        let module_options_context =
-            self.process_module_options_context(*module_asset_context.module_options_context);
-        let resolve_options_context =
-            self.process_resolve_options_context(*module_asset_context.resolve_options_context);
+        let this = self.await?;
 
         // Use a server-specific layer instead of inheriting the caller's layer
         let layer = Layer::new_with_user_friendly_name(rcstr!("server"), rcstr!("Nodejs"));
@@ -96,9 +66,9 @@ impl Transition for ServerReferenceTransition {
         // client's "server-reference" transition to avoid infinite recursion
         Ok(ModuleAssetContext::new(
             TransitionOptions::default().cell(),
-            compile_time_info,
-            module_options_context,
-            resolve_options_context,
+            *this.server_compile_time_info,
+            *this.server_module_options_context,
+            *this.server_resolve_options_context,
             layer,
         ))
     }

@@ -7,7 +7,7 @@ use modularize_imports::{Config, PackageConfig, modularize_imports};
 use serde::{Deserialize, Serialize};
 use swc_core::ecma::ast::Program;
 use swc_core::ecma::transforms::typescript::{Config as TypescriptConfig, typescript};
-use turbo_tasks::{FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, trace::TraceRawVcs};
+use turbo_tasks::{FxIndexMap, NonLocalValue, OperationValue, ResolvedVc};
 use turbopack::module_options::{ModuleRule, ModuleRuleEffect};
 use turbopack_ecmascript::{CustomTransformer, EcmascriptInputTransform, TransformContext};
 
@@ -21,7 +21,6 @@ use super::module_rule_match_js_no_url;
     Eq,
     Serialize,
     Deserialize,
-    TraceRawVcs,
     NonLocalValue,
     OperationValue,
     Encode,
@@ -50,7 +49,6 @@ pub struct ModularizeImportPackageConfig {
     Eq,
     Serialize,
     Deserialize,
-    TraceRawVcs,
     NonLocalValue,
     OperationValue,
     Encode,
