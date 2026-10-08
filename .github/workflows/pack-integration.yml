@@ -90,6 +90,9 @@ jobs:
           # Execute generated libraries with and without native Proxy support.
           node examples/with-library/run-cache-regression.cjs
 
+          # Check entry export initialization, shared runtimes and Worker asset ordering.
+          node examples/expose-entry-exports/run-regression.cjs
+
           # Verify examples
           for dir in examples/*/; do
             if [ -f "${dir}package.json" ]; then
