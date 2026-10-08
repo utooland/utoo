@@ -93,6 +93,9 @@ jobs:
           # Check entry export initialization, shared runtimes and Worker asset ordering.
           node examples/expose-entry-exports/run-regression.cjs
 
+          # Project subpath externals must not replace embedded node-polyfill dependencies.
+          node examples/externals/run-polyfill-regression.cjs
+
           # Verify examples
           for dir in examples/*/; do
             if [ -f "${dir}package.json" ]; then

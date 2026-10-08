@@ -396,7 +396,7 @@ impl ExternalsPlugin {
                     };
 
                     AfterResolvePluginCondition::new_with_glob(
-                        None,
+                        Some(root.clone()),
                         Glob::new(glob_str, GlobOptions::default()),
                     )
                 }
