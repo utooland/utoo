@@ -5,6 +5,7 @@ use indoc::writedoc;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{ResolvedVc, Vc};
 use turbopack_core::{
+    chunk::ModuleIds,
     code_builder::{Code, CodeBuilder},
     environment::Environment,
 };
@@ -25,7 +26,7 @@ pub async fn get_library_runtime_code(
     generate_source_map: bool,
     runtime_root: Vc<Option<RcStr>>,
     runtime_export: Vc<Vec<RcStr>>,
-    runtime_module_ids: Vc<Vec<RcStr>>,
+    runtime_module_ids: Vc<ModuleIds>,
     is_node_platform: bool,
 ) -> Result<Vc<Code>> {
     let asset_context = get_runtime_asset_context(*environment).resolve().await?;
@@ -147,7 +148,7 @@ pub async fn get_library_runtime_code(
                 const runtimeModuleIds = {};
                 let exports;
                 for (let i = 0; i < runtimeModuleIds.length; i++) {{
-                    const module = moduleCache[runtimeModuleIds[i]];
+                    const module = moduleCache.get(runtimeModuleIds[i]);
                     if (module.error) throw module.error;
                     exports = module;
                 }}

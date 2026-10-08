@@ -5,7 +5,7 @@ use qstring::QString;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{FxIndexMap, NonLocalValue, ResolvedVc, TryJoinIterExt, Vc, trace::TraceRawVcs};
+use turbo_tasks::{FxIndexMap, NonLocalValue, ResolvedVc, TryJoinIterExt, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_browser::ecmascript::{
     EcmascriptBrowserChunk, EcmascriptBrowserEvaluateChunk, EcmascriptBrowserRuntimeChunk,
@@ -554,7 +554,6 @@ pub struct WebpackStatsChunk {
     Eq,
     PartialOrd,
     Ord,
-    TraceRawVcs,
     NonLocalValue,
     Encode,
     Decode,

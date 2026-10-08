@@ -205,15 +205,15 @@ function _type_of(obj) {
         if (!hasOwnProperty.call(obj, name)) Object.defineProperty(obj, name, options);
     }
     function getOverwrittenModule(moduleCache, id) {
-        var _$module = moduleCache[id];
-        if (!_$module) {
+        var _$module = moduleCache.get(id);
+        if (_$module === undefined) {
             if (createModuleWithDirectionFlag) {
                 // set in development modes for hmr support
                 _$module = createModuleWithDirection(id);
             } else {
                 _$module = createModuleObject(id);
             }
-            moduleCache[id] = _$module;
+            moduleCache.set(id, _$module);
         }
         return _$module;
     }
@@ -238,6 +238,9 @@ function _type_of(obj) {
         };
     }
     var BindingTag_Value = 0;
+    /**
+ * Terminates a module's group of entries in an {@link EsmReexports} list.
+ */ var REEXPORT_GROUP_END = 0;
     /**
  * Adds the getters to the exports object.
  */ function esm(exports1, bindings, dynamic) {
@@ -303,6 +306,118 @@ function _type_of(obj) {
         esm(_$exports, bindings, dynamic);
     }
     contextPrototype.s = esmExport;
+    /**
+ * Registers re-exports that all forward to properties of other modules.
+ *
+ * This is a compact spelling of the pattern
+ *
+ * ```js
+ * var ns = context.i(moduleId)
+ * context.s([exportName, () => ns[importedName], ...])
+ * ```
+ *
+ * The list is a flat sequence of groups. Each group starts with the source the exports come from,
+ * followed by that group's entries, and is terminated by the `0` sentinel (or the end of the list).
+ *
+ * The group head is either a **module id**, which is instantiated here:
+ *
+ * ```js
+ * context.S([
+ *   76061, 'default', 'f', 'named', 'A', 0,
+ *   29842, 'otherModule', 'f',
+ * ])
+ * ```
+ *
+ * or the **namespace value** of a module that has already been imported, which is used directly:
+ *
+ * ```js
+ * var ns1 = context.i(76061)
+ * context.S([ns1, 'default', 'f', 'named', 'A'])
+ * ```
+ *
+ * The producer picks the namespace form when it has generated the import anyway -- because some
+ * later import must not be reordered past it -- so nothing is instantiated twice. The two are told
+ * apart by type: a module id is always a string or number. A CommonJS function export produces a
+ * callable namespace value, so namespace heads can be functions as well as objects.
+ *
+ * Entries are `exportName, importedName` pairs, except when a group holds exactly one string. That
+ * string is then a comma-joined list of the same pairs, which saves the repeated quoting:
+ *
+ * ```js
+ * context.S([
+ *   76061, 'default,f,named,A', 0,
+ *   29842, 'otherModule,f',
+ * ])
+ * ```
+ *
+ * The producer picks that spelling independently for each group whose names contain no commas,
+ * since that group's names are recovered by splitting on them.
+ *
+ * Groups whose head is a module id are instantiated in list order, at the point where the call
+ * appears, so the producer must not merge such a group across an import of another module. The
+ * destination reuses a source data value or getter descriptor when one exists, falling back to a
+ * wrapper getter for dynamic/proxy/inherited properties.
+ *
+ * `id` names the module the exports belong to when this module was merged into a scope-hoisting
+ * group, exactly as it does for {@link EsmExport}.
+ *
+ * Only the source descriptor's payload (value or getter) is reused. {@link esm} still defines a
+ * fresh enumerable, non-configurable destination property, and no source setter is ever forwarded.
+ */ function esmReexport(list, id) {
+        var bindings = [];
+        var i = 0;
+        while(i < list.length){
+            var head = list[i++];
+            var start = i;
+            while(i < list.length && list[i] !== REEXPORT_GROUP_END)i++;
+            var end = i;
+            // Skip the sentinel, if this group was terminated by one rather than by the end of the list.
+            i++;
+            // Module ids are always strings or numbers. Other values are already-imported namespaces;
+            // notably, interop with a CommonJS function export produces a callable namespace function.
+            // `esmImport` may return a promise for an async module, but re-exports of async modules keep
+            // going through `context.s`, so the producer never routes them here and this stays synchronous.
+            var namespace = typeof head === 'string' || typeof head === 'number' ? esmImport.call(this, head) : head;
+            if (end - start === 1) {
+                var pairs = list[start].split(',');
+                for(var j = 0; j < pairs.length; j += 2){
+                    appendReexportBinding(bindings, pairs[j], namespace, pairs[j + 1]);
+                }
+            } else {
+                for(var j1 = start; j1 < end; j1 += 2){
+                    appendReexportBinding(bindings, list[j1], namespace, list[j1 + 1]);
+                }
+            }
+        }
+        esmExport.call(this, bindings, id);
+    }
+    contextPrototype.S = esmReexport;
+    function appendReexportBinding(bindings, exportedName, namespace, importedName) {
+        var descriptor = Reflect.getOwnPropertyDescriptor(namespace, importedName);
+        if (descriptor) {
+            if ('value' in descriptor) {
+                // Code generation only routes immutable imported bindings through this helper, so a data
+                // descriptor is a constant export and can be captured once.
+                bindings.push(exportedName, BindingTag_Value, descriptor.value);
+                return;
+            }
+            if (descriptor.get) {
+                // Accessors remain live by reusing the source getter. `esmReexport` is only called by
+                // generated code: every group head is either produced by
+                // `this.i` or is the namespace variable from a generated `this.i` call. Every getter on such
+                // a namespace is receiver-independent: ESM bindings are compiler-generated arrow functions,
+                // and the CommonJS/dynamic-namespace paths create arrows in `createGetter` and
+                // `getOwnPropertyDescriptor`. The destination can therefore reuse the exact function instead
+                // of allocating another wrapper getter.
+                bindings.push(exportedName, descriptor.get);
+                return;
+            }
+        }
+        // Dynamic/proxy/inherited CommonJS edge cases may not expose a usable own descriptor.
+        bindings.push(exportedName, function() {
+            return namespace[importedName];
+        });
+    }
     function ensureDynamicExports(module1, exports1) {
         var reexportedObjects = REEXPORTED_OBJECTS.get(module1);
         if (!reexportedObjects) {
@@ -765,6 +880,14 @@ function _type_of(obj) {
         return "Module ".concat(moduleId, " was instantiated ").concat(instantiationReason, ", but the module factory is not available.");
     }
     /**
+ * Returns a `file://` URL under a synthetic directory named after `root`
+ * (`ROOT` for the project root), for when the real filesystem path is unknown.
+ * The root name and path segments are percent-encoded so the result is always
+ * a valid file URI.
+ */ function placeholderFileUrl(modulePath, root) {
+        return "file:///".concat(encodeURIComponent(root !== null && root !== void 0 ? root : 'ROOT'), "/").concat(modulePath.split('/').map(encodeURIComponent).join('/'));
+    }
+    /**
  * A stub function to make `require` available but non-functional in ESM.
  */ function requireStub(_moduleId) {
         throw new Error('dynamic usage of require is not supported');
@@ -1046,14 +1169,14 @@ function _type_of(obj) {
     contextPrototype.N = externalNamespace;
     /// <reference path="./runtime-base.ts" />
     /// <reference path="./dummy.ts" />
-    var moduleCache = {};
+    var moduleCache = new Map();
     contextPrototype.c = moduleCache;
     /**
  * Gets or instantiates a runtime module.
  */ // @ts-ignore
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
-        var _$module = moduleCache[moduleId];
+        var _$module = moduleCache.get(moduleId);
         if (_$module) {
             if (_$module.error) {
                 throw _$module.error;
@@ -1068,7 +1191,7 @@ function _type_of(obj) {
     // @ts-ignore
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     var getOrInstantiateModuleFromParent = function getOrInstantiateModuleFromParent(id, sourceModule) {
-        var _$module = moduleCache[id];
+        var _$module = moduleCache.get(id);
         if (_$module) {
             if (_$module.error) {
                 throw _$module.error;
@@ -1087,7 +1210,7 @@ function _type_of(obj) {
         }
         var _$module = createModuleObject(id);
         var _$exports = _$module.exports;
-        moduleCache[id] = _$module;
+        moduleCache.set(id, _$module);
         // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
         var context = new Context(_$module, _$exports);
         try {
@@ -1160,7 +1283,7 @@ function _type_of(obj) {
         loadedScripts.set(scriptUrl, promise);
         return promise;
     }
-    contextPrototype.S = loadScript;
+    contextPrototype.Q = loadScript;
     (function() {
         BACKEND = {
             registerChunk: function registerChunk(chunk, params) {
@@ -1203,7 +1326,7 @@ function _type_of(obj) {
         ];
         var _$exports;
         for(var i = 0; i < runtimeModuleIds.length; i++){
-            var _$module = moduleCache[runtimeModuleIds[i]];
+            var _$module = moduleCache.get(runtimeModuleIds[i]);
             if (_$module.error) throw _$module.error;
             _$exports = _$module;
         }
@@ -1238,42 +1361,15 @@ function _type_of(obj) {
         "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript)",
         function(__turbopack_context__) {
             "use strict";
-            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>");
-            var __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__ = __turbopack_context__.i("[externals]/ExternalValue [external] (ExternalValue, global)");
-            var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)");
-            __turbopack_context__.s([
-                "asset",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$asset$2e$svg__$28$static__in__ecmascript$29$__["default"];
-                },
-                "external",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$externals$5d2f$ExternalValue__$5b$external$5d$__$28$ExternalValue$2c$__global$29$__["default"];
-                },
-                "flag",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["flag"];
-                },
-                "globals",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["globals"];
-                },
-                "last",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["last"];
-                },
-                "load",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["load"];
-                },
-                "localGlobal",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["localGlobal"];
-                },
-                "read",
-                function() {
-                    return __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime_legacy$2f$input$2f$index$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__$3c$locals$3e$__["read"];
-                }
+            __turbopack_context__.S([
+                "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>",
+                "flag,V,globals,U,last,z,load,_,localGlobal,e,read,x",
+                0,
+                "[externals]/ExternalValue [external] (ExternalValue, global)",
+                "external,default",
+                0,
+                "[project]/runtime/library_build_runtime_legacy/input/asset.svg (static in ecmascript)",
+                "asset,default"
             ]);
         },
         "[project]/runtime/library_build_runtime_legacy/input/index.js [library-client] (ecmascript) <locals>",
@@ -1321,22 +1417,22 @@ function _type_of(obj) {
                 };
             }
             __turbopack_context__.s([
-                "flag",
+                "V",
                 0,
                 flag,
-                "globals",
+                "U",
                 0,
                 globals,
-                "last",
+                "z",
                 0,
                 last,
-                "load",
+                "_",
                 0,
                 load,
-                "localGlobal",
+                "e",
                 0,
                 localGlobal,
-                "read",
+                "x",
                 0,
                 read
             ]);

@@ -1,10 +1,7 @@
 use anyhow::{Result, anyhow};
 use pack_api::project::Project;
 use rustc_hash::FxHashSet;
-use turbo_tasks::{
-    NonLocalValue, OperationVc, ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, Vc,
-    trace::TraceRawVcs,
-};
+use turbo_tasks::{NonLocalValue, OperationVc, ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, Vc};
 
 use turbopack_core::chunk::{ChunkableModule, EvaluatableAsset};
 use turbopack_dev_server::{
@@ -123,7 +120,7 @@ async fn source(
     )))
 }
 
-#[derive(Clone, TraceRawVcs, NonLocalValue)]
+#[derive(Clone, NonLocalValue)]
 pub struct ServerSourceProvider {
     pub web_source: ResolvedVc<Box<dyn ContentSource>>,
 }

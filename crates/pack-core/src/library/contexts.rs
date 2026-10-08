@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use turbo_rcstr::RcStr;
-use turbo_tasks::{Vc, trace::TraceRawVcs};
+use turbo_tasks::Vc;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
@@ -20,7 +20,7 @@ use crate::{
 use super::LibraryChunkingContext;
 
 #[turbo_tasks::task_input(contains_unresolved_vcs)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash, TraceRawVcs, Encode, Decode)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Encode, Decode)]
 pub struct LibraryChunkingContextOptions {
     pub name: Vc<Option<RcStr>>,
     pub preserve_entry_name: bool,

@@ -4,7 +4,7 @@ use qstring::QString;
 use rustc_hash::FxHashMap;
 use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbo_tasks_hash::{
     DeterministicHash, HashAlgorithm, Xxh3Hash64Hasher, encode_hex, hash_xxh3_hash64,
@@ -46,9 +46,7 @@ use turbopack_ecmascript_runtime::RuntimeType;
 use crate::library::ecmascript::chunk::{EcmascriptLibraryChunk, EcmascriptLibraryEvaluateChunk};
 
 #[turbo_tasks::task_input]
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, TraceRawVcs, DeterministicHash, Encode, Decode,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, DeterministicHash, Encode, Decode)]
 pub enum ContentHashing {
     /// Direct content hashing: Embeds the chunk content hash directly into the referencing chunk.
     /// Benefit: No hash manifest needed.
@@ -1031,7 +1029,7 @@ impl ChunkingContext for LibraryChunkingContext {
         if let Some(export_usage) = self.await?.export_usage {
             Ok(export_usage.await?.used_exports(module).await?)
         } else {
-            Ok(ModuleExportUsage::all())
+            Ok(ModuleExportUsage::unknown())
         }
     }
 

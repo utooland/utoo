@@ -9,7 +9,7 @@ use turbopack_core::{
     asset::{Asset, AssetContent},
     chunk::{
         ChunkData, ChunkingContext, ChunksData, EvaluatableAssets, MinifyType,
-        ModuleChunkItemIdExt, ModuleId,
+        ModuleChunkItemIdExt, ModuleId, ModuleIds,
     },
     code_builder::{Code, CodeBuilder},
     ident::AssetIdent,
@@ -334,7 +334,7 @@ impl EcmascriptLibraryEvaluateChunk {
             .map(|chunk_data| EcmascriptChunkData::new(chunk_data))
             .collect();
 
-        let runtime_module_ids: Vec<turbopack_core::chunk::ModuleId> = this
+        let runtime_module_ids: Vec<ModuleId> = this
             .evaluatable_assets
             .await?
             .iter()
@@ -404,12 +404,7 @@ impl EcmascriptLibraryEvaluateChunk {
                     source_maps,
                     this.chunking_context.runtime_root(),
                     this.chunking_context.runtime_export(),
-                    Vc::cell(
-                        runtime_module_ids
-                            .iter()
-                            .map(|id| id.to_string().into())
-                            .collect(),
-                    ),
+                    Vc::<ModuleIds>::cell(runtime_module_ids.clone()),
                     this.chunking_context.await?.is_node_platform(),
                 )
                 .await?;

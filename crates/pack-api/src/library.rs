@@ -251,7 +251,8 @@ impl LibraryEndpoint {
                 .resolve_asset(origin_path, entry_request, resolve_options, ty)
                 .await?
                 .primary_modules()
-                .await?,
+                .await?
+                .into_vec(),
         ))
     }
 

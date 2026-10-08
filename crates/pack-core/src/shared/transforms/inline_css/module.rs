@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use bincode::{Decode, Encode};
 use rustc_hash::FxHashSet;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{ResolvedVc, Vc, fxindexmap, trace::TraceRawVcs};
+use turbo_tasks::{ResolvedVc, Vc, fxindexmap};
 use turbopack::{ModuleAssetContext, module_options::CustomModuleType};
 use turbopack_core::{
     asset::{Asset, AssetContent},
@@ -36,7 +36,7 @@ use turbopack_ecmascript::{
 use super::source_asset::{INLINE_CSS_CONTENT, InlineCssFileSource};
 
 #[turbo_tasks::task_input]
-#[derive(Eq, PartialEq, Clone, Copy, Debug, PartialOrd, Ord, Hash, TraceRawVcs, Encode, Decode)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, PartialOrd, Ord, Hash, Encode, Decode)]
 pub enum InjectType {
     Style,
     SingletonStyle,

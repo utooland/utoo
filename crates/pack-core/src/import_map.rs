@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use anyhow::Result;
 use rustc_hash::FxHashMap;
@@ -6,7 +6,8 @@ use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexMap, ResolvedVc, Vc};
 use turbo_tasks_fs::{FileSystem, FileSystemPath};
 use turbopack_core::resolve::{
-    ExternalTraced, ExternalType, ResolveAliasMap, SubpathValue,
+    AliasKey, AliasTemplate, ExternalTraced, ExternalType, ReplacedSubpathValueResultType,
+    ResolveAliasMap, SubpathValue,
     options::{ConditionValue, ImportMap, ImportMapping},
 };
 use turbopack_node::execution_context::ExecutionContext;
@@ -121,40 +122,37 @@ fn export_value_to_import_mapping(
     conditions: &BTreeMap<RcStr, ConditionValue>,
     project_path: &FileSystemPath,
 ) -> Option<ResolvedVc<ImportMapping>> {
-    let mut result = Vec::new();
-    value.add_results(
+    let alias_key = AliasKey::Exact;
+    let mut results = Vec::new();
+    value.convert().add_results(
+        Cow::Borrowed(""),
+        &alias_key,
         conditions,
         &ConditionValue::Unset,
         &mut FxHashMap::default(),
-        &mut result,
+        &mut results,
     );
-    if result.is_empty() {
-        None
-    } else {
-        Some(if result.len() == 1 {
-            let relative_import =
-                convert_to_project_relative(result[0].0, &project_path.path).ok()?;
-            ImportMapping::PrimaryAlternative(relative_import, Some(project_path.clone()))
-                .resolved_cell()
-        } else {
-            ImportMapping::Alternatives(
-                result
-                    .iter()
-                    .filter_map(|(m, _)| {
-                        let relative_import =
-                            convert_to_project_relative(m, &project_path.path).ok()?;
-                        Some(
-                            ImportMapping::PrimaryAlternative(
-                                relative_import,
-                                Some(project_path.clone()),
-                            )
-                            .resolved_cell(),
-                        )
-                    })
-                    .collect(),
-            )
-            .resolved_cell()
+
+    let mappings: Vec<_> = results
+        .iter()
+        .filter_map(|result| match &result.ty {
+            ReplacedSubpathValueResultType::Path(path) => {
+                let relative_import =
+                    convert_to_project_relative(path.as_constant_string()?, &project_path.path)
+                        .ok()?;
+                Some(
+                    ImportMapping::PrimaryAlternative(relative_import, Some(project_path.clone()))
+                        .resolved_cell(),
+                )
+            }
+            ReplacedSubpathValueResultType::Empty => Some(ImportMapping::Empty.resolved_cell()),
         })
+        .collect();
+
+    match mappings.len() {
+        0 => None,
+        1 => mappings.into_iter().next(),
+        _ => Some(ImportMapping::Alternatives(mappings).resolved_cell()),
     }
 }
 

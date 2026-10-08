@@ -4,7 +4,7 @@ use anyhow::Result;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use turbo_rcstr::rcstr;
-use turbo_tasks::{OperationValue, ResolvedVc, Vc, trace::TraceRawVcs};
+use turbo_tasks::{OperationValue, ResolvedVc, Vc};
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
     WebpackLoaderBuiltinConditionSet, WebpackLoaderBuiltinConditionSetMatch, WebpackLoadersOptions,
@@ -35,7 +35,6 @@ pub(crate) mod sass;
     Hash,
     Serialize,
     Deserialize,
-    TraceRawVcs,
     OperationValue,
     Encode,
     Decode,
