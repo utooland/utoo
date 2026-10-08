@@ -87,6 +87,9 @@ jobs:
           # build-time runtime (utooland/utoo#3316).
           npm test --workspace shared-runtime-async-module
 
+          # Execute generated libraries with and without native Proxy support.
+          node examples/with-library/run-cache-regression.cjs
+
           # Verify examples
           for dir in examples/*/; do
             if [ -f "${dir}package.json" ]; then
