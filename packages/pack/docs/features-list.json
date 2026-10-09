@@ -1,4 +1,5 @@
 {
+  "description": "# Pack Feature Status\n\nThis list tracks the implementation progress of `@utoo/pack` on the `next` branch. Feature statuses follow Utoopack's own development roadmap. See the [configuration schema](../config_schema.json), [shared configuration types](../../pack-shared/src/config.ts) and [official configuration guide](https://utoo.land/en/docs/utoopack/config) for option shapes and examples.\n\nGenerated from [features-list.json](./features-list.json). After editing the JSON, run `npm run generate-features-list --workspace @utoo/pack`.",
   "statusLegend": [
     {
       "symbol": "✅",
@@ -21,13 +22,25 @@
           "featureLevel2": "`name` & `import`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `entry` context](https://webpack.js.org/configuration/entry-context/#entry)",
-          "remarks": ""
+          "remarks": "Multiple named entry points"
         },
         {
           "featureLevel2": "`library`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.library`](https://webpack.js.org/configuration/output/#outputlibrary)",
-          "remarks": "Supports UMD (root, export) and `dynamicImportToRequire`"
+          "remarks": "Library bundles with `name` and `export`; CommonJS and browser globals"
+        },
+        {
+          "featureLevel2": "`html`",
+          "featureStatus": "✅",
+          "featureDetails": "[HTML configuration](../../pack-shared/src/config.ts)",
+          "remarks": "Per-entry templates, inline template content, asset injection and HTML filenames"
+        },
+        {
+          "featureLevel2": "HTML entry",
+          "featureStatus": "✅",
+          "featureDetails": "[HTML entry processing](../src/utils/htmlEntry.ts)",
+          "remarks": "Extract local module scripts from an `.html` entry and use it as the generated HTML template"
         }
       ]
     },
@@ -49,7 +62,35 @@
           "featureLevel2": "`rules`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `module.rules`](https://webpack.js.org/configuration/module/#rulerules)",
-          "remarks": "`loader-runner` supports most mainstream webpack loaders"
+          "remarks": "Glob-keyed conditional loader rules and explicit module types; loader options must be JSON-serializable"
+        }
+      ]
+    },
+    {
+      "featureLevel1": "TypeScript",
+      "children": [
+        {
+          "featureLevel2": "",
+          "featureStatus": "✅",
+          "featureDetails": "[TypeScript snapshots](../../../crates/pack-tests/tests/snapshot/typescript)",
+          "remarks": "Built-in TypeScript transpilation and tsconfig support; type checking runs separately"
+        }
+      ]
+    },
+    {
+      "featureLevel1": "React",
+      "children": [
+        {
+          "featureLevel2": "`react`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Automatic or classic JSX runtime and custom `importSource`"
+        },
+        {
+          "featureLevel2": "`reactCompiler`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Opt-in Rust React Compiler; `infer`, `annotation` or `all` modes and React 17/18/19 targets (default 19). React 17/18 require `react-compiler-runtime`"
         }
       ]
     },
@@ -60,7 +101,7 @@
           "featureLevel2": "`alias`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `resolve.alias`](https://webpack.js.org/configuration/resolve/#resolvealias)",
-          "remarks": ""
+          "remarks": "Wildcard aliases and `browser` / `default` conditional aliases"
         },
         {
           "featureLevel2": "`extensions`",
@@ -77,7 +118,7 @@
           "featureLevel2": "",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `externals` configuration](https://webpack.js.org/configuration/externals/#root)",
-          "remarks": ""
+          "remarks": "Object-map configuration for `commonjs`, `esm`, `script`, `global` and `promise` externals"
         }
       ]
     },
@@ -94,7 +135,7 @@
           "featureLevel2": "`publicPath`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.publicPath`](https://webpack.js.org/configuration/output/#outputpublicpath)",
-          "remarks": ""
+          "remarks": "Static URL prefixes, `runtime` and `auto`"
         },
         {
           "featureLevel2": "`crossOriginLoading`",
@@ -112,7 +153,7 @@
           "featureLevel2": "`filename`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.filename`](https://webpack.js.org/configuration/output/#outputfilename)",
-          "remarks": ""
+          "remarks": "Templates override the default short content-hashed names for production client chunks"
         },
         {
           "featureLevel2": "`chunkFilename`",
@@ -136,7 +177,6 @@
           "featureLevel2": "`assetModuleFilename`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `output.assetModuleFilename`](https://webpack.js.org/configuration/output/#outputassetmodulefilename)",
-
           "remarks": ""
         },
         {
@@ -146,10 +186,22 @@
           "remarks": ""
         },
         {
-          "featureLevel2": "`standalone`",
+          "featureLevel2": "`type: \"standalone\"`",
           "featureStatus": "❓",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "Schema option only; standalone deployment packaging is not implemented"
+        },
+        {
+          "featureLevel2": "`chunkLoadingGlobal`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Custom chunk registration global for isolating multiple runtimes"
+        },
+        {
+          "featureLevel2": "`entryRootExport`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Expose entry exports on a named `globalThis` property"
         }
       ]
     },
@@ -160,13 +212,13 @@
           "featureLevel2": "`browserslist`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `target` string](https://webpack.js.org/configuration/target/#string)",
-          "remarks": ""
+          "remarks": "Browserslist query strings via `target`; omit for the default browser build"
         },
         {
           "featureLevel2": "`node`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `target` string](https://webpack.js.org/configuration/target/#string)",
-          "remarks": ""
+          "remarks": "`node` and Node.js Browserslist targets such as `node 18`"
         }
       ]
     },
@@ -174,10 +226,10 @@
       "featureLevel1": "Sourcemap",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`sourceMaps`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `devtool` configuration](https://webpack.js.org/configuration/devtool/)",
-          "remarks": ""
+          "remarks": "Boolean source-map control"
         }
       ]
     },
@@ -192,19 +244,17 @@
         }
       ]
     },
-
     {
       "featureLevel1": "Providers",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`provider`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `ProvidePlugin`](https://webpack.js.org/plugins/provide-plugin/#root)",
-          "remarks": ""
+          "remarks": "Module imports or `[module, export]` pairs for free variables"
         }
       ]
     },
-
     {
       "featureLevel1": "Optimization",
       "children": [
@@ -212,13 +262,13 @@
           "featureLevel2": "`concatenateModules`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `optimization.concatenateModules`](https://webpack.js.org/configuration/optimization/#optimizationconcatenatemodules)",
-          "remarks": ""
+          "remarks": "Module concatenation in production builds"
         },
         {
           "featureLevel2": "`moduleIds`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `optimization.moduleIds`](https://webpack.js.org/configuration/optimization/#optimizationmoduleids)",
-          "remarks": "Supports \"names\" or \"deterministic\""
+          "remarks": "`named` or `deterministic` in production; development always uses `named`"
         },
         {
           "featureLevel2": "`minify`",
@@ -230,15 +280,14 @@
           "featureLevel2": "`treeShaking`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `tree-shaking` guide](https://webpack.js.org/guides/tree-shaking/#root)",
-          "remarks": "Includes `packageImports`"
+          "remarks": "ESM and CommonJS tree shaking"
         },
         {
           "featureLevel2": "`splitChunks`",
           "featureStatus": "🟠",
-          "featureDetails": "[Turbopack chunking config](https://github.com/vercel/next.js/blob/c3429682aa910eb2b5ddd1e761c8ec8cfaa4bb04/turbopack/crates/turbopack-core/src/chunk/chunking_context.rs#L114)",
-          "remarks": ""
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Turbopack heuristics for production browser builds: JS size/count thresholds and CSS `maxMergeChunkSize`"
         },
-
         {
           "featureLevel2": "`modularizeImports`",
           "featureStatus": "✅",
@@ -249,7 +298,7 @@
           "featureLevel2": "`packageImports`",
           "featureStatus": "✅",
           "featureDetails": "[Next.js `optimizePackageImports`](https://nextjs.org/docs/app/api-reference/config/next-config-js/optimizePackageImports)",
-          "remarks": ""
+          "remarks": "Configured packages are merged with the built-in optimization list"
         },
         {
           "featureLevel2": "`transpilePackages`",
@@ -262,6 +311,48 @@
           "featureStatus": "✅",
           "featureDetails": "[terser `drop_console`](https://github.com/terser/terser/blob/da1e6fb2acd90e62bac69967718b89d6f00aab79/README.md?plain=1#L734)",
           "remarks": ""
+        },
+        {
+          "featureLevel2": "`cssChunking`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Production CSS grouping with `true`, `loose` or `graph`; graph supports `requestCost` and `weightDistribution`. `false` and `strict` are unsupported"
+        },
+        {
+          "featureLevel2": "`inferModuleSideEffects`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Infer side-effect-free modules when package metadata is absent; enabled by default"
+        },
+        {
+          "featureLevel2": "`removeUnusedExports` & `removeUnusedImports`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Remove unused exports and imports across modules; enabled by default in production"
+        },
+        {
+          "featureLevel2": "`compress` & `noMangling`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Compression options and control over local/export name mangling"
+        },
+        {
+          "featureLevel2": "`extractComments`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Extract legal comments to LICENSE files when minifying library output"
+        },
+        {
+          "featureLevel2": "`sharedRuntime`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Share a browser runtime across production application entries; disabled by default and ignored in development, Node.js and library builds"
+        },
+        {
+          "featureLevel2": "`nestedAsyncChunking`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Nested async chunk availability tracking"
         }
       ]
     },
@@ -272,31 +363,31 @@
           "featureLevel2": "`less`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `less-loader`](https://github.com/webpack-contrib/less-loader)",
-          "remarks": ""
+          "remarks": "Supports custom `styles.less.loader` and Less implementation/options"
         },
         {
           "featureLevel2": "`sass`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `sass-loader`](https://github.com/webpack-contrib/sass-loader)",
-          "remarks": ""
+          "remarks": "Supports custom Sass implementation/options"
         },
         {
           "featureLevel2": "`postcss`",
           "featureStatus": "✅",
           "featureDetails": "[PostCss](https://postcss.org/)",
-          "remarks": ""
+          "remarks": "Discovered PostCSS config and inline `styles.postcss` plugins run in one pass, with inline plugins appended"
         },
         {
           "featureLevel2": "`inlineCss`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `style-loader`](https://github.com/webpack-contrib/style-loader)",
-          "remarks": ""
+          "remarks": "Inject styles at runtime with configurable insertion and injection type"
         },
         {
           "featureLevel2": "`styledJsx`",
           "featureStatus": "✅",
           "featureDetails": "[Vercel `styled-jsx`](https://github.com/vercel/styled-jsx)",
-          "remarks": ""
+          "remarks": "Built-in styled-jsx transform"
         },
         {
           "featureLevel2": "`styledComponents`",
@@ -311,10 +402,22 @@
           "remarks": ""
         },
         {
-          "featureLevel2": "`css module`",
+          "featureLevel2": "`cssModules` & `autoCssModules`",
           "featureStatus": "✅",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "CSS Modules, automatic module detection and custom `styles.cssModules.localIdentName`; hash format/length modifiers normalize to `[hash]`"
+        },
+        {
+          "featureLevel2": "`emotion`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Emotion transform with source maps, labels and import maps"
+        },
+        {
+          "featureLevel2": "`postcss.implementation`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Select a custom PostCSS module by absolute path; omitted or null uses runtime resolution"
         }
       ]
     },
@@ -325,13 +428,30 @@
           "featureLevel2": "`inline`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `url-loader`](https://github.com/webpack-contrib/url-loader)",
-          "remarks": ""
+          "remarks": "Opt in with `images`; `images.inlineLimit` defaults to 10,000 bytes"
         },
         {
           "featureLevel2": "`blur placeholder`",
           "featureStatus": "✅",
           "featureDetails": "[Next.js `Image` component](https://nextjs.org/docs/app/api-reference/components/image#blurdataurl)",
-          "remarks": ""
+          "remarks": "With `images` enabled, non-inlined PNG/JPEG/WebP/AVIF images export dimensions and blur placeholder metadata"
+        }
+      ]
+    },
+    {
+      "featureLevel1": "Assets",
+      "children": [
+        {
+          "featureLevel2": "Web Workers",
+          "featureStatus": "✅",
+          "featureDetails": "[Worker snapshot](../../../crates/pack-tests/tests/snapshot/static-assets/worker_url_dev)",
+          "remarks": "Bundle `new Worker(new URL(..., import.meta.url))` references"
+        },
+        {
+          "featureLevel2": "WASM",
+          "featureStatus": "✅",
+          "featureDetails": "[WASM snapshot](../../../crates/pack-tests/tests/snapshot/static-assets/wasm)",
+          "remarks": "Emit WASM files as static assets with `optimization.wasmAsAsset`"
         }
       ]
     },
@@ -339,10 +459,10 @@
       "featureLevel1": "MDX",
       "children": [
         {
-          "featureLevel2": "",
-          "featureStatus": "❓",
-          "featureDetails": "[MDX.js](https://www.mdxjs.cn/)",
-          "remarks": ""
+          "featureLevel2": "`mdx`",
+          "featureStatus": "✅",
+          "featureDetails": "[MDX snapshot](../../../crates/pack-tests/tests/snapshot/mdx/basic)",
+          "remarks": "Opt-in Rust MDX transform; boolean or options for JSX runtime, provider and CommonMark/GFM parsing"
         }
       ]
     },
@@ -350,10 +470,10 @@
       "featureLevel1": "Stats",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`stats`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack `stats` configuration](https://webpack.js.org/configuration/stats/#root)",
-          "remarks": ""
+          "remarks": "Opt-in Webpack-compatible `stats.json` for client, server and library outputs"
         }
       ]
     },
@@ -361,10 +481,10 @@
       "featureLevel1": "Analysis",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`ANALYZE`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack Bundle Analyzer](https://github.com/webpack-contrib/webpack-bundle-analyzer)",
-          "remarks": ""
+          "remarks": "Set `ANALYZE=1` to generate stats and launch the bundle analyzer"
         }
       ]
     },
@@ -375,13 +495,13 @@
           "featureLevel2": "`webpackChunkName`",
           "featureStatus": "🟠",
           "featureDetails": "[Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments)",
-          "remarks": ""
+          "remarks": "Chunk naming via this comment is not implemented"
         },
         {
           "featureLevel2": "`webpackIgnore`",
-          "featureStatus": "🟠",
-          "featureDetails": "[Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments)",
-          "remarks": ""
+          "featureStatus": "✅",
+          "featureDetails": "[Ignore-comment snapshot](../../../crates/pack-tests/tests/snapshot/ignore_comments)",
+          "remarks": "Supported for `import()`, `require()` and URL references"
         }
       ]
     },
@@ -389,10 +509,10 @@
       "featureLevel1": "SWC Transform Plugin",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`swcPlugins`",
           "featureStatus": "✅",
           "featureDetails": "[SWC ECMAScript Plugins](https://swc.rs/docs/plugin/ecmascript/getting-started)",
-          "remarks": ""
+          "remarks": "Custom SWC ECMAScript transform plugins"
         }
       ]
     },
@@ -403,7 +523,7 @@
           "featureLevel2": "",
           "featureStatus": "❓",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "No built-in Module Federation integration"
         }
       ]
     },
@@ -414,7 +534,7 @@
           "featureLevel2": "",
           "featureStatus": "✅",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "React Fast Refresh, `module.hot`, `import.meta.turbopackHot` and opt-in `devServer.dynamicHmrChunkLists`"
         }
       ]
     },
@@ -422,10 +542,28 @@
       "featureLevel1": "Dev Server",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "HTTP / HTTPS / proxy",
           "featureStatus": "✅",
-          "featureDetails": "",
-          "remarks": ""
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Configurable port/host, HTTPS and HTTP proxy rules with path rewriting"
+        },
+        {
+          "featureLevel2": "`browserToTerminal`",
+          "featureStatus": "✅",
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Forward browser console output with `devServer.browserToTerminal`: `\"error\"`, `\"warn\"` or `true`; disabled by default"
+        },
+        {
+          "featureLevel2": "Dependency watching",
+          "featureStatus": "✅",
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Watch selected node_modules packages with `watch.nodeModulesRegexes` or negated `watch.ignored` patterns"
+        },
+        {
+          "featureLevel2": "`lazyDynamicImports`",
+          "featureStatus": "✅",
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Compile client `import()` targets on first browser request in development; disabled by default. Pair with HMR and `dynamicHmrChunkLists`"
         }
       ]
     },
@@ -436,7 +574,7 @@
           "featureLevel2": "",
           "featureStatus": "✅",
           "featureDetails": "[Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat)",
-          "remarks": "Made it easy to migrate from webpack-based projects"
+          "remarks": "Subset of Webpack configuration, loader and plugin APIs for migration; unsupported options may be ignored or warned about"
         }
       ]
     },
@@ -444,10 +582,10 @@
       "featureLevel1": "Node Polyfill",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`nodePolyfill`",
           "featureStatus": "✅",
           "featureDetails": "[Webpack Node Polyfill Plugin](https://github.com/Richienb/node-polyfill-webpack-plugin)",
-          "remarks": "Automatically polyfills Node.js built-in modules for browser builds"
+          "remarks": "Opt-in Node.js built-in polyfills for browser builds; disabled by default"
         }
       ]
     },
@@ -463,13 +601,42 @@
       ]
     },
     {
+      "featureLevel1": "Node.js server bundles",
+      "children": [
+        {
+          "featureLevel2": "`server.entry`",
+          "featureStatus": "✅",
+          "featureDetails": "[Multi-server-entry snapshot](../../../crates/pack-tests/tests/snapshot/basic/multi_server_entries)",
+          "remarks": "Single server entry or multiple named entries alongside client entries; the first server entry receives Server Functions"
+        },
+        {
+          "featureLevel2": "`server.resolve`",
+          "featureStatus": "✅",
+          "featureDetails": "[Server resolve snapshot](../../../crates/pack-tests/tests/snapshot/basic/server_alias)",
+          "remarks": "Server aliases override matching shared aliases; server extensions replace the shared list"
+        },
+        {
+          "featureLevel2": "`server.externals`",
+          "featureStatus": "✅",
+          "featureDetails": "[Server externals snapshot](../../../crates/pack-tests/tests/snapshot/externals/server-specific)",
+          "remarks": "Replaces top-level externals when provided; otherwise inherits them"
+        },
+        {
+          "featureLevel2": "`server.output`",
+          "featureStatus": "✅",
+          "featureDetails": "[Pack configuration](../config_schema.json)",
+          "remarks": "Independent output path, entry filename and chunk filename templates"
+        }
+      ]
+    },
+    {
       "featureLevel1": "SSR",
       "children": [
         {
           "featureLevel2": "",
           "featureStatus": "❓",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "Dedicated SSR rendering and hydration integration is not implemented"
         }
       ]
     },
@@ -480,19 +647,18 @@
           "featureLevel2": "",
           "featureStatus": "❓",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "React Server Component boundary handling is not implemented"
         }
       ]
     },
-
     {
-      "featureLevel1": "Server Action",
+      "featureLevel1": "Server Functions / RPC",
       "children": [
         {
-          "featureLevel2": "",
-          "featureStatus": "❓",
-          "featureDetails": "",
-          "remarks": ""
+          "featureLevel2": "`server.function`",
+          "featureStatus": "✅",
+          "featureDetails": "[Server references example](../../../examples/with-server-references)",
+          "remarks": "Module-level `\"use server\"`; application supplies `clientProxy` transport and `serverRegister` modules"
         }
       ]
     },
@@ -503,19 +669,36 @@
           "featureLevel2": "",
           "featureStatus": "❓",
           "featureDetails": "",
-          "remarks": ""
+          "remarks": "No dedicated Edge Runtime build target"
         }
       ]
     },
-
     {
-      "featureLevel1": "Persistent Caching",
+      "featureLevel1": "Caching",
       "children": [
         {
-          "featureLevel2": "",
+          "featureLevel2": "`persistentCaching`",
           "featureStatus": "✅",
-          "featureDetails": "Enabled on dev",
-          "remarks": ""
+          "featureDetails": "[Cache configuration](../src/utils/env.ts)",
+          "remarks": "Enabled by default in development and production; disable with `persistentCaching: false` or `DISABLE_PERSISTENT_CACHE=1`"
+        },
+        {
+          "featureLevel2": "`turbopackMemoryEviction`",
+          "featureStatus": "✅",
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Memory eviction modes: `false`, `\"auto\"` (default) or `\"full\"`; `true` also selects full eviction"
+        },
+        {
+          "featureLevel2": "`cacheDirectory`",
+          "featureStatus": "✅",
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Directory for cache data, locks and traces; defaults to `.turbopack`. Relative paths resolve from the project path"
+        },
+        {
+          "featureLevel2": "`turbopackGc`",
+          "featureStatus": "✅",
+          "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
+          "remarks": "Opt-in reference-counting GC for unreachable turbo-tasks; disabled by default. Read/write persistent cache mode requires memory eviction"
         }
       ]
     },
@@ -525,14 +708,20 @@
         {
           "featureLevel2": "`log file`",
           "featureStatus": "✅",
-          "featureDetails": "",
-          "remarks": ""
+          "featureDetails": "[Tracing implementation](../../../crates/pack-napi/src/pack_api/project.rs)",
+          "remarks": "`TURBOPACK_TRACING` writes `.trace-turbopack` in `cacheDirectory` (default `.turbopack`)"
         },
         {
           "featureLevel2": "`log viewer`",
-          "featureStatus": "🟠",
-          "featureDetails": "",
-          "remarks": ""
+          "featureStatus": "✅",
+          "featureDetails": "[Turbopack Trace Viewer](https://turbo-trace-viewer.vercel.app/)",
+          "remarks": "Enable `TURBOPACK_TRACING=1` and `TURBOPACK_TRACE_SERVER=1`"
+        },
+        {
+          "featureLevel2": "Chrome Trace",
+          "featureStatus": "✅",
+          "featureDetails": "[Tracing implementation](../../../crates/pack-napi/src/pack_api/project.rs)",
+          "remarks": "Set `TRACING_CHROME=1` or a file path to capture Chrome Trace events"
         }
       ]
     }

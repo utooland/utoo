@@ -28,7 +28,7 @@ function formatKeyAsTitle(key) {
  * This function is tailored to process a specific nested JSON structure
  * where features are organized by levels with children.
  *
- * @param {object} data - The data object containing statusLegend and featuresStatusList.
+ * @param {object} data - The data object containing description, statusLegend and featuresStatusList.
  * @returns {string} The generated Markdown string.
  */
 function generateMarkdownFromData(data) {
@@ -36,6 +36,10 @@ function generateMarkdownFromData(data) {
 
     // Check if data is an object and not null
     if (typeof data === 'object' && data !== null) {
+        if (typeof data.description === 'string' && data.description) {
+            markdown += `${data.description}\n\n`;
+        }
+
         // If statusLegend exists, generate the status legend list first
         if (Array.isArray(data.statusLegend) && data.statusLegend.length > 0) {
             markdown += `### Feature Status Legend\n\n`; // Title for the legend section
@@ -102,7 +106,7 @@ function generateMarkdownFromData(data) {
         markdown += `_No data provided or data is not an object._\n`;
     }
 
-    return markdown;
+    return markdown.trimEnd() + '\n';
 }
 
 // --- Example Usage ---
@@ -138,4 +142,3 @@ try {
 } catch (err) {
     console.error('Error writing Markdown to file:', err);
 }
-
