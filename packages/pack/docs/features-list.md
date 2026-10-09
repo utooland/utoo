@@ -1,14 +1,14 @@
-# Pack Feature Support
+# Pack Feature Status
 
-This list describes the current `@utoo/pack` implementation on the `next` branch. Support is scoped by the Remarks column; Webpack links provide comparisons rather than full API compatibility guarantees. See the [configuration schema](../config_schema.json), [shared configuration types](../../pack-shared/src/config.ts) and [official configuration guide](https://utoo.land/en/docs/utoopack/config) for option shapes and examples.
+This list tracks the implementation progress of `@utoo/pack` on the `next` branch. Feature statuses follow Utoopack's own development roadmap. See the [configuration schema](../config_schema.json), [shared configuration types](../../pack-shared/src/config.ts) and [official configuration guide](https://utoo.land/en/docs/utoopack/config) for option shapes and examples.
 
 Generated from [features-list.json](./features-list.json). After editing the JSON, run `npm run generate-features-list --workspace @utoo/pack`.
 
 ### Feature Status Legend
 
-* ✅: Supported within the scope described below
-* 🟠: Partial or experimental support
-* ❓: Not yet supported; roadmap to be determined
+* ✅: Completed
+* 🟠: Work in Progress
+* ❓: To be determined
 
 ## Features Status List
 
@@ -48,7 +48,7 @@ Generated from [features-list.json](./features-list.json). After editing the JSO
 |  | `moduleIds` | ✅ | [Webpack `optimization.moduleIds`](https://webpack.js.org/configuration/optimization/#optimizationmoduleids) | `named` or `deterministic` in production; development always uses `named` |
 |  | `minify` | ✅ | [Webpack `optimization.minimize`](https://webpack.js.org/configuration/optimization/#optimizationminimize) |  |
 |  | `treeShaking` | ✅ | [Webpack `tree-shaking` guide](https://webpack.js.org/guides/tree-shaking/#root) | ESM and CommonJS tree shaking |
-|  | `splitChunks` | ✅ | [Pack configuration](../config_schema.json) | Turbopack heuristics for production browser builds: JS size/count thresholds and CSS `maxMergeChunkSize` |
+|  | `splitChunks` | 🟠 | [Pack configuration](../config_schema.json) | Turbopack heuristics for production browser builds: JS size/count thresholds and CSS `maxMergeChunkSize` |
 |  | `modularizeImports` | ✅ | [UmiJS `babel-plugin-import`](https://github.com/umijs/babel-plugin-import) |  |
 |  | `packageImports` | ✅ | [Next.js `optimizePackageImports`](https://nextjs.org/docs/app/api-reference/config/next-config-js/optimizePackageImports) | Configured packages are merged with the built-in optimization list |
 |  | `transpilePackages` | ✅ | [Next.js `transpilePackages`](https://nextjs.org/docs/app/api-reference/config/next-config-js/transpilePackages) |  |
@@ -77,7 +77,7 @@ Generated from [features-list.json](./features-list.json). After editing the JSO
 | MDX | `mdx` | ✅ | [MDX snapshot](../../../crates/pack-tests/tests/snapshot/mdx/basic) | Opt-in Rust MDX transform; boolean or options for JSX runtime, provider and CommonMark/GFM parsing |
 | Stats | `stats` | ✅ | [Webpack `stats` configuration](https://webpack.js.org/configuration/stats/#root) | Opt-in Webpack-compatible `stats.json` for client, server and library outputs |
 | Analysis | `ANALYZE` | ✅ | [Webpack Bundle Analyzer](https://github.com/webpack-contrib/webpack-bundle-analyzer) | Set `ANALYZE=1` to generate stats and launch the bundle analyzer |
-| Magic Comments | `webpackChunkName` | ❓ | [Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments) | Chunk naming via this comment is not implemented |
+| Magic Comments | `webpackChunkName` | 🟠 | [Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments) | Chunk naming via this comment is not implemented |
 |  | `webpackIgnore` | ✅ | [Ignore-comment snapshot](../../../crates/pack-tests/tests/snapshot/ignore_comments) | Supported for `import()`, `require()` and URL references |
 | SWC Transform Plugin | `swcPlugins` | ✅ | [SWC ECMAScript Plugins](https://swc.rs/docs/plugin/ecmascript/getting-started) | Custom SWC ECMAScript transform plugins |
 | Module Federation |  | ❓ |  | No built-in Module Federation integration |
@@ -86,7 +86,7 @@ Generated from [features-list.json](./features-list.json). After editing the JSO
 |  | `browserToTerminal` | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Forward browser console output with `devServer.browserToTerminal`: `"error"`, `"warn"` or `true`; disabled by default |
 |  | Dependency watching | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Watch selected node_modules packages with `watch.nodeModulesRegexes` or negated `watch.ignored` patterns |
 |  | `lazyDynamicImports` | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Compile client `import()` targets on first browser request in development; disabled by default. Pair with HMR and `dynamicHmrChunkLists` |
-| Webpack compatibility mode |  | 🟠 | [Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat) | Subset of Webpack configuration, loader and plugin APIs for migration; unsupported options may be ignored or warned about |
+| Webpack partially compatible mode |  | ✅ | [Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat) | Subset of Webpack configuration, loader and plugin APIs for migration; unsupported options may be ignored or warned about |
 | Node Polyfill | `nodePolyfill` | ✅ | [Webpack Node Polyfill Plugin](https://github.com/Richienb/node-polyfill-webpack-plugin) | Opt-in Node.js built-in polyfills for browser builds; disabled by default |
 | CSR |  | ✅ |  |  |
 | Node.js server bundles | `server.entry` | ✅ | [Multi-server-entry snapshot](../../../crates/pack-tests/tests/snapshot/basic/multi_server_entries) | Single server entry or multiple named entries alongside client entries; the first server entry receives Server Functions |

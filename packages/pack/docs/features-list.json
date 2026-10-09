@@ -1,17 +1,17 @@
 {
-  "description": "# Pack Feature Support\n\nThis list describes the current `@utoo/pack` implementation on the `next` branch. Support is scoped by the Remarks column; Webpack links provide comparisons rather than full API compatibility guarantees. See the [configuration schema](../config_schema.json), [shared configuration types](../../pack-shared/src/config.ts) and [official configuration guide](https://utoo.land/en/docs/utoopack/config) for option shapes and examples.\n\nGenerated from [features-list.json](./features-list.json). After editing the JSON, run `npm run generate-features-list --workspace @utoo/pack`.",
+  "description": "# Pack Feature Status\n\nThis list tracks the implementation progress of `@utoo/pack` on the `next` branch. Feature statuses follow Utoopack's own development roadmap. See the [configuration schema](../config_schema.json), [shared configuration types](../../pack-shared/src/config.ts) and [official configuration guide](https://utoo.land/en/docs/utoopack/config) for option shapes and examples.\n\nGenerated from [features-list.json](./features-list.json). After editing the JSON, run `npm run generate-features-list --workspace @utoo/pack`.",
   "statusLegend": [
     {
       "symbol": "✅",
-      "description": "Supported within the scope described below"
+      "description": "Completed"
     },
     {
       "symbol": "🟠",
-      "description": "Partial or experimental support"
+      "description": "Work in Progress"
     },
     {
       "symbol": "❓",
-      "description": "Not yet supported; roadmap to be determined"
+      "description": "To be determined"
     }
   ],
   "featuresStatusList": [
@@ -284,7 +284,7 @@
         },
         {
           "featureLevel2": "`splitChunks`",
-          "featureStatus": "✅",
+          "featureStatus": "🟠",
           "featureDetails": "[Pack configuration](../config_schema.json)",
           "remarks": "Turbopack heuristics for production browser builds: JS size/count thresholds and CSS `maxMergeChunkSize`"
         },
@@ -493,7 +493,7 @@
       "children": [
         {
           "featureLevel2": "`webpackChunkName`",
-          "featureStatus": "❓",
+          "featureStatus": "🟠",
           "featureDetails": "[Webpack `module` methods](https://webpack.js.org/api/module-methods/#magic-comments)",
           "remarks": "Chunk naming via this comment is not implemented"
         },
@@ -568,11 +568,11 @@
       ]
     },
     {
-      "featureLevel1": "Webpack compatibility mode",
+      "featureLevel1": "Webpack partially compatible mode",
       "children": [
         {
           "featureLevel2": "",
-          "featureStatus": "🟠",
+          "featureStatus": "✅",
           "featureDetails": "[Webpack compat example](https://github.com/utooland/utoo/tree/next/examples/webpack-compat)",
           "remarks": "Subset of Webpack configuration, loader and plugin APIs for migration; unsupported options may be ignored or warned about"
         }
