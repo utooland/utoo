@@ -4,7 +4,7 @@
 //!
 //! Routing ([`resolve_cache_plan`]) classifies a lockfile entry by the host of
 //! its `resolved` URL: git deps and trusted-registry-host tarballs use the
-//! shared global `~/.cache/nm/` store, while non-registry tarballs (untrusted
+//! shared global store (registry content under `<cache>.utoo-v2/packages/`), while non-registry tarballs (untrusted
 //! https + local `file:`) are materialized **directly** into `node_modules`
 //! ([`extract_non_registry_to_target`]) and never enter the cache.
 //!
@@ -43,7 +43,11 @@ impl PackageSource {
 
     fn fingerprint(&self) -> String {
         let mut hash = Sha256::new();
-        for part in [self.integrity.as_deref(), self.shasum.as_deref()] {
+        for part in [
+            Some(self.tarball_url.as_str()),
+            self.integrity.as_deref(),
+            self.shasum.as_deref(),
+        ] {
             let part = part.unwrap_or("");
             hash.update((part.len() as u64).to_le_bytes());
             hash.update(part.as_bytes());
@@ -114,8 +118,8 @@ pub enum CachePlan {
     /// A git dep, already cloned into the global cache during BFS at
     /// `<cache>/<name>/<commit_sha>/`; clone from there.
     GitCache(PathBuf),
-    /// A registry-host tarball: download into the global `<name>/<version>`
-    /// slot, then clone from there (the existing registry pipeline).
+    /// A registry-host tarball: use the v2 `<name>/<version>/<source-and-digest>`
+    /// slot, then clone from there. Legacy slots are treated as misses.
     RegistryDownload,
     /// A non-registry tarball (http(s) remote or local `file:`): fetch/read the
     /// tarball and extract it **directly** into the package's `node_modules`
