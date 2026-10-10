@@ -651,9 +651,10 @@ async fn walk_asset(
         .iter()
         .any(|prefix| relative_path.starts_with(prefix.as_str()));
 
-    if !ignored {
-        // Add the full path to seen set
-        seen.insert(full_path.clone());
+    seen.insert(full_path.clone());
+    if ignored {
+        asset.content().write(full_path).await?;
+    } else {
         diff(full_path, asset.content()).await?;
     }
 
