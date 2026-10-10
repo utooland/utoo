@@ -651,11 +651,13 @@ async fn walk_asset(
         .iter()
         .any(|prefix| relative_path.starts_with(prefix.as_str()));
 
-    seen.insert(full_path.clone());
-    if ignored {
-        asset.content().write(full_path).await?;
-    } else {
+    if !ignored {
+        seen.insert(full_path.clone());
         diff(full_path, asset.content()).await?;
+    } else if relative_path == "_turbopack__runtime.js" {
+        // Materialize the ignored Node runtime for executable assertions.
+        seen.insert(full_path.clone());
+        asset.content().write(full_path).await?;
     }
 
     queue.extend(asset.references().all_assets().await?.iter().copied());
