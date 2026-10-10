@@ -1,0 +1,2 @@
+# The Node runtime is unrelated to path resolution; keep the module snapshots.
+_turbopack__runtime.js

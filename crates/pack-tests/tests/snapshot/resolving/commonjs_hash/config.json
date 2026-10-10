@@ -1,0 +1,13 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "node",
+    "sourceMaps": false
+  },
+  "runtimeType": "Production"
+}

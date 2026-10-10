@@ -1,0 +1,27 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "node",
+    "sourceMaps": false,
+    "externals": {
+      "hash-package": {
+        "root": "hash-package/string/#/contains",
+        "type": "commonjs",
+        "subPath": {
+          "rules": [
+            {
+              "regex": "/^\\/string\\/#\\/contains$/",
+              "target": ""
+            }
+          ]
+        }
+      }
+    }
+  },
+  "runtimeType": "Production"
+}
