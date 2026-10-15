@@ -18,6 +18,7 @@ fn reserves_self_pin_logical_namespace(pkg_pattern: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CacheEntryKind {
     Package,
+    Manifest,
     SelfPin,
 }
 
@@ -46,7 +47,7 @@ async fn collect_matching_versions(
         }
         let version = version_entry.file_name();
         let version_str = version.to_string_lossy();
-        if matches_pattern(&version_str, version_pattern) {
+        if version_str != "manifests" && matches_pattern(&version_str, version_pattern) {
             to_delete.push(CacheEntry {
                 name: pkg_name.clone(),
                 version: version_str.to_string(),
@@ -88,6 +89,94 @@ async fn collect_self_pin_cache_entries(
     Ok(())
 }
 
+async fn collect_manifests(
+    path: &std::path::Path,
+    name: &str,
+    version_pattern: &str,
+    to_delete: &mut Vec<CacheEntry>,
+) -> Result<()> {
+    let manifests = path.join("manifests");
+    if fs::try_exists(&manifests).await? {
+        let mut entries = fs::read_dir(manifests).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let entry_path = entry.path();
+            if entry.file_type().await?.is_file()
+                && entry_path.extension().is_some_and(|ext| ext == "json")
+                && let Some(version) = entry_path.file_stem().and_then(|v| v.to_str())
+                && matches_pattern(version, version_pattern)
+            {
+                to_delete.push(CacheEntry {
+                    name: name.to_string(),
+                    version: version.to_string(),
+                    path: entry_path,
+                    kind: CacheEntryKind::Manifest,
+                });
+            }
+        }
+    }
+    // A packument/ETag is shared by every version, so invalidate it for any
+    // clean of this package, including when no individual manifest was saved.
+    let versions = path.join("versions.json");
+    if fs::try_exists(&versions).await? {
+        to_delete.push(CacheEntry {
+            name: name.to_string(),
+            version: version_pattern.to_string(),
+            path: versions,
+            kind: CacheEntryKind::Manifest,
+        });
+    }
+    Ok(())
+}
+
+async fn collect_packages_at(
+    root: &std::path::Path,
+    pkg_pattern: &str,
+    version_pattern: &str,
+    manifests_only: bool,
+    to_delete: &mut Vec<CacheEntry>,
+) -> Result<()> {
+    if !fs::try_exists(root).await? {
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(root).await?;
+    let mut packages = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        if !entry.file_type().await?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.is_scoped() {
+            let mut scoped = fs::read_dir(entry.path()).await?;
+            while let Some(package) = scoped.next_entry().await? {
+                if package.file_type().await?.is_dir() {
+                    packages.push((
+                        format!("{name}/{}", package.file_name().to_string_lossy()),
+                        package.path(),
+                    ));
+                }
+            }
+        } else {
+            packages.push((name, entry.path()));
+        }
+    }
+    for (name, path) in packages {
+        if matches_pattern(&name, pkg_pattern) {
+            collect_manifests(&path, &name, version_pattern, to_delete).await?;
+            if !manifests_only {
+                collect_matching_versions(
+                    &path,
+                    name,
+                    version_pattern,
+                    CacheEntryKind::Package,
+                    to_delete,
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Walk the package cache and the dedicated self-pin cache root, collecting
 /// entries matching `pattern`
 /// (a `name[@version]` spec, both parts may contain wildcards).
@@ -114,56 +203,25 @@ async fn collect_cache_entries_at(
     // view of the dedicated sibling root. This keeps exact clean operations
     // from also deleting a permissive private-registry package with that name.
     if !reserves_self_pin_logical_namespace(pkg_pattern) {
-        for cache_dir in [
+        for root in [
             cache_dir.to_path_buf(),
             versioned_cache_dir(cache_dir).join("packages"),
         ] {
-            // Read all package information
-            let mut entries = if fs::try_exists(&cache_dir).await? {
-                Some(fs::read_dir(&cache_dir).await?)
-            } else {
-                None
-            };
-            while let Some(entry) = match &mut entries {
-                Some(entries) => entries.next_entry().await?,
-                None => None,
-            } {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-
-                if name_str.is_scoped() {
-                    // Handle scoped packages
-                    let mut pkg_entries = fs::read_dir(entry.path()).await?;
-                    while let Some(pkg_entry) = pkg_entries.next_entry().await? {
-                        let pkg_name = pkg_entry.file_name();
-                        let full_pkg_name = format!("{}/{}", name_str, pkg_name.to_string_lossy());
-
-                        if matches_pattern(&full_pkg_name, pkg_pattern) {
-                            tracing::debug!(
-                                "full pkg name {full_pkg_name}, pkg_pattern {pkg_pattern}"
-                            );
-                            collect_matching_versions(
-                                &pkg_entry.path(),
-                                full_pkg_name,
-                                version_pattern,
-                                CacheEntryKind::Package,
-                                &mut to_delete,
-                            )
-                            .await?;
-                        }
-                    }
-                } else {
-                    // Handle regular packages
-                    if matches_pattern(&name_str, pkg_pattern) {
-                        collect_matching_versions(
-                            &entry.path(),
-                            name_str.to_string(),
-                            version_pattern,
-                            CacheEntryKind::Package,
-                            &mut to_delete,
-                        )
-                        .await?;
-                    }
+            collect_packages_at(&root, pkg_pattern, version_pattern, false, &mut to_delete).await?;
+        }
+        let manifests = versioned_cache_dir(cache_dir).join("manifests");
+        if fs::try_exists(&manifests).await? {
+            let mut registries = fs::read_dir(manifests).await?;
+            while let Some(registry) = registries.next_entry().await? {
+                if registry.file_type().await?.is_dir() {
+                    collect_packages_at(
+                        &registry.path(),
+                        pkg_pattern,
+                        version_pattern,
+                        true,
+                        &mut to_delete,
+                    )
+                    .await?;
                 }
             }
         }
@@ -208,7 +266,12 @@ pub async fn delete_cache_entries(
         } else {
             None
         };
-        if let Err(e) = fs::remove_dir_all(&entry.path).await
+        let removal = if entry.kind == CacheEntryKind::Manifest {
+            fs::remove_file(&entry.path).await
+        } else {
+            fs::remove_dir_all(&entry.path).await
+        };
+        if let Err(e) = removal
             && e.kind() != std::io::ErrorKind::NotFound
         {
             tracing::error!("Failed to delete {}@{}: {e}", entry.name, entry.version);
@@ -385,6 +448,38 @@ mod tests {
         assert!(
             !fs::try_exists(package_cache.join("_utoo-self-private/.1.0.0.self-pin.lock")).await?
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn clean_removes_both_manifest_generations_and_preserves_other_versions() -> Result<()> {
+        let temp = TempDir::new()?;
+        let cache = temp.path().join("nm");
+        let roots = [
+            cache.clone(),
+            versioned_cache_dir(&cache).join("manifests/registry"),
+        ];
+        for root in &roots {
+            let package = root.join("@scope/pkg");
+            fs::create_dir_all(package.join("manifests")).await?;
+            for file in [
+                "versions.json",
+                "manifests/1.0.0.json",
+                "manifests/2.0.0.json",
+            ] {
+                fs::write(package.join(file), b"{}").await?;
+            }
+        }
+        let entries =
+            collect_cache_entries_at(&cache, &temp.path().join("self"), "@scope/pkg@1.*").await?;
+        let (deleted, failed) = delete_cache_entries(entries).await;
+        assert_eq!(deleted.len(), 4);
+        assert!(failed.is_empty());
+        for root in roots {
+            assert!(!root.join("@scope/pkg/versions.json").exists());
+            assert!(!root.join("@scope/pkg/manifests/1.0.0.json").exists());
+            assert!(root.join("@scope/pkg/manifests/2.0.0.json").exists());
+        }
         Ok(())
     }
 
