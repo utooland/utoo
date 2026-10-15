@@ -555,7 +555,9 @@ mod tests {
             get_cache_dir(),
         );
         assert_ne!(
-            crate::util::package_cache::registry_cache_path("_utoo-self-darwin-arm64", version,),
+            get_cache_dir()
+                .join("_utoo-self-darwin-arm64")
+                .join(version),
             mac_arm64_path,
         );
         assert_ne!(

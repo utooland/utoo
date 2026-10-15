@@ -174,10 +174,10 @@ capture_footprint() {
   local phase=$1 pm=$2 out=$3
   local cache
   case "$pm" in
-    utoo)      cache=$UTOO_CACHE ;;
-    utoo-npm)  cache=$UTOO_NPM_CACHE ;;
-    utoo-next) cache=$UTOO_NEXT_CACHE ;;
-    utoo-alt)  cache=$UTOO_ALT_CACHE ;;
+    utoo)      cache="$UTOO_CACHE $UTOO_CACHE.utoo-v2" ;;
+    utoo-npm)  cache="$UTOO_NPM_CACHE $UTOO_NPM_CACHE.utoo-v2" ;;
+    utoo-next) cache="$UTOO_NEXT_CACHE $UTOO_NEXT_CACHE.utoo-v2" ;;
+    utoo-alt)  cache="$UTOO_ALT_CACHE $UTOO_ALT_CACHE.utoo-v2" ;;
     bun)       cache=$BUN_CACHE ;;
     pnpm)      cache=$PNPM_STORE ;;
     pnpm12)    cache=$PNPM12_STORE ;;
@@ -255,7 +255,7 @@ EOF
       # Phase 0: full cold install — nothing reused. Lockfile + all caches wiped.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock aube-lock.yaml yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE" "$PNPM_STORE" "$PNPM12_STORE" "$AUBE_DATA" "$AUBE_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_CACHE.utoo-v2" "$UTOO_NPM_CACHE" "$UTOO_NPM_CACHE.utoo-v2" "$UTOO_NEXT_CACHE" "$UTOO_NEXT_CACHE.utoo-v2" "$UTOO_ALT_CACHE" "$UTOO_ALT_CACHE.utoo-v2" "$BUN_CACHE" "$PNPM_STORE" "$PNPM12_STORE" "$AUBE_DATA" "$AUBE_CACHE"
 echo "[prep] phase 0 $pm: full cold (lockfile + caches + node_modules wiped)"
 EOF
       ;;
@@ -263,7 +263,7 @@ EOF
       # Phase 1: cold resolve — wipe lockfiles AND caches so nothing can be reused.
       cat >> "$path" <<EOF
 rm -f package-lock.json bun.lock aube-lock.yaml yarn.lock pnpm-lock.yaml
-rm -rf "$UTOO_CACHE" "$UTOO_NPM_CACHE" "$UTOO_NEXT_CACHE" "$UTOO_ALT_CACHE" "$BUN_CACHE" "$PNPM_STORE" "$PNPM12_STORE" "$AUBE_DATA" "$AUBE_CACHE"
+rm -rf "$UTOO_CACHE" "$UTOO_CACHE.utoo-v2" "$UTOO_NPM_CACHE" "$UTOO_NPM_CACHE.utoo-v2" "$UTOO_NEXT_CACHE" "$UTOO_NEXT_CACHE.utoo-v2" "$UTOO_ALT_CACHE" "$UTOO_ALT_CACHE.utoo-v2" "$BUN_CACHE" "$PNPM_STORE" "$PNPM12_STORE" "$AUBE_DATA" "$AUBE_CACHE"
 echo "[prep] phase 1 $pm: cleaned lockfiles + caches + node_modules"
 EOF
       ;;
@@ -296,7 +296,7 @@ EOF
         *) cat >> "$path" <<EOF
 rm -f bun.lock yarn.lock pnpm-lock.yaml
 cp -f "$LOCK_STASH/package-lock.json" package-lock.json
-rm -rf "$cache"
+rm -rf "$cache" "$cache.utoo-v2"
 echo "[prep] phase 3 $pm: restored package-lock.json, wiped $cache"
 EOF
           ;;
@@ -437,6 +437,7 @@ seed_for_phase() {
       pnpm12)    cache=$PNPM12_STORE ;;
       aube)      cache=$AUBE_DATA ;;
     esac
+    if [[ "$pm" == utoo* ]] && [ -d "$cache.utoo-v2" ]; then cache="$cache.utoo-v2"; fi
     if [ ! -d "$cache" ] || [ -z "$(ls -A "$cache" 2>/dev/null)" ]; then
       echo -e "  ${CYAN}seed: warming $pm cache via full install${NC}"
       rm -rf node_modules
