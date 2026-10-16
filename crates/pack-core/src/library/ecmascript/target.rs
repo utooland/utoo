@@ -36,6 +36,8 @@ use turbopack_core::{
 };
 use turbopack_ecmascript::parse::{IdentCollector, generate_js_source_map};
 
+use crate::shared::transforms::legacy_for_of::add_legacy_for_of_fallback;
+
 pub(super) enum CodegenStage {
     Lower,
     EmitMinified,
@@ -50,6 +52,7 @@ pub(super) async fn generate_library_code(
     stage: CodegenStage,
 ) -> Result<Code> {
     let versions = *environment.runtime_versions().await?;
+    let legacy_for_of = versions.ie.is_some();
     let target = if *environment
         .runtime_versions()
         .supports_arrow_functions()
@@ -121,9 +124,11 @@ pub(super) async fn generate_library_code(
                         .into(),
                         Assumptions::default(),
                     ));
+                    let has_for_of_helper =
+                        legacy_for_of && add_legacy_for_of_fallback(&mut program, unresolved_mark);
                     let statements_before = statement_count(&program);
                     program.mutate(inject_helpers(unresolved_mark));
-                    statement_count(&program) > statements_before
+                    has_for_of_helper || statement_count(&program) > statements_before
                 })
             } else {
                 false

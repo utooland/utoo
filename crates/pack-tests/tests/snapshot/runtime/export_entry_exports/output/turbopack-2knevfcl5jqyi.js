@@ -1,9 +1,52 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
-    typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["styles/input_initial_0aet3oohzznpd.53738803.css","chunks/input_117qsg_udtbod.100d7072.async.js"],"runtimeModuleIds":["[project]/basic/sourcemap_filename_hash/input/index.js [client] (ecmascript)"]}
+(function(root, factory) {
+    if (typeof exports === 'object' && typeof module === 'object')
+        module.exports = factory();
+    else if (typeof exports === 'object')
+        exports["export-entry-exports"] = factory();
+    else
+        root["export-entry-exports"] = factory();
+}(typeof self !== 'undefined' ? self : this, function() {
+(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push(["18y18e3f78cal.js",
+"[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+function setTernContainer(container) {
+    console.log('Setting Tern container:', container);
+    return container;
+}
+function initializeApp(config) {
+    console.log('Initializing app with config:', config);
+    return {
+        success: true,
+        config
+    };
+}
+const APP_VERSION = '1.0.0';
+var __TURBOPACK__default__export__ = {
+    setTernContainer,
+    initializeApp,
+    version: APP_VERSION
+};
+__turbopack_context__.s([
+    "APP_VERSION",
+    0,
+    APP_VERSION,
+    "default",
+    0,
+    __TURBOPACK__default__export__,
+    "initializeApp",
+    0,
+    initializeApp,
+    "setTernContainer",
+    0,
+    setTernContainer
 ]);
+}),
+]);;
+var __entryRegistration__ = [typeof document === "object" ? document.currentScript : undefined, {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)"]}];
+(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push(__entryRegistration__);
 (() => {
-var chunksToRegister = globalThis["TURBOPACK"];
+var chunksToRegister = globalThis["utooChunk_export_entry_exports"];
 if (chunksToRegister === undefined) {
     chunksToRegister = [];
 } else if (!Array.isArray(chunksToRegister)) {
@@ -55,6 +98,9 @@ var WORKER_FORWARDED_GLOBALS = [];
  * uses plain Module objects.
  */ let createModuleWithDirectionFlag = false;
 const REEXPORTED_OBJECTS = new WeakMap();
+// Legacy re-exports need the original CommonJS enumerable keys, not the
+// namespace's synthetic getters for non-enumerable properties.
+const LEGACY_CJS_SOURCES = typeof Proxy === 'function' ? undefined : new WeakMap();
 /**
  * Constructs the `__turbopack_context__` object for a module.
  */ function Context(module, exports) {
@@ -290,6 +336,10 @@ function ensureDynamicExports(module, exports) {
     let reexportedObjects = REEXPORTED_OBJECTS.get(module);
     if (!reexportedObjects) {
         REEXPORTED_OBJECTS.set(module, reexportedObjects = []);
+        if (typeof Proxy !== 'function') {
+            module.exports = module.namespaceObject = exports;
+            return reexportedObjects;
+        }
         // Returns the re-exported object that provides `prop` as an own property,
         // or `undefined` if none does. The traps share this logic so they always
         // agree on which keys are synthesized from `reexportedObjects`. `default`
@@ -391,7 +441,20 @@ function ensureDynamicExports(module, exports) {
         exports = this.e;
     }
     const reexportedObjects = ensureDynamicExports(module, exports);
-    if (typeof object === 'object' && object !== null) {
+    if (typeof Proxy !== 'function') {
+        if (object !== null && (typeof object === 'object' || typeof object === 'function')) {
+            const source = LEGACY_CJS_SOURCES?.has(object) ? LEGACY_CJS_SOURCES.get(object) : object;
+            // Like webpack, snapshot export names while keeping their values live.
+            for(const key in source){
+                if (key !== 'default' && key !== '__esModule') {
+                    defineProp(exports, key, {
+                        enumerable: true,
+                        get: createGetter(source, key)
+                    });
+                }
+            }
+        }
+    } else if (typeof object === 'object' && object !== null) {
         reexportedObjects.push(object);
     }
 }
@@ -437,8 +500,10 @@ function createGetter(obj, key) {
  */ function interopEsm(raw, ns, allowExportDefault) {
     const bindings = [];
     let defaultLocation = -1;
-    for(let current = raw; (typeof current === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
-        for (const key of Object.getOwnPropertyNames(current)){
+    for(let current = raw; (typeof current === 'object' || typeof current === 'function') && LEAF_PROTOTYPES.indexOf(current) === -1; current = getProto(current)){
+        const keys = Object.getOwnPropertyNames(current);
+        for(let i = 0; i < keys.length; i++){
+            const key = keys[i];
             bindings.push(key, createGetter(raw, key));
             if (defaultLocation === -1 && key === 'default') {
                 defaultLocation = bindings.length - 1;
@@ -457,6 +522,7 @@ function createGetter(obj, key) {
         }
     }
     esm(ns, bindings);
+    LEGACY_CJS_SOURCES?.set(ns, raw);
     return ns;
 }
 function createNS(raw) {
@@ -621,7 +687,9 @@ function installCompressedModuleFactories(chunkModules, offset, moduleFactories,
         value: values[key]
     });
 };
-relativeURL.prototype = URL.prototype;
+if (typeof URL === 'function') {
+    relativeURL.prototype = URL.prototype;
+}
 contextPrototype.U = relativeURL;
 /**
  * Utility function to ensure all variants of an enum are handled.
@@ -1424,9 +1492,25 @@ let BACKEND;
         return resolver.promise;
     }
 })();
-globalThis["TURBOPACK"] = { push: registerChunk };
+globalThis["utooChunk_export_entry_exports"] = {
+    push: registerChunk,
+    getEntryExports: function(registration) {
+        var chunk = registration[0];
+        var chunkPath = chunk == null ? undefined : getPathFromScript(getChunkFromRegistration(chunk));
+        var runtimeModuleIds = registration[1].runtimeModuleIds;
+        var entryModule;
+        for (var i = 0; i < runtimeModuleIds.length; i++) {
+            entryModule = getOrInstantiateRuntimeModule(chunkPath, runtimeModuleIds[i]);
+        }
+        // Async modules already expose a promise; synchronous entries keep their
+        // namespace value without an additional asynchronous boundary.
+        return entryModule && (entryModule.namespaceObject || entryModule.exports);
+    }
+};
 chunksToRegister.forEach(registerChunk);
 })();
+return globalThis["utooChunk_export_entry_exports"].getEntryExports(__entryRegistration__);
+}));
 
 
-//# sourceMappingURL=main.9954de0a.js.map
+//# sourceMappingURL=turbopack-2knevfcl5jqyi.js.map

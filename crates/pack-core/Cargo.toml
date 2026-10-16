@@ -40,6 +40,7 @@ swc_core                     = { workspace = true, features = [
   "ecma_parser",
   "ecma_parser_typescript",
   "ecma_preset_env",
+  "ecma_quote",
   "ecma_transforms",
   "ecma_transforms_optimization",
   "ecma_transforms_react",

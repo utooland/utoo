@@ -64,8 +64,11 @@ contextPrototype.Q = loadScript;
       }
 
       if (params.runtimeModuleIds.length > 0) {
-        for (const moduleId of params.runtimeModuleIds) {
-          getOrInstantiateRuntimeModule(chunk as ChunkPath, moduleId);
+        for (let i = 0; i < params.runtimeModuleIds.length; i++) {
+          getOrInstantiateRuntimeModule(
+            chunk as ChunkPath,
+            params.runtimeModuleIds[i],
+          );
         }
       }
     },

@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["3vge9fu5dt6kf.js"],"runtimeModuleIds":["[project]/externals/basic/input/index.js [client] (ecmascript)"]}
+    {"otherChunks":["1bpytszzof4df.js"],"runtimeModuleIds":[70]}
 ]);
 (() => {
 var chunksToRegister = globalThis["TURBOPACK"];
@@ -10,10 +10,10 @@ if (chunksToRegister === undefined) {
     return;
 }
 
-var CHUNK_BASE_PATH = "/";
+var CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
-var RUNTIME_PUBLIC_PATH = "/";
+var RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
 const SUPPORT_COMPONENT_CHUNKS = false;
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
@@ -55,6 +55,9 @@ var WORKER_FORWARDED_GLOBALS = [];
  * uses plain Module objects.
  */ let createModuleWithDirectionFlag = false;
 const REEXPORTED_OBJECTS = new WeakMap();
+// Legacy re-exports need the original CommonJS enumerable keys, not the
+// namespace's synthetic getters for non-enumerable properties.
+const LEGACY_CJS_SOURCES = typeof Proxy === 'function' ? undefined : new WeakMap();
 /**
  * Constructs the `__turbopack_context__` object for a module.
  */ function Context(module, exports) {
@@ -290,6 +293,10 @@ function ensureDynamicExports(module, exports) {
     let reexportedObjects = REEXPORTED_OBJECTS.get(module);
     if (!reexportedObjects) {
         REEXPORTED_OBJECTS.set(module, reexportedObjects = []);
+        if (typeof Proxy !== 'function') {
+            module.exports = module.namespaceObject = exports;
+            return reexportedObjects;
+        }
         // Returns the re-exported object that provides `prop` as an own property,
         // or `undefined` if none does. The traps share this logic so they always
         // agree on which keys are synthesized from `reexportedObjects`. `default`
@@ -391,7 +398,20 @@ function ensureDynamicExports(module, exports) {
         exports = this.e;
     }
     const reexportedObjects = ensureDynamicExports(module, exports);
-    if (typeof object === 'object' && object !== null) {
+    if (typeof Proxy !== 'function') {
+        if (object !== null && (typeof object === 'object' || typeof object === 'function')) {
+            const source = LEGACY_CJS_SOURCES?.has(object) ? LEGACY_CJS_SOURCES.get(object) : object;
+            // Like webpack, snapshot export names while keeping their values live.
+            for(const key in source){
+                if (key !== 'default' && key !== '__esModule') {
+                    defineProp(exports, key, {
+                        enumerable: true,
+                        get: createGetter(source, key)
+                    });
+                }
+            }
+        }
+    } else if (typeof object === 'object' && object !== null) {
         reexportedObjects.push(object);
     }
 }
@@ -437,8 +457,10 @@ function createGetter(obj, key) {
  */ function interopEsm(raw, ns, allowExportDefault) {
     const bindings = [];
     let defaultLocation = -1;
-    for(let current = raw; (typeof current === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
-        for (const key of Object.getOwnPropertyNames(current)){
+    for(let current = raw; (typeof current === 'object' || typeof current === 'function') && LEAF_PROTOTYPES.indexOf(current) === -1; current = getProto(current)){
+        const keys = Object.getOwnPropertyNames(current);
+        for(let i = 0; i < keys.length; i++){
+            const key = keys[i];
             bindings.push(key, createGetter(raw, key));
             if (defaultLocation === -1 && key === 'default') {
                 defaultLocation = bindings.length - 1;
@@ -457,6 +479,7 @@ function createGetter(obj, key) {
         }
     }
     esm(ns, bindings);
+    LEGACY_CJS_SOURCES?.set(ns, raw);
     return ns;
 }
 function createNS(raw) {
@@ -621,7 +644,9 @@ function installCompressedModuleFactories(chunkModules, offset, moduleFactories,
         value: values[key]
     });
 };
-relativeURL.prototype = URL.prototype;
+if (typeof URL === 'function') {
+    relativeURL.prototype = URL.prototype;
+}
 contextPrototype.U = relativeURL;
 /**
  * Utility function to ensure all variants of an enum are handled.
@@ -713,138 +738,6 @@ function applyModuleFactoryName(factory) {
         value: 'module evaluation'
     });
 }
-/// <reference path="./runtime-types.d.ts" />
-/// <reference path="./runtime-utils.ts" />
-/**
- * Top-level-await / async-module machinery. This is only included in the runtime
- * when the module graph actually contains an async module (a module with
- * top-level await, or one that transitively depends on one). When no async
- * module is present, the chunk items never reference `__turbopack_context__.a`,
- * so this whole file can be omitted.
- *
- * everything below is adapted from webpack
- * https://github.com/webpack/webpack/blob/6be4065ade1e252c1d8dcba4af0f43e32af1bdc1/lib/runtime/AsyncModuleRuntimeModule.js#L13
- */ const turbopackQueues = Symbol('turbopack queues');
-const turbopackExports = Symbol('turbopack exports');
-const turbopackError = Symbol('turbopack error');
-function isPromise(maybePromise) {
-    return maybePromise != null && typeof maybePromise === 'object' && 'then' in maybePromise && typeof maybePromise.then === 'function';
-}
-function isAsyncModuleExt(obj) {
-    return turbopackQueues in obj;
-}
-function createPromise() {
-    let resolve;
-    let reject;
-    const promise = new Promise((res, rej)=>{
-        reject = rej;
-        resolve = res;
-    });
-    return {
-        promise,
-        resolve: resolve,
-        reject: reject
-    };
-}
-function resolveQueue(queue) {
-    if (queue && queue.status !== 1) {
-        queue.status = 1;
-        queue.forEach((fn)=>fn.queueCount--);
-        queue.forEach((fn)=>fn.queueCount-- ? fn.queueCount++ : fn());
-    }
-}
-function wrapDeps(deps) {
-    return deps.map((dep)=>{
-        if (dep !== null && typeof dep === 'object') {
-            if (isAsyncModuleExt(dep)) return dep;
-            if (isPromise(dep)) {
-                const queue = Object.assign([], {
-                    status: 0
-                });
-                const obj = {
-                    [turbopackExports]: {},
-                    [turbopackQueues]: (fn)=>fn(queue)
-                };
-                dep.then((res)=>{
-                    obj[turbopackExports] = res;
-                    resolveQueue(queue);
-                }, (err)=>{
-                    obj[turbopackError] = err;
-                    resolveQueue(queue);
-                });
-                return obj;
-            }
-        }
-        return {
-            [turbopackExports]: dep,
-            [turbopackQueues]: ()=>{}
-        };
-    });
-}
-function asyncModule(body, hasAwait) {
-    const module = this.m;
-    const queue = hasAwait ? Object.assign([], {
-        status: -1
-    }) : undefined;
-    const depQueues = new Set();
-    const { resolve, reject, promise: rawPromise } = createPromise();
-    const promise = Object.assign(rawPromise, {
-        [turbopackExports]: module.exports,
-        [turbopackQueues]: (fn)=>{
-            queue && fn(queue);
-            depQueues.forEach(fn);
-            promise['catch'](()=>{});
-        }
-    });
-    const attributes = {
-        get () {
-            return promise;
-        },
-        set (v) {
-            // Calling `esmExport` leads to this.
-            if (v !== promise) {
-                promise[turbopackExports] = v;
-            }
-        }
-    };
-    Object.defineProperty(module, 'exports', attributes);
-    Object.defineProperty(module, 'namespaceObject', attributes);
-    function handleAsyncDependencies(deps) {
-        const currentDeps = wrapDeps(deps);
-        const getResult = ()=>currentDeps.map((d)=>{
-                if (d[turbopackError]) throw d[turbopackError];
-                return d[turbopackExports];
-            });
-        const { promise, resolve } = createPromise();
-        const fn = Object.assign(()=>resolve(getResult), {
-            queueCount: 0
-        });
-        function fnQueue(q) {
-            if (q !== queue && !depQueues.has(q)) {
-                depQueues.add(q);
-                if (q && q.status === 0) {
-                    fn.queueCount++;
-                    q.push(fn);
-                }
-            }
-        }
-        currentDeps.map((dep)=>dep[turbopackQueues](fnQueue));
-        return fn.queueCount ? promise : getResult();
-    }
-    function asyncResult(err) {
-        if (err) {
-            reject(promise[turbopackError] = err);
-        } else {
-            resolve(promise[turbopackExports]);
-        }
-        resolveQueue(queue);
-    }
-    body(handleAsyncDependencies, asyncResult);
-    if (queue && queue.status === -1) {
-        queue.status = 0;
-    }
-}
-contextPrototype.a = asyncModule;
 /**
  * This file contains runtime types and functions that are shared between all
  * Turbopack *browser* ECMAScript runtimes.
@@ -1310,82 +1203,6 @@ function registerChunk(registration) {
     }
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
-/// <reference path="../shared/runtime/runtime-utils.ts" />
-/// A 'base' utilities to support runtime can have externals.
-/// Currently this is for node.js / edge runtime both.
-/// If a fn requires node.js specific behavior, it should be placed in `node-external-utils` instead.
-async function externalImport(id) {
-    let raw;
-    try {
-        raw = await import(id);
-    } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
-        throw new Error(`Failed to load external module ${id}: ${err}`);
-    }
-    if (raw && raw.__esModule && raw.default && 'default' in raw.default) {
-        return interopEsm(raw.default, createNS(raw), true);
-    }
-    return raw;
-}
-contextPrototype.y = externalImport;
-function externalRequire(id, thunk, esm = false) {
-    let raw;
-    try {
-        raw = thunk();
-    } catch (err) {
-        // TODO(alexkirsz) This can happen when a client-side module tries to load
-        // an external module we don't provide a shim for (e.g. querystring, url).
-        // For now, we fail semi-silently, but in the future this should be a
-        // compilation error.
-        throw new Error(`Failed to load external module ${id}: ${err}`);
-    }
-    if (!esm || raw.__esModule) {
-        return raw;
-    }
-    return interopEsm(raw, createNS(raw), true);
-}
-externalRequire.resolve = (id, options)=>{
-    return require.resolve(id, options);
-};
-contextPrototype.x = externalRequire;
-/**
- * Adds Webpack-compatible ESM metadata to external values while preserving
- * native ESM live bindings.
- */ function externalNamespace(mod) {
-    if (mod && mod.__esModule) return mod;
-    const ns = Object.create(null);
-    const isEsmNamespace = mod && toStringTag && mod[toStringTag] === 'Module';
-    if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
-        for(const key in mod){
-            if (key === '__esModule' || !isEsmNamespace && key === 'default') {
-                continue;
-            }
-            Object.defineProperty(ns, key, {
-                enumerable: true,
-                get: createGetter(mod, key)
-            });
-        }
-    }
-    if (!isEsmNamespace) {
-        Object.defineProperty(ns, 'default', {
-            enumerable: true,
-            value: mod
-        });
-    }
-    Object.defineProperty(ns, '__esModule', {
-        value: true
-    });
-    if (toStringTag) {
-        Object.defineProperty(ns, toStringTag, {
-            value: 'Module'
-        });
-    }
-    return ns;
-}
-contextPrototype.N = externalNamespace;
 /**
  * This file contains the runtime code specific to the Turbopack ECMAScript DOM runtime.
  *
@@ -1637,4 +1454,4 @@ chunksToRegister.forEach(registerChunk);
 })();
 
 
-//# sourceMappingURL=turbopack-1d21qt3xx8v44.js.map
+//# sourceMappingURL=turbopack-1p6li68n_7_nd.js.map

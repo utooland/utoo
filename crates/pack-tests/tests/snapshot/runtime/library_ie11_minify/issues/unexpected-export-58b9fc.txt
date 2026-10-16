@@ -1,0 +1,9 @@
+warning - [analysis] /runtime/library_ie11_minify/input/primitive.cjs  unexpected export *
+  
+  export * used with module [project]/runtime/library_ie11_minify/input/primitive.cjs [library-client] (ecmascript) which is a CommonJS module with exports only available at runtime
+  List all export names manually (`export { a, b, c } from "...") or rewrite the module to ESM, to avoid the additional runtime code.`
+  
+  Import trace:
+    Library (Web):
+      ./runtime/library_ie11_minify/input/primitive.cjs
+      ./runtime/library_ie11_minify/input/index.js

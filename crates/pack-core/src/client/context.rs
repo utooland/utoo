@@ -63,6 +63,7 @@ use crate::{
             default_export_namer::get_default_export_namer_rule,
             emotion::get_emotion_transform_rule, jsx_dev_filename::get_jsx_dev_filename_rule,
             jsx_import_preserver::get_jsx_import_preserver_rule,
+            legacy_for_of::get_legacy_for_of_rule,
             remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
@@ -370,6 +371,12 @@ pub async fn get_client_module_options_context(
 
     client_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
     foreign_client_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
+
+    if target_browsers.await?.ie.is_some() {
+        let legacy_for_of_rule = get_legacy_for_of_rule(enable_mdx_rs.is_some());
+        client_rules.push(legacy_for_of_rule.clone());
+        foreign_client_rules.push(legacy_for_of_rule);
+    }
 
     // Ignore .d.ts files - they are TypeScript declaration files and should not be bundled
     let ignore_dts_rule = ModuleRule::new(

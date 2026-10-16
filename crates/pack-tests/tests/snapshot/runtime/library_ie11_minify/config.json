@@ -1,0 +1,20 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "Ie11Library"
+        }
+      }
+    ],
+    "target": "ie 11",
+    "sourceMaps": false,
+    "optimization": {
+      "minify": true,
+      "moduleIds": "named"
+    }
+  },
+  "runtimeType": "Production"
+}

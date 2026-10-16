@@ -185,6 +185,9 @@ function _type_of(obj) {
  * uses plain Module objects.
  */ var createModuleWithDirectionFlag = false;
     var REEXPORTED_OBJECTS = new WeakMap();
+    // Legacy re-exports need the original CommonJS enumerable keys, not the
+    // namespace's synthetic getters for non-enumerable properties.
+    var LEGACY_CJS_SOURCES = typeof Proxy === 'function' ? undefined : new WeakMap();
     /**
  * Constructs the `__turbopack_context__` object for a module.
  */ function Context(module1, exports1) {
@@ -422,6 +425,10 @@ function _type_of(obj) {
         var reexportedObjects = REEXPORTED_OBJECTS.get(module1);
         if (!reexportedObjects) {
             REEXPORTED_OBJECTS.set(module1, reexportedObjects = []);
+            if (typeof Proxy !== 'function') {
+                module1.exports = module1.namespaceObject = exports1;
+                return reexportedObjects;
+            }
             // Returns the re-exported object that provides `prop` as an own property,
             // or `undefined` if none does. The traps share this logic so they always
             // agree on which keys are synthesized from `reexportedObjects`. `default`
@@ -576,7 +583,20 @@ function _type_of(obj) {
             _$exports = this.e;
         }
         var reexportedObjects = ensureDynamicExports(_$module, _$exports);
-        if ((typeof object === "undefined" ? "undefined" : _type_of(object)) === 'object' && object !== null) {
+        if (typeof Proxy !== 'function') {
+            if (object !== null && ((typeof object === "undefined" ? "undefined" : _type_of(object)) === 'object' || typeof object === 'function')) {
+                var source = (LEGACY_CJS_SOURCES === null || LEGACY_CJS_SOURCES === void 0 ? void 0 : LEGACY_CJS_SOURCES.has(object)) ? LEGACY_CJS_SOURCES.get(object) : object;
+                // Like webpack, snapshot export names while keeping their values live.
+                for(var key in source){
+                    if (key !== 'default' && key !== '__esModule') {
+                        defineProp(_$exports, key, {
+                            enumerable: true,
+                            get: createGetter(source, key)
+                        });
+                    }
+                }
+            }
+        } else if ((typeof object === "undefined" ? "undefined" : _type_of(object)) === 'object' && object !== null) {
             reexportedObjects.push(object);
         }
     }
@@ -628,28 +648,13 @@ function _type_of(obj) {
  */ function interopEsm(raw, ns, allowExportDefault) {
         var bindings = [];
         var defaultLocation = -1;
-        for(var current = raw; ((typeof current === "undefined" ? "undefined" : _type_of(current)) === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
-            var _iteratorNormalCompletion = true, _didIteratorError = false, _iteratorError = undefined;
-            try {
-                for(var _iterator = Object.getOwnPropertyNames(current)[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true){
-                    var key = _step.value;
-                    bindings.push(key, createGetter(raw, key));
-                    if (defaultLocation === -1 && key === 'default') {
-                        defaultLocation = bindings.length - 1;
-                    }
-                }
-            } catch (err) {
-                _didIteratorError = true;
-                _iteratorError = err;
-            } finally{
-                try {
-                    if (!_iteratorNormalCompletion && _iterator.return != null) {
-                        _iterator.return();
-                    }
-                } finally{
-                    if (_didIteratorError) {
-                        throw _iteratorError;
-                    }
+        for(var current = raw; ((typeof current === "undefined" ? "undefined" : _type_of(current)) === 'object' || typeof current === 'function') && LEAF_PROTOTYPES.indexOf(current) === -1; current = getProto(current)){
+            var keys = Object.getOwnPropertyNames(current);
+            for(var i = 0; i < keys.length; i++){
+                var key = keys[i];
+                bindings.push(key, createGetter(raw, key));
+                if (defaultLocation === -1 && key === 'default') {
+                    defaultLocation = bindings.length - 1;
                 }
             }
         }
@@ -665,6 +670,7 @@ function _type_of(obj) {
             }
         }
         esm(ns, bindings);
+        LEGACY_CJS_SOURCES === null || LEGACY_CJS_SOURCES === void 0 ? void 0 : LEGACY_CJS_SOURCES.set(ns, raw);
         return ns;
     }
     function createNS(raw) {
@@ -851,7 +857,9 @@ function _type_of(obj) {
             value: values[key1]
         });
     };
-    relativeURL.prototype = URL.prototype;
+    if (typeof URL === 'function') {
+        relativeURL.prototype = URL.prototype;
+    }
     contextPrototype.U = relativeURL;
     /**
  * Utility function to ensure all variants of an enum are handled.
@@ -1298,25 +1306,8 @@ function _type_of(obj) {
                     return;
                 }
                 if (params.runtimeModuleIds.length > 0) {
-                    var _iteratorNormalCompletion = true, _didIteratorError = false, _iteratorError = undefined;
-                    try {
-                        for(var _iterator = params.runtimeModuleIds[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true){
-                            var moduleId = _step.value;
-                            getOrInstantiateRuntimeModule(chunk, moduleId);
-                        }
-                    } catch (err) {
-                        _didIteratorError = true;
-                        _iteratorError = err;
-                    } finally{
-                        try {
-                            if (!_iteratorNormalCompletion && _iterator.return != null) {
-                                _iterator.return();
-                            }
-                        } finally{
-                            if (_didIteratorError) {
-                                throw _iteratorError;
-                            }
-                        }
+                    for(var i = 0; i < params.runtimeModuleIds.length; i++){
+                        getOrInstantiateRuntimeModule(chunk, params.runtimeModuleIds[i]);
                     }
                 }
             }

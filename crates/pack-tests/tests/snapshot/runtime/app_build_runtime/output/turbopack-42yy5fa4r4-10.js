@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["3sjnmlky2qoml.js"],"runtimeModuleIds":[59]}
+    {"otherChunks":["0-be73mqx4gng.js"],"runtimeModuleIds":[47]}
 ]);
 (() => {
 var chunksToRegister = globalThis["TURBOPACK"];
@@ -16,7 +16,7 @@ var RELATIVE_ROOT_PATH = "/ROOT";
 var RUNTIME_PUBLIC_PATH = "/";
 const SUPPORT_COMPONENT_CHUNKS = false;
 var ASSET_SUFFIX = "";
-var CROSS_ORIGIN = "anonymous";
+var CROSS_ORIGIN = null;
 var CHUNK_LOAD_RETRY_MAX_ATTEMPTS = 1;
 var CHUNK_LOAD_RETRY_BASE_DELAY_MS = 200;
 var CHUNK_LOAD_RETRY_MAX_JITTER_MS = 400;
@@ -55,6 +55,9 @@ var WORKER_FORWARDED_GLOBALS = [];
  * uses plain Module objects.
  */ let createModuleWithDirectionFlag = false;
 const REEXPORTED_OBJECTS = new WeakMap();
+// Legacy re-exports need the original CommonJS enumerable keys, not the
+// namespace's synthetic getters for non-enumerable properties.
+const LEGACY_CJS_SOURCES = typeof Proxy === 'function' ? undefined : new WeakMap();
 /**
  * Constructs the `__turbopack_context__` object for a module.
  */ function Context(module, exports) {
@@ -290,6 +293,10 @@ function ensureDynamicExports(module, exports) {
     let reexportedObjects = REEXPORTED_OBJECTS.get(module);
     if (!reexportedObjects) {
         REEXPORTED_OBJECTS.set(module, reexportedObjects = []);
+        if (typeof Proxy !== 'function') {
+            module.exports = module.namespaceObject = exports;
+            return reexportedObjects;
+        }
         // Returns the re-exported object that provides `prop` as an own property,
         // or `undefined` if none does. The traps share this logic so they always
         // agree on which keys are synthesized from `reexportedObjects`. `default`
@@ -391,7 +398,20 @@ function ensureDynamicExports(module, exports) {
         exports = this.e;
     }
     const reexportedObjects = ensureDynamicExports(module, exports);
-    if (typeof object === 'object' && object !== null) {
+    if (typeof Proxy !== 'function') {
+        if (object !== null && (typeof object === 'object' || typeof object === 'function')) {
+            const source = LEGACY_CJS_SOURCES?.has(object) ? LEGACY_CJS_SOURCES.get(object) : object;
+            // Like webpack, snapshot export names while keeping their values live.
+            for(const key in source){
+                if (key !== 'default' && key !== '__esModule') {
+                    defineProp(exports, key, {
+                        enumerable: true,
+                        get: createGetter(source, key)
+                    });
+                }
+            }
+        }
+    } else if (typeof object === 'object' && object !== null) {
         reexportedObjects.push(object);
     }
 }
@@ -437,8 +457,10 @@ function createGetter(obj, key) {
  */ function interopEsm(raw, ns, allowExportDefault) {
     const bindings = [];
     let defaultLocation = -1;
-    for(let current = raw; (typeof current === 'object' || typeof current === 'function') && !LEAF_PROTOTYPES.includes(current); current = getProto(current)){
-        for (const key of Object.getOwnPropertyNames(current)){
+    for(let current = raw; (typeof current === 'object' || typeof current === 'function') && LEAF_PROTOTYPES.indexOf(current) === -1; current = getProto(current)){
+        const keys = Object.getOwnPropertyNames(current);
+        for(let i = 0; i < keys.length; i++){
+            const key = keys[i];
             bindings.push(key, createGetter(raw, key));
             if (defaultLocation === -1 && key === 'default') {
                 defaultLocation = bindings.length - 1;
@@ -457,6 +479,7 @@ function createGetter(obj, key) {
         }
     }
     esm(ns, bindings);
+    LEGACY_CJS_SOURCES?.set(ns, raw);
     return ns;
 }
 function createNS(raw) {
@@ -621,7 +644,9 @@ function installCompressedModuleFactories(chunkModules, offset, moduleFactories,
         value: values[key]
     });
 };
-relativeURL.prototype = URL.prototype;
+if (typeof URL === 'function') {
+    relativeURL.prototype = URL.prototype;
+}
 contextPrototype.U = relativeURL;
 /**
  * Utility function to ensure all variants of an enum are handled.
@@ -1429,4 +1454,4 @@ chunksToRegister.forEach(registerChunk);
 })();
 
 
-//# sourceMappingURL=turbopack-43m0au4-5afq8.js.map
+//# sourceMappingURL=turbopack-42yy5fa4r4-10.js.map
