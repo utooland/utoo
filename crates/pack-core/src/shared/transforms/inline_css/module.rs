@@ -24,7 +24,7 @@ use turbopack_css::{
     chunk::{CssChunk, CssChunkItem, CssChunkType, CssImport},
 };
 use turbopack_ecmascript::{
-    EcmascriptInputTransforms, EcmascriptModuleAsset, EcmascriptOptions,
+    EcmascriptInputTransforms, EcmascriptModuleAsset, EcmascriptOptions, SpecifiedModuleType,
     chunk::{
         EcmascriptChunkItemContent, EcmascriptChunkPlaceable, EcmascriptExports,
         ecmascript_chunk_item,
@@ -305,6 +305,8 @@ impl InlineCssModuleType {
             asset_context,
             EcmascriptInputTransforms::empty().to_resolved().await?,
             EcmascriptOptions {
+                // The generated injector is ESM even when the CSS belongs to a CommonJS package.
+                specified_module_type: SpecifiedModuleType::EcmaScript,
                 follow_reexports: module_options_context.follow_reexports,
                 module_fragments_enabled: module_options_context.module_fragments_enabled,
                 mangle_export_names: module_options_context.ecmascript.mangle_export_names,
