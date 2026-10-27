@@ -16,7 +16,7 @@ permissions:
 jobs:
   build:
     name: utooweb-ci-build-and-e2e
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Init git submodules

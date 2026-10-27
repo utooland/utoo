@@ -30,7 +30,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(pack)')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pack)'))
-    uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@main
+    uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@e95e8271c1683b0c26329a40ed1ebcd69887b6c5
     with:
       candidate_mode: source
       utoo_repository: >-
@@ -40,4 +40,4 @@ jobs:
       suite: >-
         ${{ github.event_name == 'workflow_dispatch' && inputs.suite || 'all' }}
       harness_repository: utooland/utoo-ecosystem-ci
-      harness_ref: main
+      harness_ref: e95e8271c1683b0c26329a40ed1ebcd69887b6c5
