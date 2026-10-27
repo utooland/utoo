@@ -24,9 +24,9 @@ import { createHttpProxyMiddleware } from "../core/proxyHono";
 import type { Project } from "../core/types";
 import { getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
+import { resolveRootPath } from "../utils/findRoot";
 import { createSelfSignedCertificate } from "../utils/mkcert";
 import { printServerInfo } from "../utils/printServerInfo";
-import { resolveRootPath } from "../utils/resolveRootPath";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 // --- Path helpers (same logic as dev.ts, not exported) ---

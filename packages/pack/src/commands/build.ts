@@ -14,11 +14,11 @@ import {
   isTruthyEnv,
   normalizeTurbopackMemoryEviction,
 } from "../utils/env";
+import { resolveRootPath } from "../utils/findRoot";
 import { HtmlGenerationManager } from "../utils/HtmlGenerationManager";
 import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
-import { resolveRootPath } from "../utils/resolveRootPath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
 import {
   formatDuration,

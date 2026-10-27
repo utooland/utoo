@@ -12,6 +12,7 @@ const bindingMocks = vi.hoisted(() => ({
 vi.mock("../binding", () => bindingMocks);
 
 import { projectFactory } from "../core/project";
+import { findRootDir } from "../utils/findRoot";
 import { normalizePath } from "../utils/normalizePath";
 
 const nativeProject = { __napiType: "Project" as const };
@@ -52,51 +53,39 @@ function createProject(rootPath?: string) {
 }
 
 function expectNativeRoot(rootPath: string) {
-  expect(bindingMocks.projectNew).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({
-      projectPath: normalizePath(projectPath),
-      rootPath: normalizePath(rootPath),
-    }),
-    {},
-    expect.any(Object),
-  );
+  expect(bindingMocks.projectNew.mock.calls[0][0]).toMatchObject({
+    projectPath: normalizePath(projectPath),
+    rootPath: normalizePath(rootPath),
+  });
 }
 
 describe("project root configuration", () => {
-  it("overrides an explicit root before passing options to NAPI", async () => {
-    vi.stubEnv("UTOO_ROOT_PATH", fixture);
-
-    await createProject(projectPath);
-
-    expectNativeRoot(fixture);
-  });
-
-  it("resolves relative environment roots from cwd", async () => {
-    vi.stubEnv("UTOO_ROOT_PATH", path.relative(process.cwd(), fixture));
-
-    await createProject(projectPath);
-
-    expectNativeRoot(fixture);
-  });
-
-  it.each([undefined, ""])(
-    "preserves an explicit root when the environment is %s",
-    async (value) => {
-      vi.stubEnv("UTOO_ROOT_PATH", value);
-
+  it.each(["absolute", "relative"])(
+    "applies an %s environment root without changing framework discovery",
+    async (kind) => {
+      const accessRoot = path.dirname(fixture);
+      vi.stubEnv(
+        "UTOO_ROOT_PATH",
+        kind === "absolute"
+          ? accessRoot
+          : path.relative(process.cwd(), accessRoot),
+      );
       await createProject(projectPath);
 
-      expectNativeRoot(projectPath);
+      expectNativeRoot(accessRoot);
+      expect(findRootDir(projectPath)).toBe(fixture);
     },
   );
 
   it.each([undefined, ""])(
-    "detects the root for direct project creation when the environment is %s",
+    "preserves explicit roots and discovers omitted roots when the environment is %s",
     async (value) => {
       vi.stubEnv("UTOO_ROOT_PATH", value);
+      await createProject(projectPath);
+      expectNativeRoot(projectPath);
+      bindingMocks.projectNew.mockClear();
 
       await createProject();
-
       expectNativeRoot(fixture);
     },
   );

@@ -20,8 +20,8 @@ import {
   TurbopackRuleConfigItem,
 } from "../config/types";
 import { getPackPath, rustifyEnv } from "../utils/common";
+import { resolveRootPath } from "../utils/findRoot";
 import { normalizePath } from "../utils/normalizePath";
-import { resolveRootPath } from "../utils/resolveRootPath";
 import { DiagnosticSources } from "./diagnosticSources";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
@@ -33,7 +33,7 @@ import {
 } from "./types";
 
 type ProjectCreationOptions = Omit<Required<ProjectOptions>, "rootPath"> &
-  Pick<ProjectOptions, "rootPath">;
+  Partial<Pick<ProjectOptions, "rootPath">>;
 
 /**
  * An error caused by a bug in Turbopack, and not the user's code (e.g. a Rust panic). These should

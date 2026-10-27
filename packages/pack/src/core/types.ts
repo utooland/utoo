@@ -51,7 +51,7 @@ export interface ProjectOptions extends BundleOptions {
    * Defaults to automatic root detection from projectPath. UTOO_ROOT_PATH
    * overrides both explicit paths and automatic detection.
    */
-  rootPath?: string;
+  rootPath: string;
 
   /**
    * A path inside the root_path which contains the app/pages directories.
