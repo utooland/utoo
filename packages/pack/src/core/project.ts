@@ -21,6 +21,7 @@ import {
 } from "../config/types";
 import { getPackPath, rustifyEnv } from "../utils/common";
 import { normalizePath } from "../utils/normalizePath";
+import { resolveRootPath } from "../utils/resolveRootPath";
 import { DiagnosticSources } from "./diagnosticSources";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
@@ -30,6 +31,9 @@ import {
   RawEntrypoints,
   Update,
 } from "./types";
+
+type ProjectCreationOptions = Omit<Required<ProjectOptions>, "rootPath"> &
+  Pick<ProjectOptions, "rootPath">;
 
 /**
  * An error caused by a bug in Turbopack, and not the user's code (e.g. a Rust panic). These should
@@ -384,7 +388,10 @@ async function rustifyPartialProjectOptions(
 ): Promise<NapiPartialProjectOptions> {
   return {
     ...options,
-    rootPath: normalizePathOption(options.rootPath),
+    rootPath:
+      options.rootPath === undefined
+        ? undefined
+        : normalizePath(resolveRootPath(options.projectPath, options.rootPath)),
     projectPath: normalizePathOption(options.projectPath),
     packPath: normalizePathOption(options.packPath),
     config:
@@ -407,11 +414,13 @@ function normalizePathOption(pathLike: string | undefined): string | undefined {
 }
 
 async function rustifyProjectOptions(
-  options: Required<ProjectOptions>,
+  options: ProjectCreationOptions,
 ): Promise<NapiProjectOptions> {
   return {
     ...options,
-    rootPath: normalizePath(options.rootPath),
+    rootPath: normalizePath(
+      resolveRootPath(options.projectPath, options.rootPath),
+    ),
     projectPath: normalizePath(options.projectPath),
     packPath: normalizePath(options.packPath),
     config: await serializeConfig(options.config, options.dev),
@@ -767,7 +776,7 @@ export function projectFactory(endpointWatchOptions?: {
   }
 
   return async function createProject(
-    options: Required<ProjectOptions>,
+    options: ProjectCreationOptions,
     turboEngineOptions: binding.NapiTurboEngineOptions,
   ) {
     return new ProjectImpl(

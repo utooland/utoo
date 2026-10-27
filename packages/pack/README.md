@@ -159,6 +159,31 @@ Node.js, or library builds.
 }
 ```
 
+### Worktree and Symlink Debugging
+
+Set `UTOO_ROOT_PATH` to temporarily override the bundler's filesystem root when
+debugging in a worktree that shares `node_modules`, or when linking a local
+dependency outside the project:
+
+```bash
+UTOO_ROOT_PATH=/path/to/common-parent utx up dev
+# Relative paths resolve from the current working directory:
+UTOO_ROOT_PATH=.. utx up build
+# Framework integrations use the same override:
+UTOO_ROOT_PATH=/path/to/common-parent smallfish dev
+```
+
+The root must contain both the project and the real paths of its linked
+dependencies. The project directory stays unchanged. Precedence is
+`UTOO_ROOT_PATH` > explicit `rootPath` (including CLI `--root` and config
+`rootPath`) > automatic root detection. An empty environment variable is ignored.
+
+Utoopack applies this policy when creating projects, including direct
+`projectFactory()` callers. Frameworks can omit `rootPath` and let Utoopack
+detect it; they do not need to call `findRootDir()` themselves. For integrations
+that still call `findRootDir()`, it respects the same environment override.
+Updates that omit `rootPath` retain the project's existing root.
+
 ## 🛠️ Development
 
 ### Prerequisites

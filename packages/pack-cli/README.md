@@ -61,6 +61,21 @@ Build your project for production:
 utx up build
 ```
 
+### Worktree and Symlink Debugging
+
+To reuse `node_modules` from another checkout or debug a linked dependency,
+set the root to a common parent containing both the project and the real
+dependency paths:
+
+```bash
+UTOO_ROOT_PATH=/path/to/common-parent utx up dev
+UTOO_ROOT_PATH=.. utx up build
+```
+
+`UTOO_ROOT_PATH` overrides `--root`, config `rootPath`, and automatic root
+detection. Relative environment paths resolve from the current working
+directory; an empty value is ignored. The project directory stays unchanged.
+
 ### Webpack Compatibility Mode
 
 If you have an existing `webpack.config.js`, you can run `@utoo/pack` in compatibility mode:

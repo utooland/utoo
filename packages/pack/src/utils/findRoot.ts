@@ -1,6 +1,7 @@
 import findUp from "find-up";
 import fs from "fs";
 import path from "path";
+import { getRootPathFromEnv } from "./env";
 
 export function findRootLockFile(cwd: string) {
   return findUp.sync(
@@ -56,6 +57,9 @@ export function findWorkspacesRoot(cwd: string) {
 }
 
 export function findRootDir(cwd: string): string {
+  const envRootPath = getRootPathFromEnv();
+  if (envRootPath) return envRootPath;
+
   const lockFile = findRootLockFile(cwd);
   if (!lockFile) return findWorkspacesRoot(cwd);
 

@@ -24,9 +24,9 @@ import { createHttpProxyMiddleware } from "../core/proxyHono";
 import type { Project } from "../core/types";
 import { getOutputPath } from "../utils/cleanOutput";
 import { blockStdout, getPackPath } from "../utils/common";
-import { findRootDir } from "../utils/findRoot";
 import { createSelfSignedCertificate } from "../utils/mkcert";
 import { printServerInfo } from "../utils/printServerInfo";
+import { resolveRootPath } from "../utils/resolveRootPath";
 import { xcodeProfilingReady } from "../utils/xcodeProfile";
 
 // --- Path helpers (same logic as dev.ts, not exported) ---
@@ -286,9 +286,7 @@ export function serve(
 ): Promise<DevServerHandle | void> {
   const bundleOptions = resolveBundleOptions(options, projectPath, rootPath);
 
-  if (!rootPath) {
-    rootPath = findRootDir(projectPath || process.cwd());
-  }
+  rootPath = resolveRootPath(projectPath, rootPath);
   return runDev(bundleOptions, projectPath, rootPath, serverOptions).then(
     (handle) => {
       if (serverOptions?.returnHandle) return handle;

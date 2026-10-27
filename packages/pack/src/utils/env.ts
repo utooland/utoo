@@ -1,3 +1,10 @@
+import path from "path";
+
+export function getRootPathFromEnv(): string | undefined {
+  const rootPath = process.env.UTOO_ROOT_PATH;
+  return rootPath ? path.resolve(rootPath) : undefined;
+}
+
 export function isTruthyEnv(value: string | undefined): boolean {
   return value === "1" || value === "true";
 }
