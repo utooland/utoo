@@ -1,0 +1,33 @@
+{
+  "runtimeType": "Production",
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "node",
+    "resolve": {
+      "alias": {
+        "@mvp/request/h5": "@mvp/request/fc",
+        "plain-request/h5": "@mvp/request/fc",
+        "virtual:request/h5": "@mvp/request/fc",
+        "virtual:request/[h5]{test}*": "@mvp/request/fc",
+        "@mvp/request/fc": "./input/fc.js"
+      }
+    },
+    "externals": {
+      "@mvp/request/h5": "commonjs fc",
+      "@mvp/request/fc": "commonjs fc",
+      "plain-request/h5": "commonjs fc",
+      "virtual:request/h5": "commonjs fc",
+      "virtual:request/[h5]{test}*": "commonjs fc"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false
+  }
+}

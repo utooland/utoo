@@ -345,22 +345,27 @@ impl ExternalsPlugin {
         let before_condition = match externals_config_ref.is_empty() {
             true => BeforeResolvePluginCondition::Never.cell(),
             false => {
-                // Extract all possible module names from external keys
-                // For "react" -> ["react"]
-                // For "@ant/bigfish/antd" -> ["@ant/bigfish/antd", "@ant/bigfish"]
-                let mut modules = Vec::new();
-                for key in externals_config_ref.keys() {
-                    modules.push(key.clone());
-                    // Extract scoped package name if key contains additional path
-                    if key.starts_with('@')
-                        && let (Some(pos), Some(first_pos)) = (key.rfind('/'), key.find('/'))
-                        && pos > first_pos
-                    {
-                        modules.push(key[..pos].into());
-                    }
-                }
+                // Match full requests, including URI schemes, before aliases are applied.
+                // Escape glob syntax so external keys remain literal request names.
+                let requests = externals_config_ref
+                    .keys()
+                    .map(|key| {
+                        let mut escaped = String::with_capacity(key.len());
+                        for ch in key.chars() {
+                            if matches!(ch, '\\' | '*' | '?' | '[' | ']' | '{' | '}' | ',') {
+                                escaped.push('\\');
+                            }
+                            escaped.push(ch);
+                        }
+                        escaped
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
 
-                BeforeResolvePluginCondition::from_modules(Vc::cell(modules))
+                BeforeResolvePluginCondition::from_request_glob(Glob::new(
+                    format!("{{{requests}}}").into(),
+                    GlobOptions::default(),
+                ))
             }
         };
         let before_condition = before_condition.to_resolved().await?;
@@ -435,34 +440,12 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         request: Vc<Request>,
     ) -> Result<Vc<ResolveResultOption>> {
         let externals_config = self.externals_config.await?;
-        let request_value = request.await?;
-
-        let (module_name, subpath_str) = match &*request_value {
-            Request::Module {
-                module: Pattern::Constant(name),
-                path: Pattern::Constant(path),
-                ..
-            } => (name.as_str(), path.as_str()),
-            Request::Raw {
-                path: Pattern::Constant(name),
-                ..
-            } => (name.as_str(), ""),
-            _ => return Ok(ResolveResultOption::none()),
+        let Some(request) = request.await?.request() else {
+            return Ok(ResolveResultOption::none());
         };
 
-        // Try full path first (e.g., "@ant/bigfish/antd" from module="@ant/bigfish" + path="/antd")
-        if !subpath_str.is_empty() {
-            let full_path = format!("{}{}", module_name, subpath_str);
-            if let Some(external_config) = externals_config.get(full_path.as_str()) {
-                return Ok(handle_external_config(external_config, &full_path));
-            }
-            // If full path not in externals, skip to let after_resolve or normal resolution handle it
-            return Ok(ResolveResultOption::none());
-        }
-
-        // Try module name only (e.g., "react")
-        if let Some(external_config) = externals_config.get(module_name) {
-            return Ok(handle_external_config(external_config, module_name));
+        if let Some(external_config) = externals_config.get(request.as_str()) {
+            return Ok(handle_external_config(external_config, &request));
         }
 
         Ok(ResolveResultOption::none())

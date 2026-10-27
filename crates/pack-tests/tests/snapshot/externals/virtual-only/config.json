@@ -1,0 +1,21 @@
+{
+  "runtimeType": "Production",
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main"
+      }
+    ],
+    "target": "node",
+    "externals": {
+      "@mvp/request/h5": "commonjs fc",
+      "virtual:request/h5": "commonjs fc"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "sourceMaps": false
+  }
+}
