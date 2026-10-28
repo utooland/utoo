@@ -394,16 +394,23 @@ impl LibraryChunkingContext {
                 let chunk_content_hash =
                     self.ecmascript_chunk_content_hash(ecmascript_chunk).await?;
                 let other_chunks = other_chunks.await?;
-                let content_hash = if other_chunks.is_empty() {
-                    chunk_content_hash.to_string()
-                } else {
-                    let mut hasher = Xxh3Hash64Hasher::new();
-                    hasher.write_value(chunk_content_hash.as_str());
-                    for asset in other_chunks.iter() {
-                        hasher.write_value(asset.path().await?.path.as_str());
-                    }
-                    encode_hex(hasher.finish())
-                };
+                // The entry wrapper publishes the library namespace and export path.
+                // Include its configuration even when there are no other chunks, so
+                // changed exports cannot reuse a URL that still serves an old wrapper.
+                // Shared non-entry chunks retain their module-only content hashes.
+                let mut hasher = Xxh3Hash64Hasher::new();
+                hasher.write_value("library-evaluate-v1");
+                hasher.write_value(chunk_content_hash.as_str());
+                hasher.write_ref(&this.runtime_root);
+                hasher.write_ref(&this.runtime_export);
+                hasher.write_value(this.is_node_platform);
+                hasher.write_value(this.output_root_to_root_path.as_str());
+                hasher.write_ref(&this.asset_base_path);
+                hasher.write_ref(&this.source_maps_type);
+                for asset in other_chunks.iter() {
+                    hasher.write_value(asset.path().await?.path.as_str());
+                }
+                let content_hash = encode_hex(hasher.finish());
                 filename = replace_content_hash_placeholder(&filename, &content_hash);
             };
             AssetIdent::from_path(root.join(&filename)?)
