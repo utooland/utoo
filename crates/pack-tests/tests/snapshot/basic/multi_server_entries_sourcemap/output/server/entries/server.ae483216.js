@@ -20,7 +20,7 @@ const SUPPORT_COMPONENT_CHUNKS = false;
 /**
  * Describes why a module was instantiated.
  * Shared between browser and Node.js runtimes.
- */ var SourceType = function(SourceType) {
+ */ var SourceType = /*#__PURE__*/ function(SourceType) {
     /**
    * The module was instantiated because it was included in an evaluated chunk's
    * runtime.
@@ -935,7 +935,7 @@ const chunksToRegister = __UTOOPACK__;
 __UTOOPACK__ = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 function factory () {
-    const runtimeModuleIds = ["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"];
+    const runtimeModuleIds = ["[project]/basic/multi_server_entries_sourcemap/input/server.ts [server] (ecmascript)"];
     let exports;
     for (let i = 0; i < runtimeModuleIds.length; i++) {
         const module = moduleCache.get(runtimeModuleIds[i]);
@@ -961,16 +961,19 @@ if (typeof exports === 'object' && typeof module === 'object') {
     for(var i in a) globalThis[i] = a[i];
 }
 })([
-["entries/server.5d80c3de.js",
+["entries/server.ae483216.js",
 
-"[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)", ((__turbopack_context__) => {
+"[project]/basic/multi_server_entries_sourcemap/input/server.ts [server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
 __turbopack_context__.s([]);
-var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/multi_server_entries/input/shared.ts [server] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries_sourcemap$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/multi_server_entries_sourcemap/input/shared.ts [server] (ecmascript)");
 ;
-console.log("server runtime", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
+console.log("server runtime", __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$multi_server_entries_sourcemap$2f$input$2f$shared$2e$ts__$5b$server$5d$__$28$ecmascript$29$__["shared"]);
 }),
 ],
-["entries/server.5d80c3de.js", {"otherChunks":["chunks/server-shared.fbcd5f75.js","chunks/server-shared-0-1.1b081f62.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries/input/server.ts [server] (ecmascript)"]}],
+["entries/server.ae483216.js", {"otherChunks":["chunks/server-shared.c1005744.js","chunks/server-shared-0-1.8d3d3911.js"],"runtimeModuleIds":["[project]/basic/multi_server_entries_sourcemap/input/server.ts [server] (ecmascript)"]}],
 ]);
+
+
+//# sourceMappingURL=server.ae483216.js.map
