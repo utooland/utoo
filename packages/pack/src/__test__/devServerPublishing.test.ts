@@ -13,7 +13,11 @@ vi.mock("../core/project", () => ({
 }));
 vi.mock("../binding", () => ({}));
 
-import { type DevServerHandle, serve } from "../commands/dev";
+import {
+  type DevServerHandle,
+  type StartServerOptions,
+  serve,
+} from "../commands/dev";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 
 const handles: DevServerHandle[] = [];
@@ -124,6 +128,10 @@ function createProject() {
         libraryPaths: [],
         issues: [...state.issues],
       };
+      fs.writeFileSync(
+        path.join(outputDir, "stats.json"),
+        JSON.stringify({ assets: result.appPaths[0].clientPaths }),
+      );
       nativeResults.push(result);
       return result;
     }),
@@ -151,7 +159,10 @@ async function getAvailablePort(): Promise<number> {
   return address.port;
 }
 
-async function startServer() {
+async function startServer(
+  options: Partial<StartServerOptions> = {},
+  stats = false,
+) {
   const handle = await serve(
     {
       tracing: false,
@@ -165,6 +176,7 @@ async function startServer() {
         ],
         output: { path: "./dist", clean: true },
         persistentCaching: false,
+        stats,
       },
     },
     projectPath,
@@ -175,6 +187,7 @@ async function startServer() {
       handleSignals: false,
       returnHandle: true,
       logServerInfo: false,
+      ...options,
     },
   );
   handles.push(handle);
@@ -207,6 +220,76 @@ afterEach(async () => {
 });
 
 describe("dev server publishing pipeline", () => {
+  it.each([false, true])(
+    "awaits initial client output and callback before onReady (stats: %s)",
+    async (stats) => {
+      const fixture = createProject();
+      const onReady = vi.fn();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const onClientBuild = vi.fn(async (context) => {
+        if (context.isRebuild) return;
+        expect(fixture.subscribedEndpoint.clientChanged).toHaveBeenCalledOnce();
+        expect(context).toEqual({
+          clientPaths: ["main.aaaaaaaa.js"],
+          isRebuild: false,
+        });
+        expect(
+          fs.readFileSync(path.join(projectPath, "dist/index.html"), "utf8"),
+        ).toContain('src="main.aaaaaaaa.js"');
+        expect(
+          fs.readFileSync(
+            path.join(projectPath, "dist/main.aaaaaaaa.js"),
+            "utf8",
+          ),
+        ).toContain('"A"');
+        if (stats) {
+          expect(
+            JSON.parse(
+              fs.readFileSync(
+                path.join(projectPath, "dist/stats.json"),
+                "utf8",
+              ),
+            ),
+          ).toEqual({ assets: ["main.aaaaaaaa.js"] });
+        }
+        await gate;
+      });
+      const starting = startServer({ onClientBuild, onReady }, stats);
+      try {
+        await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledOnce());
+        expect(onReady).not.toHaveBeenCalled();
+        fixture.state.marker = "B";
+        fixture.clientChanges.push({ issues: [] });
+      } finally {
+        release();
+      }
+      await starting;
+      expect(onReady).toHaveBeenCalledOnce();
+      await vi.waitFor(() =>
+        expect(onClientBuild).toHaveBeenLastCalledWith({
+          clientPaths: ["main.bbbbbbbb.js"],
+          isRebuild: true,
+        }),
+      );
+    },
+  );
+
+  it("rejects startup and closes the project if the initial callback fails", async () => {
+    const fixture = createProject();
+    const error = new Error("Framework HTML failed");
+    await expect(
+      startServer({
+        onClientBuild: () => {
+          throw error;
+        },
+      }),
+    ).rejects.toBe(error);
+    expect(fixture.project.onExit).toHaveBeenCalledOnce();
+  });
+
   it("publishes HTML with fresh content hashes and preserves the native result", async () => {
     const fixture = createProject();
     const handle = await startServer();
@@ -226,25 +309,106 @@ describe("dev server publishing pipeline", () => {
     expect(await readHttp(handle, "/main.bbbbbbbb.js")).toContain('"B"');
   });
 
-  it("keeps subscribed endpoint HTML current after a full write returns new endpoints", async () => {
+  it.each([false, true])(
+    "publishes rebuilds without a browser (stats: %s)",
+    async (stats) => {
+      const fixture = createProject();
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ onClientBuild }, stats);
+      fixture.state.marker = "B";
+      await handle.writeAllEntrypointsToDisk();
+
+      fixture.state.marker = "C";
+      fixture.clientChanges.push({ issues: [] });
+
+      await vi.waitFor(() => {
+        const html = fs.readFileSync(
+          path.join(projectPath, "dist/index.html"),
+          "utf8",
+        );
+        expect(html).toContain('src="main.cccccccc.js"');
+        expect(html).not.toContain("main.bbbbbbbb.js");
+      });
+      expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
+      expect(await readHttp(handle, "/main.cccccccc.js")).toContain('"C"');
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.cccccccc.js"],
+        isRebuild: true,
+      });
+    },
+  );
+
+  it("serializes client publication with later writes and recovers after callback failures", async () => {
     const fixture = createProject();
-    const handle = await startServer();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ onClientBuild });
+    const error = new Error("Framework HTML failed");
+    let rejectBuild!: (reason: Error) => void;
+    onClientBuild.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectBuild = reject;
+        }),
+    );
     fixture.state.marker = "B";
-    await handle.writeAllEntrypointsToDisk();
+    const outcome = handle
+      .writeAllEntrypointsToDisk()
+      .catch((reason) => reason);
+    try {
+      await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledTimes(2));
+      fixture.state.marker = "C";
+      fixture.clientChanges.push({ issues: [] });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(fixture.subscribedEndpoint.writeToDisk).toHaveBeenCalledOnce();
+      expect(await readHttp(handle)).toContain('src="main.bbbbbbbb.js"');
+    } finally {
+      rejectBuild?.(error);
+    }
+    expect(await outcome).toBe(error);
+    await vi.waitFor(() =>
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.cccccccc.js"],
+        isRebuild: true,
+      }),
+    );
 
-    fixture.state.marker = "C";
+    const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+    onClientBuild.mockRejectedValueOnce(error);
     fixture.clientChanges.push({ issues: [] });
+    await vi.waitFor(() => expect(logError).toHaveBeenCalledWith(error));
+    fixture.state.marker = "D";
+    fixture.clientChanges.push({ issues: [] });
+    await vi.waitFor(() =>
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.dddddddd.js"],
+        isRebuild: true,
+      }),
+    );
+  });
 
-    await vi.waitFor(() => {
-      const html = fs.readFileSync(
-        path.join(projectPath, "dist/index.html"),
-        "utf8",
-      );
-      expect(html).toContain('src="main.cccccccc.js"');
-      expect(html).not.toContain("main.bbbbbbbb.js");
+  it("finishes an in-flight write without calling onClientBuild after close", async () => {
+    const fixture = createProject();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ onClientBuild });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
-    expect(await readHttp(handle, "/main.cccccccc.js")).toContain('"C"');
+    const generate = vi
+      .spyOn(HtmlPlugin.prototype, "generate")
+      .mockImplementationOnce(() => gate);
+    try {
+      fixture.clientChanges.push({ issues: [] });
+      await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+      const closing = handle.close();
+      expect(fixture.project.onExit).not.toHaveBeenCalled();
+      release();
+      await closing;
+    } finally {
+      release();
+    }
+    expect(fixture.project.onExit).toHaveBeenCalledOnce();
+    expect(onClientBuild).toHaveBeenCalledOnce();
   });
 
   it("awaits HTML generation, propagates its failure, and can publish again", async () => {
@@ -294,7 +458,8 @@ describe("dev server publishing pipeline", () => {
     "rejects %s diagnostics before publishing HTML and recovers on success",
     async (severity) => {
       const fixture = createProject();
-      const handle = await startServer();
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ onClientBuild });
       fixture.state.marker = "B";
       fixture.state.issues = [createIssue(severity)];
 
@@ -303,12 +468,14 @@ describe("dev server publishing pipeline", () => {
         message: expect.stringContaining("Publishing fixture diagnostic"),
       });
       expect(await readHttp(handle)).toContain('src="main.aaaaaaaa.js"');
+      expect(onClientBuild).toHaveBeenCalledOnce();
 
       fixture.state.marker = "C";
       fixture.state.issues = [];
       const written = await handle.writeAllEntrypointsToDisk();
       expect(written.issues).toEqual([]);
       expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
+      expect(onClientBuild).toHaveBeenCalledTimes(2);
     },
   );
 });

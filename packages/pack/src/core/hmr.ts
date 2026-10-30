@@ -14,6 +14,7 @@ import type { Socket } from "net";
 import { Duplex } from "stream";
 import { WebSocketServer } from "ws";
 import type { MemoryEvictionMode, NapiWrittenEndpoint } from "../binding";
+import type { StartServerOptions } from "../commands/dev";
 import { BundleOptions } from "../config/types";
 import { resolveCacheDirectory } from "../utils/cacheDirectory";
 import { cleanOutput, getOutputPath } from "../utils/cleanOutput";
@@ -241,6 +242,7 @@ export async function createHotReloader(
   bundleOptions: BundleOptions,
   projectPath?: string,
   rootPath?: string,
+  onClientBuild?: StartServerOptions["onClientBuild"],
 ): Promise<HotReloaderInterface> {
   const resolvedProjectPath = projectPath || process.cwd();
   const resolvedRootPath = rootPath || projectPath || process.cwd();
@@ -355,10 +357,28 @@ export async function createHotReloader(
   let currentEntrypoints: RawEntrypoints = {};
   let backgroundWatchersStarted = false;
   let backgroundWatchGeneration = 0;
-  const backgroundEndpointWriteTasks = new Map<Endpoint, Promise<void>>();
-  let backgroundProjectWriteTask: Promise<void> | undefined;
+  let outputWriteTask = Promise.resolve();
   let closed = false;
   let closePromise: Promise<void> | undefined;
+
+  function queueOutputWrite<T>(write: () => Promise<T>): Promise<T> {
+    const task = outputWriteTask.then(() => {
+      if (closed) throw new Error("The dev server is closing or closed");
+      return write();
+    });
+    outputWriteTask = task.then(
+      () => {},
+      () => {},
+    );
+    return task;
+  }
+
+  async function notifyClientBuild(isRebuild: boolean) {
+    const clientPaths = hotReloader.getClientPaths();
+    if (!closed && clientPaths.length > 0) {
+      await onClientBuild?.({ clientPaths, isRebuild });
+    }
+  }
 
   function markHmrEvent() {
     if (!progress || hmrEventHappened) {
@@ -494,8 +514,6 @@ export async function createHotReloader(
     const subscriptions = [...backgroundWatchSubscriptions];
     backgroundWatchSubscriptions.clear();
     currentEntryIssues.clear();
-    backgroundEndpointWriteTasks.clear();
-    backgroundProjectWriteTask = undefined;
     await Promise.all(
       subscriptions.map((subscription) => subscription.return?.()),
     );
@@ -510,35 +528,18 @@ export async function createHotReloader(
       return;
     }
 
-    const previousTask = shouldCreateWebpackStats
-      ? (backgroundProjectWriteTask ?? Promise.resolve())
-      : (backgroundEndpointWriteTasks.get(entrypoint) ?? Promise.resolve());
-    const task = previousTask
-      .catch(() => {})
-      .then(async () => {
-        await currentEntriesHandling;
-        if (closed || generation !== backgroundWatchGeneration) {
-          return;
-        }
-
-        markHmrEvent();
-        await writeOutputToDisk(entrypoint);
-      })
-      .finally(() => {
-        if (shouldCreateWebpackStats) {
-          if (backgroundProjectWriteTask === task) {
-            backgroundProjectWriteTask = undefined;
-          }
-        } else if (backgroundEndpointWriteTasks.get(entrypoint) === task) {
-          backgroundEndpointWriteTasks.delete(entrypoint);
-        }
+    void currentEntriesHandling
+      .then(() =>
+        queueOutputWrite(async () => {
+          if (generation !== backgroundWatchGeneration) return;
+          markHmrEvent();
+          await writeOutputToDisk(entrypoint);
+          await notifyClientBuild(true);
+        }),
+      )
+      .catch((error) => {
+        if (!closed) console.error(error);
       });
-
-    if (shouldCreateWebpackStats) {
-      backgroundProjectWriteTask = task;
-    } else {
-      backgroundEndpointWriteTasks.set(entrypoint, task);
-    }
   }
 
   async function refreshBackgroundWatchers() {
@@ -661,6 +662,8 @@ export async function createHotReloader(
 
   async function handleEntrypointsSubscription() {
     for await (const entrypoints of entrypointsSubscription) {
+      if (closed) return;
+      ++backgroundWatchGeneration;
       if (!currentEntriesHandlingResolve) {
         currentEntriesHandling = new Promise(
           // eslint-disable-next-line no-loop-func
@@ -668,26 +671,28 @@ export async function createHotReloader(
         );
       }
 
-      currentEntrypoints = entrypoints;
-      currentWatchedEntrypoints = [
-        ...(entrypoints.apps ?? []),
-        ...(entrypoints.libraries ?? []),
-      ];
-      setEntrypoints(entrypoints);
-      if (shouldCreateWebpackStats) {
-        await writeAllEntrypointsToDisk();
-      } else {
-        await Promise.all(
-          currentWatchedEntrypoints.map((entrypoint) =>
-            writeEntrypointToDisk(entrypoint, false),
-          ),
-        );
-        await htmlGenerationManager.generateAll();
-      }
-
-      if (backgroundWatchersStarted) {
-        await refreshBackgroundWatchers();
-      }
+      await queueOutputWrite(async () => {
+        currentEntrypoints = entrypoints;
+        currentWatchedEntrypoints = [
+          ...(entrypoints.apps ?? []),
+          ...(entrypoints.libraries ?? []),
+        ];
+        setEntrypoints(entrypoints);
+        if (shouldCreateWebpackStats) {
+          await writeAllEntrypointsToDisk();
+        } else {
+          await Promise.all(
+            currentWatchedEntrypoints.map((entrypoint) =>
+              writeEntrypointToDisk(entrypoint, false),
+            ),
+          );
+          await htmlGenerationManager.generateAll();
+        }
+        if (backgroundWatchersStarted) {
+          await refreshBackgroundWatchers();
+          await notifyClientBuild(true).catch((error) => console.error(error));
+        }
+      });
 
       currentEntriesHandlingResolve!();
       currentEntriesHandlingResolve = undefined;
@@ -710,7 +715,11 @@ export async function createHotReloader(
 
     async writeAllEntrypointsToDisk() {
       await currentEntriesHandling;
-      return writeAllEntrypointsToDisk();
+      return queueOutputWrite(async () => {
+        const result = await writeAllEntrypointsToDisk();
+        await notifyClientBuild(true);
+        return result;
+      });
     },
 
     onHMR(req, socket: Socket, head, onUpgrade) {
@@ -964,8 +973,11 @@ export async function createHotReloader(
         return;
       }
 
-      backgroundWatchersStarted = true;
-      await refreshBackgroundWatchers();
+      await queueOutputWrite(async () => {
+        backgroundWatchersStarted = true;
+        await refreshBackgroundWatchers();
+        await notifyClientBuild(false);
+      });
     },
 
     async buildFallbackError() {
@@ -973,21 +985,26 @@ export async function createHotReloader(
     },
 
     async activateLazyChunk(chunkPath: string) {
-      if (!(await project.activateLazyChunk(chunkPath))) {
-        return false;
-      }
-      const owners = [...writtenEndpointPaths.entries()]
-        .filter(([, written]) => written.clientPaths.includes(chunkPath))
-        .map(([endpoint]) => endpoint);
-      if (owners.length === 0) {
-        // The chunk is not attributed to a written endpoint yet; rebuild everything.
-        await writeAllEntrypointsToDisk();
-      } else {
-        await Promise.all(
-          owners.map((endpoint) => writeEntrypointToDisk(endpoint, false)),
-        );
-      }
-      return true;
+      await currentEntriesHandling;
+      return queueOutputWrite(async () => {
+        if (!(await project.activateLazyChunk(chunkPath))) {
+          return false;
+        }
+        const owners = [...writtenEndpointPaths.entries()]
+          .filter(([, written]) => written.clientPaths.includes(chunkPath))
+          .map(([endpoint]) => endpoint);
+        if (owners.length === 0 || shouldCreateWebpackStats) {
+          // Refresh project-wide stats, or recover a chunk without a known owner.
+          await writeAllEntrypointsToDisk();
+        } else {
+          await Promise.all(
+            owners.map((endpoint) => writeEntrypointToDisk(endpoint, false)),
+          );
+          await htmlGenerationManager.generateAll();
+        }
+        await notifyClientBuild(true);
+        return true;
+      });
     },
 
     async close() {
@@ -995,9 +1012,8 @@ export async function createHotReloader(
       progress?.stop();
       closed = true;
       const disposePromise = disposeBackgroundWatchSubscriptions();
-      closePromise ??= (
-        persistentCaching ? project.shutdown() : project.onExit()
-      )
+      closePromise ??= outputWriteTask
+        .then(() => (persistentCaching ? project.shutdown() : project.onExit()))
         .catch((err) => {
           console.error(err);
         })
@@ -1018,6 +1034,7 @@ export async function createHotReloader(
   markHmrEvent();
 
   handleEntrypointsSubscription().catch((err) => {
+    if (closed) return;
     console.error(err);
     process.exit(1);
   });

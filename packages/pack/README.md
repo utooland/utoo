@@ -102,6 +102,15 @@ resolving. Compilation and HTML generation errors reject the call. Await
 Calling `close()` does not exit the process. To manage the surrounding process
 yourself, pass `{ port: 3000, returnHandle: true, handleSignals: false }` as the fourth argument.
 
+Pass `onClientBuild({ clientPaths, isRebuild })` in the fourth argument to publish
+framework HTML after successful client builds. It runs after assets, enabled
+stats and built-in HTML are written, even without a connected browser. The first
+call has `isRebuild: false` and precedes `onReady`; subsequent calls have
+`isRebuild: true`. Its returned promise is awaited before the next output write.
+Do not call `writeAllEntrypointsToDisk()` or await `close()` inside this callback.
+Startup callback failures reject `serve()`; background failures are logged and
+later builds can retry. Failed compilations do not invoke the callback.
+
 ## 🔌 Webpack Compatibility Mode
 
 `@utoo/pack` provides a partial compatibility layer for Webpack.
