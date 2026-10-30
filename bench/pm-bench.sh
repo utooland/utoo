@@ -117,7 +117,7 @@ cd "$PROJECT_DIR" && git clean -dfx
 
 if [ "$COLD" = "--cold" ]; then
   case "$PM" in
-    utoo|utoo-npm|utoo-next) rm -rf "$UTOO_CACHE_DIR" ;;
+    utoo|utoo-npm|utoo-next) rm -rf "$UTOO_CACHE_DIR" "$UTOO_CACHE_DIR.utoo-v2" ;;
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
     pnpm) rm -rf "$PNPM_STORE_DIR" ;;
     pnpm12) rm -rf "$PNPM12_STORE_DIR" ;;
