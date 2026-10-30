@@ -7,5 +7,6 @@ export { typeNamespace } from "./type-namespace";
 export { valueNamespace } from "./value-namespace";
 export { ambient } from "./ambient";
 export { custom } from "./custom";
+export { providedFactory } from "./factory";
 export { automatic } from "./automatic";
 export { default as commonJS } from "./commonjs";

@@ -20,7 +20,6 @@ pub mod image;
 pub mod inline_css;
 pub mod jsx_dev_filename;
 pub mod jsx_import_preserver;
-pub mod jsx_provider;
 pub mod modularize_imports;
 pub mod remove_console;
 pub mod styled_components;

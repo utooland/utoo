@@ -88,6 +88,17 @@ __turbopack_context__.s([
     custom
 ]);
 }),
+"[project]/basic/jsx_classic_provider/input/factory.tsx [library-client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+/** @jsx h */ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provider$2f$input$2f$react$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = /*#__PURE__*/ __turbopack_context__.i("[project]/basic/jsx_classic_provider/input/react.js [library-client] (ecmascript)");
+const providedFactory = /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provider$2f$input$2f$react$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["X"])("section", null, "provided factory");
+__turbopack_context__.s([
+    "f",
+    0,
+    providedFactory
+]);
+}),
 "[project]/basic/jsx_classic_provider/input/imported.tsx [library-client] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -128,6 +139,9 @@ __turbopack_context__.S([
     "[project]/basic/jsx_classic_provider/input/custom.tsx [library-client] (ecmascript)",
     "custom,f",
     0,
+    "[project]/basic/jsx_classic_provider/input/factory.tsx [library-client] (ecmascript)",
+    "providedFactory,f",
+    0,
     "[project]/basic/jsx_classic_provider/input/automatic.tsx [library-client] (ecmascript)",
     "automatic,f",
     0,
@@ -144,6 +158,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provide
 var __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provider$2f$input$2f$commonjs$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/basic/jsx_classic_provider/input/commonjs.js [library-client] (ecmascript)");
 const bareTsx = /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provider$2f$input$2f$react$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["m"].createElement("section", null, "tsx");
 const fragmentTsx = /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provider$2f$input$2f$react$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["m"].createElement(__TURBOPACK__imported__module__$5b$project$5d2f$basic$2f$jsx_classic_provider$2f$input$2f$react$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["m"].Fragment, null, "tsx fragment");
+;
 ;
 ;
 ;
@@ -179,10 +194,20 @@ function createReact(factory) {
 }
 const providedReact = createReact("provider");
 const importedReact = createReact("imported");
+function providedFactory(type, props, ...children) {
+    return {
+        factory: "provided factory",
+        type,
+        children
+    };
+}
 __turbopack_context__.s([
     "Z",
     0,
     importedReact,
+    "X",
+    0,
+    providedFactory,
     "m",
     0,
     providedReact

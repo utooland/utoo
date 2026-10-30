@@ -9,3 +9,7 @@ function createReact(factory) {
 
 export const providedReact = createReact("provider");
 export const importedReact = createReact("imported");
+
+export function providedFactory(type, props, ...children) {
+  return { factory: "provided factory", type, children };
+}

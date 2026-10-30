@@ -14,7 +14,8 @@
       "runtime": "classic"
     },
     "provider": {
-      "React": ["./react.js", "providedReact"]
+      "React": ["./react.js", "providedReact"],
+      "h": ["./react.js", "providedFactory"]
     }
   },
   "runtimeType": "dummy"
