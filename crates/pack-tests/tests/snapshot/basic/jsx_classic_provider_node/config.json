@@ -1,0 +1,21 @@
+{
+  "config": {
+    "entry": [
+      {
+        "import": "../jsx_classic_provider/input/index.tsx",
+        "name": "main",
+        "library": {
+          "name": "ClassicJsxProvider"
+        }
+      }
+    ],
+    "target": "node",
+    "react": {
+      "runtime": "classic"
+    },
+    "provider": {
+      "React": ["./react.js", "providedReact"]
+    }
+  },
+  "runtimeType": "Production"
+}

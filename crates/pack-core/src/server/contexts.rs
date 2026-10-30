@@ -42,7 +42,7 @@ use crate::{
         transforms::{
             css_modules::get_auto_css_modules_rule,
             jsx_import_preserver::get_jsx_import_preserver_rule,
-            remove_console::get_remove_console_transform_rule,
+            jsx_provider::get_jsx_provider_rule, remove_console::get_remove_console_transform_rule,
             styled_components::get_styled_components_transform_rule,
             styled_jsx::get_styled_jsx_transform_rule,
             swc_ecma_transform_plugins::get_swc_ecma_transform_plugin_rule,
@@ -173,6 +173,12 @@ pub async fn get_server_module_options_context(
     let jsx_import_preserver_rule = get_jsx_import_preserver_rule(classic_jsx_runtime);
     server_rules.push(jsx_import_preserver_rule.clone());
     foreign_server_rules.push(jsx_import_preserver_rule);
+
+    if config.provider_config().await?.contains_key("React") {
+        let jsx_provider_rule = get_jsx_provider_rule(enable_mdx_rs.is_some());
+        server_rules.push(jsx_provider_rule.clone());
+        foreign_server_rules.push(jsx_provider_rule);
+    }
 
     server_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
     foreign_server_rules.push(get_type_only_import_rule(enable_mdx_rs.is_some()));
