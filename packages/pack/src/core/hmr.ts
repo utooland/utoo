@@ -374,8 +374,9 @@ export async function createHotReloader(
   }
 
   async function notifyClientBuild(isRebuild: boolean) {
+    if (closed || hasBlockingIssues(currentEntryIssues)) return;
     const clientPaths = hotReloader.getClientPaths();
-    if (!closed && clientPaths.length > 0) {
+    if (clientPaths.length > 0) {
       await onClientBuild?.({ clientPaths, isRebuild });
     }
   }
@@ -528,7 +529,7 @@ export async function createHotReloader(
       return;
     }
 
-    void currentEntriesHandling
+    currentEntriesHandling
       .then(() =>
         queueOutputWrite(async () => {
           if (generation !== backgroundWatchGeneration) return;

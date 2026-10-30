@@ -82,17 +82,21 @@ function createIssue(severity: "warning" | "error" | "fatal"): NapiIssue {
   };
 }
 
-function createProject() {
+function createProject(entryNames = ["main"]) {
   const state = { marker: "A", issues: [] as NapiIssue[] };
   const outputDir = path.join(projectPath, "dist");
   const nativeResults: TurbopackResult<RawEntrypoints>[] = [];
-  const clientChanges = createStream<TurbopackResult>();
-  const serverChanges = createStream<TurbopackResult>();
+  const clientChangeStreams = entryNames.map(() =>
+    createStream<TurbopackResult>(),
+  );
+  const serverChangeStreams = entryNames.map(() =>
+    createStream<TurbopackResult>(),
+  );
   const entrypoints = createStream<TurbopackResult<RawEntrypoints>>();
   fs.writeFileSync(path.join(projectPath, "entry.js"), "export default 1;\n");
 
-  function writeAsset(): NapiWrittenEndpoint {
-    const clientPath = `main.${state.marker.toLowerCase().repeat(8)}.js`;
+  function writeAsset(name: string): NapiWrittenEndpoint {
+    const clientPath = `${name}.${state.marker.toLowerCase().repeat(8)}.js`;
     fs.mkdirSync(outputDir, { recursive: true });
     fs.writeFileSync(
       path.join(outputDir, clientPath),
@@ -107,24 +111,29 @@ function createProject() {
     };
   }
 
-  function createEndpoint(): Endpoint {
+  function createEndpoint(index: number): Endpoint {
     return {
-      writeToDisk: vi.fn(async () => ({ ...writeAsset(), issues: [] })),
-      clientChanged: vi.fn(async () => clientChanges.stream),
-      serverChanged: vi.fn(async () => serverChanges.stream),
+      writeToDisk: vi.fn(async () => ({
+        ...writeAsset(entryNames[index]),
+        issues: [],
+      })),
+      clientChanged: vi.fn(async () => clientChangeStreams[index].stream),
+      serverChanged: vi.fn(async () => serverChangeStreams[index].stream),
     };
   }
 
-  const subscribedEndpoint = createEndpoint();
-  entrypoints.push({ apps: [subscribedEndpoint], libraries: [], issues: [] });
+  const subscribedEndpoints = entryNames.map((_, index) =>
+    createEndpoint(index),
+  );
+  entrypoints.push({ apps: subscribedEndpoints, libraries: [], issues: [] });
   const project = {
     entrypointsSubscribe: () => entrypoints.stream,
     writeAllEntrypointsToDisk: vi.fn(async () => {
       // The binding creates new EndpointImpl objects for every all-write result.
       const result = {
-        apps: [createEndpoint()],
+        apps: entryNames.map((_, index) => createEndpoint(index)),
         libraries: [],
-        appPaths: [writeAsset()],
+        appPaths: entryNames.map(writeAsset),
         libraryPaths: [],
         issues: [...state.issues],
       };
@@ -140,7 +149,14 @@ function createProject() {
     shutdown: vi.fn(async () => {}),
   };
   projectMocks.projectFactory.mockReturnValue(async () => project);
-  return { clientChanges, nativeResults, project, state, subscribedEndpoint };
+  return {
+    clientChanges: clientChangeStreams[0],
+    clientChangeStreams,
+    nativeResults,
+    project,
+    state,
+    subscribedEndpoint: subscribedEndpoints[0],
+  };
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -162,18 +178,17 @@ async function getAvailablePort(): Promise<number> {
 async function startServer(
   options: Partial<StartServerOptions> = {},
   stats = false,
+  entryNames = ["main"],
 ) {
   const handle = await serve(
     {
       tracing: false,
       config: {
-        entry: [
-          {
-            name: "main",
-            import: "./entry.js",
-            html: { filename: "index.html" },
-          },
-        ],
+        entry: entryNames.map((name) => ({
+          name,
+          import: "./entry.js",
+          html: { filename: name === "main" ? "index.html" : `${name}.html` },
+        })),
         output: { path: "./dist", clean: true },
         persistentCaching: false,
         stats,
@@ -333,6 +348,37 @@ describe("dev server publishing pipeline", () => {
       expect(await readHttp(handle, "/main.cccccccc.js")).toContain('"C"');
       expect(onClientBuild).toHaveBeenLastCalledWith({
         clientPaths: ["main.cccccccc.js"],
+        isRebuild: true,
+      });
+    },
+  );
+
+  it.each(["error", "fatal"] as const)(
+    "waits for another entrypoint's %s to recover before publication, allowing warnings",
+    async (severity) => {
+      const entryNames = ["main", "other"];
+      const fixture = createProject(entryNames);
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ onClientBuild }, false, entryNames);
+      fixture.clientChangeStreams[1].push({ issues: [createIssue(severity)] });
+      fixture.state.marker = "B";
+      fixture.clientChanges.push({ issues: [] });
+
+      await vi.waitFor(() => {
+        expect(
+          fs.readFileSync(path.join(projectPath, "dist/index.html"), "utf8"),
+        ).toContain('src="main.bbbbbbbb.js"');
+      });
+      expect(await readHttp(handle, "/other.html")).toContain(
+        'src="other.aaaaaaaa.js"',
+      );
+      expect(onClientBuild).toHaveBeenCalledOnce();
+
+      fixture.state.marker = "C";
+      fixture.clientChangeStreams[1].push({ issues: [createIssue("warning")] });
+      await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledTimes(2));
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.bbbbbbbb.js", "other.cccccccc.js"],
         isRebuild: true,
       });
     },
