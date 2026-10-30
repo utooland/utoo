@@ -1,0 +1,12 @@
+export const bareTsx = <section>tsx</section>;
+export const fragmentTsx = <>tsx fragment</>;
+export { bareJsx, fragmentJsx } from "./bare";
+export { imported } from "./imported";
+export { typeImport } from "./type-import";
+export { typeNamespace } from "./type-namespace";
+export { valueNamespace } from "./value-namespace";
+export { ambient } from "./ambient";
+export { custom } from "./custom";
+export { providedFactory } from "./factory";
+export { automatic } from "./automatic";
+export { default as commonJS } from "./commonjs";
