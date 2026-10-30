@@ -16,5 +16,5 @@
       "React": ["./react.js", "providedReact"]
     }
   },
-  "runtimeType": "Production"
+  "runtimeType": "dummy"
 }
