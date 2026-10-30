@@ -13,7 +13,11 @@ vi.mock("../core/project", () => ({
 }));
 vi.mock("../binding", () => ({}));
 
-import { type DevServerHandle, serve } from "../commands/dev";
+import {
+  type DevServerHandle,
+  type StartServerOptions,
+  serve,
+} from "../commands/dev";
 import { HtmlPlugin } from "../plugins/HtmlPlugin";
 
 const handles: DevServerHandle[] = [];
@@ -78,17 +82,21 @@ function createIssue(severity: "warning" | "error" | "fatal"): NapiIssue {
   };
 }
 
-function createProject() {
+function createProject(entryNames = ["main"]) {
   const state = { marker: "A", issues: [] as NapiIssue[] };
   const outputDir = path.join(projectPath, "dist");
   const nativeResults: TurbopackResult<RawEntrypoints>[] = [];
-  const clientChanges = createStream<TurbopackResult>();
-  const serverChanges = createStream<TurbopackResult>();
+  const clientChangeStreams = entryNames.map(() =>
+    createStream<TurbopackResult>(),
+  );
+  const serverChangeStreams = entryNames.map(() =>
+    createStream<TurbopackResult>(),
+  );
   const entrypoints = createStream<TurbopackResult<RawEntrypoints>>();
   fs.writeFileSync(path.join(projectPath, "entry.js"), "export default 1;\n");
 
-  function writeAsset(): NapiWrittenEndpoint {
-    const clientPath = `main.${state.marker.toLowerCase().repeat(8)}.js`;
+  function writeAsset(name: string): NapiWrittenEndpoint {
+    const clientPath = `${name}.${state.marker.toLowerCase().repeat(8)}.js`;
     fs.mkdirSync(outputDir, { recursive: true });
     fs.writeFileSync(
       path.join(outputDir, clientPath),
@@ -103,27 +111,36 @@ function createProject() {
     };
   }
 
-  function createEndpoint(): Endpoint {
+  function createEndpoint(index: number): Endpoint {
     return {
-      writeToDisk: vi.fn(async () => ({ ...writeAsset(), issues: [] })),
-      clientChanged: vi.fn(async () => clientChanges.stream),
-      serverChanged: vi.fn(async () => serverChanges.stream),
+      writeToDisk: vi.fn(async () => ({
+        ...writeAsset(entryNames[index]),
+        issues: [],
+      })),
+      clientChanged: vi.fn(async () => clientChangeStreams[index].stream),
+      serverChanged: vi.fn(async () => serverChangeStreams[index].stream),
     };
   }
 
-  const subscribedEndpoint = createEndpoint();
-  entrypoints.push({ apps: [subscribedEndpoint], libraries: [], issues: [] });
+  const subscribedEndpoints = entryNames.map((_, index) =>
+    createEndpoint(index),
+  );
+  entrypoints.push({ apps: subscribedEndpoints, libraries: [], issues: [] });
   const project = {
     entrypointsSubscribe: () => entrypoints.stream,
     writeAllEntrypointsToDisk: vi.fn(async () => {
       // The binding creates new EndpointImpl objects for every all-write result.
       const result = {
-        apps: [createEndpoint()],
+        apps: entryNames.map((_, index) => createEndpoint(index)),
         libraries: [],
-        appPaths: [writeAsset()],
+        appPaths: entryNames.map(writeAsset),
         libraryPaths: [],
         issues: [...state.issues],
       };
+      fs.writeFileSync(
+        path.join(outputDir, "stats.json"),
+        JSON.stringify({ assets: result.appPaths[0].clientPaths }),
+      );
       nativeResults.push(result);
       return result;
     }),
@@ -132,7 +149,14 @@ function createProject() {
     shutdown: vi.fn(async () => {}),
   };
   projectMocks.projectFactory.mockReturnValue(async () => project);
-  return { clientChanges, nativeResults, project, state, subscribedEndpoint };
+  return {
+    clientChanges: clientChangeStreams[0],
+    clientChangeStreams,
+    nativeResults,
+    project,
+    state,
+    subscribedEndpoint: subscribedEndpoints[0],
+  };
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -151,20 +175,23 @@ async function getAvailablePort(): Promise<number> {
   return address.port;
 }
 
-async function startServer() {
+async function startServer(
+  options: Partial<StartServerOptions> = {},
+  stats = false,
+  entryNames = ["main"],
+) {
   const handle = await serve(
     {
       tracing: false,
       config: {
-        entry: [
-          {
-            name: "main",
-            import: "./entry.js",
-            html: { filename: "index.html" },
-          },
-        ],
+        entry: entryNames.map((name) => ({
+          name,
+          import: "./entry.js",
+          html: { filename: name === "main" ? "index.html" : `${name}.html` },
+        })),
         output: { path: "./dist", clean: true },
         persistentCaching: false,
+        stats,
       },
     },
     projectPath,
@@ -175,6 +202,7 @@ async function startServer() {
       handleSignals: false,
       returnHandle: true,
       logServerInfo: false,
+      ...options,
     },
   );
   handles.push(handle);
@@ -207,6 +235,76 @@ afterEach(async () => {
 });
 
 describe("dev server publishing pipeline", () => {
+  it.each([false, true])(
+    "awaits initial client output and callback before onReady (stats: %s)",
+    async (stats) => {
+      const fixture = createProject();
+      const onReady = vi.fn();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const onClientBuild = vi.fn(async (context) => {
+        if (context.isRebuild) return;
+        expect(fixture.subscribedEndpoint.clientChanged).toHaveBeenCalledOnce();
+        expect(context).toEqual({
+          clientPaths: ["main.aaaaaaaa.js"],
+          isRebuild: false,
+        });
+        expect(
+          fs.readFileSync(path.join(projectPath, "dist/index.html"), "utf8"),
+        ).toContain('src="main.aaaaaaaa.js"');
+        expect(
+          fs.readFileSync(
+            path.join(projectPath, "dist/main.aaaaaaaa.js"),
+            "utf8",
+          ),
+        ).toContain('"A"');
+        if (stats) {
+          expect(
+            JSON.parse(
+              fs.readFileSync(
+                path.join(projectPath, "dist/stats.json"),
+                "utf8",
+              ),
+            ),
+          ).toEqual({ assets: ["main.aaaaaaaa.js"] });
+        }
+        await gate;
+      });
+      const starting = startServer({ onClientBuild, onReady }, stats);
+      try {
+        await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledOnce());
+        expect(onReady).not.toHaveBeenCalled();
+        fixture.state.marker = "B";
+        fixture.clientChanges.push({ issues: [] });
+      } finally {
+        release();
+      }
+      await starting;
+      expect(onReady).toHaveBeenCalledOnce();
+      await vi.waitFor(() =>
+        expect(onClientBuild).toHaveBeenLastCalledWith({
+          clientPaths: ["main.bbbbbbbb.js"],
+          isRebuild: true,
+        }),
+      );
+    },
+  );
+
+  it("rejects startup and closes the project if the initial callback fails", async () => {
+    const fixture = createProject();
+    const error = new Error("Framework HTML failed");
+    await expect(
+      startServer({
+        onClientBuild: () => {
+          throw error;
+        },
+      }),
+    ).rejects.toBe(error);
+    expect(fixture.project.onExit).toHaveBeenCalledOnce();
+  });
+
   it("publishes HTML with fresh content hashes and preserves the native result", async () => {
     const fixture = createProject();
     const handle = await startServer();
@@ -226,25 +324,137 @@ describe("dev server publishing pipeline", () => {
     expect(await readHttp(handle, "/main.bbbbbbbb.js")).toContain('"B"');
   });
 
-  it("keeps subscribed endpoint HTML current after a full write returns new endpoints", async () => {
-    const fixture = createProject();
-    const handle = await startServer();
-    fixture.state.marker = "B";
-    await handle.writeAllEntrypointsToDisk();
+  it.each([false, true])(
+    "publishes rebuilds without a browser (stats: %s)",
+    async (stats) => {
+      const fixture = createProject();
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ onClientBuild }, stats);
+      fixture.state.marker = "B";
+      await handle.writeAllEntrypointsToDisk();
 
-    fixture.state.marker = "C";
-    fixture.clientChanges.push({ issues: [] });
+      fixture.state.marker = "C";
+      fixture.clientChanges.push({ issues: [] });
 
-    await vi.waitFor(() => {
-      const html = fs.readFileSync(
-        path.join(projectPath, "dist/index.html"),
-        "utf8",
+      await vi.waitFor(() => {
+        const html = fs.readFileSync(
+          path.join(projectPath, "dist/index.html"),
+          "utf8",
+        );
+        expect(html).toContain('src="main.cccccccc.js"');
+        expect(html).not.toContain("main.bbbbbbbb.js");
+      });
+      expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
+      expect(await readHttp(handle, "/main.cccccccc.js")).toContain('"C"');
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.cccccccc.js"],
+        isRebuild: true,
+      });
+    },
+  );
+
+  it.each(["error", "fatal"] as const)(
+    "waits for another entrypoint's %s to recover before publication, allowing warnings",
+    async (severity) => {
+      const entryNames = ["main", "other"];
+      const fixture = createProject(entryNames);
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ onClientBuild }, false, entryNames);
+      fixture.clientChangeStreams[1].push({ issues: [createIssue(severity)] });
+      fixture.state.marker = "B";
+      fixture.clientChanges.push({ issues: [] });
+
+      await vi.waitFor(() => {
+        expect(
+          fs.readFileSync(path.join(projectPath, "dist/index.html"), "utf8"),
+        ).toContain('src="main.bbbbbbbb.js"');
+      });
+      expect(await readHttp(handle, "/other.html")).toContain(
+        'src="other.aaaaaaaa.js"',
       );
-      expect(html).toContain('src="main.cccccccc.js"');
-      expect(html).not.toContain("main.bbbbbbbb.js");
+      expect(onClientBuild).toHaveBeenCalledOnce();
+
+      fixture.state.marker = "C";
+      fixture.clientChangeStreams[1].push({ issues: [createIssue("warning")] });
+      await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledTimes(2));
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.bbbbbbbb.js", "other.cccccccc.js"],
+        isRebuild: true,
+      });
+    },
+  );
+
+  it("serializes client publication with later writes and recovers after callback failures", async () => {
+    const fixture = createProject();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ onClientBuild });
+    const error = new Error("Framework HTML failed");
+    let rejectBuild!: (reason: Error) => void;
+    onClientBuild.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectBuild = reject;
+        }),
+    );
+    fixture.state.marker = "B";
+    const outcome = handle
+      .writeAllEntrypointsToDisk()
+      .catch((reason) => reason);
+    try {
+      await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledTimes(2));
+      fixture.state.marker = "C";
+      fixture.clientChanges.push({ issues: [] });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(fixture.subscribedEndpoint.writeToDisk).toHaveBeenCalledOnce();
+      expect(await readHttp(handle)).toContain('src="main.bbbbbbbb.js"');
+    } finally {
+      rejectBuild?.(error);
+    }
+    expect(await outcome).toBe(error);
+    await vi.waitFor(() =>
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.cccccccc.js"],
+        isRebuild: true,
+      }),
+    );
+
+    const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+    onClientBuild.mockRejectedValueOnce(error);
+    fixture.clientChanges.push({ issues: [] });
+    await vi.waitFor(() => expect(logError).toHaveBeenCalledWith(error));
+    fixture.state.marker = "D";
+    fixture.clientChanges.push({ issues: [] });
+    await vi.waitFor(() =>
+      expect(onClientBuild).toHaveBeenLastCalledWith({
+        clientPaths: ["main.dddddddd.js"],
+        isRebuild: true,
+      }),
+    );
+  });
+
+  it("finishes an in-flight write without calling onClientBuild after close", async () => {
+    const fixture = createProject();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ onClientBuild });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
-    expect(await readHttp(handle, "/main.cccccccc.js")).toContain('"C"');
+    const generate = vi
+      .spyOn(HtmlPlugin.prototype, "generate")
+      .mockImplementationOnce(() => gate);
+    try {
+      fixture.clientChanges.push({ issues: [] });
+      await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
+      const closing = handle.close();
+      expect(fixture.project.onExit).not.toHaveBeenCalled();
+      release();
+      await closing;
+    } finally {
+      release();
+    }
+    expect(fixture.project.onExit).toHaveBeenCalledOnce();
+    expect(onClientBuild).toHaveBeenCalledOnce();
   });
 
   it("awaits HTML generation, propagates its failure, and can publish again", async () => {
@@ -294,7 +504,8 @@ describe("dev server publishing pipeline", () => {
     "rejects %s diagnostics before publishing HTML and recovers on success",
     async (severity) => {
       const fixture = createProject();
-      const handle = await startServer();
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ onClientBuild });
       fixture.state.marker = "B";
       fixture.state.issues = [createIssue(severity)];
 
@@ -303,12 +514,14 @@ describe("dev server publishing pipeline", () => {
         message: expect.stringContaining("Publishing fixture diagnostic"),
       });
       expect(await readHttp(handle)).toContain('src="main.aaaaaaaa.js"');
+      expect(onClientBuild).toHaveBeenCalledOnce();
 
       fixture.state.marker = "C";
       fixture.state.issues = [];
       const written = await handle.writeAllEntrypointsToDisk();
       expect(written.issues).toEqual([]);
       expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
+      expect(onClientBuild).toHaveBeenCalledTimes(2);
     },
   );
 });

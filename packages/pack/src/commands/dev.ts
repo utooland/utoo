@@ -141,6 +141,12 @@ export interface DevServerReadyContext {
   clientPaths: string[];
 }
 
+export interface DevServerClientBuildContext {
+  /** Client asset paths written for all configured endpoints. */
+  clientPaths: string[];
+  isRebuild: boolean;
+}
+
 export interface DevServerHandle {
   port: number;
   hostname: string;
@@ -160,6 +166,13 @@ export interface StartServerOptions {
   /** Handle process signals and errors. Defaults to true; embedded servers can opt out. */
   handleSignals?: boolean;
   selfSignedCertificate?: SelfSignedCertificate;
+  /**
+   * Awaited after successful client output, stats and HTML writes, including
+   * rebuilds without a browser. The initial call precedes onReady.
+   */
+  onClientBuild?: (
+    context: DevServerClientBuildContext,
+  ) => void | Promise<void>;
   /**
    * Called after the initial dev build has been written and the HTTP server is
    * listening. Integrations can await this instead of polling the internal
@@ -322,6 +335,7 @@ async function runDev(
     bundleOptions,
     projectPathResolved,
     rootPathResolved,
+    serverOptions?.onClientBuild,
   );
   let server: ReturnType<typeof honoServe> | undefined;
   let webSocket: ReturnType<typeof createNodeWebSocket> | undefined;
