@@ -501,6 +501,7 @@ impl SchedulerState {
                         version: &job.spec.package.version,
                         tarball_url: &job.spec.package.tarball_url,
                         cache: &job.cache_path,
+                        source_key: &job.spec.package.key(),
                         target: &job.spec.target,
                         policy: job.spec.policy,
                     })
