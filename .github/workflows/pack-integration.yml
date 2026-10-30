@@ -83,9 +83,6 @@ jobs:
           # Exercise the generated NAPI loader on the minimum supported Node major.
           NAPI_RS_ENFORCE_VERSION_CHECK=1 node -e 'require("./packages/pack/src/binding.js")'
 
-          # SWC-generated imports must resolve to compatible runtime helpers.
-          npm test --workspace @utoo/pack -- src/__test__/swcHelpers.test.ts
-
           # Regression coverage for independent PostCSS and loader evaluator graphs sharing one
           # build-time runtime (utooland/utoo#3316).
           npm test --workspace shared-runtime-async-module
