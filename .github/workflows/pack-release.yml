@@ -183,6 +183,8 @@ jobs:
         if: ${{ matrix.settings.docker }}
         run: |
           cat <<'EOF' > build_script.sh
+          git config --global --add safe.directory /build &&
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}" &&
           ${{ matrix.settings.build }}
           EOF
           chmod +x build_script.sh
