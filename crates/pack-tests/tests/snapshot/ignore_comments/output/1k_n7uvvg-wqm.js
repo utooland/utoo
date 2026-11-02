@@ -47,7 +47,7 @@ module.exports = 'turbopack';
 }),
 "[project]/ignore_comments/input/vercel.cjs [client] (ecmascript, worker loader)", ((__turbopack_context__) => {
 
-__turbopack_context__.v(__turbopack_context__.r("[turbopack-ecmascript]/worker/browser/createWorker.ts [client] (ecmascript)")["f"]("turbopack-worker-24br-m-hm3f2d.js", "[project]/ignore_comments/input/vercel.cjs [client] (ecmascript, worker loader)"));
+__turbopack_context__.v(__turbopack_context__.r("[turbopack-ecmascript]/worker/browser/createWorker.ts [client] (ecmascript)")["f"]("turbopack-worker-24br-m-hm3f2d.js", "[project]/ignore_comments/input/vercel.cjs [client] (ecmascript, worker loader)", []));
 }),
 "[project]/ignore_comments/input/vercel.mjs [client] (ecmascript, async loader)", ((__turbopack_context__) => {
 
@@ -80,13 +80,14 @@ __turbopack_context__.v((parentImport) => {
  * which module chunks to load and which module to run as the entry point.
  *
  * The params are a JSON array of the following structure:
- * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, WORKER_CHUNK_BASE_PATH, ...workerForwardedGlobals values]`
+ * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, WORKER_CHUNK_BASE_PATH, ...workerForwardedGlobals values, workerRegistry?]`
  *
  * @param WorkerConstructor The Worker or SharedWorker constructor
  * @param entrypoint path to the worker entrypoint chunk
  * @param moduleChunks list of module chunk paths to load
+ * @param workerIds reachable nested worker loaders whose configuration must be forwarded
  * @param workerOptions options to pass to the Worker constructor (optional)
- */ function createWorker(WorkerConstructor, entrypoint, moduleChunks, workerOptions) {
+ */ function createWorker(WorkerConstructor, entrypoint, moduleChunks, workerIds, workerOptions) {
     const isSharedWorker = WorkerConstructor.name === 'SharedWorker';
     // `WORKER_BASE_PATH` overrides `CHUNK_BASE_PATH` for the entrypoint and the
     // module chunks loaded inside the worker, keeping them same-origin to each
@@ -103,10 +104,13 @@ __turbopack_context__.v((parentImport) => {
     for(let i = 0; i < globals.length; i++){
         params.push(globalThis[globals[i]]);
     }
-    // Nested workers need the same complete registry. Keeping it in bootstrap params,
-    // rather than worker module code, avoids circular content-hash dependencies.
-    if (/*TURBOPACK member replacement*/ __turbopack_context__.W.size > 0) {
-        params.push(Array.from(/*TURBOPACK member replacement*/ __turbopack_context__.W));
+    // Forward only reachable nested workers. Unrelated worker changes must not
+    // change this URL and split a SharedWorker's shared instance.
+    if (workerIds.length > 0) {
+        params.push(workerIds.map((id)=>[
+                id,
+                getWorkerChunks(id)
+            ]));
     }
     const url = new URL(/*TURBOPACK member replacement*/ __turbopack_context__.h(entrypoint, workerBasePath), location.origin);
     const paramsJson = JSON.stringify(params);
@@ -122,13 +126,17 @@ __turbopack_context__.v((parentImport) => {
     } : undefined;
     return new WorkerConstructor(url, options);
 }
-function generateCreateWorker(entrypoint, workerIdOrChunks) {
+function getWorkerChunks(workerId) {
+    const chunks = /*TURBOPACK member replacement*/ __turbopack_context__.W.get(workerId);
+    if (!chunks) {
+        throw new Error(`Missing chunk configuration for worker ${workerId}`);
+    }
+    return chunks;
+}
+function generateCreateWorker(entrypoint, workerIdOrChunks, workerIds = []) {
     return (WorkerConstructor, workerOptions)=>{
-        const moduleChunks = Array.isArray(workerIdOrChunks) ? workerIdOrChunks : /*TURBOPACK member replacement*/ __turbopack_context__.W.get(workerIdOrChunks);
-        if (!moduleChunks) {
-            throw new Error(`Missing chunk configuration for worker ${workerIdOrChunks}`);
-        }
-        return createWorker(WorkerConstructor, entrypoint, moduleChunks, workerOptions);
+        const moduleChunks = Array.isArray(workerIdOrChunks) ? workerIdOrChunks : getWorkerChunks(workerIdOrChunks);
+        return createWorker(WorkerConstructor, entrypoint, moduleChunks, workerIds, workerOptions);
     };
 }
 __turbopack_context__.s([
@@ -139,4 +147,4 @@ __turbopack_context__.s([
 }),
 ]);
 
-//# sourceMappingURL=1povj-y289qoy.js.map
+//# sourceMappingURL=1k_n7uvvg-wqm.js.map
