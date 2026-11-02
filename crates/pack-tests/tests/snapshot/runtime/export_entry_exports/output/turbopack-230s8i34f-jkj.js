@@ -1,19 +1,62 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
-    typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["2drwrwlv85b8z.js"],"runtimeModuleIds":[4]}
+(function(root, factory) {
+    if (typeof exports === 'object' && typeof module === 'object')
+        module.exports = factory();
+    else if (typeof exports === 'object')
+        exports["export-entry-exports"] = factory();
+    else
+        root["export-entry-exports"] = factory();
+}(typeof self !== 'undefined' ? self : this, function() {
+(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push(["18y18e3f78cal.js",
+"[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+function setTernContainer(container) {
+    console.log('Setting Tern container:', container);
+    return container;
+}
+function initializeApp(config) {
+    console.log('Initializing app with config:', config);
+    return {
+        success: true,
+        config
+    };
+}
+const APP_VERSION = '1.0.0';
+var __TURBOPACK__default__export__ = {
+    setTernContainer,
+    initializeApp,
+    version: APP_VERSION
+};
+__turbopack_context__.s([
+    "APP_VERSION",
+    0,
+    APP_VERSION,
+    "default",
+    0,
+    __TURBOPACK__default__export__,
+    "initializeApp",
+    0,
+    initializeApp,
+    "setTernContainer",
+    0,
+    setTernContainer
 ]);
+}),
+]);;
+var __entryRegistration__ = [typeof document === "object" ? document.currentScript : undefined, {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/export_entry_exports/input/index.ts [client] (ecmascript)"]}];
+(globalThis["utooChunk_export_entry_exports"] || (globalThis["utooChunk_export_entry_exports"] = [])).push(__entryRegistration__);
 (() => {
-var chunksToRegister = globalThis["TURBOPACK"];
+var chunksToRegister = globalThis["utooChunk_export_entry_exports"];
 if (chunksToRegister === undefined) {
     chunksToRegister = [];
 } else if (!Array.isArray(chunksToRegister)) {
     return;
 }
 
-var CHUNK_BASE_PATH = "https://cdn.example.com/assets/";
+var CHUNK_BASE_PATH = "/";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
-var RUNTIME_PUBLIC_PATH = "https://cdn.example.com/assets/";
+var RUNTIME_PUBLIC_PATH = "/";
 const SUPPORT_COMPONENT_CHUNKS = false;
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
@@ -734,6 +777,15 @@ function getRuntimeChunkBasePath(basePath = CHUNK_BASE_PATH) {
 }
 const browserContextPrototype = Context.prototype;
 const RUNTIME_CHUNK_BASE_PATH = typeof TURBOPACK_CHUNK_BASE_PATH === 'string' ? TURBOPACK_CHUNK_BASE_PATH : CHUNK_BASE_PATH;
+const workerChunks = new Map(typeof TURBOPACK_WORKER_CHUNKS !== 'undefined' ? TURBOPACK_WORKER_CHUNKS : []);
+browserContextPrototype.W = workerChunks;
+function registerWorkerChunks(params) {
+    if (params?.workerChunks) {
+        for (const [id, chunks] of params.workerChunks){
+            workerChunks.set(id, chunks);
+        }
+    }
+}
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 const availableModules = new Map();
@@ -1198,6 +1250,7 @@ let BACKEND;
 (()=>{
     BACKEND = {
         async registerChunk (chunk, params) {
+            registerWorkerChunks(params);
             // `chunk` is `undefined` for an inlined entry-only registration, which has no source chunk.
             let chunkPath;
             if (chunk != null) {
@@ -1424,9 +1477,25 @@ let BACKEND;
         return resolver.promise;
     }
 })();
-globalThis["TURBOPACK"] = { push: registerChunk };
+globalThis["utooChunk_export_entry_exports"] = {
+    push: registerChunk,
+    getEntryExports: function(registration) {
+        var chunk = registration[0];
+        var chunkPath = chunk == null ? undefined : getPathFromScript(getChunkFromRegistration(chunk));
+        var runtimeModuleIds = registration[1].runtimeModuleIds;
+        var entryModule;
+        for (var i = 0; i < runtimeModuleIds.length; i++) {
+            entryModule = getOrInstantiateRuntimeModule(chunkPath, runtimeModuleIds[i]);
+        }
+        // Async modules already expose a promise; synchronous entries keep their
+        // namespace value without an additional asynchronous boundary.
+        return entryModule && (entryModule.namespaceObject || entryModule.exports);
+    }
+};
 chunksToRegister.forEach(registerChunk);
 })();
+return globalThis["utooChunk_export_entry_exports"].getEntryExports(__entryRegistration__);
+}));
 
 
-//# sourceMappingURL=turbopack-1djcy3wmo0n6w.js.map
+//# sourceMappingURL=turbopack-230s8i34f-jkj.js.map

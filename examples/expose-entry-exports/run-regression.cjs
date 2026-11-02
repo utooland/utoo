@@ -134,7 +134,8 @@ async function buildCase(binding, runDir, variant) {
         "The fixture must inline multiple initial JS chunks",
       );
       const ids = JSON.parse(
-        bootstrap.match(/"runtimeModuleIds":(\[[^\n]*\])\}/)[1],
+        // Module IDs are numbers or JSON strings; other runtime fields may follow.
+        bootstrap.match(/"runtimeModuleIds":(\[(?:"(?:\\.|[^"\\])*"|[\d,\s])*\])/)[1],
       );
       assert.equal(
         typeof ids[ids.length - 1],

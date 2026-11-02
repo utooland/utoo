@@ -1,6 +1,6 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     typeof document === "object" ? document.currentScript : undefined,
-    {"otherChunks":["3sjnmlky2qoml.js"],"runtimeModuleIds":[59]}
+    {"otherChunks":["3dum4wtr2awxi.js"],"runtimeModuleIds":[48]}
 ]);
 (() => {
 var chunksToRegister = globalThis["TURBOPACK"];
@@ -10,13 +10,13 @@ if (chunksToRegister === undefined) {
     return;
 }
 
-var CHUNK_BASE_PATH = "/";
+var CHUNK_BASE_PATH = "__RUNTIME_PUBLIC_PATH__";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
-var RUNTIME_PUBLIC_PATH = "/";
+var RUNTIME_PUBLIC_PATH = "__RUNTIME_PUBLIC_PATH__";
 const SUPPORT_COMPONENT_CHUNKS = false;
 var ASSET_SUFFIX = "";
-var CROSS_ORIGIN = "anonymous";
+var CROSS_ORIGIN = null;
 var CHUNK_LOAD_RETRY_MAX_ATTEMPTS = 1;
 var CHUNK_LOAD_RETRY_BASE_DELAY_MS = 200;
 var CHUNK_LOAD_RETRY_MAX_JITTER_MS = 400;
@@ -734,6 +734,15 @@ function getRuntimeChunkBasePath(basePath = CHUNK_BASE_PATH) {
 }
 const browserContextPrototype = Context.prototype;
 const RUNTIME_CHUNK_BASE_PATH = typeof TURBOPACK_CHUNK_BASE_PATH === 'string' ? TURBOPACK_CHUNK_BASE_PATH : CHUNK_BASE_PATH;
+const workerChunks = new Map(typeof TURBOPACK_WORKER_CHUNKS !== 'undefined' ? TURBOPACK_WORKER_CHUNKS : []);
+browserContextPrototype.W = workerChunks;
+function registerWorkerChunks(params) {
+    if (params?.workerChunks) {
+        for (const [id, chunks] of params.workerChunks){
+            workerChunks.set(id, chunks);
+        }
+    }
+}
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 const availableModules = new Map();
@@ -1198,6 +1207,7 @@ let BACKEND;
 (()=>{
     BACKEND = {
         async registerChunk (chunk, params) {
+            registerWorkerChunks(params);
             // `chunk` is `undefined` for an inlined entry-only registration, which has no source chunk.
             let chunkPath;
             if (chunk != null) {
@@ -1429,4 +1439,4 @@ chunksToRegister.forEach(registerChunk);
 })();
 
 
-//# sourceMappingURL=turbopack-43m0au4-5afq8.js.map
+//# sourceMappingURL=turbopack-0fdoyb-tntb5a.js.map

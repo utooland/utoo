@@ -1,13 +1,19 @@
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/ignore_comments/input/ignore-worker.cjs (static in ecmascript)", ((__turbopack_context__) => {
+(()=>{"use strict";return[
+197, ((__turbopack_context__) => {
+"use strict";
 
-__turbopack_context__.q("/ignore-worker.4e0cf842.cjs");}),
-"[project]/ignore_comments/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
+var __TURBOPACK__imported__module__936__ = __turbopack_context__.i(936);
+;
+console.log(__TURBOPACK__imported__module__936__["q"], __TURBOPACK__imported__module__936__["i"]);
+__turbopack_context__.s([]);
+}),
+936, ((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
-        return __turbopack_context__.F("input/index.js");
+        return __turbopack_context__.F("node_modules/static-url-package/index.js");
     },
     env: {
         DEV: false,
@@ -17,49 +23,20 @@ var __TURBOPACK__import$2e$meta__ = {
         SSR: false
     }
 };
-__turbopack_context__.A("[project]/ignore_comments/input/vercel.mjs [client] (ecmascript, async loader)").then(console.log);
-__turbopack_context__.A("[project]/ignore_comments/input/vercel.mjs [client] (ecmascript, async loader)").then(console.log);
-console.log(__turbopack_context__.r("[project]/ignore_comments/input/vercel.cjs [client] (ecmascript)"));
-__turbopack_context__.r("[project]/ignore_comments/input/vercel.cjs [client] (ecmascript, worker loader)")(Worker);
-// turbopack shouldn't attempt to bundle these, and they should be preserved in the output
-import(/* webpackIgnore: true */ './ignore.mjs');
-import(/* turbopackIgnore: true */ './ignore.mjs');
-// this should work for cjs requires too
-require(/* webpackIgnore: true */ './ignore.cjs');
-require(/* turbopackIgnore: true */ './ignore.cjs');
-new Worker(new __turbopack_context__.U(__turbopack_context__.r("[project]/ignore_comments/input/ignore-worker.cjs (static in ecmascript)")));
-new Worker(new __turbopack_context__.U(__turbopack_context__.r("[project]/ignore_comments/input/ignore-worker.cjs (static in ecmascript)")));
-function foo(plugin) {
-    return require(/* turbopackIgnore: true */ plugin);
+const resourceProxyUrl = new __turbopack_context__.U(__turbopack_context__.r(727)).toString();
+function createMainWorker() {
+    return __turbopack_context__.r(675)(Worker);
 }
 __turbopack_context__.s([
-    "foo",
+    "q",
     0,
-    foo
+    createMainWorker,
+    "i",
+    0,
+    resourceProxyUrl
 ]);
 }),
-"[project]/ignore_comments/input/vercel.cjs (static in ecmascript)", ((__turbopack_context__) => {
-
-__turbopack_context__.q("/vercel.fad5a703.cjs");}),
-"[project]/ignore_comments/input/vercel.cjs [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-
-module.exports = 'turbopack';
-}),
-"[project]/ignore_comments/input/vercel.cjs [client] (ecmascript, worker loader)", ((__turbopack_context__) => {
-
-__turbopack_context__.v(__turbopack_context__.r("[turbopack-ecmascript]/worker/browser/createWorker.ts [client] (ecmascript)")["f"]("turbopack-worker-00tma42mu2bq8.js", ["2c2dbmxi8yagu.js","turbopack-2zj939a75a1rv.js"]));
-}),
-"[project]/ignore_comments/input/vercel.mjs [client] (ecmascript, async loader)", ((__turbopack_context__) => {
-
-__turbopack_context__.v((parentImport) => {
-    return Promise.all([
-  "0b_gkdnyr1538.js"
-].map((chunk) => __turbopack_context__.l(chunk))).then(() => {
-        return parentImport("[project]/ignore_comments/input/vercel.mjs [client] (ecmascript)");
-    });
-});
-}),
-"[turbopack-ecmascript]/worker/browser/createWorker.ts [client] (ecmascript)", ((__turbopack_context__) => {
+730, ((__turbopack_context__) => {
 "use strict";
 
 // Embedded worker-runtime helper. This file is bundled as a regular module and
@@ -80,13 +57,14 @@ __turbopack_context__.v((parentImport) => {
  * which module chunks to load and which module to run as the entry point.
  *
  * The params are a JSON array of the following structure:
- * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, WORKER_CHUNK_BASE_PATH, ...workerForwardedGlobals values]`
+ * `[TURBOPACK_NEXT_CHUNK_URLS, ASSET_SUFFIX, WORKER_CHUNK_BASE_PATH, ...workerForwardedGlobals values, workerRegistry?]`
  *
  * @param WorkerConstructor The Worker or SharedWorker constructor
  * @param entrypoint path to the worker entrypoint chunk
  * @param moduleChunks list of module chunk paths to load
+ * @param workerIds reachable nested worker loaders whose configuration must be forwarded
  * @param workerOptions options to pass to the Worker constructor (optional)
- */ function createWorker(WorkerConstructor, entrypoint, moduleChunks, workerOptions) {
+ */ function createWorker(WorkerConstructor, entrypoint, moduleChunks, workerIds, workerOptions) {
     const isSharedWorker = WorkerConstructor.name === 'SharedWorker';
     // `WORKER_BASE_PATH` overrides `CHUNK_BASE_PATH` for the entrypoint and the
     // module chunks loaded inside the worker, keeping them same-origin to each
@@ -103,6 +81,14 @@ __turbopack_context__.v((parentImport) => {
     for(let i = 0; i < globals.length; i++){
         params.push(globalThis[globals[i]]);
     }
+    // Forward only reachable nested workers. Unrelated worker changes must not
+    // change this URL and split a SharedWorker's shared instance.
+    if (workerIds.length > 0) {
+        params.push(workerIds.map((id)=>[
+                id,
+                getWorkerChunks(id)
+            ]));
+    }
     const url = new URL(/*TURBOPACK member replacement*/ __turbopack_context__.h(entrypoint, workerBasePath), location.origin);
     const paramsJson = JSON.stringify(params);
     if (isSharedWorker) {
@@ -117,8 +103,18 @@ __turbopack_context__.v((parentImport) => {
     } : undefined;
     return new WorkerConstructor(url, options);
 }
-function generateCreateWorker(entrypoint, moduleChunks) {
-    return (WorkerConstructor, workerOptions)=>createWorker(WorkerConstructor, entrypoint, moduleChunks, workerOptions);
+function getWorkerChunks(workerId) {
+    const chunks = /*TURBOPACK member replacement*/ __turbopack_context__.W.get(workerId);
+    if (!chunks) {
+        throw new Error(`Missing chunk configuration for worker ${workerId}`);
+    }
+    return chunks;
+}
+function generateCreateWorker(entrypoint, workerIdOrChunks, workerIds = []) {
+    return (WorkerConstructor, workerOptions)=>{
+        const moduleChunks = Array.isArray(workerIdOrChunks) ? workerIdOrChunks : getWorkerChunks(workerIdOrChunks);
+        return createWorker(WorkerConstructor, entrypoint, moduleChunks, workerIds, workerOptions);
+    };
 }
 __turbopack_context__.s([
     "f",
@@ -126,6 +122,17 @@ __turbopack_context__.s([
     generateCreateWorker
 ]);
 }),
+]})(),
+473, ((__turbopack_context__) => {
+
+__turbopack_context__.q("/MainWorker.f5cc1aa6.js");}),
+675, ((__turbopack_context__) => {
+
+__turbopack_context__.v(__turbopack_context__.r(730)["f"]("turbopack-worker-24br-m-hm3f2d.js", 675, []));
+}),
+727, ((__turbopack_context__) => {
+
+__turbopack_context__.q("/sw.3abde911.js");}),
 ]);
 
-//# sourceMappingURL=2db-k2i2iwela.js.map
+//# sourceMappingURL=35b6w9hvssaud.js.map
