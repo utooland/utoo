@@ -562,7 +562,6 @@ async fn run_test_operation(
 
     // Walk through all assets for snapshot comparison
     let mut seen = FxHashSet::default();
-    let mut visited = FxHashSet::default();
     let mut queue = VecDeque::new();
 
     // Add all output assets to queue
@@ -572,11 +571,6 @@ async fn run_test_operation(
 
     // Process all assets
     while let Some(asset) = queue.pop_front() {
-        // Output references can contain cycles, for example when a worker spawns itself.
-        // Keep asset identities separate from the paths used to compare expected output.
-        if !visited.insert(asset) {
-            continue;
-        }
         walk_asset(
             asset,
             &output_path,
