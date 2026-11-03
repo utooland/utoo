@@ -1,0 +1,35 @@
+crates/pack-tests/tests/snapshot/public_path/runtime_isolation/assert.js
+  s_a09ed228621c85::t_05a4da694d2680 32
+crates/pack-tests/tests/snapshot/style/inline_css/assert.js
+  s_a09ed228621c85::t_ac08a78c5a8536 4,21-27,29-34,36-48
+packages/pack/src/__test__/workerContentHashChild.ts
+  s_a09ed228621c85::t_678bdcf4eb17aa 50
+examples/expose-entry-exports/run-regression.cjs
+  s_a09ed228621c85::t_678bdcf4eb17aa 207
+crates/pack-tests/tests/snapshot/style/local_postcss_config/postcss.config.js
+  s_34bfbe4bd92ce3::t_916aa110cc46fe 1-8,11-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5eaa849d59a32b7ff07819f3d4b1d4ea79692696",
+  "prompts": {},
+  "sessions": {
+    "s_34bfbe4bd92ce3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a058-692e-7973-9a50-ec7e9545a001",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_a09ed228621c85": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a026-acf7-7392-a873-6b4a84dcfce7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
