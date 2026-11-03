@@ -3,11 +3,12 @@
     "module": "commonjs",
     "sourceMap": true,
     "esModuleInterop": true,
-     "target": "ESNext",
+    "target": "ESNext",
     "lib": ["dom"],
     "downlevelIteration": true,
     "preserveWatchOutput": true,
     "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/library/runtime-backend-node.ts"]
 }

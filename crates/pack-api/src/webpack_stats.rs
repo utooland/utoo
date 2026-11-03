@@ -18,7 +18,7 @@ use turbopack_core::{
     reference::all_assets_from_entries,
 };
 use turbopack_css::chunk::CssChunk;
-use turbopack_ecmascript::chunk::EcmascriptChunk;
+use turbopack_ecmascript::chunk::{ChunkMinification, EcmascriptChunk};
 use turbopack_nodejs::{EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk};
 
 #[turbo_tasks::value]
@@ -62,7 +62,9 @@ async fn get_chunk_modules(
         .into_iter()
         .collect::<FxHashMap<_, _>>();
     let content = content.await?;
-    let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
+    let chunk_items = content
+        .chunk_item_code_module_ids_and_paths(ChunkMinification::None, false)
+        .await?;
     let mut modules = Vec::new();
 
     for item in &chunk_items {

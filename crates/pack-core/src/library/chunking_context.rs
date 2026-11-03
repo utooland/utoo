@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use bincode::{Decode, Encode};
 use qstring::QString;
 use rustc_hash::FxHashMap;
+use smallvec::{SmallVec, smallvec};
 use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, TryJoinIterExt, ValueToString, Vc};
@@ -30,7 +31,7 @@ use turbopack_core::{
     module_graph::{
         ModuleGraph,
         binding_usage_info::{BindingUsageInfo, ModuleExportUsage},
-        chunk_group_info::ChunkGroup,
+        chunk_group_info::ChunkGroupKey,
         style_groups::StyleGroupsAlgorithm,
     },
     output::{OutputAsset, OutputAssets},
@@ -38,7 +39,7 @@ use turbopack_core::{
 use turbopack_css::chunk::{CssChunk, CssChunkType, source_map::CssChunkSourceMapAsset};
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
-    chunk::{EcmascriptChunk, EcmascriptChunkType},
+    chunk::{ChunkMinification, EcmascriptChunk, EcmascriptChunkType},
     manifest::{chunk_asset::ManifestAsyncModule, loader_module::ManifestLoaderModule},
 };
 use turbopack_ecmascript_runtime::RuntimeType;
@@ -449,7 +450,7 @@ impl LibraryChunkingContext {
         let chunk_items = ecmascript_chunk
             .chunk_content()
             .await?
-            .chunk_item_code_module_ids_and_paths()
+            .chunk_item_code_module_ids_and_paths(ChunkMinification::None, false)
             .await?;
 
         let mut hasher = Xxh3Hash64Hasher::new();
@@ -747,7 +748,7 @@ impl ChunkingContext for LibraryChunkingContext {
     async fn chunk_group(
         self: ResolvedVc<Self>,
         ident: Vc<AssetIdent>,
-        chunk_group: ChunkGroup,
+        chunk_groups: SmallVec<[ChunkGroupKey; 1]>,
         module_graph: Vc<ModuleGraph>,
         availability_info: AvailabilityInfo,
     ) -> Result<Vc<ChunkGroupResult>> {
@@ -756,12 +757,17 @@ impl ChunkingContext for LibraryChunkingContext {
         }
 
         let module_graph = module_graph.to_resolved().await?;
+        let chunk_group_info = module_graph.chunk_group_info();
+        let mut groups = SmallVec::with_capacity(chunk_groups.len());
+        for key in chunk_groups {
+            groups.push(chunk_group_info.get_chunk_group(key).await?);
+        }
         let MakeChunkGroupResult {
             chunks,
             references,
             availability_info,
         } = make_chunk_group(
-            chunk_group,
+            groups,
             module_graph,
             ResolvedVc::upcast(self),
             availability_info,
@@ -874,7 +880,7 @@ impl ChunkingContext for LibraryChunkingContext {
     async fn evaluated_chunk_group(
         self: ResolvedVc<Self>,
         ident: Vc<AssetIdent>,
-        chunk_group: ChunkGroup,
+        chunk_group: ChunkGroupKey,
         module_graph: Vc<ModuleGraph>,
         extra_chunks: Vc<OutputAssets>,
         availability_info: AvailabilityInfo,
@@ -885,13 +891,17 @@ impl ChunkingContext for LibraryChunkingContext {
         };
         async move {
             let module_graph = module_graph.to_resolved().await?;
+            let chunk_group = module_graph
+                .chunk_group_info()
+                .get_chunk_group(chunk_group)
+                .await?;
 
             let MakeChunkGroupResult {
                 chunks,
                 references,
                 availability_info,
             } = make_chunk_group(
-                chunk_group.clone(),
+                smallvec![chunk_group.clone()],
                 module_graph,
                 ResolvedVc::upcast(self),
                 availability_info,
@@ -977,7 +987,7 @@ impl ChunkingContext for LibraryChunkingContext {
     fn entry_chunk_group(
         self: Vc<Self>,
         _path: FileSystemPath,
-        _chunk_group: ChunkGroup,
+        _chunk_group: ChunkGroupKey,
         _module_graph: Vc<ModuleGraph>,
         _extra_chunks: Vc<OutputAssets>,
         _extra_referenced_assets: Vc<OutputAssets>,

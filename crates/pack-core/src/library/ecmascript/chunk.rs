@@ -20,7 +20,7 @@ use turbopack_core::{
     virtual_output::VirtualOutputAsset,
 };
 use turbopack_ecmascript::{
-    chunk::{EcmascriptChunk, EcmascriptChunkData, EcmascriptChunkPlaceable},
+    chunk::{ChunkMinification, EcmascriptChunk, EcmascriptChunkData, EcmascriptChunkPlaceable},
     minify::{get_compress_options_for_target, minify, minify_with_legal_comments},
     utils::StringifyJs,
 };
@@ -80,7 +80,9 @@ impl EcmascriptLibraryChunk {
             .await?;
         let content = this.chunk.chunk_content().await?;
         // Items are already globally sorted by module path upstream.
-        let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
+        let chunk_items = content
+            .chunk_item_code_module_ids_and_paths(ChunkMinification::None, false)
+            .await?;
 
         let mut code = CodeBuilder::default();
         writeln!(code, "module.exports = [")?;
@@ -438,7 +440,9 @@ impl EcmascriptLibraryEvaluateChunk {
         let content = this.chunk.chunk_content().await?;
         // Items are already globally sorted by module path upstream so that
         // similar modules stay together and the chunks gzip better.
-        let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
+        let chunk_items = content
+            .chunk_item_code_module_ids_and_paths(ChunkMinification::None, false)
+            .await?;
         for item in &chunk_items {
             write!(code, "\n{}, ", StringifyJs(&item.id))?;
             code.push_code(&item.code);

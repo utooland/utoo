@@ -70,10 +70,10 @@ impl VisitMut for DefaultExportNamerVisitor {
     fn visit_mut_module_item(&mut self, item: &mut ModuleItem) {
         if let ModuleItem::ModuleDecl(module_decl) = item {
             match module_decl {
-                ModuleDecl::ExportDefaultExpr(ExportDefaultExpr {
-                    expr: box Expr::Arrow(arrow_expr),
-                    ..
-                }) => {
+                ModuleDecl::ExportDefaultExpr(ExportDefaultExpr { expr, .. }) => {
+                    let Expr::Arrow(arrow_expr) = expr.as_ref() else {
+                        return;
+                    };
                     if arrow_expr.is_async || arrow_expr.is_generator {
                         return;
                     }

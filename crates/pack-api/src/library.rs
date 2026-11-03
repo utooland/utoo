@@ -26,7 +26,7 @@ use turbopack_core::{
     module::{Module, Modules},
     module_graph::{
         GraphEntries, ModuleGraph,
-        chunk_group_info::{ChunkGroup, ChunkGroupEntry, EntryHeuristics},
+        chunk_group_info::{ChunkGroupEntry, ChunkGroupKey, EntryHeuristics},
     },
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
@@ -338,7 +338,7 @@ impl LibraryEndpoint {
                 AssetIdent::from_path(project.project_path().await?.join(this.import.as_str())?)
                     .with_query(query.into())
                     .into_vc(),
-                ChunkGroup::Entry(self.library_entry_modules().await?.to_vec()),
+                ChunkGroupKey::Entry(self.library_entry_modules().await?.to_vec()),
                 module_graph,
                 OutputAssets::empty(),
                 AvailabilityInfo::root(),

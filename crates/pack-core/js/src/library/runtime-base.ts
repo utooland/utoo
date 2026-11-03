@@ -43,9 +43,6 @@ interface RuntimeBackend {
 
 let BACKEND: RuntimeBackend;
 
-const moduleFactories: ModuleFactories = new Map();
-contextPrototype.M = moduleFactories;
-
 /**
  * Determine the chunk to register from a registration entry.
  * In library builds, chunks are always string paths or script objects.
