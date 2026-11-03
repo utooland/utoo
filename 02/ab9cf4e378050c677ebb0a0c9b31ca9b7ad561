@@ -1,0 +1,14 @@
+next.js
+  h_05d0a07afcde4c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "02ab9cf4e378050c677ebb0a0c9b31ca9b7ad561",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
