@@ -204,6 +204,7 @@ function createRealm(outputDir, dispatch, legacy, worker = false) {
         };
       },
       head: {
+        getElementsByTagName: (tagName) => (tagName === "script" ? scripts : []),
         appendChild(element) {
           appended.push(element.src || element.href);
           if (element.tagName === "script") scripts.push(element);

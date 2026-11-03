@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 15, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/short_hash_filenames/input/index.js"],"sourcesContent":["import \"./a_very_long_directory_name_that_must_not_appear_in_production_chunk_urls/initial.css\";\n\nglobalThis.loadFeature = () =>\n  import(\n    \"./a_very_long_directory_name_that_must_not_appear_in_production_chunk_urls/lazy.js\"\n  );\n"],"names":["globalThis","loadFeature"],"mappings":";AAEAA,WAAWC,WAAW,GAAG"}}]
-}

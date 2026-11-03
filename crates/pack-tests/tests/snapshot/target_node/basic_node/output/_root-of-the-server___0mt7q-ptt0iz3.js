@@ -1,11 +1,4 @@
-module.exports = [
-"[externals]/node:path [external] (node:path, cjs)", ((__turbopack_context__, module, exports) => {
-
-var mod = __turbopack_context__.x("node:path", () => require("node:path"));
-
-module.exports = mod;
-}),
-"[project]/target_node/basic_node/input/index.ts [server] (ecmascript)", ((__turbopack_context__) => {
+module.exports=["[project]/target_node/basic_node/input/index.ts [server] (ecmascript)",((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/node:path [external] (node:path, cjs)");
@@ -20,8 +13,7 @@ console.log("dirname:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3
 console.log("extname:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__["default"].extname("index.ts"));
 console.log("joined:", __TURBOPACK__imported__module__$5b$externals$5d2f$node$3a$path__$5b$external$5d$__$28$node$3a$path$2c$__cjs$29$__["default"].join("src", "utils", "index.ts"));
 __turbopack_context__.s([]);
-}),
-"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)", ((__turbopack_context__) => {
+}),"[project]/target_node/basic_node/input/utils.ts [server] (ecmascript)",((__turbopack_context__) => {
 "use strict";
 
 function greet(name) {
@@ -35,7 +27,11 @@ __turbopack_context__.s([
     0,
     greet
 ]);
-}),
-];
+}),"[externals]/node:path [external] (node:path, cjs)",((__turbopack_context__, module, exports) => {
+
+var mod = __turbopack_context__.x("node:path", () => require("node:path"));
+
+module.exports = mod;
+})];
 
 //# sourceMappingURL=_root-of-the-server___0mt7q-ptt0iz3.js.map

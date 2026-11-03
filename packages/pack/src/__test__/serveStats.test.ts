@@ -109,10 +109,6 @@ describe("serve stats", () => {
             "name": "src_lazy_<hash>.js.map",
             "type": "asset",
           },
-          {
-            "name": "src_lazy_<hash>.js.map",
-            "type": "asset",
-          },
         ],
         "entrypoints": {
           "main": {

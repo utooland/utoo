@@ -29,6 +29,7 @@ const document = {
     };
   },
   head: {
+    getElementsByTagName: () => [],
     appendChild(element) {
       if (element.tagName !== "script") {
         throw new Error(`unexpected element: ${element.tagName}`);

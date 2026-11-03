@@ -81,10 +81,6 @@ var __TURBOPACK__imported__module__554__ = __turbopack_context__.i(554);
 ;
 __turbopack_context__.s([]);
 }),
-855, ((__turbopack_context__, module, exports) => {
-
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
-}),
 888, ((__turbopack_context__) => {
 "use strict";
 
@@ -92,10 +88,6 @@ var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
 ;
 console.log('x', __TURBOPACK__imported__module__148__["f"]);
 __turbopack_context__.s([]);
-}),
-554, ((__turbopack_context__, module, exports) => {
-
-setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(77)), 1000);
 }),
 77, ((__turbopack_context__) => {
 "use strict";
@@ -109,6 +101,14 @@ var __TURBOPACK__imported__module__148__ = __turbopack_context__.i(148);
 console.log('y', __TURBOPACK__imported__module__148__["f"]);
 ;
 __turbopack_context__.s([], 77);
+}),
+855, ((__turbopack_context__, module, exports) => {
+
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(888)), 500);
+}),
+554, ((__turbopack_context__, module, exports) => {
+
+setTimeout(()=>Promise.resolve().then(()=>__turbopack_context__.i(77)), 1000);
 }),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":[498]}],

@@ -3,15 +3,15 @@
     "main": {
       "name": "main",
       "chunks": [
-        "2ob6fvs8x0iy8.js",
-        "turbopack-28526ls0oh265.js"
+        "3cd2a-hhsox5h.js",
+        "turbopack-3dezlwwwkifes.js"
       ],
       "assets": [
         {
-          "name": "2ob6fvs8x0iy8.js"
+          "name": "3cd2a-hhsox5h.js"
         },
         {
-          "name": "turbopack-28526ls0oh265.js"
+          "name": "turbopack-3dezlwwwkifes.js"
         }
       ]
     }
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "2ob6fvs8x0iy8.js",
-      "size": 321,
+      "id": "3cd2a-hhsox5h.js",
+      "size": 297,
       "hash": "",
       "files": [
-        "2ob6fvs8x0iy8.js"
+        "3cd2a-hhsox5h.js"
       ]
     },
     {
@@ -34,37 +34,37 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "turbopack-28526ls0oh265.js",
-      "size": 281,
+      "id": "turbopack-3dezlwwwkifes.js",
+      "size": 271,
       "hash": "",
       "files": [
-        "turbopack-28526ls0oh265.js"
+        "turbopack-3dezlwwwkifes.js"
       ]
     }
   ],
   "assets": [
     {
       "type": "asset",
-      "name": "2ob6fvs8x0iy8.js",
+      "name": "3cd2a-hhsox5h.js",
       "info": {},
-      "size": 321,
+      "size": 297,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "2ob6fvs8x0iy8.js"
+        "3cd2a-hhsox5h.js"
       ]
     },
     {
       "type": "asset",
-      "name": "2ob6fvs8x0iy8.js.map",
+      "name": "3cd2a-hhsox5h.js.map",
       "info": {},
       "size": 290,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "2ob6fvs8x0iy8.js.map"
+        "3cd2a-hhsox5h.js.map"
       ]
     },
     {
@@ -117,26 +117,26 @@
     },
     {
       "type": "asset",
-      "name": "turbopack-28526ls0oh265.js",
+      "name": "turbopack-3dezlwwwkifes.js",
       "info": {},
-      "size": 281,
+      "size": 271,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "turbopack-28526ls0oh265.js"
+        "turbopack-3dezlwwwkifes.js"
       ]
     },
     {
       "type": "asset",
-      "name": "turbopack-28526ls0oh265.js.map",
+      "name": "turbopack-3dezlwwwkifes.js.map",
       "info": {},
       "size": 53,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "turbopack-28526ls0oh265.js.map"
+        "turbopack-3dezlwwwkifes.js.map"
       ]
     }
   ],
@@ -145,7 +145,7 @@
       "name": "basic/copy/input/index.js",
       "id": "[project]/basic/copy/input/index.js [client] (ecmascript)",
       "chunks": [
-        "2ob6fvs8x0iy8.js"
+        "3cd2a-hhsox5h.js"
       ],
       "size": 79
     }

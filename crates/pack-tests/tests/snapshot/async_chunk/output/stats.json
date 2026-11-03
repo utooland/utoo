@@ -3,15 +3,15 @@
     "main": {
       "name": "main",
       "chunks": [
-        "23_wg0uo_493k.js",
-        "turbopack-3ce3jt2w3uhdj.js"
+        "18cbom_5ma0ix.js",
+        "turbopack-3_aqk4tr7ngmy.js"
       ],
       "assets": [
         {
-          "name": "23_wg0uo_493k.js"
+          "name": "18cbom_5ma0ix.js"
         },
         {
-          "name": "turbopack-3ce3jt2w3uhdj.js"
+          "name": "turbopack-3_aqk4tr7ngmy.js"
         }
       ]
     }
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "1nvhz2_b34vie.js",
-      "size": 727,
+      "id": "18cbom_5ma0ix.js",
+      "size": 851,
       "hash": "",
       "files": [
-        "1nvhz2_b34vie.js"
+        "18cbom_5ma0ix.js"
       ]
     },
     {
@@ -34,11 +34,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "23_wg0uo_493k.js",
-      "size": 879,
+      "id": "2scvaewz8d-m9.js",
+      "size": 675,
       "hash": "",
       "files": [
-        "23_wg0uo_493k.js"
+        "2scvaewz8d-m9.js"
       ]
     },
     {
@@ -46,85 +46,85 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "turbopack-3ce3jt2w3uhdj.js",
-      "size": 258,
+      "id": "turbopack-3_aqk4tr7ngmy.js",
+      "size": 248,
       "hash": "",
       "files": [
-        "turbopack-3ce3jt2w3uhdj.js"
+        "turbopack-3_aqk4tr7ngmy.js"
       ]
     }
   ],
   "assets": [
     {
       "type": "asset",
-      "name": "1nvhz2_b34vie.js",
+      "name": "18cbom_5ma0ix.js",
       "info": {},
-      "size": 727,
+      "size": 851,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "1nvhz2_b34vie.js"
+        "18cbom_5ma0ix.js"
       ]
     },
     {
       "type": "asset",
-      "name": "1nvhz2_b34vie.js.map",
+      "name": "18cbom_5ma0ix.js.map",
+      "info": {},
+      "size": 797,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "18cbom_5ma0ix.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "2scvaewz8d-m9.js",
+      "info": {},
+      "size": 675,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "2scvaewz8d-m9.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "2scvaewz8d-m9.js.map",
       "info": {},
       "size": 731,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "1nvhz2_b34vie.js.map"
+        "2scvaewz8d-m9.js.map"
       ]
     },
     {
       "type": "asset",
-      "name": "23_wg0uo_493k.js",
+      "name": "turbopack-3_aqk4tr7ngmy.js",
       "info": {},
-      "size": 879,
+      "size": 248,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "23_wg0uo_493k.js"
+        "turbopack-3_aqk4tr7ngmy.js"
       ]
     },
     {
       "type": "asset",
-      "name": "23_wg0uo_493k.js.map",
-      "info": {},
-      "size": 798,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "23_wg0uo_493k.js.map"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "turbopack-3ce3jt2w3uhdj.js",
-      "info": {},
-      "size": 258,
-      "emitted": false,
-      "comparedForEmit": false,
-      "cached": false,
-      "chunks": [
-        "turbopack-3ce3jt2w3uhdj.js"
-      ]
-    },
-    {
-      "type": "asset",
-      "name": "turbopack-3ce3jt2w3uhdj.js.map",
+      "name": "turbopack-3_aqk4tr7ngmy.js.map",
       "info": {},
       "size": 53,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "turbopack-3ce3jt2w3uhdj.js.map"
+        "turbopack-3_aqk4tr7ngmy.js.map"
       ]
     }
   ],
@@ -133,7 +133,7 @@
       "name": "async_chunk/input/node_modules/bar/index.js",
       "id": 2,
       "chunks": [
-        "23_wg0uo_493k.js"
+        "18cbom_5ma0ix.js"
       ],
       "size": 152
     },
@@ -141,7 +141,7 @@
       "name": "async_chunk/input/node_modules/foo/index.js",
       "id": 26,
       "chunks": [
-        "1nvhz2_b34vie.js"
+        "2scvaewz8d-m9.js"
       ],
       "size": 152
     },
@@ -149,7 +149,7 @@
       "name": "async_chunk/input/index.js",
       "id": 45,
       "chunks": [
-        "23_wg0uo_493k.js"
+        "18cbom_5ma0ix.js"
       ],
       "size": 266
     },
@@ -157,7 +157,7 @@
       "name": "async_chunk/input/import.js",
       "id": 76,
       "chunks": [
-        "1nvhz2_b34vie.js"
+        "2scvaewz8d-m9.js"
       ],
       "size": 327
     },
@@ -165,7 +165,7 @@
       "name": "async_chunk/input/import.js",
       "id": 92,
       "chunks": [
-        "23_wg0uo_493k.js"
+        "18cbom_5ma0ix.js"
       ],
       "size": 231
     }

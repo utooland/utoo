@@ -1,7 +1,5 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-(()=>{"use strict";return[
-"[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,(()=>{"use strict";return["[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "default",
@@ -161,9 +159,8 @@ var __TURBOPACK__default__export__ = {
     getRefreshBoundarySignature: getRefreshBoundarySignature,
     scheduleUpdate: scheduleUpdate
 };
-}),
-"[@utoo/pack-runtime]/react-refresh/internal/react-refresh-runtime.development.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-"use strict";
+}),"[@utoo/pack-runtime]/react-refresh/internal/react-refresh-runtime.development.js [client] (ecmascript)",((__turbopack_context__, module, exports) => {
+
 
 // react@0.18.0: https://unpkg.com/react-refresh@0.18.0/cjs/react-refresh-runtime.development.js
 /**
@@ -399,9 +396,8 @@ var __TURBOPACK__default__export__ = {
     exports.register = register;
     exports.setSignature = setSignature;
 }();
-}),
-"[@utoo/pack-runtime]/react-refresh/runtime.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[@utoo/pack-runtime]/react-refresh/runtime.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$react$2d$refresh$2f$internal$2f$helpers$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)");
@@ -427,9 +423,8 @@ self.$RefreshInterceptModuleExecution$ = function(webpackModuleId) {
         self.$RefreshSig$ = prevRefreshSig;
     };
 };
-}),
-"[project]/style/css_data_uri/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/style/css_data_uri/input/index.js [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$style$2f$css_data_uri$2f$input$2f$path$2d$alias$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/style/css_data_uri/input/path-alias.js [client] (ecmascript)");
@@ -440,9 +435,8 @@ console.log(__TURBOPACK__imported__module__$5b$project$5d2f$style$2f$css_data_ur
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }
-}),
-"[project]/style/css_data_uri/input/path-alias.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/style/css_data_uri/input/path-alias.js [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "marker",
@@ -452,9 +446,7 @@ const marker = "WILDCARD_PATHS_APPLIED";
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }
-}),
-]})(),
-"[project]/style/css_data_uri/input/style.module.css [client] (css module)", ((__turbopack_context__) => {
+})]})(),"[project]/style/css_data_uri/input/style.module.css [client] (css module)",((__turbopack_context__) => {
 
 __turbopack_context__.v({
   "inline": "style-module__jJus2a__inline",
@@ -462,5 +454,4 @@ __turbopack_context__.v({
   "relative": "style-module__jJus2a__relative",
   "uppercase": "style-module__jJus2a__uppercase",
 });
-}),
-]);
+})]);

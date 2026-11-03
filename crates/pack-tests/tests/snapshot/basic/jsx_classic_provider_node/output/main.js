@@ -62,14 +62,6 @@ __turbopack_context__.s([
     fragmentJsx
 ]);
 }),
-"[project]/basic/jsx_classic_provider/input/commonjs.js [library-server] (ecmascript)", ((__turbopack_context__, module, exports) => {
-
-if (1 < 2) {
-    module.exports = 42;
-    return;
-}
-module.exports = 0;
-}),
 "[project]/basic/jsx_classic_provider/input/custom.tsx [library-server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -255,6 +247,14 @@ __turbopack_context__.s([
     0,
     valueNamespace
 ]);
+}),
+"[project]/basic/jsx_classic_provider/input/commonjs.js [library-server] (ecmascript)", ((__turbopack_context__, module, exports) => {
+
+if (1 < 2) {
+    module.exports = 42;
+    return;
+}
+module.exports = 0;
 }),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/basic/jsx_classic_provider/input/index.tsx [library-server] (ecmascript)"]}],

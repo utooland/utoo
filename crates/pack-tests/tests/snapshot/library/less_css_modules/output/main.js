@@ -3,6 +3,43 @@
 })([
 ["main.js",
 
+12, ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__37__ = __turbopack_context__.i(37);
+var __TURBOPACK__imported__module__15__ = __turbopack_context__.i(15);
+;
+;
+var options = {};
+options.insert = "head";
+options.singleton = false;
+var update = (0, __TURBOPACK__imported__module__15__["default"])([
+    [
+        "library/less_css_modules/input/index.less.css?modules",
+        __TURBOPACK__imported__module__37__["default"],
+        undefined,
+        undefined
+    ]
+], options);
+var __TURBOPACK__default__export__ = {};
+__turbopack_context__.s([
+    "default",
+    0,
+    __TURBOPACK__default__export__
+]);
+}),
+91, ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__56__ = __turbopack_context__.i(56);
+;
+var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__56__["default"];
+__turbopack_context__.s([
+    "default",
+    0,
+    __TURBOPACK__default__export__
+]);
+}),
 15, ((__turbopack_context__, module, exports) => {
 
 /**
@@ -229,49 +266,12 @@ module.exports = function(list, options) {
 
 __turbopack_context__.v("/* [project]/library/less_css_modules/input/index.less.css?modules [library-client] (css) */\n.-C211G_widget-button {\n  color: red;\n}\n\n/*# sourceMappingURL=input_index.less.css.map*/");
 }),
-12, ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__37__ = __turbopack_context__.i(37);
-var __TURBOPACK__imported__module__15__ = __turbopack_context__.i(15);
-;
-;
-var options = {};
-options.insert = "head";
-options.singleton = false;
-var update = (0, __TURBOPACK__imported__module__15__["default"])([
-    [
-        "library/less_css_modules/input/index.less.css?modules",
-        __TURBOPACK__imported__module__37__["default"],
-        undefined,
-        undefined
-    ]
-], options);
-var __TURBOPACK__default__export__ = {};
-__turbopack_context__.s([
-    "default",
-    0,
-    __TURBOPACK__default__export__
-]);
-}),
 56, ((__turbopack_context__) => {
 
 __turbopack_context__.i(12);
 __turbopack_context__.v({
   "widget-button": "-C211G_widget-button",
 });
-}),
-91, ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__56__ = __turbopack_context__.i(56);
-;
-var __TURBOPACK__default__export__ = __TURBOPACK__imported__module__56__["default"];
-__turbopack_context__.s([
-    "default",
-    0,
-    __TURBOPACK__default__export__
-]);
 }),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":[91]}],

@@ -1,6 +1,5 @@
-(()=>{"use strict";(self["TURBOPACK"] || (self["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+(()=>{"use strict";(self.TURBOPACK||(self.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,"[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "default",
@@ -160,9 +159,8 @@ var __TURBOPACK__default__export__ = {
     getRefreshBoundarySignature: getRefreshBoundarySignature,
     scheduleUpdate: scheduleUpdate
 };
-}),
-"[@utoo/pack-runtime]/react-refresh/internal/react-refresh-runtime.development.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-"use strict";
+}),"[@utoo/pack-runtime]/react-refresh/internal/react-refresh-runtime.development.js [client] (ecmascript)",((__turbopack_context__, module, exports) => {
+
 
 // react@0.18.0: https://unpkg.com/react-refresh@0.18.0/cjs/react-refresh-runtime.development.js
 /**
@@ -398,9 +396,8 @@ var __TURBOPACK__default__export__ = {
     exports.register = register;
     exports.setSignature = setSignature;
 }();
-}),
-"[project]/hmr/refresh_host_exports/input/index.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/hmr/refresh_host_exports/input/index.js [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$hmr$2f$refresh_host_exports$2f$input$2f$swc$2d$typeof$2e$cjs__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/hmr/refresh_host_exports/input/swc-typeof.cjs [client] (ecmascript)");
@@ -418,9 +415,8 @@ globalThis.refreshHostExports = {
     runtime: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$react$2d$refresh$2f$internal$2f$react$2d$refresh$2d$runtime$2e$development$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"],
     userTypeof: userTypeof
 };
-}),
-"[project]/hmr/refresh_host_exports/input/swc-typeof.cjs [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-"use strict";
+}),"[project]/hmr/refresh_host_exports/input/swc-typeof.cjs [client] (ecmascript)",((__turbopack_context__, module, exports) => {
+
 
 // @swc/helpers 0.5.15, MIT. Keep its actual constructor probe: an empty helper
 // stub would hide the cross-origin failure this fixture is intended to catch.
@@ -429,5 +425,4 @@ function _type_of(obj) {
     return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj;
 }
 exports._ = _type_of;
-}),
-]);})()
+})]);})()

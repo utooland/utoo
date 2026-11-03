@@ -1,6 +1,5 @@
-(()=>{"use strict";(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[project]/node_modules/@emotion/react/index.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+(()=>{"use strict";(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,"[project]/node_modules/@emotion/react/index.js [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "Global",
@@ -24,9 +23,8 @@ function Global() {
 function keyframes() {
     return 'purposefully empty stub for @emotion/react/index.js';
 }
-}),
-"[project]/node_modules/@emotion/react/jsx-dev-runtime.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/node_modules/@emotion/react/jsx-dev-runtime.js [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "jsxDEV",
@@ -35,9 +33,8 @@ __turbopack_context__.s([
 function jsxDEV() {
     return 'purposefully empty stub for @emotion/react/jsx-dev-runtime.js';
 }
-}),
-"[project]/style/emotion_dev/input/index.tsx [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/style/emotion_dev/input/index.tsx [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "default",
@@ -65,5 +62,4 @@ function App() {
         columnNumber: 10
     }, this);
 }
-}),
-]);})()
+})]);})()
