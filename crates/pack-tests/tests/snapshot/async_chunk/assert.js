@@ -29,25 +29,40 @@ assert.notStrictEqual(
 );
 
 const factoriesByChunk = new Map();
-for (const asset of stats.assets) {
-  if (!asset.name.endsWith(".js") || asset.name === "main.js") {
-    continue;
+function collectFactories(items, factories) {
+  const ids = [];
+  for (const item of items) {
+    if (Array.isArray(item)) {
+      assert.strictEqual(ids.length, 0, "expected strict groups before module ids");
+      collectFactories(item, factories);
+    } else if (typeof item === "function") {
+      assert.ok(ids.length, "expected module ids before each factory");
+      for (const id of ids) factories.set(id, item);
+      ids.length = 0;
+    } else {
+      assert.ok(typeof item === "string" || typeof item === "number");
+      ids.push(item);
+    }
   }
+  assert.strictEqual(ids.length, 0, "expected a factory after module ids");
+}
 
+for (const chunk of new Set(stats.modules.flatMap((module) => module.chunks))) {
   globalThis.utooChunk_async_chunk_test = [];
-  require(path.join(outputDir, asset.name));
+  require(path.join(outputDir, chunk));
 
   const factories = new Map();
   for (const registration of globalThis.utooChunk_async_chunk_test) {
-    for (let index = 1; index < registration.length; index += 2) {
-      const id = registration[index];
-      const factory = registration[index + 1];
-      if (typeof factory === "function") {
-        factories.set(id, factory);
-      }
+    if (
+      registration.length === 2 &&
+      typeof registration[1] === "object" &&
+      !Array.isArray(registration[1])
+    ) {
+      continue;
     }
+    collectFactories(registration.slice(1), factories);
   }
-  factoriesByChunk.set(asset.name, factories);
+  factoriesByChunk.set(chunk, factories);
 }
 
 for (const module of stats.modules) {
@@ -66,6 +81,7 @@ for (const module of stats.modules) {
 
     assert.strictEqual(
       module.size,
+      // Chunk item code surrounds the emitted factory with parentheses.
       Buffer.byteLength(factory.toString()) + 2,
       `stats module ${module.id} must use generated module factory size`,
     );

@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [{ "import": "input/index.js", "name": "main" }],
+    "output": {
+      "path": "output",
+      "chunkLoadingGlobal": "stats_strict_mixed"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named",
+      "concatenateModules": false
+    },
+    "sourceMaps": false,
+    "stats": true
+  }
+}

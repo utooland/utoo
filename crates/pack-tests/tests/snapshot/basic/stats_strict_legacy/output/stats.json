@@ -1,0 +1,89 @@
+{
+  "entrypoints": {
+    "main": {
+      "name": "main",
+      "chunks": [
+        "0a1moazul-pyo.js",
+        "turbopack-3yyq6in3q_z9j.js"
+      ],
+      "assets": [
+        {
+          "name": "0a1moazul-pyo.js"
+        },
+        {
+          "name": "turbopack-3yyq6in3q_z9j.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "0a1moazul-pyo.js",
+      "size": 936,
+      "hash": "",
+      "files": [
+        "0a1moazul-pyo.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "turbopack-3yyq6in3q_z9j.js",
+      "size": 314,
+      "hash": "",
+      "files": [
+        "turbopack-3yyq6in3q_z9j.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "0a1moazul-pyo.js",
+      "info": {},
+      "size": 936,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "0a1moazul-pyo.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "turbopack-3yyq6in3q_z9j.js",
+      "info": {},
+      "size": 314,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "turbopack-3yyq6in3q_z9j.js"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/stats_strict_legacy/input/index.js",
+      "id": "[project]/basic/stats_strict_legacy/input/index.js [client] (ecmascript)",
+      "chunks": [
+        "0a1moazul-pyo.js"
+      ],
+      "size": 493
+    },
+    {
+      "name": "basic/stats_strict_legacy/input/value.js",
+      "id": "[project]/basic/stats_strict_legacy/input/value.js [client] (ecmascript)",
+      "chunks": [
+        "0a1moazul-pyo.js"
+      ],
+      "size": 149
+    }
+  ]
+}

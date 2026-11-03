@@ -193,7 +193,7 @@
       "chunks": [
         "16q9v-e01znjv.js"
       ],
-      "size": 120
+      "size": 107
     },
     {
       "name": "basic/stats_with_server_and_libraries/input/a.ts",
@@ -209,7 +209,7 @@
       "chunks": [
         "16q9v-e01znjv.js"
       ],
-      "size": 936
+      "size": 923
     },
     {
       "name": "basic/stats_with_server_and_libraries/input/b.ts",
@@ -217,7 +217,7 @@
       "chunks": [
         "16q9v-e01znjv.js"
       ],
-      "size": 120
+      "size": 107
     },
     {
       "name": "basic/stats_with_server_and_libraries/input/b.ts",

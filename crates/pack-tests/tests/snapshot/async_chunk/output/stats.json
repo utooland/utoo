@@ -143,7 +143,7 @@
       "chunks": [
         "2scvaewz8d-m9.js"
       ],
-      "size": 152
+      "size": 139
     },
     {
       "name": "async_chunk/input/index.js",
@@ -159,7 +159,7 @@
       "chunks": [
         "2scvaewz8d-m9.js"
       ],
-      "size": 327
+      "size": 314
     },
     {
       "name": "async_chunk/input/import.js",

@@ -1,0 +1,105 @@
+{
+  "entrypoints": {
+    "main": {
+      "name": "main",
+      "chunks": [
+        "08m47nh2x83ub.js",
+        "turbopack-095k_x3jyqdrs.js"
+      ],
+      "assets": [
+        {
+          "name": "08m47nh2x83ub.js"
+        },
+        {
+          "name": "turbopack-095k_x3jyqdrs.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "08m47nh2x83ub.js",
+      "size": 2124,
+      "hash": "",
+      "files": [
+        "08m47nh2x83ub.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "turbopack-095k_x3jyqdrs.js",
+      "size": 323,
+      "hash": "",
+      "files": [
+        "turbopack-095k_x3jyqdrs.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "08m47nh2x83ub.js",
+      "info": {},
+      "size": 2124,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "08m47nh2x83ub.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "turbopack-095k_x3jyqdrs.js",
+      "info": {},
+      "size": 323,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "turbopack-095k_x3jyqdrs.js"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/stats_strict_mixed/input/first.js",
+      "id": "[project]/basic/stats_strict_mixed/input/first.js [client] (ecmascript)",
+      "chunks": [
+        "08m47nh2x83ub.js"
+      ],
+      "size": 125
+    },
+    {
+      "name": "basic/stats_strict_mixed/input/index.js",
+      "id": "[project]/basic/stats_strict_mixed/input/index.js [client] (ecmascript)",
+      "chunks": [
+        "08m47nh2x83ub.js"
+      ],
+      "size": 1282
+    },
+    {
+      "name": "basic/stats_strict_mixed/input/second.js",
+      "id": "[project]/basic/stats_strict_mixed/input/second.js [client] (ecmascript)",
+      "chunks": [
+        "08m47nh2x83ub.js"
+      ],
+      "size": 127
+    },
+    {
+      "name": "basic/stats_strict_mixed/input/sloppy.cjs",
+      "id": "[project]/basic/stats_strict_mixed/input/sloppy.cjs [client] (ecmascript)",
+      "chunks": [
+        "08m47nh2x83ub.js"
+      ],
+      "size": 104
+    }
+  ]
+}

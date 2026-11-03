@@ -161,8 +161,8 @@ fn test(resource: PathBuf) {
     }
 
     let _guard = SNAPSHOT_TEST_LOCK.lock().unwrap();
-    run(resource.clone()).unwrap();
-    run_assertion(&resource).unwrap();
+    let project_path = run(resource).unwrap();
+    run_assertion(&project_path).unwrap();
 }
 
 fn run_assertion(resource: &Path) -> Result<()> {
@@ -189,8 +189,15 @@ fn run_assertion(resource: &Path) -> Result<()> {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn run(resource: PathBuf) -> Result<()> {
+async fn run(resource: PathBuf) -> Result<PathBuf> {
     let snapshot_ignore_prefixes = snapshot_ignore_prefixes(&resource)?;
+    let SnapshotProjectOptions {
+        project: project_options,
+        write_endpoints_individually,
+        expected_app_endpoints,
+        expected_individual_app_output_paths,
+    } = project_options_from_resource(&resource)?;
+    let project_path = PathBuf::from(project_options.project_path.as_str());
     let tt = TurboTasks::new(TurboTasksBackend::new(
         BackendOptions {
             storage_mode: None,
@@ -203,12 +210,6 @@ async fn run(resource: PathBuf) -> Result<()> {
         noop_backing_storage(),
     ));
     tt.run_once(async move {
-        let SnapshotProjectOptions {
-            project: project_options,
-            write_endpoints_individually,
-            expected_app_endpoints,
-            expected_individual_app_output_paths,
-        } = project_options_from_resource(&resource)?;
         let container_op = ProjectContainer::new_operation(rcstr!("project"), project_options.dev);
         ProjectContainer::initialize(container_op, project_options).await?;
 
@@ -334,7 +335,7 @@ async fn run(resource: PathBuf) -> Result<()> {
     })
     .await?;
 
-    Ok(())
+    Ok(project_path)
 }
 
 fn project_options_from_resource(resource: &Path) -> Result<SnapshotProjectOptions> {
