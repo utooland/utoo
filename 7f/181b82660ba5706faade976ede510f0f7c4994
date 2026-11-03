@@ -1,0 +1,53 @@
+crates/pack-tests/tests/snapshot/basic/stats_strict_mixed/config.json
+  s_a09ed228621c85::t_894141a8e50883 1-5,7-16
+  s_a09ed228621c85::t_f13fafbd0df68c 6
+crates/pack-tests/tests/snapshot/basic/stats_strict_legacy/input/value.js
+  s_a09ed228621c85::t_894141a8e50883 1-3
+crates/pack-tests/tests/snapshot/basic/stats_strict_legacy/config.json
+  s_a09ed228621c85::t_f13fafbd0df68c 7
+  s_a09ed228621c85::t_894141a8e50883 1-6,8-17
+crates/pack-tests/tests/snapshot/basic/stats_strict_mixed/input/index.js
+  s_a09ed228621c85::t_894141a8e50883 1-5
+crates/pack-tests/tests/snapshot/basic/stats_strict_mixed/input/sloppy.cjs
+  s_a09ed228621c85::t_894141a8e50883 1-3
+crates/pack-tests/tests/snapshot/basic/stats_strict_mixed/input/second.js
+  s_a09ed228621c85::t_894141a8e50883 1-3
+crates/pack-tests/tests/snapshot/target_node/stats_node/assert.js
+  s_a09ed228621c85::t_155a5a60b18a7e 1-14,16-49
+  s_a09ed228621c85::t_d3211d98582201 15
+crates/pack-tests/tests/snapshot.rs
+  s_a09ed228621c85::t_155a5a60b18a7e 164-165,192
+  s_a09ed228621c85::t_08beaafd852493 194-200,338
+crates/pack-tests/tests/snapshot/basic/stats_strict_legacy/assert.js
+  s_a09ed228621c85::t_894141a8e50883 1-64
+crates/pack-tests/tests/snapshot/basic/stats_strict_legacy/input/index.js
+  s_a09ed228621c85::t_894141a8e50883 1-3
+crates/pack-tests/tests/snapshot/basic/stats_strict_mixed/assert.js
+  s_a09ed228621c85::t_894141a8e50883 1-66
+crates/pack-tests/tests/snapshot/async_chunk/assert.js
+  s_a09ed228621c85::t_155a5a60b18a7e 32-35,37-45,47-48,63,84
+  s_a09ed228621c85::t_08beaafd852493 56-61
+  s_a09ed228621c85::t_d3211d98582201 36,50,52,65
+crates/pack-api/src/webpack_stats.rs
+  s_a09ed228621c85::t_3ad0f95eaa43e5 21,23,44-48,52,76-88,93-98,106,204-205,226-227,246-253,353-358
+  s_a09ed228621c85::t_8125d21365734e 22
+  s_a09ed228621c85::t_1a00bdec1b0c2a 16
+crates/pack-tests/tests/snapshot/basic/stats_strict_mixed/input/first.js
+  s_a09ed228621c85::t_894141a8e50883 1-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f181b82660ba5706faade976ede510f0f7c4994",
+  "prompts": {},
+  "sessions": {
+    "s_a09ed228621c85": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a026-acf7-7392-a873-6b4a84dcfce7",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
