@@ -1,0 +1,46 @@
+crates/pack-core/src/shared/transforms/jsx_dev_filename.rs
+  s_a09ed228621c85::t_3434fd1c300105 51-54,56-57,72-75,90-93,101-104,109-112
+crates/pack-api/src/webpack_stats.rs
+  s_a09ed228621c85::t_7c345f6fe78ef1 21,65-67
+crates/pack-core/src/shared/transforms/default_export_namer.rs
+  s_a09ed228621c85::t_3434fd1c300105 73-76
+crates/pack-core/src/library/ecmascript/chunk.rs
+  s_a09ed228621c85::t_7c345f6fe78ef1 23,83-85,443-445
+crates/pack-core/js/tsconfig.library-node.json
+  s_a09ed228621c85::t_3a0c69d3fb9611 1-5
+crates/pack-core/js/tsconfig.json
+  s_a09ed228621c85::t_3a0c69d3fb9611 6,12-13
+crates/pack-api/src/library.rs
+  s_a09ed228621c85::t_a7dbd84a176d56 29,341
+crates/pack-api/src/project.rs
+  s_a09ed228621c85::t_a7dbd84a176d56 1478,1482
+  s_a09ed228621c85::t_012b39aef3a36f 1893
+  s_a09ed228621c85::t_89c7f5c8870e36 59,714-733,1249,1483,1882,1885,1892,1894,1911-1919,1933,1940-1944
+crates/pack-core/src/library/chunking_context.rs
+  s_a09ed228621c85::t_a7dbd84a176d56 5,34,751,760-764,770,883,894-897,904,990
+  s_a09ed228621c85::t_7c345f6fe78ef1 42,453
+crates/pack-core/js/src/library/runtime-backend-node.ts
+  s_a09ed228621c85::t_3a0c69d3fb9611 17-18
+  s_a09ed228621c85::t_bb2482d51ba2b1 95
+crates/pack-api/src/app.rs
+  s_a09ed228621c85::t_a7dbd84a176d56 34,376,417,820-826,866,869-872,876-879,906,911-912,948
+  s_a09ed228621c85::t_f7340e8df6f4fb 827-828,873-875
+crates/pack-core/js/package.json
+  s_a09ed228621c85::t_3a0c69d3fb9611 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3367e9751474cb144dffb511d0f2addfaf26a280",
+  "prompts": {},
+  "sessions": {
+    "s_a09ed228621c85": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a026-acf7-7392-a873-6b4a84dcfce7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
