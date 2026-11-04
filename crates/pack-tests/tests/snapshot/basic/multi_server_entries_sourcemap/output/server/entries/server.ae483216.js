@@ -43,6 +43,9 @@ const SUPPORT_COMPONENT_CHUNKS = false;
  * nodejs build-base.ts). Browser production (build-base.ts) leaves it as `false` since it
  * uses plain Module objects.
  */ let createModuleWithDirectionFlag = false;
+/**
+ * Maps module IDs to the factory functions that instantiate them.
+ */ const moduleFactories = new Map();
 const REEXPORTED_OBJECTS = new WeakMap();
 /**
  * Constructs the `__turbopack_context__` object for a module.
@@ -58,10 +61,21 @@ const REEXPORTED_OBJECTS = new WeakMap();
     this.e = exports;
 }
 const contextPrototype = Context.prototype;
+contextPrototype.M = moduleFactories;
 const hasOwnProperty = Object.prototype.hasOwnProperty;
 const toStringTag = typeof Symbol !== 'undefined' && Symbol.toStringTag;
 function defineProp(obj, name, options) {
     if (!hasOwnProperty.call(obj, name)) Object.defineProperty(obj, name, options);
+}
+/**
+ * Returns the cached module for `id`, or `undefined` if it has not been
+ * instantiated yet. Rethrows the error if the module's factory threw.
+ */ function getCachedModule(moduleCache, id) {
+    const module = moduleCache.get(id);
+    if (module?.error) {
+        throw module.error;
+    }
+    return module;
 }
 function getOverwrittenModule(moduleCache, id) {
     let module = moduleCache.get(id);
@@ -467,7 +481,7 @@ function esmImport(id) {
 }
 contextPrototype.i = esmImport;
 function asyncLoader(moduleId) {
-    const loader = this.r(moduleId);
+    const loader = getOrInstantiateModuleFromParent(moduleId, this.m).exports;
     return loader(esmImport.bind(this));
 }
 contextPrototype.A = asyncLoader;
@@ -539,11 +553,11 @@ contextPrototype.f = moduleContext;
 // Load the CompressedModuleFactories of a chunk into the `moduleFactories` Map.
 // The flat format alternates one or more module IDs with their factory function.
 // Strict factories can be prepended as a nested array.
-function installCompressedModuleFactories(chunkModules, offset, moduleFactories, newModuleId) {
+function installCompressedModuleFactories(chunkModules, offset, newModuleId) {
     let i = offset;
     const strictFactories = chunkModules[i];
     if (Array.isArray(strictFactories)) {
-        installCompressedModuleFactories(strictFactories, 0, moduleFactories, newModuleId);
+        installCompressedModuleFactories(strictFactories, 0, newModuleId);
         i++;
     }
     while(i < chunkModules.length){
@@ -712,8 +726,6 @@ function applyModuleFactoryName(factory) {
 /// <reference path="../../../../../next.js/turbopack/crates/turbopack-ecmascript-runtime/js/src/shared/runtime/runtime-types.d.ts" />
 // Provided by build
 let BACKEND;
-const moduleFactories = new Map();
-contextPrototype.M = moduleFactories;
 /**
  * Determine the chunk to register from a registration entry.
  * In library builds, chunks are always string paths or script objects.
@@ -792,14 +804,7 @@ contextPrototype.c = moduleCache;
  */ // @ts-ignore
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
-    const module = moduleCache.get(moduleId);
-    if (module) {
-        if (module.error) {
-            throw module.error;
-        }
-        return module;
-    }
-    return instantiateModule(moduleId, SourceType.Runtime, chunkPath);
+    return getCachedModule(moduleCache, moduleId) ?? instantiateModule(moduleId, SourceType.Runtime, chunkPath);
 }
 /**
  * Retrieves a module from the cache, or instantiate it if it is not cached.
@@ -807,14 +812,7 @@ function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
 // @ts-ignore
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const getOrInstantiateModuleFromParent = (id, sourceModule)=>{
-    const module = moduleCache.get(id);
-    if (module) {
-        if (module.error) {
-            throw module.error;
-        }
-        return module;
-    }
-    return instantiateModule(id, SourceType.Parent, sourceModule.id);
+    return getCachedModule(moduleCache, id) ?? instantiateModule(id, SourceType.Parent, sourceModule.id);
 };
 function instantiateModule(id, sourceType, sourceData) {
     const moduleFactory = moduleFactories.get(id);
@@ -857,7 +855,7 @@ function registerChunk(registration) {
         runtimeParams = registration[1];
     } else {
         runtimeParams = undefined;
-        installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories);
+        installCompressedModuleFactories(registration, /* offset= */ 1);
     }
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
@@ -921,7 +919,7 @@ contextPrototype.q = exportUrl;
                 }
                 const relativeChunkPath = nodePath.relative(nodePath.dirname(chunkPath), otherChunkPath);
                 const chunkModules = require(nodePath.resolve(__dirname, relativeChunkPath));
-                installCompressedModuleFactories(chunkModules, 0, moduleFactories);
+                installCompressedModuleFactories(chunkModules, 0);
             }
             if (params.runtimeModuleIds.length > 0) {
                 for (const moduleId of params.runtimeModuleIds){

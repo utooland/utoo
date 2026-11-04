@@ -31,7 +31,7 @@ use turbopack_core::{
     module::{Module, Modules},
     module_graph::{
         GraphEntries, GraphTraversalAction, ModuleGraph,
-        chunk_group_info::{ChunkGroup, ChunkGroupEntry, EntryHeuristics},
+        chunk_group_info::{ChunkGroupEntry, ChunkGroupKey, EntryHeuristics},
     },
     output::OutputAssets,
     reference_type::{EntryReferenceSubType, ReferenceType},
@@ -373,7 +373,7 @@ impl AppEntrypoint {
                     )
                     .with_query(query.into())
                     .into_vc(),
-                    ChunkGroup::Entry(
+                    ChunkGroupKey::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?
                             .iter()
@@ -414,7 +414,7 @@ impl AppEntrypoint {
                 .server_chunking_context()
                 .entry_chunk_group(
                     project.dist_root().owned().await?.join(name)?,
-                    ChunkGroup::Entry(
+                    ChunkGroupKey::Entry(
                         self.entry_evaluatable_assets(asset_context, runtime_entries)
                             .await?
                             .iter()
@@ -817,8 +817,15 @@ impl AppProject {
             })
             .collect::<Vec<_>>();
         let all_entry_modules = entry_modules.iter().flatten().copied().collect::<Vec<_>>();
-        let initial_server_module_graph =
-            project.server_fn_module_graph(Vc::cell(all_entry_modules.clone()));
+        let entry_groups = entry_modules
+            .iter()
+            .map(|modules| ChunkGroupEntry::Entry {
+                modules: modules.clone(),
+                heuristics: EntryHeuristics::default(),
+            })
+            .collect::<Vec<_>>();
+        let initial_server_module_graph = project
+            .server_fn_module_graph(GraphEntries::from_chunk_groups(entry_groups.clone()).cell());
         let initial_module_graph = initial_server_module_graph.await?;
 
         let mut module_usage = FxHashMap::default();
@@ -854,23 +861,22 @@ impl AppProject {
         // A shared module's dependencies are used by at least the same entries, so build wider
         // groups first and make them available to the narrower groups that depend on them.
         shared_module_groups.sort_by(|(a, _), (b, _)| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
-        let shared_modules = shared_module_groups
-            .iter()
-            .flat_map(|(_, modules)| modules.iter().copied())
-            .collect::<Vec<_>>();
-
         // Shared modules are graph roots too, allowing their chunk group to be emitted first and
         // marked available while each entry chunk is constructed.
-        let server_module_graph = if shared_modules.is_empty() {
+        let server_module_graph = if shared_module_groups.is_empty() {
             initial_server_module_graph
         } else {
-            let mut graph_entries = all_entry_modules;
-            graph_entries.extend(
-                shared_modules
-                    .iter()
-                    .map(|module| ResolvedVc::upcast(*module)),
-            );
-            project.server_fn_module_graph(Vc::cell(graph_entries))
+            let mut graph_entries = entry_groups;
+            graph_entries.extend(shared_module_groups.iter().map(|(_, modules)| {
+                ChunkGroupEntry::Entry {
+                    modules: modules
+                        .iter()
+                        .map(|module| ResolvedVc::upcast(*module))
+                        .collect(),
+                    heuristics: EntryHeuristics::default(),
+                }
+            }));
+            project.server_fn_module_graph(GraphEntries::from_chunk_groups(graph_entries).cell())
         };
         let server_chunking_context = project.server_fn_chunking_context();
 
@@ -897,12 +903,13 @@ impl AppProject {
             let shared_group = server_chunking_context
                 .chunk_group(
                     shared_ident,
-                    ChunkGroup::Entry(
+                    vec![ChunkGroupKey::Entry(
                         shared_modules
                             .iter()
                             .map(|module| ResolvedVc::upcast(*module))
                             .collect(),
-                    ),
+                    )]
+                    .into(),
                     server_module_graph,
                     entry_availability,
                 )
@@ -938,7 +945,7 @@ impl AppProject {
                         let chunk_group_result = server_chunking_context
                             .evaluated_chunk_group(
                                 ident,
-                                ChunkGroup::Entry(modules),
+                                ChunkGroupKey::Entry(modules),
                                 server_module_graph,
                                 shared_assets,
                                 entry_availability,

@@ -54,6 +54,7 @@ strum                             = { version = "0.26", features = ["derive"] }
 serde_json                        = "1.0.140"
 serde_path_to_error               = "0.1.16"
 simd-json                         = "0.17.0"
+smallvec                          = "1.15.1"
 tempfile                          = "3"
 thiserror                         = "1.0"
 tokio                             = { version = "=1.51.0" }
@@ -63,24 +64,24 @@ toml                              = "0.8"
 tracing                           = "0.1.41"
 tracing-subscriber                = { version = "0.3.19", features = ["env-filter", "fmt"] }
 # SWC crates
-swc_core                          = { version = "79.0.0", default-features = false, features = [
+swc_core                          = { version = "82.2.0", default-features = false, features = [
   "ecma_loader_lru",
   "ecma_loader_parking_lot",
   "parallel_rayon",
 ] }
-swc_plugin_backend_wasmtime       = { version = "16.0.0" }
+swc_plugin_backend_wasmtime       = { version = "17.0.0" }
 testing                           = "27.0.0"
 # Keep consistent with preset_env_base through swc_core
-browserslist-rs                   = "0.20.0"
+browserslist-rs                   = "0.21.0"
 mdxjs                             = "1.0.4"
-modularize_imports                = "18.0.0"
-preset_env_base                   = "9.0.0"
-react_remove_properties           = "18.0.0"
-remove_console                    = "18.0.0"
-styled_components                 = "18.0.0"
-styled_jsx                        = "18.0.0"
-swc_emotion                       = "18.0.0"
-swc_relay                         = "18.0.0"
+modularize_imports                = "22.0.0"
+preset_env_base                   = "10.0.0"
+react_remove_properties           = "22.0.0"
+remove_console                    = "22.0.0"
+styled_components                 = "22.0.0"
+styled_jsx                        = "22.0.0"
+swc_emotion                       = "22.0.0"
+swc_relay                         = "22.0.0"
 indoc                             = "2.0.0"
 parking_lot                       = "0.12.4"
 qstring                           = "0.7.2"
@@ -133,7 +134,7 @@ turbopack-trace-utils             = { path = "./next.js/turbopack/crates/turbopa
 too_many_arguments = "allow"
 
 [patch.crates-io]
-bincode          = { git = "https://github.com/bgw/bincode.git", branch = "bgw/patches" }
+bincode          = { git = "https://github.com/vercel-labs/bincode-fork.git", branch = "main" }
 include_dir      = { git = "https://github.com/vercel-labs/include_dir", branch = "turbopack" }
 libmimalloc-sys  = { git = "https://github.com/utooland/mimalloc_rust.git" }
 lightningcss     = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
@@ -142,7 +143,7 @@ mimalloc         = { git = "https://github.com/utooland/mimalloc_rust.git" }
 parcel_selectors = { git = "https://github.com/utooland/lightningcss", branch = "support-css-module-global" }
 tokio            = { package = "tokio", git = "https://github.com/utooland/tokio.git" }
 tokio-util       = { package = "tokio-util", git = "https://github.com/utooland/tokio.git" }
-virtue           = { git = "https://github.com/bgw/virtue.git", branch = "bgw/fix-generic-default-parsing" }
+virtue           = { git = "https://github.com/vercel-labs/virtue-fork.git", branch = "trunk" }
 
 [profile.release]
 opt-level = "z"

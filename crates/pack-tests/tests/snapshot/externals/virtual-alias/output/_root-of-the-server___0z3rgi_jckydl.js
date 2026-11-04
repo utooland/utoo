@@ -1,11 +1,4 @@
-module.exports = [
-"[externals]/fc [external] (fc, cjs)", ((__turbopack_context__, module, exports) => {
-
-var mod = __turbopack_context__.x("fc", () => require("fc"));
-
-module.exports = mod;
-}),
-"[project]/externals/virtual-alias/input/index.js [server] (ecmascript)", ((__turbopack_context__) => {
+module.exports=["[project]/externals/virtual-alias/input/index.js [server] (ecmascript)",((__turbopack_context__) => {
 "use strict";
 
 var __TURBOPACK__imported__module__$5b$externals$5d2f$fc__$5b$external$5d$__$28$fc$2c$__cjs$29$__ = __turbopack_context__.i("[externals]/fc [external] (fc, cjs)");
@@ -40,5 +33,9 @@ __turbopack_context__.s([
     0,
     unscopedInitialized
 ]);
-}),
-];
+}),"[externals]/fc [external] (fc, cjs)",((__turbopack_context__, module, exports) => {
+
+var mod = __turbopack_context__.x("fc", () => require("fc"));
+
+module.exports = mod;
+})];

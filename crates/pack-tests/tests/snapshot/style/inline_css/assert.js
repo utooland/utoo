@@ -1,6 +1,7 @@
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const outputDir = path.join(__dirname, "output");
 const chunkFile = fs
@@ -17,31 +18,33 @@ const chunkFile = fs
 assert.ok(chunkFile, "expected an inline CSS output chunk");
 
 const chunk = fs.readFileSync(path.join(outputDir, chunkFile), "utf8");
-const cssModuleMarker =
-  '"[project]/style/inline_css/input/index.less?modules [client] (css module)"';
-const entryMarker =
-  '"[project]/style/inline_css/input/index.js [client] (ecmascript)"';
-// Match factory definitions (marker at line start followed by the factory),
-// not import calls that mention the same module id inside other factories.
-const cssModuleStart = chunk.indexOf(`\n${cssModuleMarker},`);
-const entryStart = chunk.indexOf(`\n${entryMarker},`);
-
-assert.notEqual(cssModuleStart, -1, "expected the CSS Modules facade");
-assert.notEqual(entryStart, -1, "expected the JavaScript entry");
-
-// Strict factories are grouped separately from non-strict ones, so the entry
-// may precede the facade. Slice the facade's own factory up to the next one.
-const nextFactoryStart = chunk.indexOf(
-  '\n"[project]/',
-  cssModuleStart + cssModuleMarker.length,
+const context = vm.createContext({ TURBOPACK: [] });
+vm.runInContext(chunk, context, { filename: chunkFile });
+// Strict factories may be grouped in a nested array. Inspect registrations
+// without depending on the generated chunk's whitespace or wrapper layout.
+const factories = context.TURBOPACK[0].slice(1).flat();
+const cssModuleIndex = factories.indexOf(
+  "[project]/style/inline_css/input/index.less?modules [client] (css module)",
 );
-const cssModuleFactory = chunk.slice(
-  cssModuleStart,
-  nextFactoryStart === -1 ? undefined : nextFactoryStart,
+assert.notEqual(cssModuleIndex, -1, "expected the CSS Modules facade");
+assert.ok(
+  factories.includes(
+    "[project]/style/inline_css/input/index.js [client] (ecmascript)",
+  ),
+  "expected the JavaScript entry",
 );
-
-assert.match(
-  cssModuleFactory,
-  /__turbopack_context__\.i\([^)]*index\.less\.css\?modules/,
+const cssModuleFactory = factories[cssModuleIndex + 1];
+assert.equal(typeof cssModuleFactory, "function");
+const imports = [];
+cssModuleFactory({
+  i(moduleId) {
+    imports.push(moduleId);
+  },
+  v() {},
+});
+assert.ok(
+  imports.some((moduleId) =>
+    /index\.less\.css\?modules.*\(inline css, ecmascript\)/.test(moduleId),
+  ),
   "CSS Modules facade must evaluate the inline style injection module",
 );

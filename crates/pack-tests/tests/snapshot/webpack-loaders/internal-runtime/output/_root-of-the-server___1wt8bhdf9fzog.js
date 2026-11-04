@@ -1,14 +1,12 @@
-(()=>{"use strict";(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([typeof document === "object" ? document.currentScript : undefined,
-"[@utoo/pack-runtime]/hmr/bootstrap.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+(()=>{"use strict";(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,"[@utoo/pack-runtime]/hmr/bootstrap.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/hmr/client.ts [client] (ecmascript)");
 ;
 (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initHMR"])("TURBOPACK_CHUNK_UPDATE_LISTENERS");
-}),
-"[@utoo/pack-runtime]/hmr/browser-logs.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[@utoo/pack-runtime]/hmr/browser-logs.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "initializeBrowserLogForwarding",
@@ -178,9 +176,8 @@ function captureStack(framesToSkip) {
 function isInternalHmrLog(args) {
     return typeof args[0] === "string" && args[0].startsWith("[HMR]");
 }
-}),
-"[@utoo/pack-runtime]/hmr/client.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[@utoo/pack-runtime]/hmr/client.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "initHMR",
@@ -208,9 +205,8 @@ function initHMR(chunkUpdateListenersGlobal = "TURBOPACK_CHUNK_UPDATE_LISTENERS"
         path: "/turbopack-hmr"
     });
 }
-}),
-"[@utoo/pack-runtime]/hmr/websocket.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[@utoo/pack-runtime]/hmr/websocket.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 // Adapted from https://github.com/vercel/next.js/blob/canary/packages/next/src/client/dev/error-overlay/websocket.ts
 __turbopack_context__.s([
@@ -347,9 +343,8 @@ function connectHMR(options) {
     }
     init();
 }
-}),
-"[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "default",
@@ -509,9 +504,8 @@ var __TURBOPACK__default__export__ = {
     getRefreshBoundarySignature: getRefreshBoundarySignature,
     scheduleUpdate: scheduleUpdate
 };
-}),
-"[@utoo/pack-runtime]/react-refresh/internal/react-refresh-runtime.development.js [client] (ecmascript)", ((__turbopack_context__, module, exports) => {
-"use strict";
+}),"[@utoo/pack-runtime]/react-refresh/internal/react-refresh-runtime.development.js [client] (ecmascript)",((__turbopack_context__, module, exports) => {
+
 
 // react@0.18.0: https://unpkg.com/react-refresh@0.18.0/cjs/react-refresh-runtime.development.js
 /**
@@ -747,9 +741,8 @@ var __TURBOPACK__default__export__ = {
     exports.register = register;
     exports.setSignature = setSignature;
 }();
-}),
-"[@utoo/pack-runtime]/react-refresh/runtime.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[@utoo/pack-runtime]/react-refresh/runtime.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$react$2d$refresh$2f$internal$2f$helpers$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/react-refresh/internal/helpers.ts [client] (ecmascript)");
@@ -775,9 +768,8 @@ self.$RefreshInterceptModuleExecution$ = function(webpackModuleId) {
         self.$RefreshSig$ = prevRefreshSig;
     };
 };
-}),
-"[project]/webpack-loaders/internal-runtime/input/index.mjs [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/webpack-loaders/internal-runtime/input/index.mjs [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$internal$2d$runtime$2f$input$2f$value$2e$js$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/webpack-loaders/internal-runtime/input/value.js.js [client] (ecmascript)");
@@ -786,9 +778,8 @@ console.log(__TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }
-}),
-"[project]/webpack-loaders/internal-runtime/input/value.js.js [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[project]/webpack-loaders/internal-runtime/input/value.js.js [client] (ecmascript)",((__turbopack_context__) => {
+
 
 __turbopack_context__.s([
     "default",
@@ -798,9 +789,8 @@ var __TURBOPACK__default__export__ = 'js-frontmatter';
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }
-}),
-"[turbopack]/browser/dev/hmr-client/hmr-client.ts [client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
+}),"[turbopack]/browser/dev/hmr-client/hmr-client.ts [client] (ecmascript)",((__turbopack_context__) => {
+
 
 /// <reference path="../../../shared/runtime/runtime-types.d.ts" />
 /// <reference path="../../../shared/runtime/dev-globals.d.ts" />
@@ -818,7 +808,10 @@ __turbopack_context__.s([
 ]);
 const TURBOPACK_CHUNK_UPDATE_LISTENERS_GLOBAL = 'TURBOPACK_CHUNK_UPDATE_LISTENERS';
 let lastSeenHmrVersion;
-function connect({ addMessageListener, sendMessage, onUpdateError = console.error, chunkUpdateListenersGlobal }) {
+function connect({ addMessageListener, sendMessage, onUpdateError = console.error, chunkUpdateListenersGlobal, initialHmrVersion }) {
+    // Initialize before replaying socket messages or draining queued listeners.
+    // A previously observed socket version takes priority on reconnection.
+    lastSeenHmrVersion ??= initialHmrVersion;
     addMessageListener((msg)=>{
         switch(msg.type){
             case 'turbopack-connected':
@@ -1292,5 +1285,4 @@ function triggerUpdate(msg) {
         updateCallbackSets.delete(key);
     }
 }
-}),
-]);})()
+})]);})()

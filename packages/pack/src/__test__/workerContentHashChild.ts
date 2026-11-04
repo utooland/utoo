@@ -47,6 +47,7 @@ async function readOutput(): Promise<Output> {
       querySelectorAll: () => [],
       createElement: () => ({ addEventListener() {} }),
       head: {
+        getElementsByTagName: () => [],
         appendChild(script: {
           src: string;
           onload?(): void;

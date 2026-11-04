@@ -5,7 +5,7 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc --noEmit -p tsconfig.library-node.json",
     "gen:node-polyfills": "node scripts/generate-node-polyfills.mjs"
   },
   "devDependencies": {

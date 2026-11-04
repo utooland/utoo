@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 53, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/externals/dotted-global/input/index.js"],"sourcesContent":["import multimedia, { VideoComponent } from \"@galacean/effects-plugin-multimedia\";\nimport normalized from \"normalized-plugin\";\nimport deep from \"deep-plugin\";\nimport legacySimple from \"legacy-simple\";\nimport legacyNested from \"legacy-nested\";\nimport legacyHyphen from \"legacy-hyphen\";\nimport legacyMissing from \"legacy-missing\";\nimport literalGlobal from \"literal-global\";\n\nconsole.log(\n  multimedia,\n  VideoComponent,\n  normalized,\n  deep,\n  legacySimple,\n  legacyNested,\n  legacyHyphen,\n  legacyMissing,\n  literalGlobal,\n);\n"],"names":["console","log"],"mappings":"AAAA;AACA;AACA;AACA;AAEA;AACA;AACA;;;;;;;;;AAEAA,QAAQC,GAAG,CACT,+JAAU,EACV,sKAAc,EACd,+IAAU,EACV,+KAAI,EACJ,2IAAY,EACZ,+IAAY,EACZ,uIAAY,EACZ,6IAAa,EACb,mJAAa"}}]
-}

@@ -3,13 +3,6 @@
 })([
 ["main.js",
 
-"[project]/library/node_auto_css_modules/input/index.css?modules [library-server] (css module)", ((__turbopack_context__) => {
-
-__turbopack_context__.v({
-  "primaryButton": "xcHvDW_primaryButton",
-  "title": "xcHvDW_title",
-});
-}),
 "[project]/library/node_auto_css_modules/input/index.js [library-server] (ecmascript)", ((__turbopack_context__) => {
 "use strict";
 
@@ -29,6 +22,13 @@ __turbopack_context__.s([
     0,
     titleClassName
 ]);
+}),
+"[project]/library/node_auto_css_modules/input/index.css?modules [library-server] (css module)", ((__turbopack_context__) => {
+
+__turbopack_context__.v({
+  "primaryButton": "xcHvDW_primaryButton",
+  "title": "xcHvDW_title",
+});
 }),
 ],
 ["main.js", {"otherChunks":["input_index.css"],"runtimeModuleIds":["[project]/library/node_auto_css_modules/input/index.js [library-server] (ecmascript)"]}],

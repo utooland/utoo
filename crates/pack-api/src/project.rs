@@ -55,9 +55,8 @@ use turbopack_core::{
     },
     compile_time_info::CompileTimeInfo,
     issue::{CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, StyledString},
-    module::Modules,
     module_graph::{
-        GraphEntries, ModuleGraph, SingleModuleGraph, VisitedModules,
+        GraphEntries, ModuleGraph, ModuleGraphOptions, SingleModuleGraph, VisitedModules,
         chunk_group_info::{ChunkGroupEntry, EntryHeuristics},
     },
     output::{
@@ -712,6 +711,26 @@ impl Issue for ConflictIssue {
 #[turbo_tasks::value(transparent)]
 pub struct OutputAssetVec(pub Vec<ResolvedVc<Box<dyn OutputAsset>>>);
 
+impl Project {
+    async fn module_graph_options(self: Vc<Self>, whole_app: bool) -> Result<ModuleGraphOptions> {
+        let mode = self.mode();
+        let is_production = mode.await?.is_production();
+        let config = self.config();
+        Ok(ModuleGraphOptions {
+            include_ident_strings: whole_app
+                && is_production
+                && !matches!(
+                    *config.module_ids().await?,
+                    Some(ModuleIdStrategyConfig::Named)
+                ),
+            include_side_effects: *config.remove_unused_imports(mode).await?,
+            include_mergeable: *config.concatenate_modules(mode).await?,
+            include_traced: is_production,
+            include_binding_usage: is_production,
+        })
+    }
+}
+
 #[turbo_tasks::value_impl]
 impl Project {
     #[turbo_tasks::function]
@@ -1213,7 +1232,6 @@ impl Project {
         self: Vc<Self>,
         evaluatable_assets: Vc<EvaluatableAssets>,
     ) -> Result<Vc<ModuleGraph>> {
-        let is_production = self.mode().await?.is_production();
         Ok(if *self.per_entry_module_graph().await? {
             let entries = evaluatable_assets
                 .await?
@@ -1228,8 +1246,7 @@ impl Project {
                         heuristics: EntryHeuristics::default(),
                     }])
                     .resolved_cell(),
-                    is_production,
-                    is_production,
+                    self.module_graph_options(false).await?,
                 )],
                 None,
             )
@@ -1458,19 +1475,12 @@ impl Project {
     #[turbo_tasks::function]
     pub(super) async fn server_fn_module_graph(
         self: Vc<Self>,
-        modules: Vc<Modules>,
+        entries: Vc<GraphEntries>,
     ) -> Result<Vc<ModuleGraph>> {
-        let is_production = self.mode().await?.is_production();
-        let entries = modules.await?.iter().copied().collect();
         Ok(ModuleGraph::from_graphs(
             vec![SingleModuleGraph::new_with_entries(
-                GraphEntries::from_chunk_groups(vec![ChunkGroupEntry::Entry {
-                    modules: entries,
-                    heuristics: EntryHeuristics::default(),
-                }])
-                .resolved_cell(),
-                is_production,
-                is_production,
+                entries.to_resolved().await?,
+                self.module_graph_options(false).await?,
             )],
             None,
         )
@@ -1869,20 +1879,19 @@ async fn whole_app_module_graph_operation(
     project: ResolvedVc<Project>,
 ) -> Result<Vc<BaseAndFullModuleGraph>> {
     let mode = project.mode();
-    let mode_ref = mode.await?;
-    let should_trace = mode_ref.is_production();
-    let should_read_binding_usage = mode_ref.is_production();
+    let graph_options = project.module_graph_options(true).await?;
     let base_single_module_graph = SingleModuleGraph::new_with_entries(
         project.get_all_entries().to_resolved().await?,
-        should_trace,
-        should_read_binding_usage,
+        graph_options,
     );
     let base = ModuleGraph::from_graphs(vec![base_single_module_graph], None);
 
     let remove_unused_imports = *project.config().remove_unused_imports(mode).await?;
 
     let (base, base_binding_usage_info) = if remove_unused_imports {
-        let binding_usage_info = compute_binding_usage_info(base, true);
+        let binding_usage_info = compute_binding_usage_info(
+            base, /* remove_unused_imports */ true, /* drop_unused_module_data */ false,
+        );
         (
             ModuleGraph::from_graphs(vec![base_single_module_graph], Some(binding_usage_info)),
             Some(binding_usage_info),
@@ -1899,6 +1908,15 @@ async fn whole_app_module_graph_operation(
     // An empty extension leaves the module graph unchanged, so its binding usage analysis
     // can be reused. Read the entries even in this case to track future additions.
     if *additional_entries.await? == GraphEntries::default() {
+        if let Some(binding_usage_info) = base_binding_usage_info {
+            // Discovery is complete: the base is also the final graph, so its unused ASTs can
+            // be released without repeating binding-usage analysis.
+            binding_usage_info
+                .connect()
+                .await?
+                .drop_unused_module_data(base.connect())
+                .await?;
+        }
         let base = base.connect().to_resolved().await?;
         return Ok(BaseAndFullModuleGraph {
             base,
@@ -1912,15 +1930,18 @@ async fn whole_app_module_graph_operation(
     let additional_module_graph = SingleModuleGraph::new_with_entries_visited(
         additional_entries,
         base_visited_modules,
-        should_trace,
-        should_read_binding_usage,
+        graph_options,
     );
 
     let graphs = vec![base_single_module_graph, additional_module_graph];
 
     let (full, binding_usage_info) = if remove_unused_imports {
         let full_with_unused_references = ModuleGraph::from_graphs(graphs.clone(), None);
-        let binding_usage_info = compute_binding_usage_info(full_with_unused_references, true);
+        let binding_usage_info = compute_binding_usage_info(
+            full_with_unused_references,
+            /* remove_unused_imports */ true,
+            /* drop_unused_module_data */ true,
+        );
         (
             ModuleGraph::from_graphs(graphs, Some(binding_usage_info)),
             Some(binding_usage_info),

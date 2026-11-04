@@ -14,6 +14,8 @@
 
 /// <reference path="./runtime-base.ts" />
 
+declare const RELATIVE_ROOT_PATH: string;
+
 /**
  * Resolve source modules relative to the library bundle's directory.
  */
@@ -90,7 +92,7 @@ contextPrototype.q = exportUrl;
         const chunkModules: CompressedModuleFactories = require(
           nodePath.resolve(__dirname, relativeChunkPath),
         );
-        installCompressedModuleFactories(chunkModules, 0, moduleFactories);
+        installCompressedModuleFactories(chunkModules, 0);
       }
 
       if (params.runtimeModuleIds.length > 0) {

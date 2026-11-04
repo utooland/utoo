@@ -1,0 +1,17 @@
+{
+  "config": {
+    "entry": [{ "import": "input/index.js", "name": "main" }],
+    "target": "Chrome 41",
+    "output": {
+      "path": "output",
+      "chunkLoadingGlobal": "stats_strict_legacy"
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named",
+      "concatenateModules": false
+    },
+    "sourceMaps": false,
+    "stats": true
+  }
+}

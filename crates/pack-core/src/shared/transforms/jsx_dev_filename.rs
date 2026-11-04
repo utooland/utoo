@@ -48,9 +48,13 @@ impl JsxDevFilenameVisitor {
     }
 
     fn is_jsx_dev_callee(callee: &Callee) -> bool {
+        let Callee::Expr(expr) = callee else {
+            return false;
+        };
+
         matches!(
-            callee,
-            Callee::Expr(box Expr::Ident(Ident { sym, .. }))
+            expr.as_ref(),
+            Expr::Ident(Ident { sym, .. })
                 if sym == "jsxDEV" || sym == "_jsxDEV"
         )
     }
@@ -65,7 +69,10 @@ impl JsxDevFilenameVisitor {
 
     fn rewrite_object_file_name_prop(&self, source: &mut ObjectLit) {
         for prop in &mut source.props {
-            let PropOrSpread::Prop(box Prop::KeyValue(KeyValueProp { key, value })) = prop else {
+            let PropOrSpread::Prop(prop) = prop else {
+                continue;
+            };
+            let Prop::KeyValue(KeyValueProp { key, value }) = prop.as_mut() else {
                 continue;
             };
 
@@ -80,11 +87,10 @@ impl JsxDevFilenameVisitor {
     }
 
     fn rewrite_jsx_dev_source_file_name(&self, args: &mut [ExprOrSpread]) {
-        let Some(ExprOrSpread {
-            expr: box Expr::Object(source),
-            ..
-        }) = args.get_mut(4)
-        else {
+        let Some(arg) = args.get_mut(4) else {
+            return;
+        };
+        let Expr::Object(source) = arg.expr.as_mut() else {
             return;
         };
 
@@ -92,16 +98,18 @@ impl JsxDevFilenameVisitor {
     }
 
     fn rewrite_classic_runtime_source_file_name(&self, args: &mut [ExprOrSpread]) {
-        let Some(ExprOrSpread {
-            expr: box Expr::Object(props),
-            ..
-        }) = args.get_mut(1)
-        else {
+        let Some(arg) = args.get_mut(1) else {
+            return;
+        };
+        let Expr::Object(props) = arg.expr.as_mut() else {
             return;
         };
 
         for prop in &mut props.props {
-            let PropOrSpread::Prop(box Prop::KeyValue(KeyValueProp { key, value })) = prop else {
+            let PropOrSpread::Prop(prop) = prop else {
+                continue;
+            };
+            let Prop::KeyValue(KeyValueProp { key, value }) = prop.as_mut() else {
                 continue;
             };
 

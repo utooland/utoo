@@ -3,15 +3,15 @@
     "main": {
       "name": "main",
       "chunks": [
-        "2_3j-lp12inzn.js",
-        "turbopack-2js18s3_gniw3.js"
+        "0ephjv5jjts70.js",
+        "turbopack-4307ujb-ka9x-.js"
       ],
       "assets": [
         {
-          "name": "2_3j-lp12inzn.js"
+          "name": "0ephjv5jjts70.js"
         },
         {
-          "name": "turbopack-2js18s3_gniw3.js"
+          "name": "turbopack-4307ujb-ka9x-.js"
         }
       ]
     }
@@ -22,11 +22,11 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "2_3j-lp12inzn.js",
-      "size": 363,
+      "id": "0ephjv5jjts70.js",
+      "size": 339,
       "hash": "",
       "files": [
-        "2_3j-lp12inzn.js"
+        "0ephjv5jjts70.js"
       ]
     },
     {
@@ -34,61 +34,61 @@
       "initial": false,
       "entry": false,
       "recorded": false,
-      "id": "turbopack-2js18s3_gniw3.js",
-      "size": 309,
+      "id": "turbopack-4307ujb-ka9x-.js",
+      "size": 299,
       "hash": "",
       "files": [
-        "turbopack-2js18s3_gniw3.js"
+        "turbopack-4307ujb-ka9x-.js"
       ]
     }
   ],
   "assets": [
     {
       "type": "asset",
-      "name": "2_3j-lp12inzn.js",
+      "name": "0ephjv5jjts70.js",
       "info": {},
-      "size": 363,
+      "size": 339,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "2_3j-lp12inzn.js"
+        "0ephjv5jjts70.js"
       ]
     },
     {
       "type": "asset",
-      "name": "2_3j-lp12inzn.js.map",
+      "name": "0ephjv5jjts70.js.map",
       "info": {},
       "size": 321,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "2_3j-lp12inzn.js.map"
+        "0ephjv5jjts70.js.map"
       ]
     },
     {
       "type": "asset",
-      "name": "turbopack-2js18s3_gniw3.js",
+      "name": "turbopack-4307ujb-ka9x-.js",
       "info": {},
-      "size": 309,
+      "size": 299,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "turbopack-2js18s3_gniw3.js"
+        "turbopack-4307ujb-ka9x-.js"
       ]
     },
     {
       "type": "asset",
-      "name": "turbopack-2js18s3_gniw3.js.map",
+      "name": "turbopack-4307ujb-ka9x-.js.map",
       "info": {},
       "size": 53,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
       "chunks": [
-        "turbopack-2js18s3_gniw3.js.map"
+        "turbopack-4307ujb-ka9x-.js.map"
       ]
     }
   ],
@@ -97,7 +97,7 @@
       "name": "basic/chunk_loading_global/input/index.js",
       "id": "[project]/basic/chunk_loading_global/input/index.js [client] (ecmascript)",
       "chunks": [
-        "2_3j-lp12inzn.js"
+        "0ephjv5jjts70.js"
       ],
       "size": 93
     }

@@ -3,6 +3,39 @@
 })([
 ["main.js",
 
+"[project]/library/inline_css_commonjs/input/commonjs/styles.css { INLINE_CSS_CONTENT => \"[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)\" } [library-client] (inline css, ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$29$__ = __turbopack_context__.i("[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)");
+var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [library-client] (ecmascript)");
+;
+;
+var options = {};
+options.insert = "head";
+options.singleton = false;
+var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["default"])([
+    [
+        "library/inline_css_commonjs/input/commonjs/styles.css",
+        __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$29$__["default"],
+        undefined,
+        undefined
+    ]
+], options);
+var __TURBOPACK__default__export__ = {};
+__turbopack_context__.s([]);
+}),
+"[project]/library/inline_css_commonjs/input/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
+"use strict";
+
+var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$library$2d$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/library/inline_css_commonjs/input/commonjs/styles.css { INLINE_CSS_CONTENT => "[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)" } [library-client] (inline css, ecmascript)');
+;
+const loaded = true;
+__turbopack_context__.s([
+    "loaded",
+    0,
+    loaded
+]);
+}),
 "[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [library-client] (ecmascript)", ((__turbopack_context__, module, exports) => {
 
 /**
@@ -228,39 +261,6 @@ module.exports = function(list, options) {
 "[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)", (function(__turbopack_context__){
 
 __turbopack_context__.v("/* [project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css) */\n.commonjs-theme {\n  color: red;\n}\n\n");
-}),
-"[project]/library/inline_css_commonjs/input/commonjs/styles.css { INLINE_CSS_CONTENT => \"[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)\" } [library-client] (inline css, ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$29$__ = __turbopack_context__.i("[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)");
-var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/inline_css/injectStylesIntoStyleTag.js [library-client] (ecmascript)");
-;
-;
-var options = {};
-options.insert = "head";
-options.singleton = false;
-var update = (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$inline_css$2f$injectStylesIntoStyleTag$2e$js__$5b$library$2d$client$5d$__$28$ecmascript$29$__["default"])([
-    [
-        "library/inline_css_commonjs/input/commonjs/styles.css",
-        __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$29$__["default"],
-        undefined,
-        undefined
-    ]
-], options);
-var __TURBOPACK__default__export__ = {};
-__turbopack_context__.s([]);
-}),
-"[project]/library/inline_css_commonjs/input/index.js [library-client] (ecmascript)", ((__turbopack_context__) => {
-"use strict";
-
-var __TURBOPACK__imported__module__$5b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$7b$__INLINE_CSS_CONTENT__$3d3e$__$225b$project$5d2f$library$2f$inline_css_commonjs$2f$input$2f$commonjs$2f$styles$2e$css__$5b$library$2d$client$5d$__$28$css$2c$__inline__css__content$2922$__$7d$__$5b$library$2d$client$5d$__$28$inline__css$2c$__ecmascript$29$__ = __turbopack_context__.i('[project]/library/inline_css_commonjs/input/commonjs/styles.css { INLINE_CSS_CONTENT => "[project]/library/inline_css_commonjs/input/commonjs/styles.css [library-client] (css, inline css content)" } [library-client] (inline css, ecmascript)');
-;
-const loaded = true;
-__turbopack_context__.s([
-    "loaded",
-    0,
-    loaded
-]);
 }),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/library/inline_css_commonjs/input/index.js [library-client] (ecmascript)"]}],

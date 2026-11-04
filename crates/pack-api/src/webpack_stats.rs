@@ -13,12 +13,14 @@ use turbopack_browser::ecmascript::{
 };
 use turbopack_core::{
     asset::Asset,
-    chunk::{ChunkItem, ChunkItemExt, ModuleId},
+    chunk::{ChunkItem, ChunkItemExt, ChunkingContext, ModuleId},
     output::{OutputAsset, OutputAssets},
     reference::all_assets_from_entries,
 };
 use turbopack_css::chunk::CssChunk;
-use turbopack_ecmascript::chunk::EcmascriptChunk;
+use turbopack_ecmascript::chunk::{
+    ChunkMinification, EcmascriptChunk, StrictFactoryMode, strict_factory_mode,
+};
 use turbopack_nodejs::{EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk};
 
 #[turbo_tasks::value]
@@ -39,9 +41,15 @@ fn normalize_stats_path(path: RcStr) -> RcStr {
     path.strip_prefix("./").map(Into::into).unwrap_or(path)
 }
 
+enum ModuleFactoryFormat {
+    Grouped,
+    Flat,
+}
+
 async fn get_chunk_modules(
     chunk: ResolvedVc<EcmascriptChunk>,
     chunk_id: RcStr,
+    factory_format: ModuleFactoryFormat,
 ) -> Result<Vec<WebpackStatsModule>> {
     let content = chunk.chunk_content();
     let module_names = content
@@ -62,11 +70,32 @@ async fn get_chunk_modules(
         .into_iter()
         .collect::<FxHashMap<_, _>>();
     let content = content.await?;
-    let chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
+    let chunk_items = content
+        .chunk_item_code_module_ids_and_paths(ChunkMinification::None, false)
+        .await?;
+    let strict_mode = match factory_format {
+        ModuleFactoryFormat::Grouped => {
+            let supports_arrow_functions = *chunk
+                .await?
+                .chunking_context
+                .environment()
+                .runtime_versions()
+                .supports_arrow_functions()
+                .await?;
+            strict_factory_mode(&chunk_items, supports_arrow_functions)
+        }
+        ModuleFactoryFormat::Flat => StrictFactoryMode::Flat,
+    };
     let mut modules = Vec::new();
 
     for item in &chunk_items {
         let id = &item.id;
+        let mut size = item.code.source_code().len();
+        // Match write_module_factories: a strict wrapper replaces the recorded directive.
+        // Library chunks emit flat factories and keep their per-module directives.
+        if item.strict && strict_mode != StrictFactoryMode::Flat {
+            size -= item.code.strict_directive().map_or(0, |range| range.len());
+        }
         modules.push(WebpackStatsModule {
             name: module_names
                 .get(id)
@@ -74,7 +103,7 @@ async fn get_chunk_modules(
                 .with_context(|| format!("missing source path for module {id}"))?,
             id: id.into(),
             chunks: vec![chunk_id.clone()],
-            size: item.code.source_code().len() as u64,
+            size: size as u64,
         });
     }
 
@@ -172,7 +201,8 @@ pub async fn get_asset_intermediate_info(
 
         let chunk = chunk.chunk().to_resolved().await?;
         if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
-            local_modules.extend(get_chunk_modules(chunk, chunk_ident).await?);
+            local_modules
+                .extend(get_chunk_modules(chunk, chunk_ident, ModuleFactoryFormat::Grouped).await?);
         }
     }
 
@@ -193,7 +223,8 @@ pub async fn get_asset_intermediate_info(
 
         let chunk = chunk.chunk().to_resolved().await?;
         if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk) {
-            local_modules.extend(get_chunk_modules(chunk, chunk_ident).await?);
+            local_modules
+                .extend(get_chunk_modules(chunk, chunk_ident, ModuleFactoryFormat::Grouped).await?);
         }
     }
 
@@ -212,8 +243,14 @@ pub async fn get_asset_intermediate_info(
             ..Default::default()
         });
 
-        local_modules
-            .extend(get_chunk_modules(chunk.chunk().to_resolved().await?, chunk_ident).await?);
+        local_modules.extend(
+            get_chunk_modules(
+                chunk.chunk().to_resolved().await?,
+                chunk_ident,
+                ModuleFactoryFormat::Flat,
+            )
+            .await?,
+        );
     }
 
     if let Some(chunk) = ResolvedVc::try_downcast_type::<EcmascriptBuildNodeEntryChunk>(asset) {
@@ -313,7 +350,12 @@ pub async fn get_asset_intermediate_info(
         });
 
         local_modules.extend(
-            get_chunk_modules(chunk.chunk().to_resolved().await?, entry_path.clone()).await?,
+            get_chunk_modules(
+                chunk.chunk().to_resolved().await?,
+                entry_path.clone(),
+                ModuleFactoryFormat::Flat,
+            )
+            .await?,
         );
 
         let entry_referenced_assets = chunk.chunks_data().await?;
