@@ -66,6 +66,9 @@
       "$ref": "#/definitions/ConfigListSuccessSchema"
     },
     {
+      "$ref": "#/definitions/ConfigDeleteSuccessSchema"
+    },
+    {
       "$ref": "#/definitions/InitSuccessSchema"
     },
     {
@@ -245,6 +248,64 @@
       "enum": [
         "config"
       ]
+    },
+    "ConfigDeleteResult": {
+      "type": "object",
+      "required": [
+        "deleted",
+        "key",
+        "scope"
+      ],
+      "properties": {
+        "deleted": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      }
+    },
+    "ConfigDeleteSubcommand": {
+      "type": "string",
+      "enum": [
+        "delete"
+      ]
+    },
+    "ConfigDeleteSuccessSchema": {
+      "type": "object",
+      "required": [
+        "command",
+        "durationMs",
+        "ok",
+        "result",
+        "schemaVersion",
+        "subcommand"
+      ],
+      "properties": {
+        "command": {
+          "$ref": "#/definitions/ConfigCommand"
+        },
+        "durationMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ok": {
+          "$ref": "#/definitions/SuccessMarker"
+        },
+        "result": {
+          "$ref": "#/definitions/ConfigDeleteResult"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersionOne"
+        },
+        "subcommand": {
+          "$ref": "#/definitions/ConfigDeleteSubcommand"
+        }
+      }
     },
     "ConfigGetResult": {
       "type": "object",
