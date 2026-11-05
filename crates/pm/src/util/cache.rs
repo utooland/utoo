@@ -7,6 +7,14 @@ pub use super::user_config::get_cache_dir;
 
 const SELF_PIN_CACHE_SUFFIX: &str = ".utoo-self-pin";
 
+/// A separate namespace prevents older binaries from committing unchecked
+/// contents into slots used by the verified package store.
+pub fn versioned_cache_dir(cache_dir: &Path) -> PathBuf {
+    let mut path = cache_dir.as_os_str().to_os_string();
+    path.push(".utoo-v2");
+    PathBuf::from(path)
+}
+
 /// Return the internal self-pin cache root as a sibling of the package cache.
 ///
 /// Ordinary registry slots use the `<cache>/<name>/<version>` layout, so a
