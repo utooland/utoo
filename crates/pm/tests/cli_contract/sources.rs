@@ -339,3 +339,95 @@ fn source_identity_separates_caches_and_existing_targets_without_digests() {
         tarball.assert();
     }
 }
+
+#[test]
+fn git_lock_recovers_exact_commit_with_empty_cache() {
+    let fixture = tempdir().unwrap();
+    let repo = fixture.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .current_dir(&repo)
+            .args([
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    git(&["init", "--quiet"]);
+    fs::write(
+        repo.join("package.json"),
+        r#"{"name":"fixture","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    fs::write(repo.join("marker.txt"), "locked").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "locked"]);
+    let commit = git(&["rev-parse", "HEAD"]);
+    fs::write(repo.join("marker.txt"), "new head").unwrap();
+    git(&["commit", "--quiet", "-am", "advance"]);
+    let url = format!(
+        "git+{}#{commit}",
+        reqwest::Url::from_directory_path(&repo).unwrap()
+    );
+    let project = fixture.path().join("project");
+    let cache = fixture.path().join("cache");
+    locked_project(&project, &url, None, false);
+    let lock_before = fs::read(project.join("package-lock.json")).unwrap();
+    for _ in 0..2 {
+        assert_success(
+            &command(&project, &cache, "http://127.0.0.1:9")
+                .args(["install", "--ignore-scripts"])
+                .output()
+                .unwrap(),
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("node_modules/fixture/marker.txt")).unwrap(),
+            "locked"
+        );
+        assert_eq!(
+            fs::read(project.join("package-lock.json")).unwrap(),
+            lock_before
+        );
+        fs::remove_dir_all(project.join("node_modules")).unwrap();
+        // Cache reuse must work after the source is unavailable.
+        if repo.exists() {
+            fs::rename(&repo, fixture.path().join("offline-repo")).unwrap();
+        }
+    }
+}
+
+#[test]
+fn git_lock_does_not_fall_back_to_a_branch() {
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    locked_project(
+        &project,
+        "git+https://example.invalid/fixture.git#main",
+        None,
+        false,
+    );
+    let output = command(
+        &project,
+        &fixture.path().join("cache"),
+        "http://127.0.0.1:9",
+    )
+    .args(["install", "--ignore-scripts"])
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("full commit"));
+    assert!(!project.join("node_modules/fixture/package.json").exists());
+}
