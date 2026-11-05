@@ -1,0 +1,18 @@
+crates/pack-tests/tests/snapshot/hmr/dynamic_chunk_lists/output/input_index_11lo8plvb-si2.js
+  h_05d0a07afcde4c 5
+crates/pack-tests/tests/snapshot/hmr/dynamic_chunk_lists/output/input_lazy_0su10817w4pwb.js
+  h_05d0a07afcde4c 3
+next.js
+  h_05d0a07afcde4c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b73e9043baf0721c84adba9fd63c7dbaf2769dc3",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
