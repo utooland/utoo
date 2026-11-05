@@ -183,10 +183,13 @@ jobs:
         if: ${{ matrix.settings.docker }}
         run: |
           cat <<'EOF' > build_script.sh
+          git config --global --add safe.directory /build &&
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}" &&
           ${{ matrix.settings.build }}
           EOF
           chmod +x build_script.sh
           docker run --rm \
+            --env CI=1 \
             --env npm_new_version \
             -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db \
             -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache \
