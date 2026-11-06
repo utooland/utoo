@@ -6,7 +6,7 @@ export default defineCommand({
   meta: {
     name: "analyze",
     description:
-      "Analyze client and server application bundles with the native Analyzer",
+      "Analyze client/server bundles; use 'up analyze export' to read a saved report as JSONL",
   },
   args: {
     project: {

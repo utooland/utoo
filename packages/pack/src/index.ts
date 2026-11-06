@@ -6,6 +6,20 @@ import * as webpackCompat from "./config/webpackCompat";
 export { build };
 export { analyze };
 export type { AnalyzeOptions, AnalyzeResult } from "./commands/analyze";
+export type {
+  AnalyzeExportCoverage,
+  AnalyzeExportEntryRecord,
+  AnalyzeExportEnvironment,
+  AnalyzeExportGroupRecord,
+  AnalyzeExportMetaRecord,
+  AnalyzeExportModuleRecord,
+  AnalyzeExportOptions,
+  AnalyzeExportOutputRecord,
+  AnalyzeExportPartRecord,
+  AnalyzeExportRecord,
+  AnalyzeExportRoot,
+} from "./commands/exportAnalyzeReport";
+export { exportAnalyzeReport } from "./commands/exportAnalyzeReport";
 export type { AnalyzeServer } from "./commands/serveAnalyzeReport";
 export { serveAnalyzeReport } from "./commands/serveAnalyzeReport";
 export { serve };

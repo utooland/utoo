@@ -10,12 +10,26 @@
       "import": "./esm/index.js",
       "require": "./cjs/index.js"
     },
+    "./analyze": {
+      "types": "./esm/commands/exportAnalyzeReport.d.ts",
+      "import": "./esm/commands/exportAnalyzeReport.js",
+      "require": "./cjs/commands/exportAnalyzeReport.js"
+    },
+    "./analyze/graph-v1.schema.json": "./analyze/graph-v1.schema.json",
     "./cjs/*": "./cjs/*",
     "./esm/*": "./esm/*",
     "./config_schema.json": "./config_schema.json",
     "./package.json": "./package.json"
   },
+  "typesVersions": {
+    "*": {
+      "analyze": [
+        "esm/commands/exportAnalyzeReport.d.ts"
+      ]
+    }
+  },
   "files": [
+    "analyze",
     "analyzer",
     "cjs",
     "esm",

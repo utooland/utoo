@@ -39,6 +39,13 @@ type AnalyzeHeader = {
   }[];
   output_files: { filename: string }[];
   output_file_modules: Edges;
+  output_file_async_loaders: Edges;
+  chunk_groups: {
+    id: number;
+    kind: string;
+    trigger_module_index?: number;
+    output_file_indices: number[];
+  }[];
   route_entries: {
     module_ident: string;
     module_path: string;
@@ -162,6 +169,126 @@ function readFiles(directory: string): Record<string, string> {
   );
 }
 
+async function assertExportedReport(
+  reportPath: string,
+  entries: { name: string; path: string; environment: "client" | "server" }[],
+) {
+  const { exportAnalyzeReport } = await import(
+    "../commands/exportAnalyzeReport"
+  );
+  const records: import("../commands/exportAnalyzeReport").AnalyzeExportRecord[] =
+    [];
+  for await (const record of exportAnalyzeReport(reportPath))
+    records.push(record);
+  const graph = readArtifact<ModuleHeader>(
+    path.join(reportPath, "data/modules.data"),
+  );
+  assert.deepEqual(records[0], {
+    type: "meta",
+    schema_version: 1,
+    tool: "@utoo/pack",
+    module_index_hash: graph.header.module_index_hash,
+    entry_count: entries.length,
+    selected_entries: entries.length,
+  });
+  assert.deepEqual(
+    records.filter((record) => record.type === "module"),
+    graph.header.modules.map((module, index) => ({
+      type: "module",
+      ...module,
+      dependencies: Object.fromEntries(
+        [
+          ["sync", graph.header.module_dependencies],
+          ["async", graph.header.async_module_dependencies],
+          ["traced", graph.header.traced_module_dependencies],
+        ].map(([kind, edges]) => [
+          kind,
+          readEdges(graph.binary, edges as Edges, index).map(
+            (target) => graph.header.modules[target].ident,
+          ),
+        ]),
+      ),
+    })),
+  );
+  for (const entry of entries) {
+    const { header, binary } = readArtifact<AnalyzeHeader>(
+      path.join(reportPath, "data", entry.path.slice(1), "analyze.data"),
+    );
+    const paths = sourcePaths(header);
+    const parts = records
+      .filter((record) => record.type === "part")
+      .filter((record) => record.entry === entry.path);
+    assert.deepEqual(
+      parts,
+      header.chunk_parts.map((part, id) => ({
+        type: "part",
+        entry: entry.path,
+        id,
+        filename: header.output_files[part.output_file_index].filename,
+        source_path: paths[part.source_index],
+        size: part.size,
+        compressed_size: part.compressed_size,
+      })),
+    );
+    const outputs = records
+      .filter((record) => record.type === "output")
+      .filter((record) => record.entry === entry.path);
+    assert.equal(outputs.length, header.output_files.length);
+    for (const [index, output] of outputs.entries()) {
+      const rawOutput = header.output_files[index];
+      assert.equal(output.filename, rawOutput.filename);
+      assert.deepEqual(
+        output.modules,
+        readEdges(binary, header.output_file_modules, index)
+          .map((index) => graph.header.modules[index].ident)
+          .sort(),
+      );
+      assert.deepEqual(
+        output.async_loaders,
+        readEdges(binary, header.output_file_async_loaders, index)
+          .map((index) => graph.header.modules[index].ident)
+          .sort(),
+      );
+      const matchingParts = parts.filter(
+        (part) => part.filename === output.filename,
+      );
+      assert.equal(
+        output.size,
+        matchingParts.reduce((sum, part) => sum + part.size, 0),
+      );
+      assert.equal(
+        output.compressed_size,
+        matchingParts.reduce((sum, part) => sum + part.compressed_size, 0),
+      );
+      if (output.filename.includes("/src/vendor/")) {
+        assert.equal(output.kind, "traced");
+        assert.equal(output.environment, "server");
+        assert.equal(output.coverage, "not_a_chunk");
+      }
+    }
+    assert.deepEqual(
+      records.filter(
+        (record) => record.type === "group" && record.entry === entry.path,
+      ),
+      header.chunk_groups.map((group) => ({
+        type: "group",
+        entry: entry.path,
+        id: group.id,
+        kind: group.kind,
+        trigger_module_ident:
+          group.trigger_module_index === undefined
+            ? null
+            : graph.header.modules[group.trigger_module_index].ident,
+        trigger_join:
+          group.trigger_module_index === undefined ? "none" : "joined",
+        outputs: group.output_file_indices.map(
+          (index) => header.output_files[index].filename,
+        ),
+      })),
+    );
+  }
+}
+
 async function externalScenario(
   analyze: typeof import("../commands/analyze").analyze,
   build: typeof import("../commands/build").build,
@@ -280,6 +407,7 @@ async function externalScenario(
   assert.equal(JSON.stringify(config), originalConfig);
   assert.deepEqual(readFiles(distPath), beforeOutputs);
   assert.equal(result.entries.length, mixed ? 3 : 2);
+  await assertExportedReport(reportPath, result.entries);
   const graph = readArtifact<ModuleHeader>(
     path.join(reportPath, "data/modules.data"),
   );
@@ -636,6 +764,7 @@ async function serverScenario(
     "Analysis rewrote client/server bundles or stats",
   );
   assert(fs.existsSync(path.join(reportPath, "index.html")));
+  await assertExportedReport(reportPath, result.entries);
   assert.equal(
     result.entries.length,
     scenario === "mixed" || withFunctionEntry
@@ -1011,6 +1140,7 @@ async function main() {
     scenario === "mpa" ? ["alpha", "nested/beta"] : ["alpha"],
   );
   assert(result.entries.every((entry) => entry.environment === "client"));
+  await assertExportedReport(reportPath, result.entries);
   assert.deepEqual(
     JSON.parse(
       fs.readFileSync(path.join(reportPath, "data/entries.json"), "utf8"),
