@@ -47,6 +47,16 @@ export declare const enum MemoryEvictionMode {
   Full = 'full'
 }
 
+export interface NapiAnalyzeEntry {
+  name: string
+  path: string
+  environment: 'client' | 'server'
+}
+
+export interface NapiAnalyzeResult {
+  entries: Array<NapiAnalyzeEntry>
+}
+
 export interface NapiEndpointConfig {
 
 }
@@ -291,14 +301,7 @@ export declare function projectUpdate(project: { __napiType: "Project" }, option
 export declare function projectUpdateInfoSubscribe(project: { __napiType: "Project" }, aggregationMs: number, func: (err: Error, value: NapiUpdateMessage) => void): void
 
 export declare function projectWriteAllEntrypointsToDisk(project: { __napiType: "Project" }): Promise<TurbopackResult<NapiEntrypoints>>
-export interface NapiAnalyzeEntry {
-  name: string
-  path: string
-  environment: 'client' | 'server'
-}
-export interface NapiAnalyzeResult {
-  entries: Array<NapiAnalyzeEntry>
-}
+
 export declare function projectWriteAnalyzeData(project: { __napiType: "Project" }, outputPath: string): Promise<TurbopackResult<NapiAnalyzeResult>>
 
 export declare function recvTaskMessageInWorker(workerId: number): Promise<NapiTaskMessage>

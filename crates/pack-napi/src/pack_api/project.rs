@@ -716,7 +716,7 @@ pub struct NapiAnalyzeResult {
 #[napi(ts_return_type = "Promise<TurbopackResult<NapiAnalyzeResult>>")]
 pub async fn project_write_analyze_data(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
-    output_path: RcStr,
+    #[napi(ts_arg_type = "string")] output_path: RcStr,
 ) -> napi::Result<TurbopackResult<NapiAnalyzeResult>> {
     let ctx = &project.turbopack_ctx;
     let container = project.container;
