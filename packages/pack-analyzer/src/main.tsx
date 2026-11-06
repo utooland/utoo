@@ -49,6 +49,7 @@ const fileTypes = [
   { value: "css", label: "CSS" },
   { value: "json", label: "JSON" },
   { value: "asset", label: "Assets" },
+  { value: "traced", label: "External files" },
 ];
 
 // This method is added to the upstream parser by build.mjs. It reads the
@@ -325,7 +326,7 @@ function EntryTreemap({
       return (
         flags[entry.environment] &&
         typeFilter.some(
-          (type) => flags[type as "js" | "css" | "json" | "asset"],
+          (type) => flags[type as "js" | "css" | "json" | "asset" | "traced"],
         ) &&
         (!initialOnly || scope === "initial" || scope === "mixed")
       );
@@ -402,6 +403,7 @@ function EntryTreemap({
             <span className="font-medium text-foreground">{hovered.name}</span>
             {" · "}
             {formatBytes(hovered.size)} estimated compressed
+            {hovered.traced ? " · External file (traced)" : null}
           </>
         ) : (
           "Hover over a file to see details"

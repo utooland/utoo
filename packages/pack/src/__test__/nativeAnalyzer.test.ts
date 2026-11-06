@@ -19,6 +19,8 @@ describe("native bundle analyzer", () => {
     "server-only",
     "server-functions",
     "server-functions-entry",
+    "external-node",
+    "external-mixed",
   ])(
     "exports %s entry sizes and import chains without changing build outputs or stats",
     async (scenario) => {

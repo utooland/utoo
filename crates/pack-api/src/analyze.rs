@@ -5,15 +5,17 @@ mod capture;
 mod groups;
 mod membership;
 mod output_file;
+mod trace;
 
 use std::io::Write;
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use byteorder::{BE, WriteBytesExt};
-use output_file::{AnalyzedChunkPart, analyze_output_file};
+use output_file::{AnalyzedChunkPart, analyze_output_file, analyze_traced_file};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
+use trace::{EdgeKind, TraceFiles};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
     FxIndexSet, JoinIterExt, NonLocalValue, ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt,
@@ -25,7 +27,7 @@ use turbo_tasks_fs::{
 };
 use turbo_tasks_hash::hash_xxh3_hash64;
 use turbopack_core::{
-    chunk::{ChunkingType, TracedMode},
+    chunk::ChunkingType,
     module::Module,
     module_graph::{GraphTraversalAction, ModuleGraph},
     output::{OutputAsset, OutputAssets},
@@ -658,6 +660,7 @@ impl AnalyzedRoute {
 #[turbo_tasks::function]
 async fn analyze_output_assets(
     output_assets: Vc<OutputAssets>,
+    traced_files: Vc<TraceFiles>,
     route_entries: Vc<AnalyzeRouteEntries>,
     chunk_groups: Vc<AnalyzeChunkGroups>,
     module_index_vc: Vc<AnalyzeModuleIndex>,
@@ -682,11 +685,17 @@ async fn analyze_output_assets(
     let mut browser_chunks = FxHashSet::default();
 
     let output_assets = output_assets.await?;
+    let traced_files = traced_files.await?;
     // One call per file: per-route fan-out over shared assets dominates analysis
     // through task-graph bookkeeping, not the work behind each call.
     let files = output_assets
         .iter()
         .map(|&asset| analyze_output_file(*asset, module_index_vc))
+        .chain(
+            traced_files
+                .iter()
+                .map(|path| analyze_traced_file(path.clone())),
+        )
         .try_join()
         .await?;
 
@@ -695,8 +704,7 @@ async fn analyze_output_assets(
         let output_file_index = builder.add_output_file(AnalyzeOutputFile {
             filename: file.filename.clone(),
         });
-        {
-            let emitted = &file.emitted;
+        if let Some(emitted) = &file.emitted {
             let membership = &emitted.membership;
             asset_indices
                 .entry(emitted.asset)
@@ -782,43 +790,17 @@ async fn analyze_module_graphs(module_graphs: Vc<AnalyzeModuleGraphs>) -> Result
     let mut all_async_edges = FxIndexSet::default();
     let mut all_traced_edges = FxIndexSet::default();
     for module_graph in module_graphs.await?.iter().copied().try_join().await? {
-        let mut traced_modules = FxHashSet::default();
-        module_graph.traverse_edges_dfs(
+        trace::traverse_edges(
+            &module_graph,
             module_graph.all_entry_modules(),
-            &mut (),
-            |parent, node, _| {
-                let Some((parent_node, reference)) = parent else {
-                    return Ok(GraphTraversalAction::Continue);
+            |from, to, kind| {
+                match kind {
+                    EdgeKind::Sync => all_edges.insert((from, to)),
+                    EdgeKind::Async => all_async_edges.insert((from, to)),
+                    EdgeKind::Traced => all_traced_edges.insert((from, to)),
                 };
-
-                // ChunkingType::Traced{TracedMode::Entry}     => target is always traced
-                // ChunkingType::Traced{TracedMode::Transitive}=> target only traced if parent is traced
-                // ChunkingType::*                             => target only traced if parent is traced
-                if matches!(
-                    reference.chunking_type,
-                    ChunkingType::Traced {
-                        mode: TracedMode::Entry
-                    }
-                ) || traced_modules.contains(&parent_node)
-                {
-                    traced_modules.insert(node);
-                    all_traced_edges.insert((parent_node, node));
-                    return Ok(GraphTraversalAction::Continue);
-                };
-
-                match reference.chunking_type {
-                    ChunkingType::Async => {
-                        all_async_edges.insert((parent_node, node));
-                    }
-                    _ => {
-                        all_edges.insert((parent_node, node));
-                    }
-                }
-                Ok(GraphTraversalAction::Continue)
+                Ok(())
             },
-            |_, _, _| Ok(()),
-            true,
-            false,
         )?;
     }
 

@@ -163,12 +163,18 @@ first configured server entry, or the generated `index` entry when none is confi
 Library entries are not supported. Entries refer to Pack entries, not framework
 SPA routes; client and server entries are listed separately without inferring
 framework route pairings.
-Server sizes cover emitted bundles and assets. External packages remain external;
-their files on disk are not included in the report's size totals.
+Server sizes cover emitted bundles/assets and traced local CommonJS/ESM external
+files, including their transitive dependencies and statically discoverable assets.
+Like Next.js, the analyzer measures the traced files rather than entire installed
+package directories; Node built-ins, remote/global externals, and runtime-provided
+externals that cannot be resolved locally have no measured file size. External
+files remain external and are shown under **External files** in the
+file-type filter (enabled by default), with import chains and per-entry sizes.
 The initial/async module indicators describe static import reachability, not
 measured browser requests. Compressed module sizes are estimates; their sum is
-not an exact HTTP transfer size. Analysis itself has additional CPU and memory
-cost for source maps, graph traversal and compression.
+not an exact HTTP transfer size. External files are measured as stored on disk,
+without bundle minification or tree shaking. Analysis itself has additional CPU
+and memory cost for source maps, dependency tracing, graph traversal and compression.
 
 The UI and binary data format reuse the pinned Next.js/Turbopack analyzer; see
 [`pack-analyzer`](../pack-analyzer/README.md) for source-build details.

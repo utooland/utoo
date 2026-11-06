@@ -583,6 +583,7 @@ pub async fn get_client_resolve_options_context(
         project_path.clone(),
         project_path.root().owned().await?,
         external_config,
+        false,
     )
     .to_resolved()
     .await?;

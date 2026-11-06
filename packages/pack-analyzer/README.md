@@ -12,6 +12,9 @@ The environment selector filters the entry list and source modules. Its
 entry picker is adapted from upstream's route picker, and its graph starts at the
 exact module roots written by the native analyzer. The graph's initial and async
 classifications describe import paths; they do not measure browser requests.
+Server reports include traced external files using the upstream file-size reader
+and import-chain graph. The **External files** filter is enabled by default;
+**Initial modules only** excludes files reached through a tracing boundary.
 
 To rebuild just the static assets, initialize the `next.js` submodule, install
 workspace dependencies, and run:

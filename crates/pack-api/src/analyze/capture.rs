@@ -10,11 +10,14 @@ use turbo_tasks::{
     ValueToStringRef, Vc,
 };
 use turbo_tasks_fs::{DiskFileSystem, File, FileContent, FileSystem};
-use turbopack_core::{issue::PlainIssue, module::Module, output::OutputAssets};
+use turbopack_core::{
+    issue::PlainIssue, module::Module, module_graph::ModuleGraph, output::OutputAssets,
+};
 
 use super::{
     AnalyzeChunkGroup, AnalyzeModuleGraphs, AnalyzeRouteEntry, RouteBundleSummary,
     analyze_module_graphs, analyze_module_index, analyze_output_assets, analyze_route_entry_id,
+    trace::trace_files,
 };
 use crate::{
     app::AppProject, project::ProjectContainer, utils::strongly_consistent_catch_collectables,
@@ -53,6 +56,7 @@ struct EntryCapture {
     name: RcStr,
     environment: AnalyzeEnvironment,
     modules: Vec<ResolvedVc<Box<dyn Module>>>,
+    graph: ResolvedVc<ModuleGraph>,
     assets: ResolvedVc<OutputAssets>,
 }
 
@@ -150,6 +154,7 @@ async fn write_analyze_data_operation(
                     Ok(EntryCapture {
                         name: entry.await?.name.clone(),
                         environment,
+                        graph,
                         modules: entry
                             .entry_evaluatable_assets(context, runtime_entries)
                             .await?
@@ -178,12 +183,15 @@ async fn write_analyze_data_operation(
     .await?;
     let (app_graph, mut entries) = app_capture;
     let mut graphs = app_graph.into_iter().collect::<Vec<_>>();
-    if let Some(server_build) = server_build {
-        graphs.extend(server_build.graph);
+    if let Some(server_build) = server_build
+        && let Some(graph) = server_build.graph
+    {
+        graphs.push(graph);
         entries.extend(server_build.entries.iter().map(|entry| EntryCapture {
             name: entry.name.clone(),
             environment: AnalyzeEnvironment::Server,
             modules: entry.modules.clone(),
+            graph,
             assets: entry.assets,
         }));
     }
@@ -193,6 +201,7 @@ async fn write_analyze_data_operation(
         .root()
         .owned()
         .await?;
+    let project_path = project.project_path().owned().await?;
 
     let captures = entries
         .into_iter()
@@ -204,6 +213,7 @@ async fn write_analyze_data_operation(
                     name,
                     environment,
                     modules,
+                    graph,
                     assets,
                 },
             )| {
@@ -247,8 +257,17 @@ async fn write_analyze_data_operation(
                     }],
                     AnalyzeEnvironment::Server => vec![],
                 };
+                let traced_files = match environment {
+                    AnalyzeEnvironment::Client => Vc::cell(vec![]),
+                    AnalyzeEnvironment::Server => trace_files(
+                        *graph,
+                        Vc::cell(modules.into_iter().collect()),
+                        project_path.clone(),
+                    ),
+                };
                 let capture = analyze_output_assets(
                     *assets,
+                    traced_files,
                     Vc::cell(route_entries),
                     Vc::cell(chunk_groups),
                     module_index,

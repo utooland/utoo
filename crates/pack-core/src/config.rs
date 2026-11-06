@@ -278,7 +278,7 @@ pub struct Config {
     target: Option<RcStr>,
     source_maps: Option<bool>,
     #[serde(skip)]
-    analyze_source_maps: bool,
+    bundle_analysis: bool,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     define: Option<FxIndexMap<String, JsonValue>>,
     #[bincode(with = "option_indexmap")]
@@ -2069,15 +2069,20 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn with_analyze_source_maps(&self) -> Vc<Self> {
+    pub fn with_bundle_analysis(&self) -> Vc<Self> {
         let mut config = self.clone();
-        config.analyze_source_maps = true;
+        config.bundle_analysis = true;
         config.cell()
     }
 
     #[turbo_tasks::function]
+    pub fn is_bundle_analysis(&self) -> Vc<bool> {
+        Vc::cell(self.bundle_analysis)
+    }
+
+    #[turbo_tasks::function]
     pub fn source_maps_type(&self) -> Vc<SourceMapsType> {
-        let source_maps = if self.analyze_source_maps {
+        let source_maps = if self.bundle_analysis {
             // Keep output attribution on the files Turbopack resolved, so source
             // map paths can be joined with the module graph's paths.
             SourceMapsType::Partial

@@ -230,6 +230,7 @@ fn to_snake_case(input: &str) -> String {
 fn handle_external_config(
     external_config: &ExternalConfig,
     module_name: &str,
+    trace_node_files_only: bool,
 ) -> Vc<ResolveResultOption> {
     let (external_name, external_type) = match external_config {
         ExternalConfig::Basic(name) => {
@@ -285,7 +286,7 @@ fn handle_external_config(
                         ResolveResult::primary(ResolveResultItem::External {
                             name: external_name.into(),
                             ty: ExternalType::Script,
-                            traced: ExternalTraced::Traced,
+                            traced: external_tracing(ExternalType::Script, trace_node_files_only),
                             target: None,
                         })
                         .cell(),
@@ -313,11 +314,19 @@ fn handle_external_config(
         ResolveResult::primary(ResolveResultItem::External {
             name: external_name,
             ty: external_type,
-            traced: ExternalTraced::Traced,
+            traced: external_tracing(external_type, trace_node_files_only),
             target: None,
         })
         .cell(),
     )
+}
+
+fn external_tracing(ty: ExternalType, node_files_only: bool) -> ExternalTraced {
+    if node_files_only && !matches!(ty, ExternalType::CommonJs | ExternalType::EcmaScriptModule) {
+        ExternalTraced::Untraced
+    } else {
+        ExternalTraced::Traced
+    }
 }
 
 #[turbo_tasks::value]
@@ -325,6 +334,7 @@ pub struct ExternalsPlugin {
     project_path: FileSystemPath,
     root: FileSystemPath,
     externals_config: ResolvedVc<ExternalsConfig>,
+    trace_node_files_only: bool,
     processed_config: ResolvedVc<ProcessedExternalsConfig>,
     before_condition: ResolvedVc<BeforeResolvePluginCondition>,
     after_condition: ResolvedVc<AfterResolvePluginCondition>,
@@ -337,6 +347,7 @@ impl ExternalsPlugin {
         project_path: FileSystemPath,
         root: FileSystemPath,
         externals_config: ResolvedVc<ExternalsConfig>,
+        trace_node_files_only: bool,
     ) -> Result<Vc<Self>> {
         let processed_config = pre_process_externals_config(*externals_config)
             .to_resolved()
@@ -418,6 +429,7 @@ impl ExternalsPlugin {
             project_path,
             root,
             externals_config,
+            trace_node_files_only,
             processed_config,
             before_condition,
             after_condition,
@@ -445,7 +457,11 @@ impl BeforeResolvePlugin for ExternalsPlugin {
         };
 
         if let Some(external_config) = externals_config.get(request.as_str()) {
-            return Ok(handle_external_config(external_config, &request));
+            return Ok(handle_external_config(
+                external_config,
+                &request,
+                self.trace_node_files_only,
+            ));
         }
 
         Ok(ResolveResultOption::none())
@@ -582,7 +598,7 @@ impl AfterResolvePlugin for ExternalsPlugin {
                             ResolveResult::primary(ResolveResultItem::External {
                                 name: external_name.into(),
                                 ty: external_type,
-                                traced: ExternalTraced::Traced,
+                                traced: external_tracing(external_type, self.trace_node_files_only),
                                 target: None,
                             })
                             .cell(),

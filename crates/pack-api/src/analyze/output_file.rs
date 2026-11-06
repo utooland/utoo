@@ -6,7 +6,9 @@ use bincode::{Decode, Encode};
 use turbo_rcstr::RcStr;
 use turbo_tasks::{NonLocalValue, ResolvedVc, ValueToStringRef, Vc};
 use turbo_tasks_fs::FileSystemPath;
-use turbopack_analyze::split_chunk::{ChunkPart, split_output_asset_into_parts};
+use turbopack_analyze::split_chunk::{
+    ChunkPart, split_output_asset_into_parts, split_traced_file_into_parts,
+};
 use turbopack_browser::ecmascript::EcmascriptBrowserChunk;
 use turbopack_core::{SOURCE_URL_PROTOCOL, output::OutputAsset};
 
@@ -34,7 +36,8 @@ pub(super) struct EmittedChunk {
 pub(super) struct AnalyzedOutputFile {
     pub filename: RcStr,
     pub chunk_parts: Vec<AnalyzedChunkPart>,
-    pub emitted: EmittedChunk,
+    /// Traced files are measured on disk, without emitted chunk membership.
+    pub emitted: Option<EmittedChunk>,
 }
 
 /// `None` for source maps and trace manifests, which are not reported.
@@ -52,16 +55,38 @@ pub(super) async fn analyze_output_file(
     }
     let filename = path.to_string_ref().await?;
     let membership = output_chunk_modules(asset, &filename, &*module_index.await?).await?;
-    let chunk_parts = analyzed_chunk_parts(&split_output_asset_into_parts(*asset).await?).await?;
+    let chunk_parts = analyzed_chunk_parts(
+        &split_output_asset_into_parts(*asset).await?,
+        SourcePathKind::SourceMap,
+    )
+    .await?;
     Ok(Vc::cell(Some(AnalyzedOutputFile {
         filename,
         chunk_parts,
-        emitted: EmittedChunk {
+        emitted: Some(EmittedChunk {
             asset,
             is_browser_chunk: ResolvedVc::try_downcast_type::<EcmascriptBrowserChunk>(asset)
                 .is_some(),
             membership,
-        },
+        }),
+    })))
+}
+
+#[turbo_tasks::function]
+pub(super) async fn analyze_traced_file(
+    path: FileSystemPath,
+) -> Result<Vc<OptionAnalyzedOutputFile>> {
+    if !is_reported_file(&path) {
+        return Ok(Vc::cell(None));
+    }
+    Ok(Vc::cell(Some(AnalyzedOutputFile {
+        filename: path.to_string_ref().await?,
+        chunk_parts: analyzed_chunk_parts(
+            &split_traced_file_into_parts(path).await?,
+            SourcePathKind::FileSystem,
+        )
+        .await?,
+        emitted: None,
     })))
 }
 
@@ -69,12 +94,24 @@ fn is_reported_file(path: &FileSystemPath) -> bool {
     !(path.path.ends_with(".map") || path.path.ends_with(".nft.json"))
 }
 
-async fn analyzed_chunk_parts(chunk_parts: &[ChunkPart]) -> Result<Vec<AnalyzedChunkPart>> {
+enum SourcePathKind {
+    SourceMap,
+    FileSystem,
+}
+
+async fn analyzed_chunk_parts(
+    chunk_parts: &[ChunkPart],
+    source_path_kind: SourcePathKind,
+) -> Result<Vec<AnalyzedChunkPart>> {
     let mut analyzed = Vec::with_capacity(chunk_parts.len());
     for part in chunk_parts {
         let size = part.real_size + part.unaccounted_size;
         analyzed.push(AnalyzedChunkPart {
-            source: normalize_source(&part.source)?,
+            source: match source_path_kind {
+                SourcePathKind::SourceMap => normalize_source(&part.source)?,
+                // Traced paths are literal filesystem names, not source-map URLs.
+                SourcePathKind::FileSystem => part.source.clone(),
+            },
             size,
             compressed_size: part.get_compressed_size().await?.unwrap_or(size),
         });

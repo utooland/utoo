@@ -1083,7 +1083,7 @@ impl Project {
     #[turbo_tasks::function]
     pub(super) async fn with_analyze_config(&self) -> Result<Vc<Self>> {
         Ok(Self {
-            config: self.config.with_analyze_source_maps().to_resolved().await?,
+            config: self.config.with_bundle_analysis().to_resolved().await?,
             ..self.clone()
         }
         .cell())

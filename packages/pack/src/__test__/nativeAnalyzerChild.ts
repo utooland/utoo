@@ -15,6 +15,8 @@ assert(
       "server-only",
       "server-functions",
       "server-functions-entry",
+      "external-node",
+      "external-mixed",
     ].includes(scenario),
 );
 
@@ -24,11 +26,17 @@ type ModuleHeader = {
   modules: { ident: string; path: string }[];
   module_dependencies: Edges;
   async_module_dependencies: Edges;
+  traced_module_dependencies: Edges;
 };
 type AnalyzeHeader = {
   module_index_hash: string;
   sources: { parent_source_index: number | null; path: string }[];
-  chunk_parts: { source_index: number; size: number }[];
+  chunk_parts: {
+    source_index: number;
+    output_file_index: number;
+    size: number;
+    compressed_size: number;
+  }[];
   output_files: { filename: string }[];
   output_file_modules: Edges;
   route_entries: {
@@ -84,7 +92,7 @@ function assertSource(header: AnalyzeHeader, suffix: string) {
     header.chunk_parts.some(
       (part) => indices.has(part.source_index) && part.size > 0,
     ),
-    `Missing emitted bytes for ${suffix}`,
+    `Missing attributed bytes for ${suffix}`,
   );
 }
 
@@ -93,24 +101,26 @@ function hasImportPath(
   from: string,
   to: string,
   requireAsync = false,
-  scope?: { roots: Set<string>; members: Set<number> },
+  scope?: { roots: Set<string>; members?: Set<number> },
+  requireTraced = false,
 ): boolean {
   const roots = graph.header.modules.flatMap((module, index) =>
     module.path.endsWith(from) && (!scope || scope.roots.has(module.ident))
-      ? [{ index, async: false }]
+      ? [{ index, async: false, traced: false }]
       : [],
   );
   assert(roots.length > 0, `Missing graph root ${from}`);
   const visited = new Set<string>();
   for (let position = 0; position < roots.length; position++) {
     const current = roots[position];
-    const key = `${current.index}:${current.async}`;
+    const key = `${current.index}:${current.async}:${current.traced}`;
     if (visited.has(key)) continue;
     visited.add(key);
     if (
       graph.header.modules[current.index].path.endsWith(to) &&
       (!requireAsync || current.async) &&
-      (!scope || scope.members.has(current.index))
+      (!requireTraced || current.traced) &&
+      (!scope?.members || scope.members.has(current.index))
     ) {
       return true;
     }
@@ -119,14 +129,21 @@ function hasImportPath(
       graph.header.module_dependencies,
       current.index,
     )) {
-      roots.push({ index, async: current.async });
+      roots.push({ index, async: current.async, traced: current.traced });
     }
     for (const index of readEdges(
       graph.binary,
       graph.header.async_module_dependencies,
       current.index,
     )) {
-      roots.push({ index, async: true });
+      roots.push({ index, async: true, traced: current.traced });
+    }
+    for (const index of readEdges(
+      graph.binary,
+      graph.header.traced_module_dependencies,
+      current.index,
+    )) {
+      roots.push({ index, async: current.async, traced: true });
     }
   }
   return false;
@@ -134,13 +151,362 @@ function hasImportPath(
 
 function readFiles(directory: string): Record<string, string> {
   return Object.fromEntries(
-    fs.readdirSync(directory, { recursive: true }).flatMap((item) => {
-      const filename = path.join(directory, item);
-      return fs.statSync(filename).isFile()
-        ? [[item, fs.readFileSync(filename).toString("base64")]]
-        : [];
-    }),
+    fs
+      .readdirSync(directory, { recursive: true, encoding: "utf8" })
+      .flatMap((item) => {
+        const filename = path.join(directory, item);
+        return fs.statSync(filename).isFile()
+          ? [[item, fs.readFileSync(filename).toString("base64")]]
+          : [];
+      }),
   );
+}
+
+async function externalScenario(
+  analyze: typeof import("../commands/analyze").analyze,
+  build: typeof import("../commands/build").build,
+) {
+  const mixed = scenario === "external-mixed";
+  const sources: Record<string, string> = {
+    "client.js":
+      'import local from "virtual-global"; import remote from "virtual-remote"; globalThis.client = [local, remote];',
+    "server-a.js":
+      'import a from "virtual-a"; import shared from "virtual-shared"; import missing from "virtual-missing"; import fs from "node:fs"; globalThis.a = [a, shared, missing, typeof fs.readFileSync];',
+    "server-b.js":
+      'import b from "virtual-b"; import shared from "virtual-shared"; globalThis.b = [b, shared];',
+    "vendor/shared/package.json": JSON.stringify({ name: "fixture-shared" }),
+    "vendor/shared/common.cjs": 'module.exports = "shared-external-payload";',
+    "vendor/shared/unused.cjs": 'module.exports = "unused-shared-payload";',
+    "vendor/a/percent%FF.cjs": 'module.exports = "literal-percent-byte";',
+    "vendor/a/percent%20name.cjs": 'module.exports = "literal-percent-space";',
+  };
+  for (const name of ["a", "b"]) {
+    const extension = name === "a" ? "cjs" : "mjs";
+    Object.assign(sources, {
+      [`vendor/${name}/package.json`]: JSON.stringify({
+        name: `fixture-${name}`,
+        main: `index.${extension}`,
+      }),
+      [`vendor/${name}/index.${extension}`]: (name === "a"
+        ? [
+            'const dependency = require("./dependency.cjs");',
+            'const data = require("./data.json");',
+            'const fs = require("node:fs");',
+            'const path = require("node:path");',
+            'const payload = fs.readFileSync(path.join(__dirname, "payload.txt"), "utf8");',
+            'const binary = fs.readFileSync(path.join(__dirname, "payload.bin"));',
+            "module.exports = { dependency, data, payload, binary };",
+          ]
+        : [
+            'import dependency from "./dependency.mjs";',
+            'import data from "./data.json" with { type: "json" };',
+            'import fs from "node:fs";',
+            'const payload = fs.readFileSync(new URL("./payload.txt", import.meta.url), "utf8");',
+            "export default { dependency, data, payload };",
+          ]
+      ).join("\n"),
+      [`vendor/${name}/dependency.${extension}`]:
+        name === "a"
+          ? 'module.exports = { shared: require("../shared/common.cjs"), literal: require("./percent%FF.cjs"), escaped: require("./percent%20name.cjs"), name: "dependency-a" };'
+          : 'import shared from "../shared/common.cjs"; export default { shared, name: "dependency-b" };',
+      [`vendor/${name}/data.json`]: JSON.stringify({ name, count: 17 }),
+      [`vendor/${name}/payload.txt`]: `external-asset-${name}\n`.repeat(256),
+      [`vendor/${name}/unused.cjs`]: `module.exports = "unused-${name}-payload";`,
+      [`vendor/${name}/unused.txt`]: `unused-${name}-asset`,
+    });
+  }
+  fs.writeFileSync(path.join(projectPath, "package.json"), '{"private":true}');
+  for (const [name, contents] of Object.entries(sources)) {
+    const filename = path.join(projectPath, "src", name);
+    fs.mkdirSync(path.dirname(filename), { recursive: true });
+    fs.writeFileSync(filename, contents);
+  }
+  fs.writeFileSync(
+    path.join(projectPath, "src/vendor/a/payload.bin"),
+    Buffer.from([0, 255, 254, 128, 129, 192, 245, 0]),
+  );
+  const distPath = path.join(projectPath, "dist");
+  const clientOutput = path.join(distPath, "client");
+  const serverOutput = path.join(distPath, "server");
+  const externalEntries = [
+    { name: "a", import: "./src/server-a.js" },
+    { name: "b", import: "./src/server-b.js" },
+  ];
+  // Virtual package names exercise configured externals without creating or
+  // modifying node_modules. Runtime requests resolve from the project root.
+  const externals = {
+    "virtual-a": "commonjs ./src/vendor/a/index.cjs",
+    "virtual-b": "esm ./src/vendor/b/index.mjs",
+    "virtual-shared": "commonjs ./src/vendor/shared/common.cjs",
+    "virtual-missing": "commonjs absent-runtime-package",
+  };
+  const config: ConfigComplete = {
+    mode: "production",
+    entry: mixed
+      ? [{ name: "client", import: "./src/client.js" }]
+      : externalEntries,
+    target: mixed ? undefined : "current node",
+    externals: mixed
+      ? {
+          "virtual-global": "FixtureGlobal",
+          "virtual-remote":
+            "script FixtureRemote@https://example.invalid/fixture.js",
+        }
+      : externals,
+    server: mixed
+      ? {
+          entry: externalEntries,
+          externals,
+          output: { path: serverOutput },
+        }
+      : undefined,
+    output: { path: clientOutput, clean: true },
+    sourceMaps: false,
+    stats: true,
+    persistentCaching: false,
+    optimization: { minify: true, concatenateModules: true },
+  };
+  const originalConfig = JSON.stringify(config);
+  delete process.env.ANALYZE;
+  await build({ config, tracing: false }, projectPath, projectPath);
+  const beforeOutputs = readFiles(distPath);
+  const reportPath = path.join(projectPath, "report");
+  const result = await analyze(
+    { config, tracing: false },
+    projectPath,
+    projectPath,
+    { outputPath: reportPath },
+  );
+  assert.equal(JSON.stringify(config), originalConfig);
+  assert.deepEqual(readFiles(distPath), beforeOutputs);
+  assert.equal(result.entries.length, mixed ? 3 : 2);
+  const graph = readArtifact<ModuleHeader>(
+    path.join(reportPath, "data/modules.data"),
+  );
+  const reports = result.entries.map((entry) => ({
+    entry,
+    artifact: readArtifact<AnalyzeHeader>(
+      path.join(reportPath, "data", entry.path.slice(1), "analyze.data"),
+    ),
+  }));
+  for (const name of ["a", "b"]) {
+    const extension = name === "a" ? "cjs" : "mjs";
+    const root = `/src/server-${name}.js`;
+    const report = reports.find(
+      ({ entry, artifact }) =>
+        entry.environment === "server" &&
+        artifact.header.route_entries.some((entry) =>
+          entry.module_path.endsWith(root),
+        ),
+    );
+    assert(report, `Missing server report ${name}`);
+    const { header, binary } = report.artifact;
+    assert.equal(header.module_index_hash, graph.header.module_index_hash);
+    const scope = {
+      roots: new Set(header.route_entries.map((entry) => entry.module_ident)),
+    };
+    for (const suffix of [
+      `/src/vendor/${name}/index.${extension}`,
+      `/src/vendor/${name}/dependency.${extension}`,
+      `/src/vendor/${name}/data.json`,
+      `/src/vendor/${name}/payload.txt`,
+      ...(name === "a"
+        ? [
+            "/src/vendor/a/payload.bin",
+            "/src/vendor/a/percent%FF.cjs",
+            "/src/vendor/a/percent%20name.cjs",
+          ]
+        : []),
+      "/src/vendor/shared/common.cjs",
+    ]) {
+      const outputIndices = header.output_files.flatMap((file, index) =>
+        file.filename.endsWith(suffix) ? [index] : [],
+      );
+      assert.equal(
+        outputIndices.length,
+        1,
+        `External ${suffix} must be counted once in ${name}`,
+      );
+      const outputIndex = outputIndices[0];
+      const parts = header.chunk_parts.filter(
+        (part) => part.output_file_index === outputIndex,
+      );
+      assert.equal(
+        parts.reduce((size, part) => size + part.size, 0),
+        fs.statSync(path.join(projectPath, suffix.slice(1))).size,
+        `External ${suffix} must retain its complete on-disk size`,
+      );
+      if (suffix.endsWith("payload.txt")) {
+        const rawSize = parts.reduce((size, part) => size + part.size, 0);
+        const compressedSize = parts.reduce(
+          (size, part) => size + part.compressed_size,
+          0,
+        );
+        assert(
+          compressedSize > 0 && compressedSize < rawSize,
+          `Repetitive external asset ${suffix} must have a compressed size`,
+        );
+      }
+      assertSource(header, suffix);
+      assert.deepEqual(
+        readEdges(binary, header.output_file_modules, outputIndex),
+        [],
+        "Traced payloads are not emitted bundle modules",
+      );
+      assert(
+        hasImportPath(graph, root, suffix, false, scope, true),
+        `Missing traced import chain from ${root} to ${suffix}`,
+      );
+    }
+    for (const [from, to] of [
+      [
+        `/src/vendor/${name}/index.${extension}`,
+        `/src/vendor/${name}/dependency.${extension}`,
+      ],
+      [
+        `/src/vendor/${name}/index.${extension}`,
+        `/src/vendor/${name}/data.json`,
+      ],
+      [
+        `/src/vendor/${name}/index.${extension}`,
+        `/src/vendor/${name}/payload.txt`,
+      ],
+      [
+        `/src/vendor/${name}/dependency.${extension}`,
+        "/src/vendor/shared/common.cjs",
+      ],
+      ...(name === "a"
+        ? [
+            ["/src/vendor/a/dependency.cjs", "/src/vendor/a/percent%FF.cjs"],
+            [
+              "/src/vendor/a/dependency.cjs",
+              "/src/vendor/a/percent%20name.cjs",
+            ],
+          ]
+        : []),
+    ]) {
+      assert(
+        hasImportPath(graph, from, to, false, undefined, true),
+        `Missing traced dependency ${from} -> ${to}`,
+      );
+    }
+    const other = name === "a" ? "b" : "a";
+    assert(
+      !header.output_files.some((file) =>
+        file.filename.includes(`/src/vendor/${other}/`),
+      ),
+      `Server ${name} includes the other endpoint's external files`,
+    );
+    assert(
+      !sourcePaths(header).some((source) =>
+        source.includes(`/src/vendor/${other}/`),
+      ),
+    );
+  }
+  for (const { entry, artifact } of reports) {
+    const filenames = artifact.header.output_files.map((file) => file.filename);
+    assert(!filenames.some((filename) => filename.includes("unused.")));
+    assert(
+      !filenames.some(
+        (filename) =>
+          filename.endsWith(".map") || filename.endsWith(".nft.json"),
+      ),
+      "Source maps and tracing manifests are not runtime payloads",
+    );
+    assert(
+      !filenames.some((filename) => /(^|\/)(node:)?(fs|path)$/.test(filename)),
+    );
+    assert(
+      !filenames.some(
+        (filename) =>
+          filename.includes("https://") ||
+          filename.includes("FixtureGlobal") ||
+          filename.includes("absent-runtime-package"),
+      ),
+    );
+    if (entry.environment === "client") {
+      assert(!filenames.some((filename) => filename.includes("/src/vendor/")));
+      assert(
+        !sourcePaths(artifact.header).some((source) =>
+          source.includes("/src/vendor/"),
+        ),
+      );
+    }
+  }
+  assert(
+    !graph.header.modules.some((module) => module.path.includes("unused.")),
+  );
+  await build({ config, tracing: false }, projectPath, projectPath);
+  assert.deepEqual(
+    readFiles(distPath),
+    beforeOutputs,
+    "Analysis changed subsequent build output or stats",
+  );
+  assert(
+    !Object.keys(beforeOutputs).some(
+      (filename) => filename.includes("vendor/") || filename.endsWith(".txt"),
+    ),
+  );
+  const assertUntracedStats = () => {
+    for (const output of mixed
+      ? [clientOutput, serverOutput]
+      : [clientOutput]) {
+      const stats = JSON.parse(
+        fs.readFileSync(path.join(output, "stats.json"), "utf8"),
+      );
+      const serialized = JSON.stringify(stats);
+      for (const tracedFile of [
+        "dependency.cjs",
+        "dependency.mjs",
+        "data.json",
+        "payload.txt",
+        "payload.bin",
+        "percent%FF.cjs",
+        "percent%20name.cjs",
+      ])
+        assert(
+          !serialized.includes(tracedFile),
+          `Ordinary stats unexpectedly traced ${tracedFile}`,
+        );
+      assert(
+        !stats.assets.some(
+          (asset: { name: string }) =>
+            asset.name.includes("vendor/") ||
+            asset.name.endsWith(".txt") ||
+            asset.name.endsWith(".bin"),
+        ),
+      );
+    }
+  };
+  assertUntracedStats();
+  if (mixed) {
+    const { serve } = await import("../commands/dev");
+    const server = await serve(
+      { config: { ...config, mode: "development" }, tracing: false },
+      projectPath,
+      projectPath,
+      {
+        port: 0,
+        hostname: "127.0.0.1",
+        handleSignals: false,
+        logServerInfo: false,
+        returnHandle: true,
+      },
+    );
+    try {
+      assertUntracedStats();
+      assert(
+        !Object.keys(readFiles(distPath)).some((filename) =>
+          filename.includes("vendor/"),
+        ),
+      );
+    } finally {
+      await server.close();
+    }
+    // Like serveStatsChild's SIGTERM path, exit only after dev assertions and
+    // close complete. Native dev watchers can retain event-loop references.
+    process.exit(0);
+  }
 }
 
 async function serverScenario(
@@ -511,6 +877,10 @@ async function main() {
   }
   const { analyze } = await import("../commands/analyze");
   const { build } = await import("../commands/build");
+  if (scenario.startsWith("external-")) {
+    await externalScenario(analyze, build);
+    return;
+  }
   if (
     [
       "node",

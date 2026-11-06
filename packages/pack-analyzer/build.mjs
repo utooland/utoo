@@ -39,7 +39,17 @@ const standaloneEdits = {
 ${rootAccessorAnchor}`,
   ]],
   "lib/treemap-layout.ts": [["All Route Modules", "All Entry Modules"]],
-  "components/sidebar.tsx": [["All Route Modules", "All Entry Modules"]],
+  "components/sidebar.tsx": [
+    ["All Route Modules", "All Entry Modules"],
+    [
+      "                Output Chunks",
+      `                {analyzeData.getSourceFlags(selectedSourceIndex).traced
+                  ? chunks.some((chunk) => !chunk.startsWith('[project]/'))
+                    ? 'Output Chunks / External Files (traced)'
+                    : 'External Files (traced)'
+                  : 'Output Chunks'}`,
+    ],
+  ],
   "components/import-chain.tsx": [
     ["Current route only", "Current entry only"],
     ["current route's bundle", "current entry's bundle"],
