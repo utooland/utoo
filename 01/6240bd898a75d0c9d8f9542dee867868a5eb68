@@ -1,0 +1,102 @@
+packages/pack/src/commands/analyze.ts
+  s_9866b691db6f9b::t_31568993dce118 97,122-129,131,139-145
+packages/pack/src/__test__/analyze.test.ts
+  s_9866b691db6f9b::t_e7de58b00c2a9c 218,224
+  s_9866b691db6f9b::t_5cb832413ad369 37,201-207,209-217,219-223,225-239,241-242
+  s_66505028c262b8::t_f945c2e51c9284 240,243-247,250-251
+crates/pack-napi/src/pack_api/project.rs
+  s_9866b691db6f9b::t_1e2847d1538da6 706-707,742
+packages/pack/src/__test__/nativeAnalyzer.test.ts
+  s_9866b691db6f9b::t_84669626bb661b 13-22
+  s_9866b691db6f9b::t_7a78bf8faacd8e 12
+packages/pack-analyzer/build.mjs
+  s_9866b691db6f9b::t_e7e3a08d051912 48
+  s_9866b691db6f9b::t_91b8109c01a214 46-47
+crates/pack-api/src/app.rs
+  s_9866b691db6f9b::t_fd7230484d495b 1-2,18-20,632-644,649-661,802,831-835,953,956-985
+  s_66505028c262b8::t_98af53c2c2d492 989-993
+crates/pack-core/src/client/context.rs
+  s_9866b691db6f9b::t_236846192470b6 295
+crates/pack-core/src/server/contexts.rs
+  s_9866b691db6f9b::t_236846192470b6 247
+packages/pack-analyzer/src/entry-picker.tsx
+  s_9866b691db6f9b::t_31568993dce118 26
+crates/pack-core/src/library/contexts.rs
+  s_9866b691db6f9b::t_236846192470b6 8-9,116
+crates/pack-api/src/analyze/capture.rs
+  s_9866b691db6f9b::t_f99f5573ae5711 16-17,119-122,190-191,200-203,206-236,238-239,241-261,263-275
+  s_9866b691db6f9b::t_9d6238ed3944cd 3,13,19-43,49-56,107-108,118,123-134,136-189,198,205,281
+  s_9866b691db6f9b::t_236846192470b6 135
+  s_66505028c262b8::t_50527e78e2bead 204
+crates/pack-core/src/config.rs
+  s_9866b691db6f9b::t_236846192470b6 2079
+packages/pack/src/core/types.ts
+  s_9866b691db6f9b::t_31568993dce118 116-117
+crates/pack-api/src/analyze.rs
+  s_9866b691db6f9b::t_f99f5573ae5711 135-137,140,145,147-162,164-168,778,784-785,788-815,817-822
+  s_9866b691db6f9b::t_69d2ee2ba79bdd 139,141,146,169-170,663,777,786-787,823
+packages/pack/src/__test__/nativeAnalyzerChild.ts
+  s_9866b691db6f9b::t_e6c4be537f213a 455
+  s_9866b691db6f9b::t_27590bdc8f97ed 162-169,275-279,418-423,459-463,492-496,514-522
+  s_9866b691db6f9b::t_84669626bb661b 7-19,34-38,99-101,112-113,150,153-154,156-159,173-176,178-181,185-186,193-196,239-251,256-271,273-274,280-299,301-322,330,339-355,357,359-370,373-378,382-385,387-393,397-411,414-417,424,430-433,437-442,449-454,456-458,464-468,471-478,484,487-488,490-491,497-502,731,733,742
+  s_9866b691db6f9b::t_7a78bf8faacd8e 33,96,146-149,151-152,155,170-172,177,182-184,187-192,197-213,222-235,238,252-255,272,300,329,356,358,371-372,379-381,386,394-396,412-413,425-429,434-436,469-470,479-483,485-486,489,503-505,523-525,738-739
+  s_9866b691db6f9b::t_fbf0789b3fb8b5 236-237
+  s_9866b691db6f9b::t_f9f8fac19cf6e0 331-338,443-448,596-605,643,719-727
+  s_9866b691db6f9b::t_320cb18c6ee407 160-161,214-221,323-328
+  s_9866b691db6f9b::t_14b37a095c6176 728-730
+  s_9866b691db6f9b::t_67ecb8e2b41075 732
+  s_9866b691db6f9b::t_db7f2fd7ea9339 734-737
+  s_9866b691db6f9b::t_e7b7c98dd55f0f 740-741
+  s_9866b691db6f9b::t_1687f5e57f25d9 743-745
+packages/pack/src/binding.d.ts
+  s_9866b691db6f9b::t_31568993dce118 297
+crates/pack-api/src/analyze/membership.rs
+  s_9866b691db6f9b::t_f29ac3d15339ff 9,24,55-65,167
+  s_9866b691db6f9b::t_a43d91b9d835d8 6,27-29,149,169-177
+packages/pack-analyzer/README.md
+  s_9866b691db6f9b::t_bb2bd4e8dfdce1 10-11
+packages/pack-analyzer/src/main.tsx
+  s_9866b691db6f9b::t_b56f0f581705a3 16,108-111,114,116-120,134-144,150-160,162-163,167,170,178,180-192,333
+  s_66505028c262b8::t_bb32d089874ed8 193-204,206,248,285,326,354-356,395
+crates/pack-api/src/project.rs
+  s_9866b691db6f9b::t_236846192470b6 1366,1398
+packages/pack/README.md
+  s_9866b691db6f9b::t_bb2bd4e8dfdce1 116-118,131-132,158-165
+  s_9866b691db6f9b::t_251a354bd52602 166-167
+packages/pack-cli/src/commands/analyze.ts
+  s_9866b691db6f9b::t_31568993dce118 9
+next.js
+  s_c811fcdc69f031::t_e4f99818b30f0d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "016240bd898a75d0c9d8f9542dee867868a5eb68",
+  "prompts": {},
+  "sessions": {
+    "s_66505028c262b8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aa77-27a4-70c1-94f3-1fa2d5f8eb59",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_9866b691db6f9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af71-5078-72d2-a666-e23473ecef0a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_c811fcdc69f031": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ab99-6357-72e3-a214-036e77b95c1b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
