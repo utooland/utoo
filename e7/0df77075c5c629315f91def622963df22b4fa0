@@ -1,0 +1,29 @@
+crates/pack-napi/src/pack_api/project.rs
+  s_9866b691db6f9b::t_eb782ffb56cf2d 719
+packages/pack/src/binding.d.ts
+  s_69940802e1f71b::t_84e862cffaeb37 50-59,304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e70df77075c5c629315f91def622963df22b4fa0",
+  "prompts": {},
+  "sessions": {
+    "s_69940802e1f71b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1b048-4795-73c2-af45-0b48cd15f532",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_9866b691db6f9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af71-5078-72d2-a666-e23473ecef0a",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
