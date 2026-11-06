@@ -13,6 +13,7 @@ import useSWR from "swr";
 import { FileSearch } from "@/components/file-search";
 import { Sidebar } from "@/components/sidebar";
 import { TreemapVisualizer } from "@/components/treemap-visualizer";
+import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
 import {
   type AnalyzeData,
@@ -104,12 +105,19 @@ async function fetchEntries(url: string): Promise<Entry[]> {
       (entry) =>
         typeof entry?.name !== "string" ||
         typeof entry?.path !== "string" ||
-        !/^\/entry-\d+$/.test(entry.path),
+        !/^\/entry-\d+$/.test(entry.path) ||
+        (entry.environment !== undefined &&
+          entry.environment !== "client" &&
+          entry.environment !== "server"),
     )
   ) {
-    throw new Error("Invalid browser entry index.");
+    throw new Error("Invalid entry index.");
   }
-  return entries;
+  // Reports created before server support contain browser entries only.
+  return entries.map((entry) => ({
+    ...entry,
+    environment: entry.environment ?? "client",
+  }));
 }
 
 function Analyzer() {
@@ -123,22 +131,43 @@ function Analyzer() {
     fetchModulesData,
     staticDataOptions,
   );
-  const [entryPath, setEntryPath] = useState(() =>
-    new URLSearchParams(location.search).get("entry"),
-  );
+  const [selection, setSelection] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    const environment = params.get("environment");
+    return {
+      path: params.get("entry"),
+      environment:
+        environment === "client" || environment === "server"
+          ? environment
+          : undefined,
+    };
+  });
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState(() =>
     fileTypes.map(({ value }) => value),
   );
   const [initialOnly, setInitialOnly] = useState(false);
+  const requestedEntry = entries?.find(({ path }) => path === selection.path);
+  const requestedEnvironment =
+    selection.environment ?? requestedEntry?.environment;
+  const environment = entries?.some(
+    (entry) => entry.environment === requestedEnvironment,
+  )
+    ? requestedEnvironment
+    : entries?.[0]?.environment;
+  const visibleEntries = entries?.filter(
+    (entry) => entry.environment === environment,
+  );
   const selectedEntry =
-    entries?.find(({ path }) => path === entryPath) ?? entries?.[0];
+    visibleEntries?.find(({ path }) => path === selection.path) ??
+    visibleEntries?.[0];
   const deferredSearch = useDeferredValue(search);
 
   const selectEntry = (entry: Entry) => {
-    setEntryPath(entry.path);
+    setSelection({ path: entry.path, environment: entry.environment });
     const url = new URL(location.href);
     url.searchParams.set("entry", entry.path);
+    url.searchParams.set("environment", entry.environment);
     history.replaceState(null, "", url);
   };
 
@@ -146,13 +175,35 @@ function Analyzer() {
     <main className="flex h-dvh flex-col bg-background text-foreground">
       <header className="flex flex-wrap items-center gap-3 border-b bg-background p-3">
         <h1 className="text-sm font-semibold">Utoopack Bundle Analyzer</h1>
-        <span className="rounded-md border px-2 py-1 text-xs text-muted-foreground">
-          Browser bundles
-        </span>
-        {selectedEntry && entries ? (
+        {selectedEntry && entries && visibleEntries ? (
           <>
+            <div
+              role="group"
+              aria-label="Bundle environment"
+              className="flex gap-1"
+            >
+              {(["client", "server"] as const).map((value) => (
+                <Button
+                  key={value}
+                  variant={environment === value ? "secondary" : "outline"}
+                  size="sm"
+                  aria-pressed={environment === value}
+                  disabled={
+                    !entries.some((entry) => entry.environment === value)
+                  }
+                  onClick={() => {
+                    const entry = entries.find(
+                      (entry) => entry.environment === value,
+                    );
+                    if (entry) selectEntry(entry);
+                  }}
+                >
+                  {value === "client" ? "Client" : "Server"}
+                </Button>
+              ))}
+            </div>
             <EntryPicker
-              entries={entries}
+              entries={visibleEntries}
               selectedEntry={selectedEntry}
               onSelect={selectEntry}
             />
@@ -194,7 +245,7 @@ function Analyzer() {
         <ReportStatus>
           <p role="status">
             {entries?.length === 0
-              ? "No browser entries to analyze."
+              ? "No entries to analyze."
               : "Loading analyzer report…"}
           </p>
         </ReportStatus>
@@ -231,6 +282,7 @@ function EntryReport(props: EntryReportProps) {
 }
 
 function EntryTreemap({
+  entry,
   analyzeData,
   modulesData,
   search,
@@ -271,14 +323,14 @@ function EntryTreemap({
       const flags = analyzeData.getSourceFlags(sourceIndex);
       const scope = sourceLoadScopes.get(sourceIndex);
       return (
-        flags.client &&
+        flags[entry.environment] &&
         typeFilter.some(
           (type) => flags[type as "js" | "css" | "json" | "asset"],
         ) &&
         (!initialOnly || scope === "initial" || scope === "mixed")
       );
     },
-    [analyzeData, initialOnly, sourceLoadScopes, typeFilter],
+    [analyzeData, entry.environment, initialOnly, sourceLoadScopes, typeFilter],
   );
   const getFileLoadScope = useCallback(
     (sourceIndex: number) => sourceLoadScopes.get(sourceIndex) ?? "unknown",
@@ -299,7 +351,9 @@ function EntryTreemap({
   if (analyzeData.sourceCount() === 0) {
     return (
       <ReportStatus>
-        <p role="status">This entry has no browser bundle modules.</p>
+        <p role="status">
+          This entry has no {entry.environment} bundle modules.
+        </p>
       </ReportStatus>
     );
   }
@@ -338,7 +392,7 @@ function EntryTreemap({
           modulesData={modulesData}
           selectedSourceIndex={selected}
           moduleDepthMap={moduleDepthMap}
-          environmentFilter="client"
+          environmentFilter={entry.environment}
           filterSource={filterSource}
         />
       </div>

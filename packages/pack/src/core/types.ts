@@ -113,6 +113,8 @@ export interface AnalyzeEntry {
   name: string;
   /** Report-relative entry key, independent of user-provided names. */
   path: string;
+  /** The runtime that owns this entry's output. */
+  environment: "client" | "server";
 }
 
 export interface AnalyzeData {

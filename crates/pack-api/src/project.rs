@@ -1363,7 +1363,7 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: config.client_source_maps(),
+            source_maps: config.source_maps_type(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
@@ -1382,11 +1382,6 @@ impl Project {
     ) -> Result<Vc<NodeJsChunkingContext>> {
         let mode = self.mode();
         let config = self.config();
-        let source_maps = if *config.source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
         let server_root = self.dist_root().owned().await?;
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
@@ -1400,7 +1395,7 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: source_maps.cell(),
+            source_maps: config.source_maps_type(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),

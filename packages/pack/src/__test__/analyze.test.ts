@@ -34,7 +34,7 @@ let fixture: string;
 let projectPath: string;
 let reportPath: string;
 let options: BundleOptions;
-const entries = [{ name: "main", path: "/entry-0" }];
+const entries = [{ name: "main", path: "/entry-0", environment: "client" }];
 
 function oldReport() {
   fs.mkdirSync(reportPath, { recursive: true });
@@ -198,14 +198,57 @@ describe("native analysis lifecycle", () => {
   it.each([
     { target: "current node" },
     { target: "last 1 node version" },
-    { entry: [{ name: "lib", import: "./entry.js", library: {} }] },
+    { entry: [], server: { entry: "./entry.js" } },
+    { server: { entry: [{ name: "ssr", import: "./entry.js" }] } },
+    {
+      server: {
+        function: { clientProxy: "./entry.js", serverRegister: "./entry.js" },
+      },
+    },
   ] satisfies Partial<ConfigComplete>[])(
+    "accepts server configurations without mutating them: %j",
+    async (supported) => {
+      options.config = { ...options.config, ...supported };
+      const original = JSON.stringify(options);
+      await expect(run()).resolves.toEqual({ outputPath: reportPath, entries });
+      expect(mocks.createProject).toHaveBeenCalledOnce();
+      expect(JSON.stringify(options)).toBe(original);
+    },
+  );
+
+  it.each(["inside", "parent"])(
+    "protects configured server output when the report is %s that directory",
+    async (position) => {
+      const serverOutput = path.join(fixture, "server-build/dist");
+      fs.mkdirSync(serverOutput, { recursive: true });
+      fs.writeFileSync(path.join(serverOutput, "stats.json"), "server stats");
+      options.config.server = {
+        entry: "./entry.js",
+        output: { path: serverOutput },
+      };
+      reportPath =
+        position === "inside"
+          ? path.join(serverOutput, "report")
+          : path.dirname(serverOutput);
+      await expect(run()).rejects.toThrow(/outside.*output/);
+      expect(
+        fs.readFileSync(path.join(serverOutput, "stats.json"), "utf8"),
+      ).toBe("server stats");
+      expect(mocks.createProject).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      entry: [{ name: "lib", import: "./entry.js", library: {} }],
+      error: /library/i,
+    },
+    { entry: [], error: /entry/i },
+  ])(
     "rejects unsupported builds before creating a native project: %j",
     async (unsupported) => {
-      options.config = { ...options.config, ...unsupported };
-      await expect(run()).rejects.toThrow(
-        "browser application entries and MPA",
-      );
+      options.config = { ...options.config, entry: unsupported.entry };
+      await expect(run()).rejects.toThrow(unsupported.error);
       expect(mocks.createProject).not.toHaveBeenCalled();
       expect(fs.existsSync(path.dirname(reportPath))).toBe(false);
     },

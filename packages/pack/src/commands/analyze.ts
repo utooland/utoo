@@ -31,7 +31,6 @@ import { processHtmlEntry } from "../utils/htmlEntry";
 import { acquirePersistentCacheLock } from "../utils/lockfile";
 import { normalizePath } from "../utils/normalizePath";
 import { useWorkerThreads } from "../utils/runtimePluginStratety";
-import { isNodeTarget } from "../utils/target";
 import {
   formatDuration,
   formatTaskCount,
@@ -95,7 +94,7 @@ async function validateReportDirectory(outputPath: string): Promise<void> {
 }
 
 /**
- * Analyze a production browser build using the native module graph and output
+ * Analyze a production application build using the native module graph and output
  * source maps. The caller's configuration, bundles and Webpack stats are left intact.
  */
 export async function analyze(
@@ -120,15 +119,16 @@ export async function analyze(
   };
   processHtmlEntry(config, resolvedProjectPath);
   validateEntryPaths(config, resolvedProjectPath);
-  if (
-    !config.entry.length ||
-    config.entry.some((entry) => entry.library) ||
-    isNodeTarget(config.target) ||
-    (config.server?.entry?.length ?? 0) > 0 ||
-    config.server?.function
-  ) {
+  const serverEntries =
+    typeof config.server?.entry === "string"
+      ? [{ import: config.server.entry }]
+      : (config.server?.entry ?? []);
+  if (!config.entry.length && !serverEntries.length) {
+    throw new Error("Native Analyzer requires at least one application entry.");
+  }
+  if (config.entry.some((entry) => entry.library)) {
     throw new Error(
-      "Native Analyzer currently supports browser application entries and MPA only; library and server builds are not supported.",
+      "Native Analyzer supports application entries; library builds are not supported.",
     );
   }
 
@@ -136,7 +136,13 @@ export async function analyze(
     resolvedProjectPath,
     analyzeOptions.outputPath || ".utoo/analyze",
   );
-  if (overlaps(outputPath, getOutputPath(config, resolvedProjectPath))) {
+  const buildOutputPaths = [getOutputPath(config, resolvedProjectPath)];
+  if (config.server?.output?.path) {
+    buildOutputPaths.push(
+      path.resolve(resolvedProjectPath, config.server.output.path),
+    );
+  }
+  if (buildOutputPaths.some((buildPath) => overlaps(outputPath, buildPath))) {
     throw new Error(
       "Analyzer output must be outside the application's build output directory.",
     );

@@ -2076,7 +2076,7 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn client_source_maps(&self) -> Vc<SourceMapsType> {
+    pub fn source_maps_type(&self) -> Vc<SourceMapsType> {
         let source_maps = if self.analyze_source_maps {
             // Keep output attribution on the files Turbopack resolved, so source
             // map paths can be joined with the module graph's paths.

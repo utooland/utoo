@@ -4,7 +4,19 @@ import path from "node:path";
 import type { ConfigComplete } from "../config/types";
 
 const [, , projectPath, scenario] = process.argv;
-assert(projectPath && ["single", "mpa", "html"].includes(scenario));
+assert(
+  projectPath &&
+    [
+      "single",
+      "mpa",
+      "html",
+      "node",
+      "mixed",
+      "server-only",
+      "server-functions",
+      "server-functions-entry",
+    ].includes(scenario),
+);
 
 type Edges = { offset: number; length: number };
 type ModuleHeader = {
@@ -18,7 +30,12 @@ type AnalyzeHeader = {
   sources: { parent_source_index: number | null; path: string }[];
   chunk_parts: { source_index: number; size: number }[];
   output_files: { filename: string }[];
-  route_entries: { module_ident: string; module_path: string }[];
+  output_file_modules: Edges;
+  route_entries: {
+    module_ident: string;
+    module_path: string;
+    entry_kind?: string;
+  }[];
 };
 
 // Decode the public artifact format independently of the UI. Both JSON headers
@@ -76,9 +93,12 @@ function hasImportPath(
   from: string,
   to: string,
   requireAsync = false,
+  scope?: { roots: Set<string>; members: Set<number> },
 ): boolean {
   const roots = graph.header.modules.flatMap((module, index) =>
-    module.path.endsWith(from) ? [{ index, async: false }] : [],
+    module.path.endsWith(from) && (!scope || scope.roots.has(module.ident))
+      ? [{ index, async: false }]
+      : [],
   );
   assert(roots.length > 0, `Missing graph root ${from}`);
   const visited = new Set<string>();
@@ -89,7 +109,8 @@ function hasImportPath(
     visited.add(key);
     if (
       graph.header.modules[current.index].path.endsWith(to) &&
-      (!requireAsync || current.async)
+      (!requireAsync || current.async) &&
+      (!scope || scope.members.has(current.index))
     ) {
       return true;
     }
@@ -122,6 +143,366 @@ function readFiles(directory: string): Record<string, string> {
   );
 }
 
+async function serverScenario(
+  analyze: typeof import("../commands/analyze").analyze,
+  build: typeof import("../commands/build").build,
+) {
+  const withFunctionEntry = scenario === "server-functions-entry";
+  const inputPath = path.join(projectPath, "src");
+  const sources: Record<string, string> = {
+    "client.js":
+      'import { shared } from "./shared.js"; import { client } from "./client-only.js"; globalThis.client = [shared, client];',
+    "client-only.js": 'export const client = "browser-only-value";',
+    "server-main.js":
+      'import { shared } from "./shared.js"; import { server } from "./server-only.js"; globalThis.server = [shared, server]; globalThis.loadServer = () => import("./server-lazy.js");',
+    "server-admin.js":
+      'import { shared } from "./shared.js"; import { admin } from "./admin-only.js"; globalThis.admin = [shared, admin];',
+    "server-only.js":
+      'export const server = "server-only-value";\n//# sourceMappingURL=server-only.js.map',
+    "server-only.js.map": JSON.stringify({
+      version: 3,
+      file: "server-only.js",
+      sources: ["original-server.ts"],
+      sourcesContent: ['export const server: string = "server-only-value";'],
+      names: [],
+      mappings: "AAAA",
+    }),
+    "admin-only.js": 'export const admin = "admin-only-value";',
+    "server-lazy.js": 'export const lazy = "server-lazy-value";',
+    "shared.js": 'export const shared = "shared-in-each-environment";',
+    "function-client.js":
+      'import { shared } from "./shared.js"; import { perform } from "./actions.js"; globalThis.run = () => perform(shared);',
+    "actions.js":
+      '"use server"; import { secret } from "./action-private.js"; import { shared } from "./shared.js"; export async function perform(value) { return secret + shared + value; }',
+    "action-private.js": 'export const secret = "server-action-secret";',
+    "transport.js":
+      "export function createServerReference(id, name) { return async (...args) => ({ id, name, args }); }",
+    "register.js":
+      "export function registerServerReference(action, id, name) { globalThis.actions ??= new Map(); globalThis.actions.set(id, {action, name}); }",
+  };
+  fs.mkdirSync(inputPath, { recursive: true });
+  fs.writeFileSync(path.join(projectPath, "package.json"), '{"private":true}');
+  for (const [name, contents] of Object.entries(sources))
+    fs.writeFileSync(path.join(inputPath, name), contents);
+
+  const distPath = path.join(projectPath, "dist");
+  const clientOutput = path.join(distPath, "client");
+  const serverOutput = path.join(distPath, "server");
+  for (const output of [clientOutput, serverOutput]) {
+    fs.mkdirSync(output, { recursive: true });
+    fs.writeFileSync(
+      path.join(output, "stats.json"),
+      JSON.stringify({ existing: output }),
+    );
+    fs.writeFileSync(path.join(output, "keep.js"), "existing bundle");
+  }
+  const beforeOutputs = readFiles(distPath);
+  const serverConfig: NonNullable<ConfigComplete["server"]> = {
+    output: { path: serverOutput, filename: "[name].[contenthash:8].js" },
+  };
+  const config: ConfigComplete = {
+    mode: "production",
+    entry: [],
+    output: { path: clientOutput, clean: true },
+    sourceMaps: false,
+    stats: true,
+    persistentCaching: false,
+    optimization: { minify: true },
+  };
+  if (scenario === "node") {
+    config.target = "current node";
+    // The CLI enables concatenation: membership must include modules inside
+    // scope-hoisted Node chunk items, not only their enclosing module.
+    config.optimization = {
+      ...config.optimization,
+      concatenateModules: true,
+      removeUnusedExports: true,
+      removeUnusedImports: true,
+    };
+    config.entry = [
+      { name: "main", import: "./src/server-main.js" },
+      { name: "admin", import: "./src/server-admin.js" },
+    ];
+  } else {
+    config.server = serverConfig;
+    if (scenario === "mixed") {
+      // Names can collide across environments; these are separate endpoints.
+      config.entry = [{ name: "alpha", import: "./src/client.js" }];
+      serverConfig.entry = [
+        { name: "alpha", import: "./src/server-main.js" },
+        { name: "admin", import: "./src/server-admin.js" },
+      ];
+    } else if (scenario === "server-only") {
+      // Server entries use the native resolver and may omit their extension.
+      serverConfig.entry = "./src/server-main";
+    } else {
+      config.entry = [
+        { name: "functions", import: "./src/function-client.js" },
+      ];
+      serverConfig.function = {
+        clientProxy: "./src/transport.js",
+        serverRegister: "./src/register.js",
+      };
+      if (withFunctionEntry) {
+        serverConfig.entry = [
+          { name: "alpha", import: "./src/server-main.js" },
+          { name: "admin", import: "./src/server-admin.js" },
+        ];
+      }
+    }
+  }
+  const originalConfig = JSON.stringify(config);
+  const reportPath = path.join(projectPath, "report");
+  const result = await analyze(
+    { config, tracing: false },
+    projectPath,
+    projectPath,
+    { outputPath: reportPath },
+  );
+  assert.equal(
+    JSON.stringify(config),
+    originalConfig,
+    "Analysis changed server configuration",
+  );
+  assert.deepEqual(
+    readFiles(distPath),
+    beforeOutputs,
+    "Analysis rewrote client/server bundles or stats",
+  );
+  assert(fs.existsSync(path.join(reportPath, "index.html")));
+  assert.equal(
+    result.entries.length,
+    scenario === "mixed" || withFunctionEntry
+      ? 3
+      : scenario === "server-only"
+        ? 1
+        : 2,
+  );
+  assert.equal(
+    new Set(result.entries.map((entry) => entry.path)).size,
+    result.entries.length,
+    "Entry data paths collide",
+  );
+  assert.deepEqual(
+    JSON.parse(
+      fs.readFileSync(path.join(reportPath, "data/entries.json"), "utf8"),
+    ),
+    result.entries,
+  );
+  assert(
+    !Object.keys(readFiles(reportPath)).some((filename) =>
+      filename.endsWith("stats.json"),
+    ),
+  );
+  const graph = readArtifact<ModuleHeader>(
+    path.join(reportPath, "data/modules.data"),
+  );
+  const reports = result.entries.map((entry) => {
+    const artifact = readArtifact<AnalyzeHeader>(
+      path.join(reportPath, "data", entry.path.slice(1), "analyze.data"),
+    );
+    const members = new Set(
+      artifact.header.output_files.flatMap((_, index) =>
+        readEdges(artifact.binary, artifact.header.output_file_modules, index),
+      ),
+    );
+    assert.equal(
+      artifact.header.module_index_hash,
+      graph.header.module_index_hash,
+    );
+    assert(
+      artifact.header.output_files.length > 0,
+      `${entry.name} report is empty`,
+    );
+    assert(
+      artifact.header.chunk_parts.some((part) => part.size > 0),
+      `${entry.name} has no attributed bytes`,
+    );
+    for (const index of members)
+      assert(index < graph.header.modules.length, "Invalid graph member index");
+    assert(
+      !sourcePaths(artifact.header).some((source) =>
+        source.endsWith("/original-server.ts"),
+      ),
+      "Server source attribution no longer matches resolved JavaScript module identities",
+    );
+    assert(["client", "server"].includes(entry.environment));
+    assert(
+      artifact.header.route_entries.every(
+        (root) =>
+          root.entry_kind ===
+          (entry.environment === "client" ? "client_bootstrap" : "server"),
+      ),
+      `Wrong graph-root environment for ${entry.name}`,
+    );
+    assert(
+      artifact.header.output_files.every(
+        (file) =>
+          file.filename.startsWith("[client-fs]/") ===
+          (entry.environment === "client"),
+      ),
+      `Wrong output environment for ${entry.name}`,
+    );
+    return {
+      entry,
+      artifact,
+      scope: {
+        roots: new Set(
+          artifact.header.route_entries.map((root) => root.module_ident),
+        ),
+        members,
+      },
+    };
+  });
+  type Report = (typeof reports)[number];
+  const findReport = (suffix: string, environment: "client" | "server") => {
+    const matches = reports.filter(
+      (report) =>
+        report.entry.environment === environment &&
+        report.artifact.header.route_entries.some((root) =>
+          root.module_path.endsWith(suffix),
+        ),
+    );
+    assert.equal(
+      matches.length,
+      1,
+      `Expected one ${environment} entry rooted at ${suffix}`,
+    );
+    return matches[0];
+  };
+  const verify = (
+    report: Report,
+    root: string,
+    included: string[],
+    excluded: string[],
+  ) => {
+    assertSource(report.artifact.header, root);
+    for (const suffix of included) {
+      assertSource(report.artifact.header, suffix);
+      assert(
+        hasImportPath(graph, root, suffix, false, report.scope),
+        `Missing scoped import chain from ${root} to ${suffix}`,
+      );
+    }
+    for (const suffix of excluded)
+      assert(
+        !sourcePaths(report.artifact.header).some((source) =>
+          source.endsWith(suffix),
+        ),
+        `${root} unexpectedly includes ${suffix}`,
+      );
+  };
+  if (scenario !== "server-functions") {
+    const main = findReport("/src/server-main.js", "server");
+    verify(
+      main,
+      "/src/server-main.js",
+      ["/src/shared.js", "/src/server-only.js", "/src/server-lazy.js"],
+      ["/src/client-only.js", "/src/admin-only.js"],
+    );
+    assert(
+      hasImportPath(
+        graph,
+        "/src/server-main.js",
+        "/src/server-lazy.js",
+        true,
+        main.scope,
+      ),
+    );
+    if (scenario !== "server-only") {
+      const admin = findReport("/src/server-admin.js", "server");
+      verify(
+        admin,
+        "/src/server-admin.js",
+        ["/src/shared.js", "/src/admin-only.js"],
+        [
+          "/src/client-only.js",
+          "/src/server-only.js",
+          "/src/server-lazy.js",
+          "/src/action-private.js",
+        ],
+      );
+    }
+  }
+  if (scenario === "node" || scenario === "server-only") {
+    assert(reports.every((report) => report.entry.environment === "server"));
+  } else {
+    const functionCase = scenario.startsWith("server-functions");
+    const clientRoot = functionCase
+      ? "/src/function-client.js"
+      : "/src/client.js";
+    const serverRoot = functionCase ? "/src/actions.js" : "/src/server-main.js";
+    const client = findReport(clientRoot, "client");
+    const server = findReport(serverRoot, "server");
+    verify(
+      client,
+      clientRoot,
+      [
+        "/src/shared.js",
+        ...(functionCase ? ["/src/transport.js"] : ["/src/client-only.js"]),
+      ],
+      [
+        "/src/server-only.js",
+        "/src/admin-only.js",
+        "/src/action-private.js",
+        "/src/register.js",
+      ],
+    );
+    if (functionCase)
+      verify(
+        server,
+        serverRoot,
+        ["/src/shared.js", "/src/action-private.js", "/src/register.js"],
+        ["/src/function-client.js", "/src/transport.js"],
+      );
+    if (withFunctionEntry) {
+      assert.equal(
+        server.entry.path,
+        findReport("/src/server-main.js", "server").entry.path,
+        "Server Functions must belong to the primary configured server entry",
+      );
+    }
+    const sharedMembers = (report: Report) =>
+      [...report.scope.members].filter((index) =>
+        graph.header.modules[index].path.endsWith("/src/shared.js"),
+      );
+    const clientShared = sharedMembers(client);
+    const serverShared = sharedMembers(server);
+    assert(
+      clientShared.length > 0 && serverShared.length > 0,
+      "Shared source missing in one environment",
+    );
+    assert(
+      clientShared.every((index) => !serverShared.includes(index)),
+      "Client/server shared source identities were merged",
+    );
+    if (scenario === "mixed") {
+      assert.equal(client.entry.name, "alpha");
+      assert.equal(server.entry.name, "alpha");
+    }
+  }
+  if (scenario === "mixed" || scenario === "node" || withFunctionEntry) {
+    delete process.env.ANALYZE;
+    await build({ config, tracing: false }, projectPath, projectPath);
+    const statsAt = (output: string) =>
+      JSON.parse(fs.readFileSync(path.join(output, "stats.json"), "utf8"));
+    const topStats = statsAt(clientOutput);
+    assert.deepEqual(
+      Object.keys(topStats.entrypoints).sort(),
+      scenario === "mixed"
+        ? ["alpha"]
+        : withFunctionEntry
+          ? ["functions"]
+          : ["admin", "main"],
+    );
+    if (scenario === "mixed" || withFunctionEntry)
+      assert.deepEqual(Object.keys(statsAt(serverOutput).entrypoints).sort(), [
+        "admin",
+        "alpha",
+      ]);
+  }
+}
+
 async function main() {
   // This override is Pack-specific; domparser-rs must use its own native addon.
   if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH) {
@@ -130,6 +511,18 @@ async function main() {
   }
   const { analyze } = await import("../commands/analyze");
   const { build } = await import("../commands/build");
+  if (
+    [
+      "node",
+      "mixed",
+      "server-only",
+      "server-functions",
+      "server-functions-entry",
+    ].includes(scenario)
+  ) {
+    await serverScenario(analyze, build);
+    return;
+  }
   const sources: Record<string, string> = {
     "alpha.js": [
       'import { shared } from "./shared.js";',
@@ -200,7 +593,16 @@ async function main() {
     stats: true,
     sourceMaps: false,
     persistentCaching: false,
-    optimization: { minify: true },
+    optimization: {
+      minify: true,
+      ...(scenario === "single"
+        ? {
+            concatenateModules: true,
+            removeUnusedExports: true,
+            removeUnusedImports: true,
+          }
+        : {}),
+    },
   };
   const originalConfig = JSON.stringify(config);
   const reportPath = path.join(projectPath, "report");
@@ -238,6 +640,7 @@ async function main() {
     result.entries.map((entry) => entry.name).sort(),
     scenario === "mpa" ? ["alpha", "nested/beta"] : ["alpha"],
   );
+  assert(result.entries.every((entry) => entry.environment === "client"));
   assert.deepEqual(
     JSON.parse(
       fs.readFileSync(path.join(reportPath, "data/entries.json"), "utf8"),
@@ -313,6 +716,33 @@ async function main() {
   assert(hasImportPath(graph, "/src/alpha.js", "/src/shared.js"));
   assert(hasImportPath(graph, "/src/alpha.js", "/src/compiled-widget.js"));
   assert(hasImportPath(graph, "/src/alpha.js", "/src/lazy.js", true));
+  if (scenario === "single") {
+    const entry = result.entries.find((entry) => entry.name === "alpha")!;
+    const artifact = readArtifact<AnalyzeHeader>(
+      path.join(reportPath, "data", entry.path.slice(1), "analyze.data"),
+    );
+    const members = new Set(
+      artifact.header.output_files.flatMap((_, index) =>
+        readEdges(artifact.binary, artifact.header.output_file_modules, index),
+      ),
+    );
+    const scope = {
+      members,
+      roots: new Set(
+        artifact.header.route_entries.map((root) => root.module_ident),
+      ),
+    };
+    for (const suffix of [
+      "/src/alpha-only.js",
+      "/src/compiled-widget.js",
+      "/src/shared.js",
+    ]) {
+      assert(
+        hasImportPath(graph, "/src/alpha.js", suffix, false, scope),
+        `Scope-hoisted browser output is missing the actual member ${suffix}`,
+      );
+    }
+  }
   if (scenario === "mpa") {
     const beta = entryReports.get("nested/beta");
     assert(beta);

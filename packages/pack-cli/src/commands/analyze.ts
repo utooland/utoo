@@ -6,7 +6,7 @@ export default defineCommand({
   meta: {
     name: "analyze",
     description:
-      "Analyze browser application and MPA bundles with the native Analyzer",
+      "Analyze client and server application bundles with the native Analyzer",
   },
   args: {
     project: {

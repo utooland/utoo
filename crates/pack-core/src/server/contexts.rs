@@ -244,11 +244,7 @@ pub async fn get_server_module_options_context(
     let enable_foreign_postcss_transform = postcss_foreign_transform_options
         .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
 
-    let source_maps = if *config.source_maps().await? {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    };
+    let source_maps = *config.source_maps_type().await?;
     let css_modules_pattern = styles
         .css_modules
         .as_ref()

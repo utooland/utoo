@@ -3,9 +3,10 @@
 
 use anyhow::{Context, Result, anyhow};
 use bincode::{Decode, Encode};
+use pack_core::library::ecmascript::{EcmascriptLibraryChunk, EcmascriptLibraryEvaluateChunk};
 use rustc_hash::FxHashMap;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{FxIndexSet, NonLocalValue, ResolvedVc, ValueToString, Vc};
+use turbo_tasks::{FxIndexSet, NonLocalValue, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
 use turbopack_browser::ecmascript::{
     EcmascriptBrowserChunk, EcmascriptBrowserRuntimeChunk, EcmascriptBrowserSingleEntryChunk,
     EcmascriptBrowserWorkerEntrypoint,
@@ -20,9 +21,12 @@ use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
     chunk::{EcmascriptChunk, EcmascriptChunkItemOrBatchWithAsyncInfo},
     manifest::{chunk_asset::ManifestAsyncModule, loader_module::ManifestLoaderModule},
+    merged_ecmascript_module_members,
     single_file_ecmascript_output::SingleFileEcmascriptOutput,
 };
-use turbopack_nodejs::{EcmascriptBuildNodeChunk, EcmascriptBuildNodeRuntimeChunk};
+use turbopack_nodejs::{
+    EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk, EcmascriptBuildNodeRuntimeChunk,
+};
 
 use crate::analyze::{AnalyzeModuleIndex, AnalyzeOutputFileCoverage};
 
@@ -48,6 +52,17 @@ async fn insert_chunk_item(
     async_loaders: &mut FxIndexSet<u32>,
 ) -> Result<()> {
     let module = module.to_resolved().await?;
+    if let Some(members) = merged_ecmascript_module_members(module).await? {
+        let idents = members
+            .iter()
+            .map(|member| member.ident().to_string().owned())
+            .try_join()
+            .await?;
+        for ident in idents {
+            insert_chunk_item_ident(ident, None, &module_index.by_ident, indices, async_loaders)?;
+        }
+        return Ok(());
+    }
     let loader_target_ident =
         if let Some(loader) = ResolvedVc::try_downcast_type::<AsyncLoaderModule>(module) {
             Some(loader.await?.inner.ident().to_string().owned().await?)
@@ -131,6 +146,7 @@ pub(super) async fn output_chunk_modules(
 ) -> Result<OutputChunkModules> {
     if ResolvedVc::try_downcast_type::<EcmascriptBrowserRuntimeChunk>(asset).is_some()
         || ResolvedVc::try_downcast_type::<EcmascriptBuildNodeRuntimeChunk>(asset).is_some()
+        || ResolvedVc::try_downcast_type::<EcmascriptBuildNodeEntryChunk>(asset).is_some()
         || ResolvedVc::try_downcast_type::<SingleFileEcmascriptOutput>(asset).is_some()
         || ResolvedVc::try_downcast_type::<EcmascriptBrowserSingleEntryChunk>(asset).is_some()
         || ResolvedVc::try_downcast_type::<EcmascriptBrowserWorkerEntrypoint>(asset).is_some()
@@ -148,9 +164,17 @@ pub(super) async fn output_chunk_modules(
         let chunk = ResolvedVc::try_downcast_type::<EcmascriptChunk>(chunk)
             .ok_or_else(|| anyhow::anyhow!("browser output did not contain an ecmascript chunk"))?;
         Some(chunk.chunk_content())
-    } else {
+    } else if let Some(node_chunk) =
         ResolvedVc::try_downcast_type::<EcmascriptBuildNodeChunk>(asset)
-            .map(|node_chunk| node_chunk.chunk_content())
+    {
+        Some(node_chunk.chunk_content())
+    } else if let Some(entry_chunk) =
+        ResolvedVc::try_downcast_type::<EcmascriptLibraryEvaluateChunk>(asset)
+    {
+        Some(entry_chunk.chunk().chunk_content())
+    } else {
+        ResolvedVc::try_downcast_type::<EcmascriptLibraryChunk>(asset)
+            .map(|chunk| chunk.chunk().chunk_content())
     };
     if let Some(content) = ecmascript_content {
         let content = content.await?;

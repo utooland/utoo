@@ -43,6 +43,9 @@ ${rootAccessorAnchor}`,
   "components/import-chain.tsx": [
     ["Current route only", "Current entry only"],
     ["current route's bundle", "current entry's bundle"],
+    // Pack names its Node module layer `server`; Next uses SSR/RSC/API layers.
+    ["/ssr|rsc|route|api/.test(layer)", "/ssr|rsc|route|api|server/.test(layer)"],
+    ["Pages Router (${layer})", "Module layer (${layer})"],
   ],
 };
 

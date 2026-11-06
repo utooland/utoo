@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 export interface Entry {
   name: string;
   path: string;
+  environment: "client" | "server";
 }
 
 export function EntryPicker({

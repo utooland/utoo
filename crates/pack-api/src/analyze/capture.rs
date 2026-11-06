@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use bincode::{Decode, Encode};
 use pack_core::config::Platform;
 use serde::Serialize;
@@ -10,18 +10,50 @@ use turbo_tasks::{
     ValueToStringRef, Vc,
 };
 use turbo_tasks_fs::{DiskFileSystem, File, FileContent, FileSystem};
-use turbopack_core::{issue::PlainIssue, module::Module};
+use turbopack_core::{issue::PlainIssue, module::Module, output::OutputAssets};
 
 use super::{
-    AnalyzeChunkGroup, AnalyzeRouteEntry, RouteBundleSummary, analyze_module_graphs,
-    analyze_output_assets, analyze_route_entry_id,
+    AnalyzeChunkGroup, AnalyzeModuleGraphs, AnalyzeRouteEntry, RouteBundleSummary,
+    analyze_module_graphs, analyze_module_index, analyze_output_assets, analyze_route_entry_id,
 };
-use crate::{project::ProjectContainer, utils::strongly_consistent_catch_collectables};
+use crate::{
+    app::AppProject, project::ProjectContainer, utils::strongly_consistent_catch_collectables,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, NonLocalValue, Encode, Decode)]
+pub enum AnalyzeEnvironment {
+    Client,
+    Server,
+}
+
+impl AnalyzeEnvironment {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Client => "client",
+            Self::Server => "server",
+        }
+    }
+
+    fn entry_kind(self) -> RcStr {
+        match self {
+            Self::Client => rcstr!("client_bootstrap"),
+            Self::Server => rcstr!("server"),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, NonLocalValue, Encode, Decode)]
 pub struct AnalyzeEntry {
     pub name: RcStr,
     pub path: RcStr,
+    pub environment: AnalyzeEnvironment,
+}
+
+struct EntryCapture {
+    name: RcStr,
+    environment: AnalyzeEnvironment,
+    modules: Vec<ResolvedVc<Box<dyn Module>>>,
+    assets: ResolvedVc<OutputAssets>,
 }
 
 #[turbo_tasks::value(transparent)]
@@ -72,110 +104,181 @@ async fn write_analyze_data_operation(
         "Bundle analysis requires a production project with watch disabled"
     );
     ensure!(
-        matches!(&*project.platform().await?, Platform::Web)
-            && project.library_project().await?.is_none(),
-        "Bundle analysis supports browser applications, not Node.js or library builds"
+        project.library_project().await?.is_none(),
+        "Bundle analysis supports application entries, not library builds"
     );
     let config = project.config();
     let server = config.server().await?;
-    ensure!(
-        !server
-            .entry
-            .as_ref()
-            .is_some_and(|entry| entry.has_entries())
-            && server.function.is_none(),
-        "Bundle analysis does not yet support configured server entries or functions"
-    );
     ensure!(
         *config.source_maps().await?,
         "Bundle analysis requires source maps for source-level size attribution"
     );
 
     let project = project.with_analyze_config();
-    let app = (*project.app_project().await?)
-        .ok_or_else(|| anyhow::anyhow!("Bundle analysis requires at least one browser entry"))?;
-    let graph = *project.whole_app_module_graphs().await?.full;
-    let entries = app.resolved_entrypoints().await?;
-    let context = Vc::upcast(app.app_module_context());
-    let runtime_entries = app.app_runtime_entries();
+    let app = *project.app_project().await?;
+    let has_server_entries = server
+        .entry
+        .as_ref()
+        .is_some_and(|entry| entry.has_entries());
+    ensure!(
+        app.is_some() || has_server_entries,
+        "Bundle analysis requires at least one application or server entry"
+    );
+    let app_context = match app {
+        Some(app) => *app,
+        // The server builder is also usable without browser or Node app entrypoints.
+        None => AppProject::new(project, Vc::cell(vec![])),
+    };
+    let (app_capture, server_build) = futures::future::try_join(
+        async {
+            if app.is_none() {
+                return Ok::<_, anyhow::Error>((None, vec![]));
+            }
+            let environment = match &*project.platform().await? {
+                Platform::Web => AnalyzeEnvironment::Client,
+                Platform::Node => AnalyzeEnvironment::Server,
+            };
+            let graph = project.whole_app_module_graphs().await?.full;
+            let context = Vc::upcast(app_context.app_module_context());
+            let runtime_entries = app_context.app_runtime_entries();
+            let entries = app_context
+                .resolved_entrypoints()
+                .await?
+                .iter()
+                .copied()
+                .map(async |entry| {
+                    Ok(EntryCapture {
+                        name: entry.await?.name.clone(),
+                        environment,
+                        modules: entry
+                            .entry_evaluatable_assets(context, runtime_entries)
+                            .await?
+                            .iter()
+                            .copied()
+                            .map(ResolvedVc::upcast::<Box<dyn Module>>)
+                            .collect(),
+                        assets: entry
+                            .output_assets_for_entry(context, runtime_entries)
+                            .to_resolved()
+                            .await?,
+                    })
+                })
+                .try_join()
+                .await?;
+            Ok((Some(graph), entries))
+        },
+        async {
+            if has_server_entries || server.function.is_some() {
+                Ok(Some(app_context.server_build().await?))
+            } else {
+                Ok(None)
+            }
+        },
+    )
+    .await?;
+    let (app_graph, mut entries) = app_capture;
+    let mut graphs = app_graph.into_iter().collect::<Vec<_>>();
+    if let Some(server_build) = server_build {
+        graphs.extend(server_build.graph);
+        entries.extend(server_build.entries.iter().map(|entry| EntryCapture {
+            name: entry.name.clone(),
+            environment: AnalyzeEnvironment::Server,
+            modules: entry.modules.clone(),
+            assets: entry.assets,
+        }));
+    }
+    let graphs = AnalyzeModuleGraphs(graphs).cell();
+    let module_index = analyze_module_index(graphs);
     let root = DiskFileSystem::new(rcstr!("pack-bundle-analysis"), Vc::cell(output_path))
         .root()
         .owned()
         .await?;
 
     let captures = entries
-        .iter()
-        .copied()
+        .into_iter()
         .enumerate()
-        .map(async |(index, entry)| {
-            let name = entry.await?.name.clone();
-            // Use a controlled directory name; a configured entry name is a display label.
-            let slug = format!("entry-{index}");
-            let route: RcStr = format!("/{slug}").into();
-            let entry_modules = entry
-                .entry_evaluatable_assets(context, runtime_entries)
-                .await?;
-            let modules = entry_modules
-                .iter()
-                .copied()
-                .map(ResolvedVc::upcast::<Box<dyn Module>>)
-                .collect::<FxIndexSet<_>>();
-            let route_entries = modules
-                .iter()
-                .map(async |module| {
-                    let ident = module.ident();
-                    let module_ident = ident.to_string().owned().await?;
-                    let module_path = ident.await?.path.to_string_ref().await?;
-                    Ok(AnalyzeRouteEntry {
-                        route_entry_id: analyze_route_entry_id(
-                            &route,
-                            "primary",
-                            "",
-                            &module_ident,
-                        ),
-                        module_ident,
-                        module_path,
-                        role: rcstr!("primary"),
-                        entry_kind: Some(rcstr!("client_bootstrap")),
-                        client_references: vec![],
-                    })
-                })
-                .try_join()
-                .await?;
-
-            let output_assets = entry.output_assets_for_entry(context, runtime_entries);
-            let chunk_groups = Vc::cell(vec![AnalyzeChunkGroup {
-                kind: rcstr!("bootstrap"),
-                trigger: modules.first().copied(),
-                // This is the evaluated group's direct assets. The analyzer follows the
-                // transitive output references separately to discover asynchronous groups.
-                assets: output_assets.to_resolved().await?,
-            }]);
-            let capture =
-                analyze_output_assets(output_assets, Vc::cell(route_entries), chunk_groups, graph)
-                    .await?;
-            root.join(&slug)?
-                .join("analyze.data")?
-                .write(*capture.content)
-                .as_side_effect()
-                .await?;
-            Ok((
-                AnalyzeEntry {
+        .map(
+            async |(
+                index,
+                EntryCapture {
                     name,
-                    path: route.clone(),
+                    environment,
+                    modules,
+                    assets,
                 },
-                RouteSummary {
-                    route,
-                    bundles: capture.summary,
-                },
-            ))
-        })
+            )| {
+                // Use a controlled directory name; a configured entry name is a display label.
+                let slug = format!("entry-{index}");
+                let route: RcStr = format!("/{slug}").into();
+                let modules = modules.into_iter().collect::<FxIndexSet<_>>();
+                let route_entries = modules
+                    .iter()
+                    .map(async |module| {
+                        let ident = module.ident();
+                        let module_ident = ident.to_string().owned().await?;
+                        let module_path = ident.await?.path.to_string_ref().await?;
+                        ensure!(
+                            module_index.await?.by_ident.contains_key(&module_ident),
+                            "Entry module {module_ident} is missing from the analyzer module index"
+                        );
+                        Ok(AnalyzeRouteEntry {
+                            route_entry_id: analyze_route_entry_id(
+                                &route,
+                                "primary",
+                                "",
+                                &module_ident,
+                            ),
+                            module_ident,
+                            module_path,
+                            role: rcstr!("primary"),
+                            entry_kind: Some(environment.entry_kind()),
+                            client_references: vec![],
+                        })
+                    })
+                    .try_join()
+                    .await?;
+
+                let chunk_groups = match environment {
+                    AnalyzeEnvironment::Client => vec![AnalyzeChunkGroup {
+                        kind: rcstr!("bootstrap"),
+                        trigger: modules.first().copied(),
+                        // The analyzer follows transitive output references separately for async groups.
+                        assets,
+                    }],
+                    AnalyzeEnvironment::Server => vec![],
+                };
+                let capture = analyze_output_assets(
+                    *assets,
+                    Vc::cell(route_entries),
+                    Vc::cell(chunk_groups),
+                    module_index,
+                )
+                .await
+                .with_context(|| format!("Analyzing entry {name}"))?;
+                root.join(&slug)?
+                    .join("analyze.data")?
+                    .write(*capture.content)
+                    .as_side_effect()
+                    .await?;
+                Ok((
+                    AnalyzeEntry {
+                        name,
+                        path: route.clone(),
+                        environment,
+                    },
+                    RouteSummary {
+                        route,
+                        bundles: capture.summary,
+                    },
+                ))
+            },
+        )
         .try_join()
         .await?;
 
     let (entries, summaries): (Vec<_>, Vec<_>) = captures.into_iter().unzip();
     root.join("modules.data")?
-        .write(analyze_module_graphs(graph))
+        .write(analyze_module_graphs(graphs))
         .as_side_effect()
         .await?;
     root.join("route-summaries.json")?

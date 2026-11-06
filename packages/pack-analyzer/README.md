@@ -7,7 +7,8 @@ submodule as the Rust bundler. It compiles the original treemap, sidebar, import
 chains, file search, and binary data readers into the static files shipped by
 `@utoo/pack`. The built report includes the upstream license.
 
-The standalone page supplies the named browser entries written by Pack. Its
+The standalone page supplies the named client and server entries written by Pack.
+The environment selector filters the entry list and source modules. Its
 entry picker is adapted from upstream's route picker, and its graph starts at the
 exact module roots written by the native analyzer. The graph's initial and async
 classifications describe import paths; they do not measure browser requests.

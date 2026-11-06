@@ -703,6 +703,8 @@ pub async fn project_activate_lazy_chunk(
 pub struct NapiAnalyzeEntry {
     pub name: String,
     pub path: String,
+    #[napi(ts_type = "'client' | 'server'")]
+    pub environment: String,
 }
 
 #[napi(object)]
@@ -737,6 +739,7 @@ pub async fn project_write_analyze_data(
                 .map(|entry| NapiAnalyzeEntry {
                     name: entry.name.into_owned(),
                     path: entry.path.into_owned(),
+                    environment: entry.environment.as_str().to_owned(),
                 })
                 .collect(),
         },

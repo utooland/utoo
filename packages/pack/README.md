@@ -113,8 +113,9 @@ later builds can retry. Failed compilations do not invoke the callback.
 
 ### Native Bundle Analyzer
 
-Analyze a production browser application or MPA using Turbopack's module graph,
-source-level sizes, treemap and import chains:
+Analyze production client and server applications using Turbopack's module graph,
+source-level sizes, treemap and import chains. Switch between Client and Server,
+then select an entry to inspect its dependencies:
 
 ```bash
 up analyze
@@ -127,7 +128,8 @@ The report defaults to `.utoo/analyze`; the interactive command serves it on
 and data and can be served by any static HTTP server. Add the report directory
 to your project's `.gitignore` if it should not be committed. A subsequent run
 replaces a previously generated Pack report; unrelated existing directories are
-not overwritten. Keep reports outside the application's build output directory.
+not overwritten. Keep reports outside the application's client and server build
+output directories.
 
 ```javascript
 const { analyze, serveAnalyzeReport } = require('@utoo/pack');
@@ -153,9 +155,16 @@ application's bundles or HTML, and does not generate Webpack stats. Existing
 `stats: true` and `ANALYZE=true` behavior in `build()`/`serve()` is unchanged.
 Normal builds and development sessions do not collect native analyzer data.
 
-The first version supports browser application entries, including HTML entries
-and multiple pages. Node targets, library entries, server entries and Server
-Functions are rejected. Entries refer to Pack entries, not framework SPA routes.
+Supported entries include browser applications (HTML and multiple pages), Node
+targets, `server.entry` (single or named entries), and Server Functions discovered
+from the application. Each entry is labeled `client` or `server` in the returned
+`entries` list. Server Functions follow Pack's build semantics: they belong to the
+first configured server entry, or the generated `index` entry when none is configured.
+Library entries are not supported. Entries refer to Pack entries, not framework
+SPA routes; client and server entries are listed separately without inferring
+framework route pairings.
+Server sizes cover emitted bundles and assets. External packages remain external;
+their files on disk are not included in the report's size totals.
 The initial/async module indicators describe static import reachability, not
 measured browser requests. Compressed module sizes are estimates; their sum is
 not an exact HTTP transfer size. Analysis itself has additional CPU and memory

@@ -292,7 +292,7 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let source_maps = *config.client_source_maps().await?;
+    let source_maps = *config.source_maps_type().await?;
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
     let postcss_package_mapping = get_postcss_package_mapping(config).to_resolved().await?;
     let postcss_transform_options = Some(PostCssTransformOptions {

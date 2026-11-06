@@ -5,8 +5,8 @@ use turbo_tasks::Vc;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack_core::{
     chunk::{
-        ChunkingContext, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
-        UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
+        ChunkingContext, MangleType, MinifyType, SourceMapSourceType, UnusedReferences,
+        chunk_id_strategy::ModuleIdStrategy,
     },
     environment::Environment,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
@@ -113,11 +113,7 @@ pub async fn get_library_chunking_context(
         MinifyType::NoMinify
     })
     .extract_comments(*config.extract_comments().await?)
-    .source_maps(if *config.source_maps().await? {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    })
+    .source_maps(*config.source_maps_type().await?)
     .asset_base_path(Some(public_path))
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)

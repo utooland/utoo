@@ -9,8 +9,17 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "../../../..");
 const execute = promisify(execFile);
 
-describe("native browser bundle analyzer", () => {
-  it.each(["single", "mpa", "html"])(
+describe("native bundle analyzer", () => {
+  it.each([
+    "single",
+    "mpa",
+    "html",
+    "node",
+    "mixed",
+    "server-only",
+    "server-functions",
+    "server-functions-entry",
+  ])(
     "exports %s entry sizes and import chains without changing build outputs or stats",
     async (scenario) => {
       const target = path.join(repoRoot, "target");

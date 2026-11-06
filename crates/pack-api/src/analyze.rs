@@ -132,36 +132,42 @@ pub struct AnalyzeModuleIndex {
     pub worker_entries: Vec<AnalyzeWorkerEntry>,
 }
 
+#[turbo_tasks::value(transparent)]
+struct AnalyzeModuleGraphs(Vec<ResolvedVc<ModuleGraph>>);
+
 #[turbo_tasks::function]
-async fn analyze_module_index(module_graph: Vc<ModuleGraph>) -> Result<Vc<AnalyzeModuleIndex>> {
+async fn analyze_module_index(
+    module_graphs: Vc<AnalyzeModuleGraphs>,
+) -> Result<Vc<AnalyzeModuleIndex>> {
     let mut all_modules = FxIndexSet::default();
     let mut sync_dependents: AnalyzeSyncDependents = FxHashMap::default();
     let mut registrations = FxIndexSet::default();
-    let graph = module_graph.await?;
-    graph.traverse_edges_dfs(
-        graph.all_entry_modules(),
-        &mut (),
-        |parent, node, _| {
-            all_modules.insert(node);
-            if let Some((importer, reference)) = parent {
-                if !matches!(
-                    reference.chunking_type,
-                    ChunkingType::Async | ChunkingType::Traced { .. }
-                ) {
-                    sync_dependents.entry(node).or_default().push(importer);
+    for graph in module_graphs.await?.iter().copied().try_join().await? {
+        graph.traverse_edges_dfs(
+            graph.all_entry_modules(),
+            &mut (),
+            |parent, node, _| {
+                all_modules.insert(node);
+                if let Some((importer, reference)) = parent {
+                    if !matches!(
+                        reference.chunking_type,
+                        ChunkingType::Async | ChunkingType::Traced { .. }
+                    ) {
+                        sync_dependents.entry(node).or_default().push(importer);
+                    }
+                    if let Some(marker) =
+                        ResolvedVc::try_downcast_type::<ServiceWorkerEntryModule>(node)
+                    {
+                        registrations.insert((importer, marker));
+                    }
                 }
-                if let Some(marker) =
-                    ResolvedVc::try_downcast_type::<ServiceWorkerEntryModule>(node)
-                {
-                    registrations.insert((importer, marker));
-                }
-            }
-            Ok(GraphTraversalAction::Continue)
-        },
-        |_, _, _| Ok(()),
-        true,
-        false,
-    )?;
+                Ok(GraphTraversalAction::Continue)
+            },
+            |_, _, _| Ok(()),
+            true,
+            false,
+        )?;
+    }
     let mut modules = Vec::with_capacity(all_modules.len());
     let mut by_ident = FxHashMap::default();
     let idents_and_paths = all_modules
@@ -654,7 +660,7 @@ async fn analyze_output_assets(
     output_assets: Vc<OutputAssets>,
     route_entries: Vc<AnalyzeRouteEntries>,
     chunk_groups: Vc<AnalyzeChunkGroups>,
-    module_graph: Vc<ModuleGraph>,
+    module_index_vc: Vc<AnalyzeModuleIndex>,
 ) -> Result<Vc<AnalyzedRoute>> {
     let output_assets = all_assets_from_entries(output_assets);
     let mut summary = RouteBundleSummary {
@@ -666,7 +672,6 @@ async fn analyze_output_assets(
         },
     };
     let route_entries = route_entries.await?.iter().cloned().collect();
-    let module_index_vc = analyze_module_index(module_graph);
     let module_index = module_index_vc.await?;
 
     let mut builder =
@@ -769,53 +774,53 @@ async fn analyze_output_assets(
 }
 
 #[turbo_tasks::function]
-async fn analyze_module_graphs(module_graph: Vc<ModuleGraph>) -> Result<Vc<FileContent>> {
-    let module_index = analyze_module_index(module_graph).await?;
+async fn analyze_module_graphs(module_graphs: Vc<AnalyzeModuleGraphs>) -> Result<Vc<FileContent>> {
+    let module_index = analyze_module_index(module_graphs).await?;
     let mut builder = ModulesDataBuilder::new(module_index.module_index_hash.clone());
 
     let mut all_edges = FxIndexSet::default();
     let mut all_async_edges = FxIndexSet::default();
     let mut all_traced_edges = FxIndexSet::default();
-    let mut traced_modules = FxHashSet::default();
+    for module_graph in module_graphs.await?.iter().copied().try_join().await? {
+        let mut traced_modules = FxHashSet::default();
+        module_graph.traverse_edges_dfs(
+            module_graph.all_entry_modules(),
+            &mut (),
+            |parent, node, _| {
+                let Some((parent_node, reference)) = parent else {
+                    return Ok(GraphTraversalAction::Continue);
+                };
 
-    let module_graph = module_graph.await?;
-    module_graph.traverse_edges_dfs(
-        module_graph.all_entry_modules(),
-        &mut (),
-        |parent, node, _| {
-            let Some((parent_node, reference)) = parent else {
-                return Ok(GraphTraversalAction::Continue);
-            };
+                // ChunkingType::Traced{TracedMode::Entry}     => target is always traced
+                // ChunkingType::Traced{TracedMode::Transitive}=> target only traced if parent is traced
+                // ChunkingType::*                             => target only traced if parent is traced
+                if matches!(
+                    reference.chunking_type,
+                    ChunkingType::Traced {
+                        mode: TracedMode::Entry
+                    }
+                ) || traced_modules.contains(&parent_node)
+                {
+                    traced_modules.insert(node);
+                    all_traced_edges.insert((parent_node, node));
+                    return Ok(GraphTraversalAction::Continue);
+                };
 
-            // ChunkingType::Traced{TracedMode::Entry}     => target is always traced
-            // ChunkingType::Traced{TracedMode::Transitive}=> target only traced if parent is traced
-            // ChunkingType::*                             => target only traced if parent is traced
-            if matches!(
-                reference.chunking_type,
-                ChunkingType::Traced {
-                    mode: TracedMode::Entry
+                match reference.chunking_type {
+                    ChunkingType::Async => {
+                        all_async_edges.insert((parent_node, node));
+                    }
+                    _ => {
+                        all_edges.insert((parent_node, node));
+                    }
                 }
-            ) || traced_modules.contains(&parent_node)
-            {
-                traced_modules.insert(node);
-                all_traced_edges.insert((parent_node, node));
-                return Ok(GraphTraversalAction::Continue);
-            };
-
-            match reference.chunking_type {
-                ChunkingType::Async => {
-                    all_async_edges.insert((parent_node, node));
-                }
-                _ => {
-                    all_edges.insert((parent_node, node));
-                }
-            }
-            Ok(GraphTraversalAction::Continue)
-        },
-        |_, _, _| Ok(()),
-        true,
-        false,
-    )?;
+                Ok(GraphTraversalAction::Continue)
+            },
+            |_, _, _| Ok(()),
+            true,
+            false,
+        )?;
+    }
 
     type ModulePair = (ResolvedVc<Box<dyn Module>>, ResolvedVc<Box<dyn Module>>);
     async fn mapper((from, to): ModulePair) -> Result<Option<(RcStr, RcStr)>> {

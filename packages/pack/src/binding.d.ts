@@ -294,6 +294,7 @@ export declare function projectWriteAllEntrypointsToDisk(project: { __napiType: 
 export interface NapiAnalyzeEntry {
   name: string
   path: string
+  environment: 'client' | 'server'
 }
 export interface NapiAnalyzeResult {
   entries: Array<NapiAnalyzeEntry>
