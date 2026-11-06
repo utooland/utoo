@@ -1,0 +1,20 @@
+.github/workflows/pack-release.yml
+  s_9866b691db6f9b::t_aa4596d2c73250 390-403
+  s_9866b691db6f9b::t_85ec3835cb7dfe 404,413,423
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b86101096d884c4fbc499860934a6923d64de492",
+  "prompts": {},
+  "sessions": {
+    "s_9866b691db6f9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af71-5078-72d2-a666-e23473ecef0a",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
