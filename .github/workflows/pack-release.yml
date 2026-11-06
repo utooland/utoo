@@ -295,6 +295,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.ref_name }}
+          submodules: true
       - name: Setup node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:

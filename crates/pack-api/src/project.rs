@@ -641,6 +641,7 @@ impl ProjectContainer {
     }
 }
 
+#[derive(Clone)]
 #[turbo_tasks::value]
 pub struct Project {
     /// A root path from which all files must be nested under. Trying to access
@@ -1080,6 +1081,15 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub(super) async fn with_analyze_config(&self) -> Result<Vc<Self>> {
+        Ok(Self {
+            config: self.config.with_analyze_source_maps().to_resolved().await?,
+            ..self.clone()
+        }
+        .cell())
+    }
+
+    #[turbo_tasks::function]
     pub(super) fn mode(&self) -> Vc<Mode> {
         self.config.mode()
     }
@@ -1341,11 +1351,6 @@ impl Project {
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let mode = self.mode();
         let config = self.config();
-        let source_maps = if *config.source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode,
             root_path: self.project_path().owned().await?,
@@ -1358,7 +1363,7 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: source_maps.cell(),
+            source_maps: config.client_source_maps(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),

@@ -111,6 +111,59 @@ Do not call `writeAllEntrypointsToDisk()` or await `close()` inside this callbac
 Startup callback failures reject `serve()`; background failures are logged and
 later builds can retry. Failed compilations do not invoke the callback.
 
+### Native Bundle Analyzer
+
+Analyze a production browser application or MPA using Turbopack's module graph,
+source-level sizes, treemap and import chains:
+
+```bash
+up analyze
+up analyze --output                         # Export without starting a server
+up analyze --output --output-dir reports/bundle
+```
+
+The report defaults to `.utoo/analyze`; the interactive command serves it on
+`http://127.0.0.1:4000` (`--port` changes the port). Reports contain static assets
+and data and can be served by any static HTTP server. Add the report directory
+to your project's `.gitignore` if it should not be committed. A subsequent run
+replaces a previously generated Pack report; unrelated existing directories are
+not overwritten. Keep reports outside the application's build output directory.
+
+```javascript
+const { analyze, serveAnalyzeReport } = require('@utoo/pack');
+
+const report = await analyze({
+  config: {
+    entry: [
+      { name: 'home', import: './src/home.tsx' },
+      { name: 'admin', import: './src/admin.tsx' },
+    ],
+  },
+}, process.cwd(), undefined, { outputPath: '.utoo/analyze' });
+
+// Optional: the compiler is already shut down when analyze() resolves.
+const server = await serveAnalyzeReport(report.outputPath, 4000);
+console.log(server.url);
+// await server.close();
+```
+
+Analysis uses a separate production configuration with internal source maps and
+watching disabled. It writes only the report, without cleaning or emitting the
+application's bundles or HTML, and does not generate Webpack stats. Existing
+`stats: true` and `ANALYZE=true` behavior in `build()`/`serve()` is unchanged.
+Normal builds and development sessions do not collect native analyzer data.
+
+The first version supports browser application entries, including HTML entries
+and multiple pages. Node targets, library entries, server entries and Server
+Functions are rejected. Entries refer to Pack entries, not framework SPA routes.
+The initial/async module indicators describe static import reachability, not
+measured browser requests. Compressed module sizes are estimates; their sum is
+not an exact HTTP transfer size. Analysis itself has additional CPU and memory
+cost for source maps, graph traversal and compression.
+
+The UI and binary data format reuse the pinned Next.js/Turbopack analyzer; see
+[`pack-analyzer`](../pack-analyzer/README.md) for source-build details.
+
 ## 🔌 Webpack Compatibility Mode
 
 `@utoo/pack` provides a partial compatibility layer for Webpack.

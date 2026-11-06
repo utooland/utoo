@@ -25,6 +25,7 @@ use napi::{
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use pack_api::{
+    analyze::write_analyze_data_with_issues_operation,
     endpoint::{Endpoint, EndpointOutputPaths, OptionEndpoint},
     entrypoint::{
         EntrypointsWithIssues, get_all_written_entrypoints_with_issues_operation,
@@ -696,6 +697,54 @@ pub async fn project_activate_lazy_chunk(
         })
         .await
         .map_err(|error| napi::Error::from_reason(PrettyPrintError(&error.into()).to_string()))
+}
+
+#[napi(object)]
+pub struct NapiAnalyzeEntry {
+    pub name: String,
+    pub path: String,
+}
+
+#[napi(object)]
+pub struct NapiAnalyzeResult {
+    pub entries: Vec<NapiAnalyzeEntry>,
+}
+
+#[tracing::instrument(level = "info", name = "write bundle analysis", skip_all)]
+#[napi(ts_return_type = "Promise<TurbopackResult<NapiAnalyzeResult>>")]
+pub async fn project_write_analyze_data(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+    output_path: RcStr,
+) -> napi::Result<TurbopackResult<NapiAnalyzeResult>> {
+    let ctx = &project.turbopack_ctx;
+    let container = project.container;
+    let (entries, issues) = ctx
+        .turbo_tasks()
+        .run(async move {
+            let operation = write_analyze_data_with_issues_operation(container, output_path);
+            let result =
+                read_strongly_consistent_and_apply_effects(operation, |value| &value.effects)
+                    .await?;
+            Ok((result.entries.clone(), result.issues.clone()))
+        })
+        .await
+        .map_err(|error| napi::Error::from_reason(PrettyPrintError(&error.into()).to_string()))?;
+
+    Ok(TurbopackResult {
+        result: NapiAnalyzeResult {
+            entries: entries
+                .into_iter()
+                .map(|entry| NapiAnalyzeEntry {
+                    name: entry.name.into_owned(),
+                    path: entry.path.into_owned(),
+                })
+                .collect(),
+        },
+        issues: issues
+            .iter()
+            .map(|issue| NapiIssue::from(&**issue))
+            .collect(),
+    })
 }
 
 #[tracing::instrument(level = "info", name = "write all entrypoints to disk", skip_all)]

@@ -16,6 +16,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "analyzer",
     "cjs",
     "esm",
     "config_schema.json"
@@ -73,17 +74,18 @@
     "node": ">= 20"
   },
   "scripts": {
-    "build": "npm run build:binding && npm run build:cjs && npm run build:esm",
-    "build:js": "npm run build:cjs && npm run build:esm",
+    "build": "npm run build:binding && npm run build:js",
+    "build:js": "npm run build:cjs && npm run build:esm && npm run build:analyzer",
+    "build:analyzer": "npm run bundle --prefix ../.. --workspace=@utoo/pack-analyzer",
     "build:cjs": "rm -rf cjs && tsc -p ./tsconfig.json --module commonjs --outDir cjs && cp src/*.d.ts cjs/",
     "build:esm": "rm -rf esm && tsc -p ./tsconfig.json --module esnext --outDir esm && cp src/*.d.ts esm/ && node ../../scripts/add-esm-extensions.cjs && node scripts/inject-esm-dirname.cjs",
-    "build:local": "npm run build:binding:local && npx turbo run build --filter=@utoo/pack-shared && npm run build:cjs && npm run build:esm && cp src/*.node cjs/ && cp src/*.node esm/",
+    "build:local": "npm run build:binding:local && npx turbo run build --filter=@utoo/pack-shared && npm run build:js && cp src/*.node cjs/ && cp src/*.node esm/",
     "artifacts": "napi artifacts --output-dir ./src --npm-dir npm",
     "build:binding": "napi build --platform --release -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
     "build:binding:local": "napi build --platform --profile release-local -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
     "check:binding-version": "node scripts/check-binding-version.cjs",
     "test": "vitest run",
-    "clean": "rm -rf cjs esm",
+    "clean": "rm -rf analyzer cjs esm",
     "prepublishOnly": "npm run build:js && napi pre-publish -t npm --no-gh-release",
     "version": "napi version",
     "generate-features-list": "node ./scripts/generate-feature-list.js"

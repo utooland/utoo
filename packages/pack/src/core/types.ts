@@ -64,6 +64,9 @@ export interface Project {
 
   writeAllEntrypointsToDisk(): Promise<TurbopackResult<RawEntrypoints>>;
 
+  /** Writes native analysis data for browser entries, without emitting bundles. */
+  writeAnalyzeData(outputPath: string): Promise<TurbopackResult<AnalyzeData>>;
+
   /**
    * Activates the lazily compiled dynamic import whose manifest chunk is
    * `chunkPath` (relative to the output root). Returns whether the path named
@@ -103,6 +106,17 @@ export interface Project {
   shutdown(): Promise<void>;
 
   onExit(): Promise<void>;
+}
+
+export interface AnalyzeEntry {
+  /** The configured Pack entry name. */
+  name: string;
+  /** Report-relative entry key, independent of user-provided names. */
+  path: string;
+}
+
+export interface AnalyzeData {
+  entries: AnalyzeEntry[];
 }
 
 export interface RawEntrypoints {

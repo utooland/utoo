@@ -724,6 +724,7 @@ module.exports.projectTraceSource = nativeBinding.projectTraceSource
 module.exports.projectUpdate = nativeBinding.projectUpdate
 module.exports.projectUpdateInfoSubscribe = nativeBinding.projectUpdateInfoSubscribe
 module.exports.projectWriteAllEntrypointsToDisk = nativeBinding.projectWriteAllEntrypointsToDisk
+module.exports.projectWriteAnalyzeData = nativeBinding.projectWriteAnalyzeData
 module.exports.recvTaskMessageInWorker = nativeBinding.recvTaskMessageInWorker
 module.exports.registerWorkerScheduler = nativeBinding.registerWorkerScheduler
 module.exports.rootTaskDispose = nativeBinding.rootTaskDispose

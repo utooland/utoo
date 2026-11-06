@@ -1,4 +1,5 @@
 import { defineCommand, runMain } from "citty";
+import analyze from "./commands/analyze";
 import build from "./commands/build";
 import dev from "./commands/dev";
 
@@ -11,6 +12,7 @@ const main = defineCommand({
   subCommands: {
     build,
     dev,
+    analyze,
   },
 });
 

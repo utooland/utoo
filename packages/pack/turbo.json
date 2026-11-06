@@ -1,0 +1,24 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/pack-analyzer/**",
+        "$TURBO_ROOT$/next.js/apps/bundle-analyzer/**",
+        "$TURBO_ROOT$/next.js/license.md"
+      ],
+      "outputs": ["$TURBO_EXTENDS$", "analyzer/**"]
+    },
+    "build:js": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/pack-analyzer/**",
+        "$TURBO_ROOT$/next.js/apps/bundle-analyzer/**",
+        "$TURBO_ROOT$/next.js/license.md"
+      ],
+      "outputs": ["$TURBO_EXTENDS$", "analyzer/**"]
+    }
+  }
+}
