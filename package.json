@@ -29,6 +29,7 @@
   },
   "workspaces": [
     "packages/pack",
+    "packages/pack-analyzer",
     "packages/pack-shared",
     "packages/pack-cli",
     "packages/utoo-web",

@@ -19,7 +19,7 @@ use turbopack::module_options::{
 use turbopack_core::{
     chunk::{
         ChunkingConfig, CompressOptions as MinifyCompressOptions, CompressType,
-        CrossOrigin as RuntimeCrossOriginLoading,
+        CrossOrigin as RuntimeCrossOriginLoading, SourceMapsType,
     },
     issue::{Issue, IssueExt, IssueStage, StyledString},
     module_graph::style_groups::StyleGroupsAlgorithm,
@@ -277,6 +277,8 @@ pub struct Config {
     output: Option<OutputConfig>,
     target: Option<RcStr>,
     source_maps: Option<bool>,
+    #[serde(skip)]
+    bundle_analysis: bool,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     define: Option<FxIndexMap<String, JsonValue>>,
     #[bincode(with = "option_indexmap")]
@@ -2064,6 +2066,32 @@ impl Config {
     #[turbo_tasks::function]
     pub async fn source_maps(&self) -> Result<Vc<bool>> {
         Ok(Vc::cell(self.source_maps.unwrap_or(true)))
+    }
+
+    #[turbo_tasks::function]
+    pub fn with_bundle_analysis(&self) -> Vc<Self> {
+        let mut config = self.clone();
+        config.bundle_analysis = true;
+        config.cell()
+    }
+
+    #[turbo_tasks::function]
+    pub fn is_bundle_analysis(&self) -> Vc<bool> {
+        Vc::cell(self.bundle_analysis)
+    }
+
+    #[turbo_tasks::function]
+    pub fn source_maps_type(&self) -> Vc<SourceMapsType> {
+        let source_maps = if self.bundle_analysis {
+            // Keep output attribution on the files Turbopack resolved, so source
+            // map paths can be joined with the module graph's paths.
+            SourceMapsType::Partial
+        } else if self.source_maps.unwrap_or(true) {
+            SourceMapsType::Full
+        } else {
+            SourceMapsType::None
+        };
+        source_maps.cell()
     }
 
     #[turbo_tasks::function]

@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:utoo:analyze:graph:v1",
+  "title": "Utoopack Bundle Analyzer Graph v1",
+  "description": "Schema for each JSON Lines record from up analyze export or exportAnalyzeReport(). The stream starts with meta, then all modules, then each selected entry and its outputs, parts and groups. IDs and array order are deterministic within a saved report. Read this schema from the same installed @utoo/pack version as the exporter. Build evidence does not measure browser request timing or exact transfer savings.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/meta"
+    },
+    {
+      "$ref": "#/$defs/module"
+    },
+    {
+      "$ref": "#/$defs/entry"
+    },
+    {
+      "$ref": "#/$defs/output"
+    },
+    {
+      "$ref": "#/$defs/part"
+    },
+    {
+      "$ref": "#/$defs/group"
+    }
+  ],
+  "$defs": {
+    "root": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Root identity within this report."
+        },
+        "module_ident": {
+          "type": "string",
+          "description": "Exact join to a module record ident."
+        },
+        "module_path": {
+          "type": "string",
+          "description": "Path of that exact module; a path alone is not a unique module identity."
+        },
+        "role": {
+          "type": "string"
+        },
+        "entry_kind": {
+          "type": "string"
+        },
+        "client_references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "module_ident": {
+                "type": "string"
+              },
+              "module_path": {
+                "type": "string"
+              },
+              "reference_kind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "module_ident",
+              "module_path",
+              "reference_kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "id",
+        "module_ident",
+        "module_path",
+        "role",
+        "client_references"
+      ],
+      "additionalProperties": false,
+      "description": "An exact graph root. Build provenance does not establish observed browser requests or cold-load behavior."
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "meta"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "tool": {
+          "const": "@utoo/pack"
+        },
+        "module_index_hash": {
+          "type": "string",
+          "description": "Fingerprint of the exact module index in this report; not a cross-report module ID."
+        },
+        "entry_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "selected_entries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "type",
+        "schema_version",
+        "tool",
+        "module_index_hash",
+        "entry_count",
+        "selected_entries"
+      ],
+      "additionalProperties": false,
+      "description": "First record. A stream is valid only after export completes successfully; errors can leave partial output."
+    },
+    "module": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "module"
+        },
+        "ident": {
+          "type": "string",
+          "description": "Exact module identity used in every graph and membership join."
+        },
+        "path": {
+          "type": "string"
+        },
+        "dependencies": {
+          "type": "object",
+          "properties": {
+            "sync": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "async": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "traced": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "sync",
+            "async",
+            "traced"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "ident",
+        "path",
+        "dependencies"
+      ],
+      "additionalProperties": false,
+      "description": "The complete report module graph is emitted even when entry or environment filters are used. Scope analysis by exact entry roots and output memberships. Traced edges lead to files outside emitted bundles."
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "entry"
+        },
+        "entry": {
+          "type": "string",
+          "pattern": "^/entry-[0-9]+$",
+          "description": "Entry ID within this report. Join output, part and group records on this value; match entries across separate reports by name and environment, not array position."
+        },
+        "name": {
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "roots": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/root"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage": {
+          "type": "object",
+          "properties": {
+            "roots": {
+              "enum": [
+                "exact",
+                "unknown"
+              ]
+            },
+            "groups": {
+              "enum": [
+                "exact",
+                "unknown"
+              ],
+              "description": "exact requires an explicit completeness marker from the capture and a present group list. unknown means group provenance may be incomplete, including unsupported worker triggers; known group records are still emitted. Reports without the completeness marker are unknown."
+            }
+          },
+          "required": [
+            "roots",
+            "groups"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "entry",
+        "name",
+        "environment",
+        "roots",
+        "coverage"
+      ],
+      "additionalProperties": false,
+      "description": "One selected Pack application entry. Entry names can repeat across environments. Null roots mean missing root provenance. Unknown group coverage can coexist with known group records; do not treat their presence as proof of a complete graph."
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "output"
+        },
+        "entry": {
+          "type": "string",
+          "pattern": "^/entry-[0-9]+$",
+          "description": "Entry ID within this report. Join output, part and group records on this value; match entries across separate reports by name and environment, not array position."
+        },
+        "filename": {
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "client",
+            "server"
+          ],
+          "description": "Output class from its filesystem: [client-fs]/ is client; other outputs are server. This can differ from the entry environment."
+        },
+        "kind": {
+          "enum": [
+            "emitted",
+            "traced"
+          ],
+          "description": "Traced outputs are physical [project]/ files measured on disk; emitted outputs are generated bundles/assets."
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Exact module identities contained in this output when coverage is exact. A source path alone is not proof of emitted membership."
+        },
+        "async_loaders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "coverage": {
+          "enum": [
+            "exact",
+            "unsupported",
+            "not_a_chunk"
+          ],
+          "description": "exact: emitted membership is known; unsupported: unavailable; not_a_chunk: no chunk membership, including traced raw files."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Sum of raw attributed part sizes for this output in bytes."
+        },
+        "compressed_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Sum of independently estimated compressed part sizes, not exact network transfer bytes."
+        }
+      },
+      "required": [
+        "type",
+        "entry",
+        "filename",
+        "environment",
+        "kind",
+        "modules",
+        "async_loaders",
+        "coverage",
+        "size",
+        "compressed_size"
+      ],
+      "additionalProperties": false,
+      "description": "Join by entry + filename. Count once per selected entry; shared outputs repeated under different entries are not globally additive without a deliberate deduplication policy."
+    },
+    "part": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "part"
+        },
+        "entry": {
+          "type": "string",
+          "pattern": "^/entry-[0-9]+$",
+          "description": "Entry ID within this report. Join output, part and group records on this value; match entries across separate reports by name and environment, not array position."
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Part index unique within its entry. Count each record once; filename + source_path can repeat for distinct contributions."
+        },
+        "filename": {
+          "type": "string",
+          "description": "Join to output by entry + filename."
+        },
+        "source_path": {
+          "type": "string",
+          "description": "Full reconstructed source path, preserving literal filesystem names. Multiple module identities may share this path."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Raw attributed bytes. Traced files are measured without bundle minification or tree shaking."
+        },
+        "compressed_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Independent compressed size estimate; binary data uses raw size when no compression estimate is available."
+        }
+      },
+      "required": [
+        "type",
+        "entry",
+        "id",
+        "filename",
+        "source_path",
+        "size",
+        "compressed_size"
+      ],
+      "additionalProperties": false,
+      "description": "Source attribution within one output. Group these records to rank contributors; do not add their sizes to output totals, which already sum them."
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "group"
+        },
+        "entry": {
+          "type": "string",
+          "pattern": "^/entry-[0-9]+$",
+          "description": "Entry ID within this report. Join output, part and group records on this value; match entries across separate reports by name and environment, not array position."
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "kind": {
+          "type": "string"
+        },
+        "trigger_module_ident": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trigger_join": {
+          "enum": [
+            "none",
+            "joined"
+          ]
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Output filenames scoped to this entry. Groups can overlap or be cumulative; do not sum group membership as unique byte totals."
+        }
+      },
+      "required": [
+        "type",
+        "entry",
+        "id",
+        "kind",
+        "trigger_module_ident",
+        "trigger_join",
+        "outputs"
+      ],
+      "additionalProperties": false,
+      "description": "Known build-time chunk group provenance. Consult the owning entry's coverage.groups before treating these records as complete, including worker-triggered outputs. A missing trigger remains unknown; initial/async reachability is not observed request timing."
+    }
+  }
+}

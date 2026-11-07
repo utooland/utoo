@@ -25,6 +25,7 @@ import { normalizePath } from "../utils/normalizePath";
 import { DiagnosticSources } from "./diagnosticSources";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
 import {
+  AnalyzeData,
   Endpoint,
   Project,
   ProjectOptions,
@@ -567,6 +568,19 @@ export function projectFactory(endpointWatchOptions?: {
       return await withErrorCause(() =>
         binding.projectActivateLazyChunk(this._nativeProject, chunkPath),
       );
+    }
+
+    async writeAnalyzeData(
+      outputPath: string,
+    ): Promise<TurbopackResult<AnalyzeData>> {
+      return await withErrorCause(async () => {
+        const result = await binding.projectWriteAnalyzeData(
+          this._nativeProject,
+          normalizePath(resolve(outputPath)),
+        );
+        diagnosticSources.get(this)!.intern(result);
+        return result;
+      });
     }
 
     entrypointsSubscribe() {

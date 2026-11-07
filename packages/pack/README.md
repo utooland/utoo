@@ -111,6 +111,128 @@ Do not call `writeAllEntrypointsToDisk()` or await `close()` inside this callbac
 Startup callback failures reject `serve()`; background failures are logged and
 later builds can retry. Failed compilations do not invoke the callback.
 
+### Native Bundle Analyzer
+
+Analyze production client and server applications using Turbopack's module graph,
+source-level sizes, treemap and import chains. Switch between Client and Server,
+then select an entry to inspect its dependencies:
+
+```bash
+up analyze
+up analyze --output                         # Export without starting a server
+up analyze --output --output-dir reports/bundle
+```
+
+The report defaults to `.utoo/analyze`; the interactive command serves it on
+`http://127.0.0.1:4000` (`--port` changes the port). Reports contain static assets
+and data and can be served by any static HTTP server. Add the report directory
+to your project's `.gitignore` if it should not be committed. A subsequent run
+replaces a previously generated Pack report; unrelated existing directories are
+not overwritten. Keep reports outside the application's client and server build
+output directories.
+
+```javascript
+const { analyze, serveAnalyzeReport } = require('@utoo/pack');
+
+const report = await analyze({
+  config: {
+    entry: [
+      { name: 'home', import: './src/home.tsx' },
+      { name: 'admin', import: './src/admin.tsx' },
+    ],
+  },
+}, process.cwd(), undefined, { outputPath: '.utoo/analyze' });
+
+// Optional: the compiler is already shut down when analyze() resolves.
+const server = await serveAnalyzeReport(report.outputPath, 4000);
+console.log(server.url);
+// await server.close();
+```
+
+Analysis uses a separate production configuration with internal source maps and
+watching disabled. It writes only the report, without cleaning or emitting the
+application's bundles or HTML, and does not generate Webpack stats. Existing
+`stats: true` and `ANALYZE=true` behavior in `build()`/`serve()` is unchanged.
+Normal builds and development sessions do not collect native analyzer data.
+
+Supported entries include browser applications (HTML and multiple pages), Node
+targets, `server.entry` (single or named entries), and Server Functions discovered
+from the application. Each entry is labeled `client` or `server` in the returned
+`entries` list. Server Functions follow Pack's build semantics: they belong to the
+first configured server entry, or the generated `index` entry when none is configured.
+Library entries are not supported. Entries refer to Pack entries, not framework
+SPA routes; client and server entries are listed separately without inferring
+framework route pairings.
+Server sizes cover emitted bundles/assets and traced local CommonJS/ESM external
+files, including their transitive dependencies and statically discoverable assets.
+Like Next.js, the analyzer measures the traced files rather than entire installed
+package directories; Node built-ins, remote/global externals, and runtime-provided
+externals that cannot be resolved locally have no measured file size. External
+files remain external and are shown under **External files** in the
+file-type filter (enabled by default), with import chains and per-entry sizes.
+The initial/async module indicators describe static import reachability, not
+measured browser requests. Compressed module sizes are estimates; their sum is
+not an exact HTTP transfer size. External files are measured as stored on disk,
+without bundle minification or tree shaking. Analysis itself has additional CPU
+and memory cost for source maps, dependency tracing, graph traversal and compression.
+
+The UI and binary data format reuse the pinned Next.js/Turbopack analyzer; see
+[`pack-analyzer`](../pack-analyzer/README.md) for source-build details.
+
+#### Export data for scripts and AI
+
+Read an existing report as versioned JSON Lines without loading application
+config, compiling, loading the native binding, or starting a server:
+
+```bash
+up analyze --output --output-dir reports/bundle-before
+up analyze export --report reports/bundle-before > bundle-before.jsonl
+up analyze export --report reports/bundle-before --environment server --entry index
+```
+
+`--report` defaults to `.utoo/analyze`, relative to the current directory.
+`--environment client|server` filters entries; `--entry` accepts an exact name or
+an ID such as `/entry-1`. If client and server entries share a name, also select
+the environment or use the ID. Exports retain the complete module graph so import
+chains remain connected; use each selected entry's exact roots to scope traversal.
+
+Records include metadata, modules with sync/async/traced dependencies, entry
+roots, output files with exact membership and sizes, source contributions, and
+chunk groups. The public schema documents identities, joins, size attribution,
+and coverage:
+
+```bash
+node -p "require.resolve('@utoo/pack/analyze/graph-v1.schema.json')"
+```
+
+Check `entry.coverage.groups` before treating the group list as complete.
+Supported Worker and SharedWorker payloads retain their trigger and output
+relationships. Pack does not build service-worker scripts, so registrations
+leave chunk-group coverage `unknown`; their absent payload must not be treated
+as zero bytes. Known groups are still exported when coverage is `unknown`.
+Older reports without an explicit completeness marker also export `unknown`.
+
+The native-free API exposes the same records as an async iterator:
+
+```javascript
+const { exportAnalyzeReport } = require('@utoo/pack/analyze');
+for await (const record of exportAnalyzeReport('reports/bundle-before', {
+  environment: 'server',
+})) {
+  // Consume each record without collecting the whole export in memory.
+  console.log(JSON.stringify(record));
+}
+```
+
+Check the command's exit status before consuming the result; a malformed later
+entry can leave partial JSONL. Errors go to stderr. For pipelines, use Bash's
+`set -o pipefail`. Keep before/after captures in separate report directories and
+compare the same entries, output classes, and size metric.
+
+For AI audits, rank size contributions, trace the exact imports, and verify
+before/after results after a fix. Distinguish server external footprint from
+browser downloads and static reachability from measured runtime performance.
+
 ## 🔌 Webpack Compatibility Mode
 
 `@utoo/pack` provides a partial compatibility layer for Webpack.

@@ -292,11 +292,7 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let source_maps = if *config.source_maps().await? {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    };
+    let source_maps = *config.source_maps_type().await?;
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
     let postcss_package_mapping = get_postcss_package_mapping(config).to_resolved().await?;
     let postcss_transform_options = Some(PostCssTransformOptions {
@@ -330,7 +326,7 @@ pub async fn get_client_module_options_context(
             *execution_context,
             options.config_location,
             options.config_content.clone(),
-            matches!(source_maps, SourceMapsType::Full),
+            !matches!(source_maps, SourceMapsType::None),
         )
     };
 
@@ -587,6 +583,7 @@ pub async fn get_client_resolve_options_context(
         project_path.clone(),
         project_path.root().owned().await?,
         external_config,
+        false,
     )
     .to_resolved()
     .await?;
