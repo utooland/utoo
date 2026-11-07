@@ -205,6 +205,13 @@ and coverage:
 node -p "require.resolve('@utoo/pack/analyze/graph-v1.schema.json')"
 ```
 
+Check `entry.coverage.groups` before treating the group list as complete.
+Supported Worker and SharedWorker payloads retain their trigger and output
+relationships. Pack does not build service-worker scripts, so registrations
+leave chunk-group coverage `unknown`; their absent payload must not be treated
+as zero bytes. Known groups are still exported when coverage is `unknown`.
+Older reports without an explicit completeness marker also export `unknown`.
+
 The native-free API exposes the same records as an async iterator:
 
 ```javascript

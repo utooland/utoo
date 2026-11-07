@@ -9,7 +9,6 @@ use turbo_tasks_fs::FileSystemPath;
 use turbopack_analyze::split_chunk::{
     ChunkPart, split_output_asset_into_parts, split_traced_file_into_parts,
 };
-use turbopack_browser::ecmascript::EcmascriptBrowserChunk;
 use turbopack_core::{SOURCE_URL_PROTOCOL, output::OutputAsset};
 
 use crate::analyze::{
@@ -28,7 +27,6 @@ pub(super) struct AnalyzedChunkPart {
 #[derive(Clone, Debug, PartialEq, Eq, NonLocalValue, Encode, Decode)]
 pub(super) struct EmittedChunk {
     pub asset: ResolvedVc<Box<dyn OutputAsset>>,
-    pub is_browser_chunk: bool,
     pub membership: OutputChunkModules,
 }
 
@@ -63,12 +61,7 @@ pub(super) async fn analyze_output_file(
     Ok(Vc::cell(Some(AnalyzedOutputFile {
         filename,
         chunk_parts,
-        emitted: Some(EmittedChunk {
-            asset,
-            is_browser_chunk: ResolvedVc::try_downcast_type::<EcmascriptBrowserChunk>(asset)
-                .is_some(),
-            membership,
-        }),
+        emitted: Some(EmittedChunk { asset, membership }),
     })))
 }
 

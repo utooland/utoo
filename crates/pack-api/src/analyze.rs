@@ -13,7 +13,7 @@ use anyhow::Result;
 use bincode::{Decode, Encode};
 use byteorder::{BE, WriteBytesExt};
 use output_file::{AnalyzedChunkPart, analyze_output_file, analyze_traced_file};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use serde::Serialize;
 use trace::{EdgeKind, TraceFiles};
 use turbo_rcstr::RcStr;
@@ -153,7 +153,9 @@ async fn analyze_module_index(
                 if let Some((importer, reference)) = parent {
                     if !matches!(
                         reference.chunking_type,
-                        ChunkingType::Async | ChunkingType::Traced { .. }
+                        ChunkingType::Async
+                            | ChunkingType::Traced { .. }
+                            | ChunkingType::Isolated { .. }
                     ) {
                         sync_dependents.entry(node).or_default().push(importer);
                     }
@@ -234,6 +236,8 @@ struct AnalyzeDataHeader {
     pub output_file_async_loaders: EdgesDataReference,
     pub output_file_module_coverage: Vec<AnalyzeOutputFileCoverage>,
     pub chunk_groups: Vec<AnalyzeChunkGroupData>,
+    /// Known groups remain useful when some runtime boundaries have no captured outputs.
+    pub chunk_group_coverage: AnalyzeChunkGroupCoverage,
     /// Exact endpoint roots; nested client references do not become roots.
     pub route_entries: Vec<AnalyzeRouteEntry>,
     /// Edges from chunks to chunk parts
@@ -288,11 +292,24 @@ struct AnalyzeChunkGroupData {
     output_file_indices: Vec<u32>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AnalyzeChunkGroupCoverage {
+    #[default]
+    Exact,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, NonLocalValue, Encode, Decode)]
+enum ChunkLoadTrigger {
+    Async(u32),
+    Worker(ResolvedVc<Box<dyn Module>>),
+}
+
 struct ChunkLoadCandidate {
     source: u32,
     target: ResolvedVc<Box<dyn OutputAsset>>,
-    /// The dynamically imported target, shared by loaders and manifests.
-    trigger_module_index: u32,
+    trigger: ChunkLoadTrigger,
 }
 
 struct AnalyzeOutputFileBuilder {
@@ -328,6 +345,7 @@ struct AnalyzeDataBuilder {
     route_entries: Vec<AnalyzeRouteEntry>,
     module_index_hash: RcStr,
     chunk_groups: Vec<AnalyzeChunkGroupData>,
+    chunk_group_coverage: AnalyzeChunkGroupCoverage,
 }
 
 struct ModulesDataBuilder {
@@ -398,6 +416,7 @@ impl AnalyzeDataBuilder {
             output_file_index_map: FxHashMap::default(),
             route_entries,
             chunk_groups: vec![],
+            chunk_group_coverage: AnalyzeChunkGroupCoverage::Exact,
         }
     }
 
@@ -525,6 +544,7 @@ impl AnalyzeDataBuilder {
                 .map(|of| of.output_file)
                 .collect(),
             chunk_groups: self.chunk_groups,
+            chunk_group_coverage: self.chunk_group_coverage,
             route_entries: self.route_entries,
             output_file_chunk_parts: binary_section.add_edges(&output_file_chunk_parts),
             source_chunk_parts: binary_section.add_edges(&source_chunk_parts),
@@ -682,7 +702,6 @@ async fn analyze_output_assets(
     let mut asset_indices: FxHashMap<ResolvedVc<Box<dyn OutputAsset>>, Vec<u32>> =
         FxHashMap::default();
     let mut candidates = Vec::new();
-    let mut browser_chunks = FxHashSet::default();
 
     let output_assets = output_assets.await?;
     let traced_files = traced_files.await?;
@@ -710,9 +729,6 @@ async fn analyze_output_assets(
                 .entry(emitted.asset)
                 .or_default()
                 .push(output_file_index);
-            if emitted.is_browser_chunk {
-                browser_chunks.insert(output_file_index);
-            }
             candidates.extend(
                 membership
                     .load_targets
@@ -720,7 +736,7 @@ async fn analyze_output_assets(
                     .map(|load| ChunkLoadCandidate {
                         source: output_file_index,
                         target: load.target,
-                        trigger_module_index: load.trigger_module_index,
+                        trigger: load.trigger,
                     }),
             );
             let output = &mut builder.output_files[output_file_index as usize];
@@ -764,7 +780,6 @@ async fn analyze_output_assets(
         &asset_indices,
         chunk_groups,
         &module_index,
-        &browser_chunks,
     )
     .await?;
 

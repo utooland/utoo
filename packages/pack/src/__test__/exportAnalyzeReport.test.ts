@@ -189,6 +189,7 @@ function writeReport() {
               entry_kind: client ? "client_bootstrap" : "server",
             },
           ],
+          chunk_group_coverage: "exact",
           chunk_groups: client
             ? [
                 {
@@ -450,6 +451,36 @@ describe("saved analyzer report export", () => {
       coverage: "unsupported",
     });
   });
+
+  it.each(["unknown", "legacy"])(
+    "preserves known groups with %s completeness",
+    async (coverage) => {
+      const before = await collect({ entry: "/entry-0" });
+      const knownGroups = before.filter((record) => record.type === "group");
+      expect(knownGroups).toHaveLength(2);
+      rewriteHeader("data/entry-0/analyze.data", (header) => {
+        if (coverage === "legacy") delete header.chunk_group_coverage;
+        else header.chunk_group_coverage = coverage;
+      });
+      const records = await collect({ entry: "/entry-0" });
+      expect(records.find((record) => record.type === "entry")).toMatchObject({
+        coverage: { roots: "exact", groups: "unknown" },
+      });
+      expect(records.filter((record) => record.type === "group")).toEqual(
+        knownGroups,
+      );
+    },
+  );
+
+  it.each(["partial", null, 0, {}])(
+    "rejects invalid group completeness %j",
+    async (coverage) => {
+      rewriteHeader("data/entry-0/analyze.data", (header) => {
+        header.chunk_group_coverage = coverage;
+      });
+      await expect(collect()).rejects.toThrow(/chunk group coverage/i);
+    },
+  );
 
   it("uses each output's actual environment independently from its entry", async () => {
     rewriteHeader("data/entry-1/analyze.data", (header) => {

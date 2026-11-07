@@ -23,18 +23,18 @@ use turbopack_ecmascript::{
     manifest::{chunk_asset::ManifestAsyncModule, loader_module::ManifestLoaderModule},
     merged_ecmascript_module_members,
     single_file_ecmascript_output::SingleFileEcmascriptOutput,
+    worker_chunk::module::WorkerLoaderModule,
 };
 use turbopack_nodejs::{
     EcmascriptBuildNodeChunk, EcmascriptBuildNodeEntryChunk, EcmascriptBuildNodeRuntimeChunk,
 };
 
-use crate::analyze::{AnalyzeModuleIndex, AnalyzeOutputFileCoverage};
+use crate::analyze::{AnalyzeModuleIndex, AnalyzeOutputFileCoverage, ChunkLoadTrigger};
 
 #[derive(Clone, Debug, PartialEq, Eq, NonLocalValue, Encode, Decode)]
 pub(super) struct ChunkLoadTarget {
     pub target: ResolvedVc<Box<dyn OutputAsset>>,
-    /// Index of the dynamically imported target module in the analyzer's shared module index.
-    pub trigger_module_index: u32,
+    pub trigger: ChunkLoadTrigger,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, NonLocalValue, Encode, Decode)]
@@ -104,37 +104,40 @@ fn insert_chunk_item_ident(
     Ok(())
 }
 
-/// Only a loader or manifest item supplies a typed async relationship;
-/// generic output references do not establish an async load.
+/// Loader and manifest items supply typed async or worker relationships;
+/// generic output references do not establish a load boundary.
 async fn chunk_item_load_candidates(
     item: ResolvedVc<Box<dyn turbopack_ecmascript::chunk::EcmascriptChunkItem>>,
     index: &AnalyzeModuleIndex,
 ) -> Result<Vec<ChunkLoadTarget>> {
     let module = item.module().to_resolved().await?;
-    let trigger = if let Some(loader) = ResolvedVc::try_downcast_type::<AsyncLoaderModule>(module) {
-        loader.await?.inner
+    let target = if ResolvedVc::try_downcast_type::<WorkerLoaderModule>(module).is_some() {
+        None
+    } else if let Some(loader) = ResolvedVc::try_downcast_type::<AsyncLoaderModule>(module) {
+        Some(loader.await?.inner)
     } else if let Some(manifest) = ResolvedVc::try_downcast_type::<ManifestAsyncModule>(module) {
-        manifest.await?.inner
+        Some(manifest.await?.inner)
     } else if let Some(loader) = ResolvedVc::try_downcast_type::<ManifestLoaderModule>(module) {
-        loader.await?.manifest.await?.inner
+        Some(loader.await?.manifest.await?.inner)
     } else {
         return Ok(vec![]);
     };
     // Use the same typed target as the module graph's async dependency, including
     // next/dynamic entry wrappers. Synthetic loader identities do not join it.
-    let ident = trigger.ident().to_string().owned().await?;
-    let trigger_module_index = *index.by_ident.get(&ident).ok_or_else(|| {
-        anyhow!("Async group trigger {ident} is missing from the analyzer module index")
-    })?;
+    let trigger = if let Some(target) = target {
+        let ident = target.ident().to_string().owned().await?;
+        ChunkLoadTrigger::Async(*index.by_ident.get(&ident).ok_or_else(|| {
+            anyhow!("Async group trigger {ident} is missing from the analyzer module index")
+        })?)
+    } else {
+        ChunkLoadTrigger::Worker(module)
+    };
     let references = item.references().await?;
     let assets = references.assets.await?;
     Ok(assets
         .iter()
         .copied()
-        .map(|target| ChunkLoadTarget {
-            target,
-            trigger_module_index,
-        })
+        .map(|target| ChunkLoadTarget { target, trigger })
         .collect())
 }
 

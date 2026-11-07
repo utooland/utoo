@@ -4,11 +4,10 @@ use anyhow::Result;
 use rustc_hash::{FxHashMap, FxHashSet};
 use turbo_tasks::{FxIndexSet, ResolvedVc, ValueToString, ValueToStringRef, Vc};
 use turbopack_core::{module::Module, output::OutputAsset};
-use turbopack_ecmascript::references::service_worker::service_worker_chunk_filename;
 
 use super::{
-    AnalyzeChunkGroupData, AnalyzeChunkGroups, AnalyzeDataBuilder, AnalyzeModuleIndex,
-    ChunkLoadCandidate,
+    AnalyzeChunkGroupCoverage, AnalyzeChunkGroupData, AnalyzeChunkGroups, AnalyzeDataBuilder,
+    AnalyzeModuleIndex, ChunkLoadCandidate, ChunkLoadTrigger,
 };
 
 pub(super) async fn collect_groups(
@@ -17,48 +16,105 @@ pub(super) async fn collect_groups(
     asset_indices: &FxHashMap<ResolvedVc<Box<dyn OutputAsset>>, Vec<u32>>,
     chunk_groups: Vc<AnalyzeChunkGroups>,
     module_index: &AnalyzeModuleIndex,
-    browser_chunks: &FxHashSet<u32>,
 ) -> Result<()> {
-    record_async_groups(builder, candidates, asset_indices);
+    let emitted_modules = builder
+        .output_files
+        .iter()
+        .flat_map(|file| file.module_indices.iter().copied())
+        .collect();
+    record_load_groups(
+        builder,
+        candidates,
+        asset_indices,
+        module_index,
+        &emitted_modules,
+    )
+    .await?;
     record_groups(builder, asset_indices, chunk_groups, module_index).await?;
-    record_worker_groups(builder, module_index, browser_chunks).await?;
+    // Pack discovers service-worker registrations but does not build their
+    // standalone payloads. Preserve known groups without claiming full coverage.
+    for &(importer, _) in &module_index.worker_entries {
+        if !emitted_ancestors(vec![importer], module_index, &emitted_modules)
+            .await?
+            .is_empty()
+        {
+            builder.chunk_group_coverage = AnalyzeChunkGroupCoverage::Unknown;
+            break;
+        }
+    }
     for (id, group) in builder.chunk_groups.iter_mut().enumerate() {
         group.id = id as u32;
     }
     Ok(())
 }
 
-fn record_async_groups(
+async fn record_load_groups(
     builder: &mut AnalyzeDataBuilder,
     candidates: Vec<ChunkLoadCandidate>,
     asset_indices: &FxHashMap<ResolvedVc<Box<dyn OutputAsset>>, Vec<u32>>,
-) {
-    let mut async_groups = FxHashMap::default();
+    module_index: &AnalyzeModuleIndex,
+    emitted_modules: &FxHashSet<u32>,
+) -> Result<()> {
+    let mut load_groups = FxHashMap::default();
     for candidate in candidates {
         let Some(target_indices) = asset_indices.get(&candidate.target) else {
+            builder.chunk_group_coverage = AnalyzeChunkGroupCoverage::Unknown;
             continue;
         };
+        let (kind, triggers) = match candidate.trigger {
+            ChunkLoadTrigger::Async(index) => ("async", vec![index]),
+            ChunkLoadTrigger::Worker(loader) => (
+                "worker",
+                emitted_ancestors(
+                    module_index
+                        .sync_dependents
+                        .get(&loader)
+                        .cloned()
+                        .unwrap_or_default(),
+                    module_index,
+                    emitted_modules,
+                )
+                .await?,
+            ),
+        };
+        let triggers = if triggers.is_empty() {
+            builder.chunk_group_coverage = AnalyzeChunkGroupCoverage::Unknown;
+            vec![None]
+        } else {
+            triggers.into_iter().map(Some).collect()
+        };
         for &target in target_indices {
-            if target == candidate.source {
+            if target == candidate.source && matches!(candidate.trigger, ChunkLoadTrigger::Async(_))
+            {
                 continue;
             }
-            let key = (candidate.source, candidate.trigger_module_index);
-            let group_index = *async_groups.entry(key).or_insert_with(|| {
-                let index = builder.chunk_groups.len();
-                builder.chunk_groups.push(AnalyzeChunkGroupData {
-                    id: index as u32,
-                    kind: "async".into(),
-                    trigger_module_index: Some(candidate.trigger_module_index),
-                    output_file_indices: vec![],
+            for &trigger in &triggers {
+                // Workers use isolated root availability, so the same loader in
+                // multiple chunks still describes one group within this entry.
+                // Async loaders remain source-specific for chunk availability.
+                let source = match candidate.trigger {
+                    ChunkLoadTrigger::Async(_) => Some(candidate.source),
+                    ChunkLoadTrigger::Worker(_) => None,
+                };
+                let key = (source, candidate.trigger, trigger);
+                let group_index = *load_groups.entry(key).or_insert_with(|| {
+                    let index = builder.chunk_groups.len();
+                    builder.chunk_groups.push(AnalyzeChunkGroupData {
+                        id: index as u32,
+                        kind: kind.into(),
+                        trigger_module_index: trigger,
+                        output_file_indices: vec![],
+                    });
+                    index
                 });
-                index
-            });
-            let outputs = &mut builder.chunk_groups[group_index].output_file_indices;
-            if !outputs.contains(&target) {
-                outputs.push(target);
+                let outputs = &mut builder.chunk_groups[group_index].output_file_indices;
+                if !outputs.contains(&target) {
+                    outputs.push(target);
+                }
             }
         }
     }
+    Ok(())
 }
 
 async fn record_groups(
@@ -98,72 +154,30 @@ async fn record_groups(
     Ok(())
 }
 
-/// The marker is in the page graph, but its worker payload is in a separate
-/// compilation graph. Trace only synchronous dependents to a browser item.
-async fn record_worker_groups(
-    builder: &mut AnalyzeDataBuilder,
+/// Registrations can live in generated `<locals>`. Find the enclosing emitted
+/// items in this entry without crossing async, traced, or isolated worker edges.
+async fn emitted_ancestors(
+    mut pending: Vec<ResolvedVc<Box<dyn Module>>>,
     module_index: &AnalyzeModuleIndex,
-    browser_chunks: &FxHashSet<u32>,
-) -> Result<()> {
-    let worker_files: FxHashSet<u32> = builder
-        .chunk_groups
-        .iter()
-        .filter(|group| group.kind == "worker")
-        .flat_map(|group| group.output_file_indices.iter().copied())
-        .collect();
-    builder.chunk_groups.retain(|group| group.kind != "worker");
-    let mut worker_groups = FxHashMap::default();
-    if !worker_files.is_empty() {
-        for &(importer, marker) in &module_index.worker_entries {
-            let marker = marker.await?;
-            let filename = service_worker_chunk_filename(&marker.scope);
-            for target in &worker_files {
-                let output = &builder.output_files[*target as usize].output_file.filename;
-                if !output.ends_with(filename.as_str()) {
-                    continue;
-                }
-                // A registration may live in generated `<locals>`; find the
-                // enclosing emitted item without crossing async/traced edges.
-                let mut triggers = FxIndexSet::default();
-                let mut pending = vec![importer];
-                let mut seen = FxHashSet::default();
-                while let Some(module) = pending.pop() {
-                    if !seen.insert(module) {
-                        continue;
-                    }
-                    let ident = module.ident().to_string().owned().await?;
-                    let mut found = false;
-                    if let Some(&index) = module_index.by_ident.get(&ident) {
-                        found = builder.output_files.iter().enumerate().any(|(i, file)| {
-                            browser_chunks.contains(&(i as u32))
-                                && file.module_indices.contains(&index)
-                        });
-                        if found {
-                            triggers.insert(index);
-                        }
-                    }
-                    if !found && let Some(parents) = module_index.sync_dependents.get(&module) {
-                        pending.extend(parents.iter().copied());
-                    }
-                }
-                for trigger in triggers {
-                    let group_index = *worker_groups.entry(trigger).or_insert_with(|| {
-                        let index = builder.chunk_groups.len();
-                        builder.chunk_groups.push(AnalyzeChunkGroupData {
-                            id: index as u32,
-                            kind: "worker".into(),
-                            trigger_module_index: Some(trigger),
-                            output_file_indices: vec![],
-                        });
-                        index
-                    });
-                    let outputs = &mut builder.chunk_groups[group_index].output_file_indices;
-                    if !outputs.contains(target) {
-                        outputs.push(*target);
-                    }
-                }
+    emitted_modules: &FxHashSet<u32>,
+) -> Result<Vec<u32>> {
+    let mut triggers = FxIndexSet::default();
+    let mut seen = FxHashSet::default();
+    while let Some(module) = pending.pop() {
+        if !seen.insert(module) {
+            continue;
+        }
+        let ident = module.ident().to_string().owned().await?;
+        let mut found = false;
+        if let Some(&index) = module_index.by_ident.get(&ident) {
+            found = emitted_modules.contains(&index);
+            if found {
+                triggers.insert(index);
             }
         }
+        if !found && let Some(parents) = module_index.sync_dependents.get(&module) {
+            pending.extend(parents.iter().copied());
+        }
     }
-    Ok(())
+    Ok(triggers.into_iter().collect())
 }

@@ -215,7 +215,8 @@
               "enum": [
                 "exact",
                 "unknown"
-              ]
+              ],
+              "description": "exact requires an explicit completeness marker from the capture and a present group list. unknown means group provenance may be incomplete, including unsupported worker triggers; known group records are still emitted. Reports without the completeness marker are unknown."
             }
           },
           "required": [
@@ -234,7 +235,7 @@
         "coverage"
       ],
       "additionalProperties": false,
-      "description": "One selected Pack application entry. Entry names can repeat across environments. Null roots or groups mean missing provenance, not an empty known graph."
+      "description": "One selected Pack application entry. Entry names can repeat across environments. Null roots mean missing root provenance. Unknown group coverage can coexist with known group records; do not treat their presence as proof of a complete graph."
     },
     "output": {
       "type": "object",
@@ -412,7 +413,7 @@
         "outputs"
       ],
       "additionalProperties": false,
-      "description": "Build-time chunk group provenance. A missing trigger remains unknown; initial/async reachability is not observed request timing."
+      "description": "Known build-time chunk group provenance. Consult the owning entry's coverage.groups before treating these records as complete, including worker-triggered outputs. A missing trigger remains unknown; initial/async reachability is not observed request timing."
     }
   }
 }

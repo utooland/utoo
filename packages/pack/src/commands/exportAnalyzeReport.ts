@@ -452,6 +452,18 @@ async function readEntry(root: string, entry: Entry, modules: ModuleData) {
   });
   if (coverage.length !== outputs.length)
     throw new Error("Invalid analyzer output coverage length");
+  const groups = readGroups(header.chunk_groups, modules, outputs);
+  const groupCoverage = header.chunk_group_coverage;
+  if (
+    groupCoverage !== undefined &&
+    groupCoverage !== "exact" &&
+    groupCoverage !== "unknown"
+  ) {
+    throw new Error("Invalid analyzer chunk group coverage");
+  }
+  // A list of known groups alone does not prove complete worker provenance.
+  const groupsCoverage: "exact" | "unknown" =
+    groups !== null && groupCoverage === "exact" ? "exact" : "unknown";
   return {
     outputs,
     parts,
@@ -472,7 +484,8 @@ async function readEntry(root: string, entry: Entry, modules: ModuleData) {
       "output async loaders",
     ),
     roots: readRoots(header.route_entries, modules),
-    groups: readGroups(header.chunk_groups, modules, outputs),
+    groups,
+    groupsCoverage,
   };
 }
 
@@ -595,7 +608,7 @@ export async function* exportAnalyzeReport(
       roots: report.roots,
       coverage: {
         roots: report.roots === null ? "unknown" : "exact",
-        groups: report.groups === null ? "unknown" : "exact",
+        groups: report.groupsCoverage,
       },
     };
     for (const [id, filename] of report.outputs.entries()) {

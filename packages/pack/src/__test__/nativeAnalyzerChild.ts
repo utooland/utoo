@@ -17,6 +17,8 @@ assert(
       "server-functions-entry",
       "external-node",
       "external-mixed",
+      "workers",
+      "service-workers",
     ].includes(scenario),
 );
 
@@ -46,6 +48,7 @@ type AnalyzeHeader = {
     trigger_module_index?: number;
     output_file_indices: number[];
   }[];
+  chunk_group_coverage?: "exact" | "unknown";
   route_entries: {
     module_ident: string;
     module_path: string;
@@ -287,6 +290,225 @@ async function assertExportedReport(
       })),
     );
   }
+}
+
+async function workerScenario(
+  analyze: typeof import("../commands/analyze").analyze,
+  build: typeof import("../commands/build").build,
+) {
+  const serviceWorker = scenario === "service-workers";
+  const sources: Record<string, string> = {
+    "alpha.js": serviceWorker
+      ? 'import "./register.js"; globalThis.alpha = true;'
+      : 'import "./register.js"; import "./register-shared.js"; globalThis.alpha = true;',
+    "beta.js": 'globalThis.beta = "entry-without-workers";',
+    "register.js": serviceWorker
+      ? 'navigator.serviceWorker.register(new URL("./worker.js", import.meta.url), { scope: "/app/" });'
+      : 'globalThis.worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" }); globalThis.secondWorker = new Worker(new URL("./second-worker.js", import.meta.url), { type: "module" });',
+    "worker.js":
+      'import { message } from "./worker-dependency.js"; self.postMessage(message);',
+    "worker-dependency.js": 'export const message = "isolated-worker-payload";',
+  };
+  if (!serviceWorker) {
+    sources["second-worker.js"] =
+      'self.postMessage("second-dedicated-worker-payload");';
+    sources["register-shared.js"] =
+      'globalThis.sharedWorker = new SharedWorker(new URL("./shared-worker.js", import.meta.url), { type: "module" });';
+    sources["shared-worker.js"] =
+      'self.onconnect = (event) => event.ports[0].postMessage("isolated-shared-worker-payload");';
+  }
+  fs.mkdirSync(path.join(projectPath, "src"), { recursive: true });
+  fs.writeFileSync(path.join(projectPath, "package.json"), '{"private":true}');
+  for (const [name, contents] of Object.entries(sources))
+    fs.writeFileSync(path.join(projectPath, "src", name), contents);
+  const distPath = path.join(projectPath, "dist");
+  const config: ConfigComplete = {
+    mode: "production",
+    entry: [
+      { name: "alpha", import: "./src/alpha.js" },
+      { name: "beta", import: "./src/beta.js" },
+    ],
+    output: { path: distPath, clean: true },
+    sourceMaps: false,
+    stats: true,
+    persistentCaching: false,
+    optimization: serviceWorker
+      ? undefined
+      : {
+          concatenateModules: true,
+          removeUnusedExports: true,
+          removeUnusedImports: true,
+          minify: true,
+        },
+  };
+  delete process.env.ANALYZE;
+  await build({ config, tracing: false }, projectPath, projectPath);
+  const outputsBefore = readFiles(distPath);
+  const reportPath = path.join(projectPath, "report");
+  const result = await analyze(
+    { config, tracing: false },
+    projectPath,
+    projectPath,
+    { outputPath: reportPath },
+  );
+  assert.deepEqual(readFiles(distPath), outputsBefore);
+  const graph = readArtifact<ModuleHeader>(
+    path.join(reportPath, "data/modules.data"),
+  );
+  const reports = result.entries.map((entry) => ({
+    entry,
+    ...readArtifact<AnalyzeHeader>(
+      path.join(reportPath, "data", entry.path.slice(1), "analyze.data"),
+    ),
+  }));
+  const alpha = reports.find((report) => report.entry.name === "alpha");
+  const beta = reports.find((report) => report.entry.name === "beta");
+  assert(alpha && beta);
+  assertSource(alpha.header, "/src/register.js");
+  const workerGroups = alpha.header.chunk_groups.filter(
+    (group) => group.kind === "worker",
+  );
+  assert(!beta.header.chunk_groups.some((group) => group.kind === "worker"));
+  for (const suffix of [
+    "/src/worker.js",
+    "/src/second-worker.js",
+    "/src/shared-worker.js",
+    "/src/worker-dependency.js",
+  ])
+    assert(
+      !sourcePaths(beta.header).some((source) => source.endsWith(suffix)),
+      `Unrelated entry includes ${suffix}`,
+    );
+  const { exportAnalyzeReport } = await import(
+    "../commands/exportAnalyzeReport"
+  );
+  const records: import("../commands/exportAnalyzeReport").AnalyzeExportRecord[] =
+    [];
+  for await (const record of exportAnalyzeReport(reportPath))
+    records.push(record);
+  if (serviceWorker) {
+    assert(
+      graph.header.modules.some((module) =>
+        module.ident.includes("service worker entry [/app/]"),
+      ),
+    );
+    // Pack currently rewrites the registration but does not emit the standalone
+    // service-worker graph. Analysis must not invent payloads or claim completeness.
+    assert(
+      !sourcePaths(alpha.header).some((source) =>
+        source.endsWith("/src/worker.js"),
+      ),
+    );
+    assert(
+      !Object.keys(outputsBefore).some((filename) =>
+        /^sw(?:-|\.)/.test(filename),
+      ),
+    );
+    assert.equal(workerGroups.length, 0);
+    const exportedAlpha = records.find(
+      (record) => record.type === "entry" && record.entry === alpha.entry.path,
+    );
+    assert(exportedAlpha?.type === "entry");
+    assert.equal(
+      exportedAlpha.coverage.groups,
+      "unknown",
+      "Unemitted service worker must not claim exact group coverage",
+    );
+    assert.equal(alpha.header.chunk_group_coverage, "unknown");
+    const exportedBeta = records
+      .filter((record) => record.type === "entry")
+      .find((record) => record.entry === beta.entry.path);
+    assert.equal(exportedBeta?.coverage.groups, "exact");
+    return;
+  }
+  assertSource(alpha.header, "/src/worker.js");
+  // Scope hoisting can inline this constant into the worker's source range.
+  assert(hasImportPath(graph, "/src/worker.js", "/src/worker-dependency.js"));
+  assertSource(alpha.header, "/src/shared-worker.js");
+  assertSource(alpha.header, "/src/second-worker.js");
+  const payloads = [
+    ["/src/register.js", "/src/worker.js"],
+    ["/src/register.js", "/src/second-worker.js"],
+    ["/src/register-shared.js", "/src/shared-worker.js"],
+  ].map(([registration, sourcePath]) => {
+    const sourceIndices = new Set(
+      sourcePaths(alpha.header).flatMap((source, index) =>
+        source.endsWith(sourcePath) ? [index] : [],
+      ),
+    );
+    const outputs = new Set(
+      alpha.header.chunk_parts
+        .filter((part) => sourceIndices.has(part.source_index))
+        .map((part) => part.output_file_index),
+    );
+    assert(outputs.size > 0, `Missing worker payload ${sourcePath}`);
+    return { registration, sourcePath, outputs };
+  });
+  assert.equal(
+    workerGroups.length,
+    3,
+    "Different worker targets need separate groups, including when registered by one module",
+  );
+  assert.equal(alpha.header.chunk_group_coverage, "exact");
+  assert(
+    !alpha.header.chunk_groups.some((group) => group.kind === "async"),
+    "Worker loaders must not be reported as dynamic imports",
+  );
+  const seenPayloads = new Set<string>();
+  for (const group of workerGroups) {
+    assert.notEqual(
+      group.trigger_module_index,
+      undefined,
+      "Worker group has no joined registration trigger",
+    );
+    const trigger = graph.header.modules[group.trigger_module_index!];
+    const matching = payloads.filter(
+      ({ registration, outputs }) =>
+        trigger.path.endsWith(registration) &&
+        group.output_file_indices.some((index) => outputs.has(index)),
+    );
+    assert.equal(
+      matching.length,
+      1,
+      `Worker group does not join exactly one registered payload: ${trigger.ident}`,
+    );
+    const matched = matching[0];
+    assert(
+      !seenPayloads.has(matched.sourcePath),
+      "Worker groups duplicated a payload",
+    );
+    seenPayloads.add(matched.sourcePath);
+    for (const { sourcePath, outputs } of payloads) {
+      if (sourcePath !== matched.sourcePath)
+        assert(
+          !group.output_file_indices.some((index) => outputs.has(index)),
+          "Worker group includes another worker's payload",
+        );
+    }
+    assert(
+      group.output_file_indices.every(
+        (index) => index < alpha.header.output_files.length,
+      ),
+    );
+    const exportedGroup:
+      | import("../commands/exportAnalyzeReport").AnalyzeExportGroupRecord
+      | undefined = records
+      .filter((record) => record.type === "group")
+      .find(
+        (record) => record.entry === alpha.entry.path && record.id === group.id,
+      );
+    assert(exportedGroup?.type === "group");
+    assert.equal(exportedGroup.kind, "worker");
+    assert.equal(exportedGroup.trigger_join, "joined");
+    assert.equal(exportedGroup.trigger_module_ident, trigger.ident);
+    assert.deepEqual(
+      exportedGroup.outputs,
+      group.output_file_indices.map(
+        (index) => alpha.header.output_files[index].filename,
+      ),
+    );
+  }
+  await assertExportedReport(reportPath, result.entries);
 }
 
 async function externalScenario(
@@ -1006,6 +1228,10 @@ async function main() {
   }
   const { analyze } = await import("../commands/analyze");
   const { build } = await import("../commands/build");
+  if (scenario === "workers" || scenario === "service-workers") {
+    await workerScenario(analyze, build);
+    return;
+  }
   if (scenario.startsWith("external-")) {
     await externalScenario(analyze, build);
     return;
