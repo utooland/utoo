@@ -1,0 +1,50 @@
+packages/pack/src/__test__/nativeAnalyzer.test.ts
+  s_9866b691db6f9b::t_f3dff23d14d071 24-25
+crates/pack-api/src/analyze.rs
+  s_9866b691db6f9b::t_1f17a9b41a71b6 156-158,239-240,295-302,304-308,312,348,419,547,739
+  s_9866b691db6f9b::t_a76525a1bd9c5f 303
+  s_9866b691db6f9b::t_98c6d58d5b94ae 16
+packages/pack/src/commands/exportAnalyzeReport.ts
+  s_9866b691db6f9b::t_a9698bec6b957c 455-466,487-488,611
+packages/pack/src/__test__/exportAnalyzeReport.test.ts
+  s_9866b691db6f9b::t_a9698bec6b957c 192,455-483
+  s_9866b691db6f9b::t_98e07c107280ce 484
+packages/pack/src/__test__/nativeAnalyzerChild.ts
+  s_9866b691db6f9b::t_59517275fa4844 335-342,493-495
+  s_9866b691db6f9b::t_42906362349503 295-299,304-306,308-311,320-334,343-347,354,358-359,363-367,371,389,395-396,407,411,422-424,458,464,500-503,510-513,1231-1234
+  s_9866b691db6f9b::t_9f63d56222c97d 425-426,430-446,465-473
+  s_9866b691db6f9b::t_b1c921f0f6fc10 51,300-303,312,315-319,348-353,355-357,360-362,368-370,382-388,390-394,397-406,408-410,412-421,427,459-463,479,487-492,496,504-509
+  s_9866b691db6f9b::t_ebdb06342326bb 452
+  s_9866b691db6f9b::t_e5acd258bf3927 447-448,451,474,476,483-484,486,497-499
+  s_9866b691db6f9b::t_f3dff23d14d071 20-21
+  s_9866b691db6f9b::t_2d5b5de15937ac 307,313-314,372-381,428-429,449-450,453-457,475,477-478,480-482,485
+crates/pack-api/src/analyze/membership.rs
+  s_9866b691db6f9b::t_1f17a9b41a71b6 26,32,37,107-108,114-117,119,121,127-134
+crates/pack-api/src/analyze/groups.rs
+  s_9866b691db6f9b::t_a76525a1bd9c5f 25-32,69-73,80,82-85,101-108,110-113,168-175,178-180
+  s_9866b691db6f9b::t_f407478fad99d3 87-88
+  s_9866b691db6f9b::t_a74d76ed3b4423 9-10,20-24,34-44,51,55-58,61,64-68,74-79,81,92,117,158-160,162-167,182
+  s_9866b691db6f9b::t_ab618e3a132cbd 93-100
+  s_9866b691db6f9b::t_621f53363d406e 91
+  s_9866b691db6f9b::t_9e6f76eaaebf4e 157
+packages/pack/README.md
+  s_9866b691db6f9b::t_a9698bec6b957c 208-214
+packages/pack/analyze/graph-v1.schema.json
+  s_9866b691db6f9b::t_a9698bec6b957c 218-219,238,416
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3af907ff3c030731bdc290fb618a467e7a0052dd",
+  "prompts": {},
+  "sessions": {
+    "s_9866b691db6f9b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af71-5078-72d2-a666-e23473ecef0a",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
