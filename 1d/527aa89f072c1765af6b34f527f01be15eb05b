@@ -1,0 +1,30 @@
+.github/workflows/pack-release.yml
+  s_520c270035d39b::t_c61c9c769ca11b 39-40,55-56,145
+crates/pack-api/src/project.rs
+  s_520c270035d39b::t_2060cad8978be3 53,66,1138,1165-1167,1358-1359,1391-1392
+crates/pack-core/src/config.rs
+  s_520c270035d39b::t_e12f7ec7a108ff 22,25,28,313-318,322-324,2097-2107
+  s_520c270035d39b::t_aa6332e480d43a 319-321
+crates/pack-core/src/client/context.rs
+  s_520c270035d39b::t_e12f7ec7a108ff 22,32,296,330,443,463,666-667,694-695,742-743
+crates/pack-core/src/library/contexts.rs
+  s_520c270035d39b::t_e12f7ec7a108ff 13,117
+crates/pack-core/src/server/contexts.rs
+  s_520c270035d39b::t_e12f7ec7a108ff 15-16,22,267,290,302,473-474,499-500,543-544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d527aa89f072c1765af6b34f527f01be15eb05b",
+  "prompts": {},
+  "sessions": {
+    "s_520c270035d39b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf75-6a0b-7c42-9932-23d66c8bcbb7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
