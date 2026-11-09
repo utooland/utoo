@@ -1,0 +1,22 @@
+crates/pack-core/src/library/contexts.rs
+  s_520c270035d39b::t_f1064f36c6041e 116-117
+crates/pack-core/src/library/chunking_context.rs
+  s_520c270035d39b::t_f1064f36c6041e 38,128-132,238-239,293,661-668
+  s_520c270035d39b::t_b8775a1568e61c 669
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a107c4e39f49b8f77d14f0042a67faedd4006fa",
+  "prompts": {},
+  "sessions": {
+    "s_520c270035d39b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf75-6a0b-7c42-9932-23d66c8bcbb7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
