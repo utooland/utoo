@@ -328,7 +328,8 @@ jobs:
       - name: Build JS
         run: |
           npm run build --workspace=@utoo/pack-shared
-          npm run build:js --workspace=@utoo/pack
+          npm run build:cjs --workspace=@utoo/pack
+          npm run build:esm --workspace=@utoo/pack
           npm run build --workspace=@utoo/pack-cli
       - name: Get version from tag
         id: get_version
