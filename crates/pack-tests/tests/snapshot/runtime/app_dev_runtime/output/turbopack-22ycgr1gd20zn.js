@@ -1,20 +1,24 @@
-(globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
+(globalThis["utooChunk_appDev"] || (globalThis["utooChunk_appDev"] = [])).push([
     "object"==typeof document?document.currentScript:void 0,
-    {"otherChunks":["3udye26vmgma0.js"],"runtimeModuleIds":[44]}
+    {"otherChunks":["198dbnxrzo_91.js"],"runtimeModuleIds":[41]}
 ]);
 (() => {
-var chunksToRegister = globalThis["TURBOPACK"];
+var chunksToRegister = globalThis["utooChunk_appDev"];
 if (chunksToRegister === undefined) {
     chunksToRegister = [];
 } else if (!Array.isArray(chunksToRegister)) {
     return;
 }
 
-var CHUNK_BASE_PATH = "__AUTO_PUBLIC_PATH__";
+var CHUNK_BASE_PATH = "/";
 var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "/ROOT";
-var RUNTIME_PUBLIC_PATH = "__AUTO_PUBLIC_PATH__";
+var RUNTIME_PUBLIC_PATH = "/";
 const SUPPORT_COMPONENT_CHUNKS = false;
+globalThis["utooChunk_appDev_CHUNK_UPDATE_LISTENERS"] ||= [];
+var CHUNK_UPDATE_LISTENERS = {
+    push: (registration) => globalThis["utooChunk_appDev_CHUNK_UPDATE_LISTENERS"].push(registration),
+};
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
 var CHUNK_LOAD_RETRY_MAX_ATTEMPTS = 1;
@@ -528,7 +532,39 @@ contextPrototype.r = commonJsRequire;
 }
 /**
  * `require.context` and require/import expression runtime.
- */ function moduleContext(map) {
+ */ function moduleContextFactory(ids, mode = 0) {
+    const context = this;
+    const parentModule = this.m;
+    const map = {};
+    for(let i = 0; i < ids.length; i += 2){
+        const entry = ids[i + 1];
+        let id;
+        let module;
+        if (typeof entry === 'function') {
+            // A function is given for a module without an id to load it by: mostly a
+            // request that throws an error (e.g. one that can't be resolved), and also an
+            // external. As there is no id, `resolve` calls the function too, so that it
+            // throws the same error.
+            id = module = entry;
+        } else {
+            id = ()=>entry;
+            if (mode === 0) {
+                // inlined require implementation, which gives an ignored module empty exports
+                module = ()=>entry === undefined ? {} : getOrInstantiateModuleFromParent(entry, parentModule).exports;
+            } else if (entry === undefined) {
+                module = ()=>Promise.resolve({});
+            } else if (mode === 1) {
+                // Like `import()`, the module is evaluated asynchronously.
+                module = ()=>Promise.resolve().then(()=>esmImport.call(context, entry));
+            } else {
+                module = ()=>asyncLoader.call(context, entry);
+            }
+        }
+        map[ids[i]] = {
+            id,
+            module
+        };
+    }
     function moduleContext(id) {
         id = parseRequest(id);
         if (hasOwnProperty.call(map, id)) {
@@ -555,7 +591,7 @@ contextPrototype.r = commonJsRequire;
     };
     return moduleContext;
 }
-contextPrototype.f = moduleContext;
+contextPrototype.f = moduleContextFactory;
 /**
  * Returns the path of a chunk defined by its data.
  */ function getChunkPath(chunkData) {
@@ -727,6 +763,138 @@ function applyModuleFactoryName(factory) {
         value: 'module evaluation'
     });
 }
+/// <reference path="./runtime-types.d.ts" />
+/// <reference path="./runtime-utils.ts" />
+/**
+ * Top-level-await / async-module machinery. This is only included in the runtime
+ * when the module graph actually contains an async module (a module with
+ * top-level await, or one that transitively depends on one). When no async
+ * module is present, the chunk items never reference `__turbopack_context__.a`,
+ * so this whole file can be omitted.
+ *
+ * everything below is adapted from webpack
+ * https://github.com/webpack/webpack/blob/6be4065ade1e252c1d8dcba4af0f43e32af1bdc1/lib/runtime/AsyncModuleRuntimeModule.js#L13
+ */ const turbopackQueues = Symbol('turbopack queues');
+const turbopackExports = Symbol('turbopack exports');
+const turbopackError = Symbol('turbopack error');
+function isPromise(maybePromise) {
+    return maybePromise != null && typeof maybePromise === 'object' && 'then' in maybePromise && typeof maybePromise.then === 'function';
+}
+function isAsyncModuleExt(obj) {
+    return turbopackQueues in obj;
+}
+function createPromise() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej)=>{
+        reject = rej;
+        resolve = res;
+    });
+    return {
+        promise,
+        resolve: resolve,
+        reject: reject
+    };
+}
+function resolveQueue(queue) {
+    if (queue && queue.status !== 1) {
+        queue.status = 1;
+        queue.forEach((fn)=>fn.queueCount--);
+        queue.forEach((fn)=>fn.queueCount-- ? fn.queueCount++ : fn());
+    }
+}
+function wrapDeps(deps) {
+    return deps.map((dep)=>{
+        if (dep !== null && typeof dep === 'object') {
+            if (isAsyncModuleExt(dep)) return dep;
+            if (isPromise(dep)) {
+                const queue = Object.assign([], {
+                    status: 0
+                });
+                const obj = {
+                    [turbopackExports]: {},
+                    [turbopackQueues]: (fn)=>fn(queue)
+                };
+                dep.then((res)=>{
+                    obj[turbopackExports] = res;
+                    resolveQueue(queue);
+                }, (err)=>{
+                    obj[turbopackError] = err;
+                    resolveQueue(queue);
+                });
+                return obj;
+            }
+        }
+        return {
+            [turbopackExports]: dep,
+            [turbopackQueues]: ()=>{}
+        };
+    });
+}
+function asyncModule(body, hasAwait) {
+    const module = this.m;
+    const queue = hasAwait ? Object.assign([], {
+        status: -1
+    }) : undefined;
+    const depQueues = new Set();
+    const { resolve, reject, promise: rawPromise } = createPromise();
+    const promise = Object.assign(rawPromise, {
+        [turbopackExports]: module.exports,
+        [turbopackQueues]: (fn)=>{
+            queue && fn(queue);
+            depQueues.forEach(fn);
+            promise['catch'](()=>{});
+        }
+    });
+    const attributes = {
+        get () {
+            return promise;
+        },
+        set (v) {
+            // Calling `esmExport` leads to this.
+            if (v !== promise) {
+                promise[turbopackExports] = v;
+            }
+        }
+    };
+    Object.defineProperty(module, 'exports', attributes);
+    Object.defineProperty(module, 'namespaceObject', attributes);
+    function handleAsyncDependencies(deps) {
+        const currentDeps = wrapDeps(deps);
+        const getResult = ()=>currentDeps.map((d)=>{
+                if (d[turbopackError]) throw d[turbopackError];
+                return d[turbopackExports];
+            });
+        const { promise, resolve } = createPromise();
+        const fn = Object.assign(()=>resolve(getResult), {
+            queueCount: 0
+        });
+        function fnQueue(q) {
+            if (q !== queue && !depQueues.has(q)) {
+                depQueues.add(q);
+                if (q && q.status === 0) {
+                    fn.queueCount++;
+                    q.push(fn);
+                }
+            }
+        }
+        currentDeps.map((dep)=>dep[turbopackQueues](fnQueue));
+        return fn.queueCount ? promise : getResult();
+    }
+    function asyncResult(err) {
+        if (err) {
+            reject(promise[turbopackError] = err);
+        } else {
+            resolve(promise[turbopackExports]);
+        }
+        resolveQueue(queue);
+    }
+    body(handleAsyncDependencies, asyncResult);
+    if (queue && queue.status === -1) {
+        queue.status = 0;
+    }
+}
+contextPrototype.a = asyncModule;
 /**
  * This file contains runtime types and functions that are shared between all
  * Turbopack *browser* ECMAScript runtimes.
@@ -757,6 +925,9 @@ function registerWorkerChunks(params) {
         }
     }
 }
+// The load caches below dedupe in-flight and successful loads. A failed load must not stay
+// cached, or every later load of the same chunk would reuse the rejection without requesting
+// the chunk again, so entries are added with `cacheLoadPromise`.
 const availableModules = new Map();
 const availableModuleChunks = new Map();
 // Registry mapping a merged chunk's path to its constituent component chunk paths.
@@ -771,6 +942,20 @@ function registerComponentChunkSizes(componentChunks, sizes) {
             componentChunkSizes.set(componentChunks[i], size);
         }
     }
+}
+/**
+ * Caches `promise` under `key` and evicts it again if it rejects, so a later load retries
+ * instead of reusing the failure.
+ */ function cacheLoadPromise(cache, key, promise) {
+    cache.set(key, promise);
+    promise.catch(()=>{
+        // HMR's `disposeChunk` can delete the entry while this load is pending, and a later load
+        // can then cache a new promise under the same key. Only evict our own entry, or a late
+        // rejection here would drop the newer promise and cause a duplicate fetch.
+        if (cache.get(key) === promise) {
+            cache.delete(key);
+        }
+    });
 }
 // Memoizes the composite promise returned for a merged chunk loaded by URL, keyed by URL.
 const splitChunkPromises = new Map();
@@ -811,7 +996,7 @@ async function loadChunkInternal(sourceType, sourceData, chunkData) {
         if (!availableModules.has(included)) {
             // It might be better to race old and new promises, but it's rare that the new promise will be faster than a request started earlier.
             // In production it's even more rare, because the chunk optimization tries to deduplicate modules anyway.
-            availableModules.set(included, promise);
+            cacheLoadPromise(availableModules, included, promise);
         }
     }
     await promise;
@@ -860,7 +1045,7 @@ async function loadChunkInternal(sourceType, sourceData, chunkData) {
         for (const componentChunk of componentChunks){
             if (!availableModuleChunks.has(componentChunk)) {
                 const promise = loadChunkPath(sourceType, sourceData, componentChunk);
-                availableModuleChunks.set(componentChunk, promise);
+                cacheLoadPromise(availableModuleChunks, componentChunk, promise);
                 componentChunkPromises.push(promise);
             }
         }
@@ -871,7 +1056,7 @@ async function loadChunkInternal(sourceType, sourceData, chunkData) {
     const promise = loadChunkByUrlWhole(sourceType, sourceData, chunkUrl);
     for (const componentChunk of componentChunks){
         if (!availableModuleChunks.has(componentChunk)) {
-            availableModuleChunks.set(componentChunk, promise);
+            cacheLoadPromise(availableModuleChunks, componentChunk, promise);
         }
     }
     return promise;
@@ -933,7 +1118,7 @@ function loadChunkByUrlInternal(sourceType, sourceData, chunkEntry) {
             let promise = splitChunkPromises.get(chunkUrl);
             if (promise === undefined) {
                 promise = loadComponentChunksOrWhole(sourceType, sourceData, components, chunkUrl);
-                splitChunkPromises.set(chunkUrl, promise);
+                cacheLoadPromise(splitChunkPromises, chunkUrl, promise);
             }
             return promise;
         }
@@ -945,7 +1130,7 @@ function loadChunkByUrlInternal(sourceType, sourceData, chunkEntry) {
             return existing === true ? loadedChunk : existing;
         }
         const promise = loadChunkByUrlWhole(sourceType, sourceData, chunkUrl);
-        availableModuleChunks.set(chunkPath, promise);
+        cacheLoadPromise(availableModuleChunks, chunkPath, promise);
         return promise;
     }
     // Component chunks are disabled, so the chunking context never emits merged arrays and every
@@ -1121,43 +1306,461 @@ function isJs(chunkUrlOrPath) {
 function isCss(chunkUrl) {
     return endsWithExtension(chunkUrl, '.css');
 }
-/// <reference path="./runtime-base.ts" />
-/// <reference path="./dummy.ts" />
-const moduleCache = new Map();
-contextPrototype.c = moduleCache;
+/// <reference path="./runtime-utils.ts" />
+/// <reference path="./runtime-types.d.ts" />
+/// <reference path="./dev-extensions.ts" />
+/// <reference path="./dev-protocol.d.ts" />
+/// <reference path="./dev-runtime-hooks.d.ts" />
 /**
- * Gets or instantiates a runtime module.
- */ // @ts-ignore
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
-    return getCachedModule(moduleCache, moduleId) ?? instantiateModule(moduleId, SourceType.Runtime, chunkPath);
+ * Shared HMR (Hot Module Replacement) implementation.
+ *
+ * This file contains the complete HMR implementation that's shared between
+ * browser and Node.js runtimes. It manages module hot state, dependency
+ * tracking, the module.hot API, and the full HMR update flow.
+ */ /**
+ * The development module cache shared across the runtime.
+ */ const moduleCache = new Map();
+/**
+ * Module IDs that are instantiated as part of the runtime of a chunk.
+ */ let runtimeModules;
+/**
+ * Whether to set `module.loaded` once a module has evaluated, as Node.js does
+ * for CommonJS modules. Set by the Node.js dev runtime.
+ */ let markDevModulesLoaded = false;
+/**
+ * Maps module IDs to persisted data between executions of their hot module
+ * implementation (`hot.data`).
+ */ const moduleHotData = new Map();
+/**
+ * Maps module instances to their hot module state.
+ * Uses WeakMap so it works with both HotModule and ModuleWithDirection.
+ */ const moduleHotState = new WeakMap();
+/**
+ * Modules that call `module.hot.invalidate()` (while being updated).
+ */ const queuedInvalidatedModules = new Set();
+class UpdateApplyError extends Error {
+    name = 'UpdateApplyError';
+    constructor(message, dependencyChain){
+        super(message);
+        this.dependencyChain = dependencyChain;
+    }
 }
 /**
- * Retrieves a module from the cache, or instantiate it if it is not cached.
- */ // Used by the backend
-// @ts-ignore
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const getOrInstantiateModuleFromParent = (id, sourceModule)=>{
-    return getCachedModule(moduleCache, id) ?? instantiateModule(id, SourceType.Parent, sourceModule.id);
-};
-function instantiateModule(id, sourceType, sourceData) {
-    const moduleFactory = moduleFactories.get(id);
-    if (typeof moduleFactory !== 'function') {
-        // This can happen if modules incorrectly handle HMR disposes/updates,
-        // e.g. when they keep a `setTimeout` around which still executes old code
-        // and contains e.g. a `require("something")` call.
-        throw new Error(factoryNotAvailableMessage(id, sourceType, sourceData));
+ * Records parent-child relationship when a module imports another.
+ * Should be called during module instantiation.
+ */ // eslint-disable-next-line @typescript-eslint/no-unused-vars
+function trackModuleImport(parentModule, childModuleId, childModule) {
+    // Record that parent imports child
+    if (parentModule.children.indexOf(childModuleId) === -1) {
+        parentModule.children.push(childModuleId);
     }
-    const module = createModuleObject(id);
+    // Record that child is imported by parent
+    if (childModule && childModule.parents.indexOf(parentModule.id) === -1) {
+        childModule.parents.push(parentModule.id);
+    }
+}
+function formatDependencyChain(dependencyChain) {
+    return `Dependency chain: ${dependencyChain.join(' -> ')}`;
+}
+/**
+ * Walks the dependency tree to find all modules affected by a change.
+ * Returns information about whether the update can be accepted and which
+ * modules need to be invalidated.
+ *
+ * @param moduleId - The module that changed
+ * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept().
+ *                           This is used for server-side HMR where pages auto-accept at the top level.
+ */ function getAffectedModuleEffects(moduleId, autoAcceptRootModules) {
+    const outdatedModules = new Set();
+    const outdatedDependencies = new Map();
+    const queue = [
+        {
+            moduleId,
+            dependencyChain: []
+        }
+    ];
+    let queueIndex = 0;
+    while(queueIndex < queue.length){
+        const { moduleId, dependencyChain } = queue[queueIndex];
+        // Release copied dependency chains as soon as their queue item is consumed.
+        queue[queueIndex++] = undefined;
+        if (moduleId != null) {
+            if (outdatedModules.has(moduleId)) {
+                continue;
+            }
+            outdatedModules.add(moduleId);
+        }
+        // We've arrived at the runtime of the chunk, which means that nothing
+        // else above can accept this update.
+        if (moduleId === undefined) {
+            if (autoAcceptRootModules) {
+                return {
+                    type: 'accepted',
+                    moduleId,
+                    outdatedModules,
+                    outdatedDependencies
+                };
+            }
+            return {
+                type: 'unaccepted',
+                dependencyChain
+            };
+        }
+        const module = moduleCache.get(moduleId);
+        const hotState = moduleHotState.get(module);
+        if (// The module is not in the cache. Since this is a "modified" update,
+        // it means that the module was never instantiated before.
+        !module || hotState.selfAccepted && !hotState.selfInvalidated) {
+            continue;
+        }
+        if (hotState.selfDeclined) {
+            return {
+                type: 'self-declined',
+                dependencyChain,
+                moduleId
+            };
+        }
+        if (runtimeModules.has(moduleId)) {
+            if (autoAcceptRootModules) {
+                continue;
+            }
+            queue.push({
+                moduleId: undefined,
+                dependencyChain: [
+                    ...dependencyChain,
+                    moduleId
+                ]
+            });
+            continue;
+        }
+        for (const parentId of module.parents){
+            const parent = moduleCache.get(parentId);
+            if (!parent) {
+                continue;
+            }
+            const parentHotState = moduleHotState.get(parent);
+            // Check if parent declined this dependency
+            if (parentHotState?.declinedDependencies[moduleId]) {
+                return {
+                    type: 'declined',
+                    dependencyChain: [
+                        ...dependencyChain,
+                        moduleId
+                    ],
+                    moduleId,
+                    parentId
+                };
+            }
+            // Skip if parent is already outdated
+            if (outdatedModules.has(parentId)) {
+                continue;
+            }
+            // Check if parent accepts this dependency
+            if (parentHotState?.acceptedDependencies[moduleId]) {
+                if (!outdatedDependencies.has(parentId)) {
+                    outdatedDependencies.set(parentId, new Set());
+                }
+                outdatedDependencies.get(parentId).add(moduleId);
+                continue;
+            }
+            // Neither accepted nor declined — propagate to parent
+            queue.push({
+                moduleId: parentId,
+                dependencyChain: [
+                    ...dependencyChain,
+                    moduleId
+                ]
+            });
+        }
+        // If no parents and we're at a root module, auto-accept if configured
+        if (module.parents.length === 0 && autoAcceptRootModules) {
+            continue;
+        }
+    }
+    return {
+        type: 'accepted',
+        moduleId,
+        outdatedModules,
+        outdatedDependencies
+    };
+}
+/**
+ * Merges source dependency map into target dependency map.
+ */ function mergeDependencies(target, source) {
+    for (const [parentId, deps] of source){
+        const existing = target.get(parentId);
+        if (existing) {
+            for (const dep of deps){
+                existing.add(dep);
+            }
+        } else {
+            target.set(parentId, new Set(deps));
+        }
+    }
+}
+/**
+ * Computes all modules that need to be invalidated based on which modules changed.
+ *
+ * @param invalidated - The modules that have been invalidated
+ * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
+ */ function computedInvalidatedModules(invalidated, autoAcceptRootModules) {
+    const outdatedModules = new Set();
+    const outdatedDependencies = new Map();
+    for (const moduleId of invalidated){
+        const effect = getAffectedModuleEffects(moduleId, autoAcceptRootModules);
+        switch(effect.type){
+            case 'unaccepted':
+                throw new UpdateApplyError(`cannot apply update: unaccepted module. ${formatDependencyChain(effect.dependencyChain)}.`, effect.dependencyChain);
+            case 'self-declined':
+                throw new UpdateApplyError(`cannot apply update: self-declined module. ${formatDependencyChain(effect.dependencyChain)}.`, effect.dependencyChain);
+            case 'declined':
+                throw new UpdateApplyError(`cannot apply update: declined dependency. ${formatDependencyChain(effect.dependencyChain)}. Declined by ${effect.parentId}.`, effect.dependencyChain);
+            case 'accepted':
+                for (const outdatedModuleId of effect.outdatedModules){
+                    outdatedModules.add(outdatedModuleId);
+                }
+                mergeDependencies(outdatedDependencies, effect.outdatedDependencies);
+                break;
+            default:
+                invariant(effect, (effect)=>`Unknown effect type: ${effect?.type}`);
+        }
+    }
+    return {
+        outdatedModules,
+        outdatedDependencies
+    };
+}
+/**
+ * Creates the module.hot API object and its internal state.
+ * This provides the HMR API that user code calls (module.hot.accept(), etc.)
+ */ function createModuleHot(moduleId, hotData) {
+    const hotState = {
+        selfAccepted: false,
+        selfDeclined: false,
+        selfInvalidated: false,
+        disposeHandlers: [],
+        acceptedDependencies: {},
+        acceptedErrorHandlers: {},
+        declinedDependencies: {}
+    };
+    const hot = {
+        // TODO(alexkirsz) This is not defined in the HMR API. It was used to
+        // decide whether to warn whenever an HMR-disposed module required other
+        // modules. We might want to remove it.
+        active: true,
+        data: hotData ?? {},
+        accept: (modules, callback, errorHandler)=>{
+            if (modules === undefined) {
+                hotState.selfAccepted = true;
+            } else if (typeof modules === 'function') {
+                hotState.selfAccepted = modules;
+            } else if (typeof modules === 'object' && modules !== null) {
+                for(let i = 0; i < modules.length; i++){
+                    hotState.acceptedDependencies[modules[i]] = callback || function() {};
+                    hotState.acceptedErrorHandlers[modules[i]] = errorHandler;
+                }
+            } else {
+                hotState.acceptedDependencies[modules] = callback || function() {};
+                hotState.acceptedErrorHandlers[modules] = errorHandler;
+            }
+        },
+        decline: (dep)=>{
+            if (dep === undefined) {
+                hotState.selfDeclined = true;
+            } else if (typeof dep === 'object' && dep !== null) {
+                for(let i = 0; i < dep.length; i++){
+                    hotState.declinedDependencies[dep[i]] = true;
+                }
+            } else {
+                hotState.declinedDependencies[dep] = true;
+            }
+        },
+        dispose: (callback)=>{
+            hotState.disposeHandlers.push(callback);
+        },
+        addDisposeHandler: (callback)=>{
+            hotState.disposeHandlers.push(callback);
+        },
+        removeDisposeHandler: (callback)=>{
+            const idx = hotState.disposeHandlers.indexOf(callback);
+            if (idx >= 0) {
+                hotState.disposeHandlers.splice(idx, 1);
+            }
+        },
+        invalidate: ()=>{
+            hotState.selfInvalidated = true;
+            queuedInvalidatedModules.add(moduleId);
+        },
+        // NOTE(alexkirsz) This is part of the management API, which we don't
+        // implement, but the Next.js React Refresh runtime uses this to decide
+        // whether to schedule an update.
+        status: ()=>'idle',
+        // NOTE(alexkirsz) Since we always return "idle" for now, these are no-ops.
+        addStatusHandler: (_handler)=>{},
+        removeStatusHandler: (_handler)=>{},
+        // NOTE(jridgewell) Check returns the list of updated modules, but we don't
+        // want the webpack code paths to ever update (the turbopack paths handle
+        // this already).
+        check: ()=>Promise.resolve(null)
+    };
+    return {
+        hot,
+        hotState
+    };
+}
+/**
+ * Processes queued invalidated modules and adds them to the outdated modules set.
+ * Modules that call module.hot.invalidate() are queued and processed here.
+ *
+ * @param outdatedModules - The current set of outdated modules
+ * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
+ */ function applyInvalidatedModules(outdatedModules, outdatedDependencies, autoAcceptRootModules) {
+    if (queuedInvalidatedModules.size > 0) {
+        const result = computedInvalidatedModules(queuedInvalidatedModules, autoAcceptRootModules);
+        for (const moduleId of result.outdatedModules){
+            outdatedModules.add(moduleId);
+        }
+        mergeDependencies(outdatedDependencies, result.outdatedDependencies);
+        queuedInvalidatedModules.clear();
+    }
+    return {
+        outdatedModules,
+        outdatedDependencies
+    };
+}
+/**
+ * Computes which outdated modules have self-accepted and can be hot reloaded.
+ */ function computeOutdatedSelfAcceptedModules(outdatedModules) {
+    const outdatedSelfAcceptedModules = [];
+    for (const moduleId of outdatedModules){
+        const module = moduleCache.get(moduleId);
+        const hotState = moduleHotState.get(module);
+        if (module && hotState?.selfAccepted && !hotState.selfInvalidated) {
+            outdatedSelfAcceptedModules.push({
+                moduleId,
+                errorHandler: hotState.selfAccepted
+            });
+        }
+    }
+    return outdatedSelfAcceptedModules;
+}
+/**
+ * Disposes of an instance of a module.
+ * Runs hot.dispose handlers and manages persistent hot data.
+ *
+ * NOTE: mode = "replace" will not remove modules from moduleCache.
+ * This must be done in a separate step afterwards.
+ */ function disposeModule(moduleId, mode) {
+    const module = moduleCache.get(moduleId);
+    if (!module) {
+        return;
+    }
+    const hotState = moduleHotState.get(module);
+    if (!hotState) {
+        return;
+    }
+    const data = {};
+    // Run the `hot.dispose` handler, if any, passing in the persistent
+    // `hot.data` object.
+    for (const disposeHandler of hotState.disposeHandlers){
+        disposeHandler(data);
+    }
+    // This used to warn in `getOrInstantiateModuleFromParent` when a disposed
+    // module is still importing other modules.
+    if (module.hot) {
+        module.hot.active = false;
+    }
+    moduleHotState.delete(module);
+    // Remove the disposed module from its children's parent list.
+    // It will be added back once the module re-instantiates and imports its
+    // children again.
+    for (const childId of module.children){
+        const child = moduleCache.get(childId);
+        if (!child) {
+            continue;
+        }
+        const idx = child.parents.indexOf(module.id);
+        if (idx >= 0) {
+            child.parents.splice(idx, 1);
+        }
+    }
+    switch(mode){
+        case 'clear':
+            moduleCache.delete(module.id);
+            moduleHotData.delete(module.id);
+            break;
+        case 'replace':
+            moduleHotData.set(module.id, data);
+            break;
+        default:
+            invariant(mode, (mode)=>`invalid mode: ${mode}`);
+    }
+}
+/**
+ * Dispose phase: runs dispose handlers and cleans up outdated/disposed modules.
+ * Returns the parent modules of outdated modules for use in the apply phase.
+ */ function disposePhase(outdatedModules, disposedModules, outdatedDependencies) {
+    for (const moduleId of outdatedModules){
+        disposeModule(moduleId, 'replace');
+    }
+    for (const moduleId of disposedModules){
+        disposeModule(moduleId, 'clear');
+    }
+    // Removing modules from the module cache is a separate step.
+    // We also want to keep track of previous parents of the outdated modules.
+    const outdatedModuleParents = new Map();
+    for (const moduleId of outdatedModules){
+        const oldModule = moduleCache.get(moduleId);
+        if (oldModule) {
+            outdatedModuleParents.set(moduleId, oldModule.parents);
+        }
+        moduleCache.delete(moduleId);
+    }
+    // Remove outdated dependencies from parent module's children list.
+    // When a parent accepts a child's update, the child is re-instantiated
+    // but the parent stays alive. We remove the old child reference so it
+    // gets re-added when the child re-imports.
+    for (const [parentId, deps] of outdatedDependencies){
+        const module = moduleCache.get(parentId);
+        if (module) {
+            for (const dep of deps){
+                const idx = module.children.indexOf(dep);
+                if (idx >= 0) {
+                    module.children.splice(idx, 1);
+                }
+            }
+        }
+    }
+    return {
+        outdatedModuleParents
+    };
+}
+/* eslint-disable @typescript-eslint/no-unused-vars */ /**
+ * Instantiates a module in development mode.
+ *
+ * This calls the module factory directly, and allows different runtimes to supply hooks via
+ * `interceptDevModuleExecution`/`createDevModuleContext` hooks.
+ */ function instantiateModule(moduleId, sourceType, sourceData) {
+    const moduleFactory = moduleFactories.get(moduleId);
+    if (typeof moduleFactory !== 'function') {
+        throw new Error(factoryNotAvailableMessage(moduleId, sourceType, sourceData) + `\nThis is often caused by a stale browser cache, misconfigured Cache-Control headers, or a service worker serving outdated responses.` + `\nTo fix this, make sure your Cache-Control headers allow revalidation of chunks and review your service worker configuration. ` + `As an immediate workaround, try hard-reloading the page, clearing the browser cache, or unregistering any service workers.`);
+    }
+    const module = createDevModule(moduleId, sourceType, sourceData);
     const exports = module.exports;
-    moduleCache.set(id, module);
-    // NOTE(alexkirsz) This can fail when the module encounters a runtime error.
-    const context = new Context(module, exports);
+    const finishExecution = interceptDevModuleExecution(module);
     try {
-        moduleFactory(context, module, exports);
+        // Called like in the production runtimes, without a `this`, which keeps
+        // this frame smaller.
+        moduleFactory(createDevModuleContext(module, exports, finishExecution !== undefined), module, exports);
     } catch (error) {
         module.error = error;
         throw error;
+    } finally{
+        finishExecution?.();
+    }
+    if (markDevModulesLoaded) {
+        ;
+        module.loaded = true;
     }
     if (module.namespaceObject && module.exports !== module.namespaceObject) {
         // in case of a circular dependency: cjs1 -> esm2 -> cjs1
@@ -1165,7 +1768,604 @@ function instantiateModule(id, sourceType, sourceData) {
     }
     return module;
 }
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+/**
+ * Creates a module object with its hot API and parents, and adds it to the
+ * module cache.
+ */ function createDevModule(moduleId, sourceType, sourceData) {
+    const hotData = moduleHotData.get(moduleId);
+    const { hot, hotState } = createModuleHot(moduleId, hotData);
+    let parents;
+    switch(sourceType){
+        case SourceType.Runtime:
+            runtimeModules.add(moduleId);
+            parents = [];
+            break;
+        case SourceType.Parent:
+            parents = [
+                sourceData
+            ];
+            break;
+        case SourceType.Update:
+            parents = sourceData || [];
+            break;
+        default:
+            throw new Error(`Unknown source type: ${sourceType}`);
+    }
+    // The module object becomes a HotModule once `hot` is assigned.
+    const module = createModuleWithDirection(moduleId);
+    module.parents = parents;
+    module.hot = hot;
+    moduleCache.set(moduleId, module);
+    moduleHotState.set(module, hotState);
+    return module;
+}
+/**
+ * Analyzes update entries and chunks to determine which modules were added, modified, or deleted.
+ * This is pure logic that doesn't depend on the runtime environment.
+ */ function computeChangedModules(entries, updates, chunkModulesMap) {
+    const chunksAdded = new Map();
+    const chunksDeleted = new Map();
+    const added = new Map();
+    const modified = new Map();
+    const deleted = new Set();
+    for (const [chunkPath, mergedChunkUpdate] of Object.entries(updates)){
+        switch(mergedChunkUpdate.type){
+            case 'added':
+                {
+                    const updateAdded = new Set(mergedChunkUpdate.modules);
+                    for (const moduleId of updateAdded){
+                        added.set(moduleId, entries[moduleId]);
+                    }
+                    chunksAdded.set(chunkPath, updateAdded);
+                    break;
+                }
+            case 'deleted':
+                {
+                    const updateDeleted = chunkModulesMap ? new Set(chunkModulesMap.get(chunkPath)) : new Set();
+                    for (const moduleId of updateDeleted){
+                        deleted.add(moduleId);
+                    }
+                    chunksDeleted.set(chunkPath, updateDeleted);
+                    break;
+                }
+            case 'partial':
+                {
+                    const updateAdded = new Set(mergedChunkUpdate.added);
+                    const updateDeleted = new Set(mergedChunkUpdate.deleted);
+                    for (const moduleId of updateAdded){
+                        added.set(moduleId, entries[moduleId]);
+                    }
+                    for (const moduleId of updateDeleted){
+                        deleted.add(moduleId);
+                    }
+                    chunksAdded.set(chunkPath, updateAdded);
+                    chunksDeleted.set(chunkPath, updateDeleted);
+                    break;
+                }
+            default:
+                throw new Error('Unknown merged chunk update type');
+        }
+    }
+    // If a module was added from one chunk and deleted from another in the same update,
+    // consider it to be modified, as it means the module was moved from one chunk to another
+    // AND has new code in a single update.
+    for (const moduleId of added.keys()){
+        if (deleted.has(moduleId)) {
+            added.delete(moduleId);
+            deleted.delete(moduleId);
+        }
+    }
+    for (const [moduleId, entry] of Object.entries(entries)){
+        // Modules that haven't been added to any chunk but have new code are considered
+        // to be modified.
+        // This needs to be under the previous loop, as we need it to get rid of modules
+        // that were added and deleted in the same update.
+        if (!added.has(moduleId)) {
+            modified.set(moduleId, entry);
+        }
+    }
+    return {
+        added,
+        deleted,
+        modified,
+        chunksAdded,
+        chunksDeleted
+    };
+}
+/**
+ * Compiles new module code and walks the dependency tree to find all outdated modules.
+ * Uses the evalModuleEntry function to compile code (platform-specific).
+ *
+ * @param added - Map of added modules
+ * @param modified - Map of modified modules
+ * @param evalModuleEntry - Function to compile module code
+ * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
+ */ function computeOutdatedModules(added, modified, evalModuleEntry, autoAcceptRootModules) {
+    const newModuleFactories = new Map();
+    // Compile added modules
+    for (const [moduleId, entry] of added){
+        if (entry != null) {
+            newModuleFactories.set(moduleId, evalModuleEntry(entry));
+        }
+    }
+    // Walk dependency tree to find all modules affected by modifications
+    const { outdatedModules, outdatedDependencies } = computedInvalidatedModules(modified.keys(), autoAcceptRootModules);
+    // Compile modified modules
+    for (const [moduleId, entry] of modified){
+        newModuleFactories.set(moduleId, evalModuleEntry(entry));
+    }
+    return {
+        outdatedModules,
+        outdatedDependencies,
+        newModuleFactories
+    };
+}
+/**
+ * Updates module factories and re-instantiates self-accepted modules.
+ * Uses the instantiateModule function (platform-specific via callback).
+ */ function applyPhase(outdatedSelfAcceptedModules, newModuleFactories, outdatedModuleParents, outdatedDependencies, instantiateModuleFn, applyModuleFactoryNameFn, reportError) {
+    // Update module factories
+    for (const [moduleId, factory] of newModuleFactories.entries()){
+        applyModuleFactoryNameFn(factory);
+        moduleFactories.set(moduleId, factory);
+    }
+    // TODO(alexkirsz) Run new runtime entries here.
+    // Call accept handlers for outdated dependencies.
+    // This runs BEFORE re-instantiating self-accepted modules, matching
+    // webpack's behavior.
+    for (const [parentId, deps] of outdatedDependencies){
+        const module = moduleCache.get(parentId);
+        if (!module) continue;
+        const hotState = moduleHotState.get(module);
+        if (!hotState) continue;
+        // Group deps by callback, deduplicating callbacks that handle multiple deps.
+        // Each callback receives only the deps it was registered for.
+        const callbackDeps = new Map();
+        const callbackErrorHandlers = new Map();
+        for (const dep of deps){
+            const acceptCallback = hotState.acceptedDependencies[dep];
+            if (acceptCallback) {
+                let depList = callbackDeps.get(acceptCallback);
+                if (!depList) {
+                    depList = [];
+                    callbackDeps.set(acceptCallback, depList);
+                    callbackErrorHandlers.set(acceptCallback, hotState.acceptedErrorHandlers[dep]);
+                }
+                depList.push(dep);
+            }
+        }
+        for (const [callback, cbDeps] of callbackDeps){
+            try {
+                callback.call(null, cbDeps);
+            } catch (err) {
+                const errorHandler = callbackErrorHandlers.get(callback);
+                if (typeof errorHandler === 'function') {
+                    try {
+                        errorHandler(err, {
+                            moduleId: parentId,
+                            dependencyId: cbDeps[0]
+                        });
+                    } catch (err2) {
+                        reportError(err2);
+                        reportError(err);
+                    }
+                } else {
+                    reportError(err);
+                }
+            }
+        }
+    }
+    // Re-instantiate all outdated self-accepted modules
+    for (const { moduleId, errorHandler } of outdatedSelfAcceptedModules){
+        try {
+            instantiateModuleFn(moduleId, SourceType.Update, outdatedModuleParents.get(moduleId));
+        } catch (err) {
+            if (typeof errorHandler === 'function') {
+                try {
+                    errorHandler(err, {
+                        moduleId,
+                        module: moduleCache.get(moduleId)
+                    });
+                } catch (err2) {
+                    reportError(err2);
+                    reportError(err);
+                }
+            } else {
+                reportError(err);
+            }
+        }
+    }
+}
+/**
+ * Internal implementation that orchestrates the full HMR update flow:
+ * invalidation, disposal, and application of new modules.
+ *
+ * @param autoAcceptRootModules - If true, root modules auto-accept updates without explicit module.hot.accept()
+ */ function applyInternal(outdatedModules, outdatedDependencies, disposedModules, newModuleFactories, instantiateModuleFn, applyModuleFactoryNameFn, autoAcceptRootModules) {
+    ;
+    ({ outdatedModules, outdatedDependencies } = applyInvalidatedModules(outdatedModules, outdatedDependencies, autoAcceptRootModules));
+    // Find self-accepted modules to re-instantiate
+    const outdatedSelfAcceptedModules = computeOutdatedSelfAcceptedModules(outdatedModules);
+    // Run dispose handlers, save hot.data, clear caches
+    const { outdatedModuleParents } = disposePhase(outdatedModules, disposedModules, outdatedDependencies);
+    let error;
+    function reportError(err) {
+        if (!error) error = err; // Keep first error
+    }
+    applyPhase(outdatedSelfAcceptedModules, newModuleFactories, outdatedModuleParents, outdatedDependencies, instantiateModuleFn, applyModuleFactoryNameFn, reportError);
+    if (error) {
+        throw error;
+    }
+    // Recursively apply any queued invalidations from new module execution
+    if (queuedInvalidatedModules.size > 0) {
+        applyInternal(new Set(), new Map(), [], new Map(), instantiateModuleFn, applyModuleFactoryNameFn, autoAcceptRootModules);
+    }
+}
+/**
+ * Main entry point for applying an ECMAScript merged update.
+ * This is called by both browser and Node.js runtimes with platform-specific callbacks.
+ *
+ * @param options.autoAcceptRootModules - If true, root modules auto-accept updates without explicit
+ *                                   module.hot.accept(). Used for server-side HMR where pages
+ *                                   auto-accept at the top level.
+ */ function applyEcmascriptMergedUpdateShared(options) {
+    const { added, modified, disposedModules, evalModuleEntry, instantiateModule, applyModuleFactoryName, autoAcceptRootModules } = options;
+    const { outdatedModules, outdatedDependencies, newModuleFactories } = computeOutdatedModules(added, modified, evalModuleEntry, autoAcceptRootModules);
+    applyInternal(outdatedModules, outdatedDependencies, disposedModules, newModuleFactories, instantiateModule, applyModuleFactoryName, autoAcceptRootModules);
+}
+/// <reference path="../../../shared/runtime/dev-globals.d.ts" />
+/// <reference path="../../../shared/runtime/dev-protocol.d.ts" />
+/// <reference path="../../../shared/runtime/hmr-runtime.ts" />
+const devContextPrototype = Context.prototype;
+/**
+ * This file contains runtime types and functions that are shared between all
+ * Turbopack *development* ECMAScript runtimes.
+ *
+ * It will be appended to the runtime code of each runtime right after the
+ * shared runtime utils.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ devContextPrototype.c = moduleCache;
+// Assign browser's runtime modules to shared HMR state
+runtimeModules = new Set();
+// Set flag to indicate we use ModuleWithDirection
+createModuleWithDirectionFlag = true;
+function getRefreshBoundaryExports(exports) {
+    if (typeof isAsyncModuleExt === 'function' && exports != null && typeof exports === 'object' && isAsyncModuleExt(exports)) {
+        return exports[turbopackExports];
+    }
+    return exports;
+}
+/**
+ * Map from module ID to the chunks that contain this module.
+ *
+ * In HMR, we need to keep track of which modules are contained in which so
+ * chunks. This is so we don't eagerly dispose of a module when it is removed
+ * from chunk A, but still exists in chunk B.
+ */ const moduleChunksMap = new Map();
+/**
+ * Map from a chunk path to all modules it contains.
+ */ const chunkModulesMap = new Map();
+/**
+ * Chunk lists that contain a runtime. When these chunk lists receive an update
+ * that can't be reconciled with the current state of the page, we need to
+ * reload the runtime entirely.
+ */ const runtimeChunkLists = new Set();
+/**
+ * Map from a chunk list to the chunk paths it contains.
+ */ const chunkListChunksMap = new Map();
+/**
+ * Map from a chunk path to the chunk lists it belongs to.
+ */ const chunkChunkListsMap = new Map();
+/**
+ * Gets or instantiates a runtime module.
+ */ // @ts-ignore
+function getOrInstantiateRuntimeModule(chunkPath, moduleId) {
+    return getCachedModule(moduleCache, moduleId) ?? instantiateModule(moduleId, SourceType.Runtime, chunkPath);
+}
+/**
+ * Retrieves a module from the cache, or instantiate it if it is not cached.
+ */ // @ts-ignore Defined in `runtime-utils.ts`
+const getOrInstantiateModuleFromParent = (id, sourceModule)=>{
+    if (!sourceModule.hot.active) {
+        console.warn(`Unexpected import of module ${id} from module ${sourceModule.id}, which was deleted by an HMR update`);
+    }
+    if (sourceModule.children.indexOf(id) === -1) {
+        sourceModule.children.push(id);
+    }
+    const module = getCachedModule(moduleCache, id);
+    if (module) {
+        if (module.parents.indexOf(sourceModule.id) === -1) {
+            module.parents.push(sourceModule.id);
+        }
+        return module;
+    }
+    return instantiateModule(id, SourceType.Parent, sourceModule.id);
+};
+function DevContext(module, exports, refresh) {
+    Context.call(this, module, exports);
+    this.k = refresh;
+}
+DevContext.prototype = Context.prototype;
+const DUMMY_REFRESH_CONTEXT = {
+    register: (_type, _id)=>{},
+    signature: ()=>(_type)=>{},
+    registerExports: (_module, _helpers)=>{}
+};
+/**
+ * NOTE(alexkirsz) Webpack has a "module execution" interception hook that
+ * Next.js' React Refresh runtime hooks into to add module context to the
+ * refresh registry. The returned cleanup restores the previous registry.
+ */ function interceptDevModuleExecution(module) {
+    if (typeof globalThis.$RefreshInterceptModuleExecution$ === 'function') {
+        return globalThis.$RefreshInterceptModuleExecution$(module.id);
+    }
+    return undefined;
+}
+/**
+ * Creates the module's context. When the execution was intercepted,
+ * `$RefreshReg$` and `$RefreshSig$` already belong to this module.
+ */ function createDevModuleContext(module, exports, intercepted) {
+    return new DevContext(module, exports, intercepted ? {
+        register: globalThis.$RefreshReg$,
+        signature: globalThis.$RefreshSig$,
+        registerExports: registerExportsAndSetupBoundaryForReactRefresh
+    } : // This is expected when running in a Web Worker.  It is also common in some of
+    // our test environments.
+    DUMMY_REFRESH_CONTEXT);
+}
+/**
+ * This is adapted from https://github.com/vercel/next.js/blob/3466862d9dc9c8bb3131712134d38757b918d1c0/packages/react-refresh-utils/internal/ReactRefreshModule.runtime.ts
+ */ function registerExportsAndSetupBoundaryForReactRefresh(module, helpers) {
+    const currentExports = getRefreshBoundaryExports(module.exports);
+    const prevExports = module.hot.data.prevExports ?? null;
+    helpers.registerExportsForReactRefresh(currentExports, module.id);
+    // A module can be accepted automatically based on its exports, e.g. when
+    // it is a Refresh Boundary.
+    if (helpers.isReactRefreshBoundary(currentExports)) {
+        // Save the previous exports on update, so we can compare the boundary
+        // signatures.
+        module.hot.dispose((data)=>{
+            data.prevExports = currentExports;
+        });
+        // Unconditionally accept an update to this module, we'll check if it's
+        // still a Refresh Boundary later.
+        module.hot.accept();
+        // This field is set when the previous version of this module was a
+        // Refresh Boundary, letting us know we need to check for invalidation or
+        // enqueue an update.
+        if (prevExports !== null) {
+            // A boundary can become ineligible if its exports are incompatible
+            // with the previous exports.
+            //
+            // For example, if you add/remove/change exports, we'll want to
+            // re-execute the importing modules, and force those components to
+            // re-render. Similarly, if you convert a class component to a
+            // function, we want to invalidate the boundary.
+            if (helpers.shouldInvalidateReactRefreshBoundary(helpers.getRefreshBoundarySignature(prevExports), helpers.getRefreshBoundarySignature(currentExports))) {
+                module.hot.invalidate();
+            } else {
+                helpers.scheduleUpdate();
+            }
+        }
+    } else {
+        // Since we just executed the code for the module, it's possible that the
+        // new exports made it ineligible for being a boundary.
+        // We only care about the case when we were _previously_ a boundary,
+        // because we already accepted this update (accidental side effect).
+        const isNoLongerABoundary = prevExports !== null;
+        if (isNoLongerABoundary) {
+            module.hot.invalidate();
+        }
+    }
+}
+/**
+ * Adds, deletes, and moves modules between chunks. This must happen before the
+ * dispose phase as it needs to know which modules were removed from all chunks,
+ * which we can only compute *after* taking care of added and moved modules.
+ */ function updateChunksPhase(chunksAddedModules, chunksDeletedModules) {
+    for (const [chunkPath, addedModuleIds] of chunksAddedModules){
+        for (const moduleId of addedModuleIds){
+            addModuleToChunk(moduleId, chunkPath);
+        }
+    }
+    const disposedModules = new Set();
+    for (const [chunkPath, addedModuleIds] of chunksDeletedModules){
+        for (const moduleId of addedModuleIds){
+            if (removeModuleFromChunk(moduleId, chunkPath)) {
+                disposedModules.add(moduleId);
+            }
+        }
+    }
+    return {
+        disposedModules
+    };
+}
+function applyUpdate(update) {
+    switch(update.type){
+        case 'ChunkListUpdate':
+            applyChunkListUpdate(update);
+            break;
+        default:
+            invariant(update, (update)=>`Unknown update type: ${update.type}`);
+    }
+}
+function applyChunkListUpdate(update) {
+    if (update.merged != null) {
+        for (const merged of update.merged){
+            switch(merged.type){
+                case 'EcmascriptMergedUpdate':
+                    applyEcmascriptMergedUpdate(merged);
+                    break;
+                default:
+                    invariant(merged, (merged)=>`Unknown merged type: ${merged.type}`);
+            }
+        }
+    }
+    if (update.chunks != null) {
+        for (const [chunkPath, chunkUpdate] of Object.entries(update.chunks)){
+            const chunkUrl = getChunkRelativeUrl(chunkPath);
+            switch(chunkUpdate.type){
+                case 'added':
+                    BACKEND.loadChunkCached(SourceType.Update, chunkUrl);
+                    break;
+                case 'total':
+                    DEV_BACKEND.reloadChunk?.(chunkUrl);
+                    break;
+                case 'deleted':
+                    DEV_BACKEND.unloadChunk?.(chunkUrl);
+                    break;
+                case 'partial':
+                    invariant(chunkUpdate.instruction, (instruction)=>`Unknown partial instruction: ${JSON.stringify(instruction)}.`);
+                    break;
+                default:
+                    invariant(chunkUpdate, (chunkUpdate)=>`Unknown chunk update type: ${chunkUpdate.type}`);
+            }
+        }
+    }
+}
+function applyEcmascriptMergedUpdate(update) {
+    // Browser-specific chunk management phase
+    const { entries = {}, chunks = {} } = update;
+    const { added, modified, chunksAdded, chunksDeleted } = computeChangedModules(entries, chunks, chunkModulesMap);
+    const { disposedModules } = updateChunksPhase(chunksAdded, chunksDeleted);
+    // Use shared HMR update implementation
+    applyEcmascriptMergedUpdateShared({
+        added,
+        modified,
+        disposedModules,
+        evalModuleEntry: _eval,
+        instantiateModule,
+        applyModuleFactoryName,
+        autoAcceptRootModules: false
+    });
+}
+function handleApply(chunkListPath, update) {
+    switch(update.type){
+        case 'partial':
+            {
+                // This indicates that the update is can be applied to the current state of the application.
+                applyUpdate(update.instruction);
+                break;
+            }
+        case 'restart':
+            {
+                // This indicates that there is no way to apply the update to the
+                // current state of the application, and that the application must be
+                // restarted.
+                DEV_BACKEND.restart();
+                break;
+            }
+        case 'notFound':
+            {
+                // This indicates that the chunk list no longer exists: either the dynamic import which created it was removed,
+                // or the page itself was deleted.
+                // If it is a dynamic import, we simply discard all modules that the chunk has exclusive access to.
+                // If it is a runtime chunk list, we restart the application.
+                if (runtimeChunkLists.has(chunkListPath)) {
+                    DEV_BACKEND.restart();
+                } else {
+                    disposeChunkList(chunkListPath);
+                }
+                break;
+            }
+        default:
+            throw new Error(`Unknown update type: ${update.type}`);
+    }
+}
+/**
+ * Removes a module from a chunk.
+ * Returns `true` if there are no remaining chunks including this module.
+ */ function removeModuleFromChunk(moduleId, chunkPath) {
+    const moduleChunks = moduleChunksMap.get(moduleId);
+    moduleChunks.delete(chunkPath);
+    const chunkModules = chunkModulesMap.get(chunkPath);
+    chunkModules.delete(moduleId);
+    const noRemainingModules = chunkModules.size === 0;
+    if (noRemainingModules) {
+        chunkModulesMap.delete(chunkPath);
+    }
+    const noRemainingChunks = moduleChunks.size === 0;
+    if (noRemainingChunks) {
+        moduleChunksMap.delete(moduleId);
+    }
+    return noRemainingChunks;
+}
+/**
+ * Disposes of a chunk list and its corresponding exclusive chunks.
+ */ function disposeChunkList(chunkListPath) {
+    const chunkPaths = chunkListChunksMap.get(chunkListPath);
+    if (chunkPaths == null) {
+        return false;
+    }
+    chunkListChunksMap.delete(chunkListPath);
+    for (const chunkPath of chunkPaths){
+        const chunkChunkLists = chunkChunkListsMap.get(chunkPath);
+        chunkChunkLists.delete(chunkListPath);
+        if (chunkChunkLists.size === 0) {
+            chunkChunkListsMap.delete(chunkPath);
+            disposeChunk(chunkPath);
+        }
+    }
+    // We must also dispose of the chunk list's chunk itself to ensure it may
+    // be reloaded properly in the future.
+    const chunkListUrl = getChunkRelativeUrl(chunkListPath);
+    DEV_BACKEND.unloadChunk?.(chunkListUrl);
+    return true;
+}
+/**
+ * Disposes of a chunk and its corresponding exclusive modules.
+ *
+ * @returns Whether the chunk was disposed of.
+ */ function disposeChunk(chunkPath) {
+    const chunkUrl = getChunkRelativeUrl(chunkPath);
+    // This should happen whether the chunk has any modules in it or not.
+    // For instance, CSS chunks have no modules in them, but they still need to be unloaded.
+    DEV_BACKEND.unloadChunk?.(chunkUrl);
+    const chunkModules = chunkModulesMap.get(chunkPath);
+    if (chunkModules == null) {
+        return false;
+    }
+    chunkModules.delete(chunkPath);
+    for (const moduleId of chunkModules){
+        const moduleChunks = moduleChunksMap.get(moduleId);
+        moduleChunks.delete(chunkPath);
+        const noRemainingChunks = moduleChunks.size === 0;
+        if (noRemainingChunks) {
+            moduleChunksMap.delete(moduleId);
+            disposeModule(moduleId, 'clear');
+            availableModules.delete(moduleId);
+        }
+    }
+    return true;
+}
+/**
+ * Adds a module to a chunk.
+ */ function addModuleToChunk(moduleId, chunkPath) {
+    let moduleChunks = moduleChunksMap.get(moduleId);
+    if (!moduleChunks) {
+        moduleChunks = new Set([
+            chunkPath
+        ]);
+        moduleChunksMap.set(moduleId, moduleChunks);
+    } else {
+        moduleChunks.add(chunkPath);
+    }
+    let chunkModules = chunkModulesMap.get(chunkPath);
+    if (!chunkModules) {
+        chunkModules = new Set([
+            moduleId
+        ]);
+        chunkModulesMap.set(chunkPath, chunkModules);
+    } else {
+        chunkModules.add(moduleId);
+    }
+}
+/**
+ * Marks a chunk list as a runtime chunk list. There can be more than one
+ * runtime chunk list. For instance, integration tests can have multiple chunk
+ * groups loaded at runtime, each with its own chunk list.
+ */ function markChunkListAsRuntime(chunkListPath) {
+    runtimeChunkLists.add(chunkListPath);
+}
 function registerChunk(registration) {
     // An inlined entry-only registration is a bare params object (no source chunk).
     if (!Array.isArray(registration)) {
@@ -1180,11 +2380,118 @@ function registerChunk(registration) {
     if (registration.length === 2) {
         runtimeParams = registration[1];
     } else {
+        let chunkPath = getPathFromScript(chunk);
         runtimeParams = undefined;
-        installCompressedModuleFactories(registration, /* offset= */ 1);
+        installCompressedModuleFactories(registration, /* offset= */ 1, (id)=>addModuleToChunk(id, chunkPath));
     }
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
+/**
+ * Subscribes to chunk list updates from the update server and applies them.
+ */ function registerChunkList(chunkList) {
+    const chunkListScript = getChunkFromRegistration(chunkList.script);
+    const chunkListPath = getPathFromScript(chunkListScript);
+    // The "chunk" is also registered to finish the loading in the backend
+    BACKEND.registerChunk(chunkListPath);
+    CHUNK_UPDATE_LISTENERS.push([
+        chunkListPath,
+        handleApply.bind(null, chunkListPath),
+        chunkList.version
+    ]);
+    // Adding chunks to chunk lists and vice versa.
+    const chunkPaths = new Set(chunkList.chunks.map(getChunkPath));
+    chunkListChunksMap.set(chunkListPath, chunkPaths);
+    for (const chunkPath of chunkPaths){
+        let chunkChunkLists = chunkChunkListsMap.get(chunkPath);
+        if (!chunkChunkLists) {
+            chunkChunkLists = new Set([
+                chunkListPath
+            ]);
+            chunkChunkListsMap.set(chunkPath, chunkChunkLists);
+        } else {
+            chunkChunkLists.add(chunkListPath);
+        }
+    }
+    if (chunkList.source === 'entry') {
+        markChunkListAsRuntime(chunkListPath);
+    }
+}
+/// <reference path="../shared/runtime/runtime-utils.ts" />
+/// A 'base' utilities to support runtime can have externals.
+/// Currently this is for node.js / edge runtime both.
+/// If a fn requires node.js specific behavior, it should be placed in `node-external-utils` instead.
+async function externalImport(id) {
+    let raw;
+    try {
+        raw = await import(id);
+    } catch (err) {
+        // TODO(alexkirsz) This can happen when a client-side module tries to load
+        // an external module we don't provide a shim for (e.g. querystring, url).
+        // For now, we fail semi-silently, but in the future this should be a
+        // compilation error.
+        throw new Error(`Failed to load external module ${id}: ${err}`);
+    }
+    if (raw && raw.__esModule && raw.default && 'default' in raw.default) {
+        return interopEsm(raw.default, createNS(raw), true);
+    }
+    return raw;
+}
+contextPrototype.y = externalImport;
+function externalRequire(id, thunk, esm = false) {
+    let raw;
+    try {
+        raw = thunk();
+    } catch (err) {
+        // TODO(alexkirsz) This can happen when a client-side module tries to load
+        // an external module we don't provide a shim for (e.g. querystring, url).
+        // For now, we fail semi-silently, but in the future this should be a
+        // compilation error.
+        throw new Error(`Failed to load external module ${id}: ${err}`);
+    }
+    if (!esm || raw.__esModule) {
+        return raw;
+    }
+    return interopEsm(raw, createNS(raw), true);
+}
+externalRequire.resolve = (id, options)=>{
+    return require.resolve(id, options);
+};
+contextPrototype.x = externalRequire;
+/**
+ * Adds Webpack-compatible ESM metadata to external values while preserving
+ * native ESM live bindings.
+ */ function externalNamespace(mod) {
+    if (mod && mod.__esModule) return mod;
+    const ns = Object.create(null);
+    const isEsmNamespace = mod && toStringTag && mod[toStringTag] === 'Module';
+    if (mod && (typeof mod === 'object' || typeof mod === 'function')) {
+        for(const key in mod){
+            if (key === '__esModule' || !isEsmNamespace && key === 'default') {
+                continue;
+            }
+            Object.defineProperty(ns, key, {
+                enumerable: true,
+                get: createGetter(mod, key)
+            });
+        }
+    }
+    if (!isEsmNamespace) {
+        Object.defineProperty(ns, 'default', {
+            enumerable: true,
+            value: mod
+        });
+    }
+    Object.defineProperty(ns, '__esModule', {
+        value: true
+    });
+    if (toStringTag) {
+        Object.defineProperty(ns, toStringTag, {
+            value: 'Module'
+        });
+    }
+    return ns;
+}
+contextPrototype.N = externalNamespace;
 /**
  * This file contains the runtime code specific to the Turbopack ECMAScript DOM runtime.
  *
@@ -1486,9 +2793,121 @@ let BACKEND;
         return resolver.promise;
     }
 })();
-globalThis["TURBOPACK"] = { push: registerChunk };
+/**
+ * This file contains the runtime code specific to the Turbopack development
+ * ECMAScript DOM runtime.
+ *
+ * It will be appended to the base development runtime code.
+ */ /* eslint-disable @typescript-eslint/no-unused-vars */ /// <reference path="../base/runtime-base.ts" />
+/// <reference path="../base/dev-base.ts" />
+/// <reference path="./runtime-backend-dom.ts" />
+/// <reference path="../../../shared/require-type.d.ts" />
+let DEV_BACKEND;
+(()=>{
+    DEV_BACKEND = {
+        unloadChunk (chunkUrl) {
+            deleteResolver(chunkUrl);
+            // Strip query string so we match links regardless of cache-busting
+            // params (e.g. ?ts=) that may differ between HMR updates.
+            const baseChunkUrl = chunkUrl.split('?')[0];
+            if (isCss(chunkUrl)) {
+                for (const link of findChunkLinks(baseChunkUrl)){
+                    link.remove();
+                }
+            } else if (isJs(chunkUrl)) {
+                // Unloading a JS chunk would have no effect, as it lives in the JS
+                // runtime once evaluated.
+                // However, we still want to remove the script tag from `<head>` to keep
+                // the HTML somewhat consistent from the user's perspective.
+                for (const script of findChunkScripts(baseChunkUrl)){
+                    script.remove();
+                }
+            } else {
+                throw new Error(`can't infer type of chunk from URL ${chunkUrl}`);
+            }
+        },
+        reloadChunk (chunkUrl) {
+            return new Promise((resolve, reject)=>{
+                if (!isCss(chunkUrl)) {
+                    reject(new Error('The DOM backend can only reload CSS chunks'));
+                    return;
+                }
+                // Strip query string so we match links regardless of cache-busting
+                // params (e.g. ?ts=) that may differ between HMR updates.
+                const baseChunkUrl = chunkUrl.split('?')[0];
+                const previousLinks = findChunkStylesheets(baseChunkUrl);
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.crossOrigin = CROSS_ORIGIN;
+                if (navigator.userAgent.includes('Firefox') || navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Chromium')) {
+                    // Firefox won't reload CSS files that were previously loaded on the
+                    // current page: https://bugzilla.mozilla.org/show_bug.cgi?id=1037506
+                    //
+                    // Safari serves cached CSS when a <link rel=preload> exists for the
+                    // same URL: https://bugs.webkit.org/show_bug.cgi?id=187726
+                    //
+                    // Replace or add a fresh `ts` cache-busting param without
+                    // discarding other query parameters that may already be present.
+                    const url = new URL(chunkUrl, location.origin);
+                    // Reduced timer precision in some browers could lead to an update getting dropped
+                    // in Firefox if it happens fast enough (in firefox precision is sometimes 100ms!).
+                    // So trust that the server is only updating us when it is important and use a
+                    // random number to bust the cache.
+                    url.searchParams.set('ts', `${Date.now()}.${Math.random()}`);
+                    link.href = url.pathname + url.search;
+                } else {
+                    link.href = chunkUrl;
+                }
+                link.onerror = ()=>{
+                    reject();
+                };
+                link.onload = ()=>{
+                    // First load the new CSS, then remove the old ones. This prevents visible
+                    // flickering that would happen in-between removing the previous CSS and
+                    // loading the new one.
+                    for (const previousLink of previousLinks)previousLink.remove();
+                    // CSS chunks do not register themselves, and as such must be marked as
+                    // loaded instantly.
+                    resolve();
+                };
+                if (previousLinks.length === 0) {
+                    // The chunk's <link> was already removed from the DOM (the importing
+                    // component unmounted via navigation or a `dynamic(ssr: false)`
+                    // boundary, so `unloadChunk` removed it), but its chunk list stays
+                    // subscribed and can still receive a 'total' update. Mirror the
+                    // 'added' branch of `applyChunkListUpdate` and load the fresh
+                    // stylesheet instead of rejecting with "No link element found for
+                    // chunk" (an unhandledRejection that forced a full page reload).
+                    document.head.appendChild(link);
+                } else {
+                    // Make sure to insert the new CSS right after the previous one, so that
+                    // its precedence is higher.
+                    previousLinks[0].parentElement.insertBefore(link, previousLinks[0].nextSibling);
+                }
+            });
+        },
+        restart: ()=>self.location.reload()
+    };
+    function deleteResolver(chunkUrl) {
+        chunkResolvers.delete(chunkUrl);
+    }
+})();
+function _eval({ code, url, map }) {
+    code += `\n\n//# sourceURL=${encodeURI(location.origin + RUNTIME_CHUNK_BASE_PATH + url + ASSET_SUFFIX)}`;
+    if (map) {
+        code += `\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${btoa(// btoa doesn't handle nonlatin characters, so escape them as \x sequences
+        // See https://stackoverflow.com/a/26603875
+        unescape(encodeURIComponent(map)))}`;
+    }
+    // eslint-disable-next-line no-eval
+    return eval(code);
+}
+globalThis["utooChunk_appDev"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
+var chunkListsToRegister = globalThis["utooChunk_appDev_CHUNK_LISTS"] || [];
+globalThis["utooChunk_appDev_CHUNK_LISTS"] = { push: registerChunkList };
+chunkListsToRegister.forEach(registerChunkList);
 })();
 
 
-//# sourceMappingURL=turbopack-32eqfu-c_xdpz.js.map
+//# sourceMappingURL=turbopack-22ycgr1gd20zn.js.map

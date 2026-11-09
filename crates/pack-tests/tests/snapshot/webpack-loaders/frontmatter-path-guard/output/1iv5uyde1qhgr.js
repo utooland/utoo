@@ -22,7 +22,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$react$2f$jsx
 // @ts-ignore
 var __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$frontmatter$2d$path$2d$guard$2f$input$2f$page$2e$md$2e$js$3f$type$3d$frontmatter__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/webpack-loaders/frontmatter-path-guard/input/page.md.js?type=frontmatter [client] (ecmascript)");
 // @ts-ignore
-var __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$frontmatter$2d$path$2d$guard$2f$input$2f$page$2e$js$2e$js$3f$type$3d$frontmatter__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/webpack-loaders/frontmatter-path-guard/input/page.js.js?type=frontmatter [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$frontmatter$2d$path$2d$guard$2f$input$2f$page$2e$js$3f$type$3d$frontmatter__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/webpack-loaders/frontmatter-path-guard/input/page.js?type=frontmatter [client] (ecmascript)");
 ;
 ;
 ;
@@ -35,7 +35,7 @@ function App() {
             }),
             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$react$2f$jsx$2d$runtime$2e$js__$5b$client$5d$__$28$ecmascript$29$__["s"])("p", {
                 id: "js-frontmatter",
-                children: __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$frontmatter$2d$path$2d$guard$2f$input$2f$page$2e$js$2e$js$3f$type$3d$frontmatter__$5b$client$5d$__$28$ecmascript$29$__["f"]
+                children: __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$frontmatter$2d$path$2d$guard$2f$input$2f$page$2e$js$3f$type$3d$frontmatter__$5b$client$5d$__$28$ecmascript$29$__["f"]
             })
         ]
     });
@@ -45,7 +45,7 @@ __turbopack_context__.s([
     0,
     App
 ]);
-}),"[project]/webpack-loaders/frontmatter-path-guard/input/page.js.js?type=frontmatter [client] (ecmascript)",((__turbopack_context__) => {
+}),"[project]/webpack-loaders/frontmatter-path-guard/input/page.js?type=frontmatter [client] (ecmascript)",((__turbopack_context__) => {
 
 
 var __TURBOPACK__default__export__ = 'js-frontmatter';
@@ -65,4 +65,4 @@ __turbopack_context__.s([
 ]);
 })]);})()
 
-//# sourceMappingURL=2v-3dzo0mmla3.js.map
+//# sourceMappingURL=1iv5uyde1qhgr.js.map

@@ -1,4 +1,4 @@
-error - [resolve] /style/less/input/index.less.css:1:0  Module not found: Can't resolve 'mixins/~antd/reset.css'
+error - [resolve] /style/less/input/index.less.css:1:1  Module not found: Can't resolve 'mixins/~antd/reset.css'
   
          + v
        1 + @import 'mixins/~antd/reset.css';

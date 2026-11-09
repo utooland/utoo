@@ -7,16 +7,17 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$typescript$2f$verbatim_modul
 const App = ()=>{
     return /*#__PURE__*/ __TURBOPACK__imported__module__$5b$project$5d2f$typescript$2f$verbatim_module_syntax$2f$node_modules$2f$react$2f$index$2e$js__$5b$client$5d$__$28$ecmascript$29$__["f"].createElement("div", null, "Verbatim module syntax Test Case");
 };
-var RefType = /*#__PURE__*/ function(RefType) {
-    RefType["property"] = "11";
-    RefType["event"] = "22";
+var RefType = function(RefType) {
+    RefType[RefType["property"] = '11'] = "property";
+    RefType[RefType["event"] = '22'] = "event";
     return RefType;
 }({});
-console.log("11", "22");
+console.log(RefType.property, RefType.event);
 var __TURBOPACK__default__export__ = App;
 __turbopack_context__.s([
     "RefType",
-    ()=>RefType,
+    0,
+    RefType,
     "default",
     0,
     __TURBOPACK__default__export__
@@ -40,4 +41,4 @@ __turbopack_context__.s([
 ]);
 })]);})()
 
-//# sourceMappingURL=2ge92ja1f2q09.js.map
+//# sourceMappingURL=31lxwheeszap1.js.map
