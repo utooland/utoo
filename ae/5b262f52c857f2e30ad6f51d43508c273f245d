@@ -1,0 +1,19 @@
+.github/workflows/pack-release.yml
+  s_520c270035d39b::t_c61c9c769ca11b 331-332
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ae5b262f52c857f2e30ad6f51d43508c273f245d",
+  "prompts": {},
+  "sessions": {
+    "s_520c270035d39b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf75-6a0b-7c42-9932-23d66c8bcbb7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
