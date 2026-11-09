@@ -1,0 +1,83 @@
+crates/pack-core/src/library/contexts.rs
+  s_520c270035d39b::t_965af19e06445c 8-9,13,117
+crates/pack-core/src/server/contexts.rs
+  s_520c270035d39b::t_80c8c88718f1b3 15-16,21,248-250,261,273,437,462,505
+.github/workflows/pack-release.yml
+  s_520c270035d39b::t_3d498844b0f2e4 39-40,55-56,145
+crates/pack-tests/tests/single_file_ecmascript_output.rs
+  s_520c270035d39b::t_80c8c88718f1b3 13,16,67,139-143
+Cargo.toml
+  s_520c270035d39b::t_71c96a6720a26d 67,72-73,75,77-84
+.github/workflows/pm-benchmark-set.yml
+  s_520c270035d39b::t_3d498844b0f2e4 83
+.github/workflows/pm-release.yml
+  s_520c270035d39b::t_3d498844b0f2e4 145
+crates/pack-api/src/library.rs
+  s_520c270035d39b::t_80c8c88718f1b3 247
+crates/pack-core/src/library/ecmascript/target.rs
+  s_520c270035d39b::t_965af19e06445c 36,50,53,178,184-200
+.github/workflows/cargo-publish.yml
+  s_520c270035d39b::t_3d498844b0f2e4 49
+crates/pack-core/src/library/ecmascript/chunk.rs
+  s_520c270035d39b::t_277430d4da7e88 19,81,88,92,98-104,122,127,140,186,189-194,272,295-296,331,386,427,435,440,463,482-488,507,512,525,573,576-581,686,709-710
+  s_520c270035d39b::t_87bba0279dee60 77,79,187-188,270-271,327,329,574-575,684-685
+crates/pack-core/src/library/runtime/asset_context.rs
+  s_520c270035d39b::t_277430d4da7e88 9,16,24
+crates/pack-core/src/shared/transforms/inline_css/module.rs
+  s_520c270035d39b::t_13f83a6f6e4f5d 279
+crates/pack-api/src/versioned_content_map.rs
+  s_520c270035d39b::t_80c8c88718f1b3 14,191,193
+crates/pack-api/src/project.rs
+  s_520c270035d39b::t_80c8c88718f1b3 53,66,1128,1155-1157,1336,1349,1368,1382
+.github/workflows/utooweb-ci.yml
+  s_520c270035d39b::t_3d498844b0f2e4 31
+crates/pack-core/src/config.rs
+  s_520c270035d39b::t_80c8c88718f1b3 25
+crates/pack-core/src/client/context.rs
+  s_520c270035d39b::t_80c8c88718f1b3 22,32,296-298,332,445,465,667,694,741
+.github/workflows/clippy.yml
+  s_520c270035d39b::t_3d498844b0f2e4 26
+crates/pack-api/src/app.rs
+  s_520c270035d39b::t_80c8c88718f1b3 301,783
+crates/pack-core/src/shared/webpack_rules/less.rs
+  s_520c270035d39b::t_80c8c88718f1b3 8
+crates/pack-core/src/library/chunking_context.rs
+  s_520c270035d39b::t_965af19e06445c 23,38,40,123-124,231-232,285,406-417,560,645,649-650
+crates/pack-core/src/library/runtime/runtime_code.rs
+  s_520c270035d39b::t_81e49075f3bca8 58
+  s_520c270035d39b::t_277430d4da7e88 11,27,33-35,55,83,94,98,100,111
+.github/workflows/pack-perf.yml
+  s_520c270035d39b::t_3d498844b0f2e4 48
+.github/workflows/format.yml
+  s_520c270035d39b::t_3d498844b0f2e4 24
+.github/workflows/utooweb-release.yml
+  s_520c270035d39b::t_3d498844b0f2e4 31
+crates/pack-core/src/shared/webpack_rules/sass.rs
+  s_520c270035d39b::t_80c8c88718f1b3 8
+.github/workflows/pack-ci.yml
+  s_520c270035d39b::t_3d498844b0f2e4 38-39,53-54,64-65,80-81,127
+.github/workflows/pm-ci.yml
+  s_520c270035d39b::t_3d498844b0f2e4 64,178
+.github/workflows/pm-e2e-bench.yml
+  s_520c270035d39b::t_3d498844b0f2e4 153,227,258,298
+.github/workflows/pack-integration.yml
+  s_520c270035d39b::t_3d498844b0f2e4 70
+rust-toolchain.toml
+  s_520c270035d39b::t_71c96a6720a26d 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94922196320534de11cf669dcbb0ee443bc829de",
+  "prompts": {},
+  "sessions": {
+    "s_520c270035d39b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf75-6a0b-7c42-9932-23d66c8bcbb7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
