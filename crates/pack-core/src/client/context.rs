@@ -19,7 +19,7 @@ use turbopack_core::{
     asset::AssetContent,
     chunk::{
         ChunkingConfig, ChunkingContext, ContentHashing, MangleType, MinifyType,
-        SourceMapSourceType, SourceMapsType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
+        SourceMapSourceType, UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::{
         CompileTimeDefineValue, CompileTimeInfo, DefinableNameSegment, FreeVarReference,
@@ -29,6 +29,7 @@ use turbopack_core::{
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
     resolve::options::{ImportMap, ImportMapping},
+    source_map::{OptionSourceMapType, SourceMapGenerationOptions},
     virtual_source::VirtualSource,
 };
 use turbopack_css::chunk::CssChunkType;
@@ -292,7 +293,7 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let source_maps = *config.source_maps_type().await?;
+    let source_map_generation_options = *config.source_map_generation_options().await?;
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
     let postcss_package_mapping = get_postcss_package_mapping(config).to_resolved().await?;
     let postcss_transform_options = Some(PostCssTransformOptions {
@@ -326,7 +327,7 @@ pub async fn get_client_module_options_context(
             *execution_context,
             options.config_location,
             options.config_content.clone(),
-            !matches!(source_maps, SourceMapsType::None),
+            source_map_generation_options.should_generate_any_source_maps(),
         )
     };
 
@@ -439,7 +440,7 @@ pub async fn get_client_module_options_context(
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             enable_typeof_window_inlining: Some(TypeofWindow::Object),
-            source_maps,
+            source_map_generation_options,
             import_externals: true,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
@@ -459,7 +460,7 @@ pub async fn get_client_module_options_context(
             ..Default::default()
         },
         css: CssOptionsContext {
-            source_maps,
+            source_map_generation_options,
             module_css_condition: Some(module_styles_rule_condition()),
             module_css_debuggable_idents: mode_ref.is_development(),
             css_modules_pattern,
@@ -662,7 +663,8 @@ pub struct ClientChunkingContextOptions {
     pub unused_references: Vc<UnusedReferences>,
     pub minify: Vc<bool>,
     pub compress: Vc<OptionCompressType>,
-    pub source_maps: Vc<SourceMapsType>,
+    pub emitted_source_map_type: Vc<OptionSourceMapType>,
+    pub source_map_generation_options: Vc<SourceMapGenerationOptions>,
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
@@ -689,7 +691,8 @@ pub async fn get_client_chunking_context(
         unused_references,
         minify,
         compress,
-        source_maps,
+        emitted_source_map_type,
+        source_map_generation_options,
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
@@ -736,7 +739,8 @@ pub async fn get_client_chunking_context(
     } else {
         MinifyType::NoMinify
     })
-    .source_maps(*source_maps.await?)
+    .emitted_source_map_type(*emitted_source_map_type.await?)
+    .source_map_generation_options(*source_map_generation_options.await?)
     .chunk_base_path(Some(public_path.clone()))
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)

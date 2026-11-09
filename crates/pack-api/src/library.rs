@@ -244,7 +244,7 @@ impl LibraryEndpoint {
         let asset_context = origin.asset_context();
         let origin_path = origin.origin_path();
 
-        let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
+        let ty = ReferenceType::Entry(EntryReferenceSubType::default());
 
         Ok(Vc::cell(
             asset_context

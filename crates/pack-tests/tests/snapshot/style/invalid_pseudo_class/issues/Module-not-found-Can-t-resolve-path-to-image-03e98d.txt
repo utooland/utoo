@@ -1,4 +1,4 @@
-warning - [resolve] /style/invalid_pseudo_class/input/index.less.css:34:4  Module not found: Can't resolve '<path-to-image>'
+warning - [resolve] /style/invalid_pseudo_class/input/index.less:34:5  Module not found: Can't resolve '<path-to-image>'
   
       30 |     background-image: url('');
       31 | }

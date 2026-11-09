@@ -85,7 +85,7 @@
       "entry": false,
       "recorded": false,
       "id": "entries/detail-server.b1ab83f5.js",
-      "size": 39341,
+      "size": 40723,
       "hash": "",
       "files": [
         "entries/detail-server.b1ab83f5.js"
@@ -97,7 +97,7 @@
       "entry": false,
       "recorded": false,
       "id": "entries/index-server.f88edfa9.js",
-      "size": 39353,
+      "size": 40735,
       "hash": "",
       "files": [
         "entries/index-server.f88edfa9.js"
@@ -109,7 +109,7 @@
       "entry": false,
       "recorded": false,
       "id": "entries/server.882b3b69.js",
-      "size": 39320,
+      "size": 40702,
       "hash": "",
       "files": [
         "entries/server.882b3b69.js"
@@ -145,7 +145,7 @@
       "type": "asset",
       "name": "entries/detail-server.b1ab83f5.js",
       "info": {},
-      "size": 39341,
+      "size": 40723,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -157,7 +157,7 @@
       "type": "asset",
       "name": "entries/index-server.f88edfa9.js",
       "info": {},
-      "size": 39353,
+      "size": 40735,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,
@@ -169,7 +169,7 @@
       "type": "asset",
       "name": "entries/server.882b3b69.js",
       "info": {},
-      "size": 39320,
+      "size": 40702,
       "emitted": false,
       "comparedForEmit": false,
       "cached": false,

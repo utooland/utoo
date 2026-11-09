@@ -16,7 +16,7 @@ use turbopack_core::{
     module::Module,
     module_graph::ModuleGraph,
     output::{OutputAsset, OutputAssets, OutputAssetsReference, OutputAssetsWithReferenced},
-    source_map::{GenerateSourceMap, SourceMapAsset},
+    source_map::{GenerateSourceMap, SourceMapAsset, SourceMapType},
     virtual_output::VirtualOutputAsset,
 };
 use turbopack_ecmascript::{
@@ -74,29 +74,34 @@ impl EcmascriptLibraryChunk {
     #[turbo_tasks::function]
     async fn processed_code(self: Vc<Self>) -> Result<Vc<EcmascriptLibraryChunkCode>> {
         let this = self.await?;
-        let source_maps = *this
+        let source_map_options = *this
             .chunking_context
-            .reference_chunk_source_maps(*ResolvedVc::upcast(self.to_resolved().await?))
+            .source_map_generation_options()
             .await?;
+        let source_maps = source_map_options.should_generate_any_source_maps();
         let content = this.chunk.chunk_content().await?;
         // Items are already globally sorted by module path upstream.
         let chunk_items = content
             .chunk_item_code_module_ids_and_paths(ChunkMinification::None, false)
             .await?;
 
-        let mut code = CodeBuilder::default();
+        let mut code = CodeBuilder::new(false, source_map_options);
         writeln!(code, "module.exports = [")?;
         for item in &chunk_items {
             write!(code, "\n{}, ", StringifyJs(&item.id))?;
-            code.push_code(&item.code);
+            code.push_code(&item.code)?;
             write!(code, ",")?;
         }
         writeln!(code, "\n];")?;
 
         let environment = this.chunking_context.environment();
-        let mut code =
-            generate_library_code(code.build(), environment, source_maps, CodegenStage::Lower)
-                .await?;
+        let mut code = generate_library_code(
+            code.build(),
+            environment,
+            source_map_options,
+            CodegenStage::Lower,
+        )
+        .await?;
         let mut license_comments = None;
         if let MinifyType::Minify { mangle, compress } = this.chunking_context.await?.minify_type()
         {
@@ -114,12 +119,12 @@ impl EcmascriptLibraryChunk {
                 if !comments.is_empty() {
                     let license_filename =
                         format!("{}.LICENSE.txt", self.path().await?.file_name());
-                    let mut code_with_banner = CodeBuilder::default();
+                    let mut code_with_banner = CodeBuilder::new(false, source_map_options);
                     writeln!(
                         code_with_banner,
                         "/*! For license information please see {license_filename} */"
                     )?;
-                    code_with_banner.push_code(&code);
+                    code_with_banner.push_code(&code)?;
                     code = code_with_banner.build();
                     license_comments = Some(format!("{}\n", comments.join("\n\n")).into());
                 }
@@ -132,7 +137,7 @@ impl EcmascriptLibraryChunk {
                 code = generate_library_code(
                     code,
                     environment,
-                    source_maps,
+                    source_map_options,
                     CodegenStage::EmitMinified,
                 )
                 .await?;
@@ -178,8 +183,15 @@ impl EcmascriptLibraryChunk {
     }
 
     #[turbo_tasks::function]
-    fn source_map(self: Vc<Self>) -> Vc<SourceMapAsset> {
-        SourceMapAsset::new(Vc::upcast(self), Vc::upcast(self))
+    async fn source_map(self: Vc<Self>) -> Result<Vc<SourceMapAsset>> {
+        let chunking_context = self.await?.chunking_context;
+        let source_map_type = (*chunking_context.emitted_source_map_type().await?)
+            .context("cannot emit a library source map when source maps are disabled")?;
+        Ok(SourceMapAsset::new_fixed(
+            self.path().owned().await?,
+            source_map_type,
+            Vc::upcast(self),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -255,7 +267,9 @@ impl Asset for EcmascriptLibraryChunk {
     #[turbo_tasks::function]
     async fn content(self: Vc<Self>) -> Result<Vc<AssetContent>> {
         let code = self.code().await?;
-        let rope = if code.has_source_map() {
+        let chunking_context = self.await?.chunking_context;
+        let source_map_type = *chunking_context.emitted_source_map_type().await?;
+        let rope = if code.should_emit_source_map(source_map_type)? {
             let mut rope_builder = RopeBuilder::default();
             rope_builder.concat(code.source_code());
             let source_map_path = self.source_map().path().await?;
@@ -278,8 +292,8 @@ impl Asset for EcmascriptLibraryChunk {
 #[turbo_tasks::value_impl]
 impl GenerateSourceMap for EcmascriptLibraryChunk {
     #[turbo_tasks::function]
-    fn generate_source_map(self: Vc<Self>) -> Vc<FileContent> {
-        self.code().generate_source_map()
+    fn generate_source_map(self: Vc<Self>, ty: SourceMapType) -> Vc<FileContent> {
+        self.code().generate_source_map(ty)
     }
 }
 
@@ -310,10 +324,11 @@ impl EcmascriptLibraryEvaluateChunk {
         let this = self.await?;
 
         let output_root = this.chunking_context.output_root().await?;
-        let source_maps = *this
+        let source_map_options = *this
             .chunking_context
-            .reference_chunk_source_maps(*ResolvedVc::upcast(self.to_resolved().await?))
+            .source_map_generation_options()
             .await?;
+        let source_maps = source_map_options.should_generate_any_source_maps();
         let chunk_path_vc = self.path();
         let chunk_path = chunk_path_vc.await?;
         let root_path = this.chunking_context.root_path().await?;
@@ -368,7 +383,7 @@ impl EcmascriptLibraryEvaluateChunk {
             .flatten()
             .collect();
 
-        let mut code = CodeBuilder::default();
+        let mut code = CodeBuilder::new(false, source_map_options);
 
         writedoc!(
             code,
@@ -409,7 +424,7 @@ impl EcmascriptLibraryEvaluateChunk {
                     runtime_type,
                     has_async_modules,
                     Vc::cell(runtime_root_relative_path),
-                    source_maps,
+                    source_map_options,
                     this.chunking_context.runtime_root(),
                     this.chunking_context.runtime_export(),
                     Vc::<ModuleIds>::cell(runtime_module_ids.clone()),
@@ -417,12 +432,12 @@ impl EcmascriptLibraryEvaluateChunk {
                 )
                 .await?;
 
-                code.push_code(&runtime_code);
+                code.push_code(&runtime_code)?;
             }
             #[cfg(feature = "test")]
             RuntimeType::Dummy => {
                 let runtime_code = turbopack_ecmascript_runtime::get_dummy_runtime_code();
-                code.push_code(&runtime_code);
+                code.push_code(&runtime_code)?;
             }
         }
         // Emit two registrations matching upstream Turbopack's ChunkRegistration format:
@@ -445,7 +460,7 @@ impl EcmascriptLibraryEvaluateChunk {
             .await?;
         for item in &chunk_items {
             write!(code, "\n{}, ", StringifyJs(&item.id))?;
-            code.push_code(&item.code);
+            code.push_code(&item.code)?;
             write!(code, ",")?;
         }
 
@@ -464,9 +479,13 @@ impl EcmascriptLibraryEvaluateChunk {
         writeln!(code, "]);")?;
 
         let environment = this.chunking_context.environment();
-        let mut code =
-            generate_library_code(code.build(), environment, source_maps, CodegenStage::Lower)
-                .await?;
+        let mut code = generate_library_code(
+            code.build(),
+            environment,
+            source_map_options,
+            CodegenStage::Lower,
+        )
+        .await?;
 
         let mut license_comments = None;
         if let MinifyType::Minify { mangle, compress } = this.chunking_context.await?.minify_type()
@@ -485,12 +504,12 @@ impl EcmascriptLibraryEvaluateChunk {
                 if !comments.is_empty() {
                     let license_filename =
                         format!("{}.LICENSE.txt", self.path().await?.file_name());
-                    let mut code_with_banner = CodeBuilder::default();
+                    let mut code_with_banner = CodeBuilder::new(false, source_map_options);
                     writeln!(
                         code_with_banner,
                         "/*! For license information please see {license_filename} */"
                     )?;
-                    code_with_banner.push_code(&code);
+                    code_with_banner.push_code(&code)?;
                     code = code_with_banner.build();
                     license_comments = Some(format!("{}\n", comments.join("\n\n")).into());
                 }
@@ -503,7 +522,7 @@ impl EcmascriptLibraryEvaluateChunk {
                 code = generate_library_code(
                     code,
                     environment,
-                    source_maps,
+                    source_map_options,
                     CodegenStage::EmitMinified,
                 )
                 .await?;
@@ -551,8 +570,15 @@ impl EcmascriptLibraryEvaluateChunk {
     }
 
     #[turbo_tasks::function]
-    fn source_map(self: Vc<Self>) -> Vc<SourceMapAsset> {
-        SourceMapAsset::new(Vc::upcast(self), Vc::upcast(self))
+    async fn source_map(self: Vc<Self>) -> Result<Vc<SourceMapAsset>> {
+        let chunking_context = self.await?.chunking_context;
+        let source_map_type = (*chunking_context.emitted_source_map_type().await?)
+            .context("cannot emit a library source map when source maps are disabled")?;
+        Ok(SourceMapAsset::new_fixed(
+            self.path().owned().await?,
+            source_map_type,
+            Vc::upcast(self),
+        ))
     }
 
     #[turbo_tasks::function]
@@ -655,7 +681,9 @@ impl Asset for EcmascriptLibraryEvaluateChunk {
     async fn content(self: Vc<Self>) -> Result<Vc<AssetContent>> {
         let code = self.code().await?;
 
-        let rope = if code.has_source_map() {
+        let chunking_context = self.await?.chunking_context;
+        let source_map_type = *chunking_context.emitted_source_map_type().await?;
+        let rope = if code.should_emit_source_map(source_map_type)? {
             let mut rope_builder = RopeBuilder::default();
             rope_builder.concat(code.source_code());
             let source_map_path = self.source_map().path().await?;
@@ -678,8 +706,8 @@ impl Asset for EcmascriptLibraryEvaluateChunk {
 #[turbo_tasks::value_impl]
 impl GenerateSourceMap for EcmascriptLibraryEvaluateChunk {
     #[turbo_tasks::function]
-    fn generate_source_map(self: Vc<Self>) -> Vc<FileContent> {
-        self.code().generate_source_map()
+    fn generate_source_map(self: Vc<Self>, ty: SourceMapType) -> Vc<FileContent> {
+        self.code().generate_source_map(ty)
     }
 }
 

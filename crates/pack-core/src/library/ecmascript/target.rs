@@ -33,6 +33,7 @@ use turbo_tasks_fs::rope::Rope;
 use turbopack_core::{
     code_builder::{Code, CodeBuilder},
     environment::Environment,
+    source_map::{SourceMapGenerationOptions, SourceMapType, SourceMaps},
 };
 use turbopack_ecmascript::parse::{IdentCollector, generate_js_source_map};
 
@@ -46,9 +47,10 @@ pub(super) enum CodegenStage {
 pub(super) async fn generate_library_code(
     code: Code,
     environment: Vc<Environment>,
-    source_maps: bool,
+    source_map_options: SourceMapGenerationOptions,
     stage: CodegenStage,
 ) -> Result<Code> {
+    let source_maps = source_map_options.should_generate_any_source_maps();
     let versions = *environment.runtime_versions().await?;
     let target = if *environment
         .runtime_versions()
@@ -152,7 +154,6 @@ pub(super) async fn generate_library_code(
         // compatibility transform was needed. Reprinting would only add debugging noise.
         return Ok(code);
     };
-    let original_map = source_maps.then(|| code.generate_source_map_ref(None));
     let generate_debug_id = code.should_generate_debug_id();
 
     let mut source = Vec::new();
@@ -174,27 +175,29 @@ pub(super) async fn generate_library_code(
     .context("failed to emit library output")?;
 
     let source: Rope = String::from_utf8(source)?.into();
-    let mut builder = CodeBuilder::new(source_maps, generate_debug_id);
+    let mut builder = CodeBuilder::new(generate_debug_id, source_map_options);
     // Keep helpers and the legacy global-object alias private to the complete library,
     // including the module factories passed as arguments to its runtime IIFE.
     if needs_wrapper {
         builder += "(function() {\n";
     }
-    if let Some(original_map) = &original_map {
-        builder.push_source(
-            &source,
-            Some(generate_js_source_map(
-                &*cm,
-                mappings,
-                Some(original_map),
-                true,
-                false,
-                names,
-            )?),
-        );
-    } else {
-        builder.push_source(&source, None::<Rope>);
-    }
+    let generate_map = |ty| {
+        let original_map = code.generate_source_map_ref(None, ty)?;
+        generate_js_source_map(&*cm, &mappings, Some(&original_map), true, false, &names)
+    };
+    builder.push_source(
+        &source,
+        SourceMaps::new(
+            source_map_options
+                .full
+                .then(|| generate_map(SourceMapType::Full))
+                .transpose()?,
+            source_map_options
+                .shallow
+                .then(|| generate_map(SourceMapType::Shallow))
+                .transpose()?,
+        ),
+    )?;
     if needs_wrapper {
         builder += "\n}).call(this);\n";
     }

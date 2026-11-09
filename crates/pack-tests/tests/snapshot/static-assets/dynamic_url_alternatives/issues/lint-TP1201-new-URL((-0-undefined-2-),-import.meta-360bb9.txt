@@ -1,4 +1,4 @@
-[92;4msuggestion - [analysis] /static-assets/dynamic_url_alternatives/input/index.js:3:22  lint TP1201 new URL((???*0* | undefined | ???*2*), import.meta*3*["url"]) is very dynamic
+suggestion - [analysis] /static-assets/dynamic_url_alternatives/input/index.js:3:23  lint TP1201 new URL((???*0* | undefined | ???*2*), import.meta*3*["url"]) is very dynamic
   
        1 | globalThis.createWorker = ({ classWorkerURL, ...options } = {}) => {
        2 |   if (classWorkerURL) {

@@ -19,11 +19,13 @@ use turbopack::module_options::{
 use turbopack_core::{
     chunk::{
         ChunkingConfig, CompressOptions as MinifyCompressOptions, CompressType,
-        CrossOrigin as RuntimeCrossOriginLoading, SourceMapsType,
+        CrossOrigin as RuntimeCrossOriginLoading,
     },
     issue::{Issue, IssueExt, IssueStage, StyledString},
+    loader::{WebpackLoaderItem, WebpackLoaderItems},
     module_graph::style_groups::StyleGroupsAlgorithm,
     resolve::ResolveAliasMap,
+    source_map::{OptionSourceMapType, SourceMapGenerationOptions, SourceMapType},
 };
 use turbopack_ecmascript::transform::{
     OptionReactCompilerTransformOptions, ReactCompilerCompilationMode, ReactCompilerTarget,
@@ -32,7 +34,6 @@ use turbopack_ecmascript::transform::{
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
 };
-use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
 use crate::{
     mode::Mode,
@@ -309,6 +310,18 @@ pub struct Config {
 }
 
 impl Config {
+    fn bundle_source_map_type(&self) -> Option<SourceMapType> {
+        if self.bundle_analysis {
+            // Keep output attribution on the files Turbopack resolved, so source
+            // map paths can be joined with the module graph's paths.
+            Some(SourceMapType::Shallow)
+        } else {
+            self.source_maps
+                .unwrap_or(true)
+                .then_some(SourceMapType::Full)
+        }
+    }
+
     fn resolved_server_externals(&self) -> Option<&FxIndexMap<RcStr, ExternalConfig>> {
         self.server
             .as_ref()
@@ -2081,17 +2094,17 @@ impl Config {
     }
 
     #[turbo_tasks::function]
-    pub fn source_maps_type(&self) -> Vc<SourceMapsType> {
-        let source_maps = if self.bundle_analysis {
-            // Keep output attribution on the files Turbopack resolved, so source
-            // map paths can be joined with the module graph's paths.
-            SourceMapsType::Partial
-        } else if self.source_maps.unwrap_or(true) {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
-        source_maps.cell()
+    pub fn emitted_source_map_type(&self) -> Vc<OptionSourceMapType> {
+        Vc::cell(self.bundle_source_map_type())
+    }
+
+    #[turbo_tasks::function]
+    pub fn source_map_generation_options(&self) -> Vc<SourceMapGenerationOptions> {
+        let mut options = SourceMapGenerationOptions::from_emitted(self.bundle_source_map_type());
+        if self.bundle_analysis {
+            options.shallow_sources_content = false;
+        }
+        options.cell()
     }
 
     #[turbo_tasks::function]

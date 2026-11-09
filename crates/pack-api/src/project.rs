@@ -50,9 +50,7 @@ use turbopack::evaluate_context::node_build_environment;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME,
     changed::content_changed,
-    chunk::{
-        ChunkingContext, EvaluatableAssets, SourceMapsType, chunk_id_strategy::ModuleIdStrategy,
-    },
+    chunk::{ChunkingContext, EvaluatableAssets, chunk_id_strategy::ModuleIdStrategy},
     compile_time_info::CompileTimeInfo,
     issue::{CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, StyledString},
     module_graph::{
@@ -65,6 +63,7 @@ use turbopack_core::{
     },
     raw_output::RawOutput,
     reference::all_assets_from_entries,
+    source_map::SourceMapType,
     version::{
         NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
     },
@@ -1136,11 +1135,7 @@ impl Project {
 
         let project_root = self.project_path().owned().await?;
         let node_root_to_root_path = self.node_root_to_root_path().owned().await?;
-        let source_maps = if *self.config().source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
+        let source_maps = *self.config().source_maps().await?;
 
         #[cfg(not(any(feature = "process_pool", feature = "worker_pool")))]
         bail!("execution_context requires process_pool or worker_pool feature");
@@ -1167,12 +1162,9 @@ impl Project {
                     build_environment,
                     mode.runtime_type(),
                 )
-                .source_maps(
-                    if cfg!(all(target_family = "wasm", target_os = "unknown")) {
-                        SourceMapsType::None
-                    } else {
-                        source_maps
-                    },
+                .emitted_source_map_type(
+                    (source_maps && !cfg!(all(target_family = "wasm", target_os = "unknown")))
+                        .then_some(SourceMapType::Full),
                 )
                 // Build-time transforms create independent module graphs that all emit the same
                 // runtime chunk, so no individual graph can safely omit optional runtime helpers.
@@ -1363,7 +1355,8 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: config.source_maps_type(),
+            emitted_source_map_type: config.emitted_source_map_type(),
+            source_map_generation_options: config.source_map_generation_options(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
@@ -1395,7 +1388,8 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: config.source_maps_type(),
+            emitted_source_map_type: config.emitted_source_map_type(),
+            source_map_generation_options: config.source_map_generation_options(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),

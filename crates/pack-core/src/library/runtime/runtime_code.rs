@@ -8,6 +8,7 @@ use turbopack_core::{
     chunk::ModuleIds,
     code_builder::{Code, CodeBuilder},
     environment::Environment,
+    source_map::SourceMapGenerationOptions,
 };
 use turbopack_ecmascript::{StaticEcmascriptCode, utils::StringifyJs};
 use turbopack_ecmascript_runtime::{RuntimeType, embed_file_path};
@@ -23,20 +24,21 @@ pub async fn get_library_runtime_code(
     _runtime_type: RuntimeType,
     has_async_modules: bool,
     runtime_root_relative_path: Vc<RcStr>,
-    generate_source_map: bool,
+    source_map_generation_options: SourceMapGenerationOptions,
     runtime_root: Vc<Option<RcStr>>,
     runtime_export: Vc<Vec<RcStr>>,
     runtime_module_ids: Vc<ModuleIds>,
     is_node_platform: bool,
 ) -> Result<Vc<Code>> {
-    let asset_context = get_runtime_asset_context(*environment).resolve().await?;
+    let asset_context = get_runtime_asset_context(*environment, source_map_generation_options)
+        .resolve()
+        .await?;
 
     let shared_runtime_utils_code = StaticEcmascriptCode::new(
         asset_context,
         embed_file_path("shared/runtime/runtime-utils.ts".into())
             .owned()
             .await?,
-        generate_source_map,
     )
     .code();
 
@@ -45,20 +47,17 @@ pub async fn get_library_runtime_code(
         embed_file_path("browser/runtime/base/build-base.ts".into())
             .owned()
             .await?,
-        generate_source_map,
     )
     .code();
 
     let runtime_base_code = vec!["library/runtime-base.ts"];
 
-    let mut code: CodeBuilder = CodeBuilder::default();
+    let mut code = CodeBuilder::new(false, source_map_generation_options);
     let relative_root_path = runtime_root_relative_path.await?;
     let chunk_base_path = &*chunk_base_path.await?;
-    let chunk_base_path = chunk_base_path.as_ref().map_or_else(|| "", |f| f.as_str());
+    let chunk_base_path = chunk_base_path.as_ref().map_or("", |f| f.as_str());
     let chunk_suffix_path = &*chunk_suffix_path.await?;
-    let chunk_suffix_path = chunk_suffix_path
-        .as_ref()
-        .map_or_else(|| "", |f| f.as_str());
+    let chunk_suffix_path = chunk_suffix_path.as_ref().map_or("", |f| f.as_str());
 
     writedoc!(
         code,
@@ -81,7 +80,7 @@ pub async fn get_library_runtime_code(
         StringifyJs(chunk_base_path),
     )?;
 
-    code.push_code(&*shared_runtime_utils_code.await?);
+    code.push_code(&*shared_runtime_utils_code.await?)?;
 
     if has_async_modules {
         let async_module_code = StaticEcmascriptCode::new(
@@ -89,19 +88,16 @@ pub async fn get_library_runtime_code(
             embed_file_path("shared/runtime/async-module.ts".into())
                 .owned()
                 .await?,
-            generate_source_map,
         )
         .code();
 
-        code.push_code(&*async_module_code.await?);
+        code.push_code(&*async_module_code.await?)?;
     }
 
     for runtime_code in runtime_base_code {
-        code.push_code(
-            &*embed_static_code(asset_context, runtime_code.into(), generate_source_map).await?,
-        );
+        code.push_code(&*embed_static_code(asset_context, runtime_code.into()).await?)?;
     }
-    code.push_code(&*build_base_code.await?);
+    code.push_code(&*build_base_code.await?)?;
 
     // Select the appropriate runtime backend based on target platform.
     // - Node.js: minimal backend without DOM APIs, includes externals utils
@@ -112,9 +108,7 @@ pub async fn get_library_runtime_code(
         "library/runtime-backend-dom.ts"
     };
 
-    code.push_code(
-        &*embed_static_code(asset_context, runtime_backend.into(), generate_source_map).await?,
-    );
+    code.push_code(&*embed_static_code(asset_context, runtime_backend.into()).await?)?;
 
     // Registering chunks and chunk lists depends on the BACKEND variable, which is set by the
     // specific runtime code, hence it must be appended after it.

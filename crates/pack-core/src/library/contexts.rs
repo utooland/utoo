@@ -10,6 +10,7 @@ use turbopack_core::{
     },
     environment::Environment,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
+    source_map::SourceMapType,
 };
 
 use crate::{
@@ -113,7 +114,7 @@ pub async fn get_library_chunking_context(
         MinifyType::NoMinify
     })
     .extract_comments(*config.extract_comments().await?)
-    .source_maps(*config.source_maps_type().await?)
+    .emitted_source_map_type((*config.source_maps().await?).then_some(SourceMapType::Full))
     .asset_base_path(Some(public_path))
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)
