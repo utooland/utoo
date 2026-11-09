@@ -205,7 +205,7 @@ describe("dev server handle", () => {
       }
       const options =
         source === "webpack entry"
-          ? { webpackMode: true }
+          ? { webpackMode: true as const }
           : { config: { entry: [{ name: "main", import: "./entry.js" }] } };
 
       expect(() => {
@@ -276,6 +276,67 @@ describe("dev server handle", () => {
     expect(await (await fetch(`${url}?after-edit=1`)).text()).toContain('"B"');
   });
 
+  it.each(["before startup", "during the initial build"])(
+    "uses an available port when the requested port is occupied %s",
+    async (when) => {
+      const { runtime } = createRuntime();
+      const port = await getAvailablePort();
+      const occupied = http.createServer();
+      serverMocks.servers.push(occupied);
+      const occupyPort = () =>
+        new Promise<void>((resolve, reject) => {
+          occupied.once("error", reject);
+          occupied.listen(port, "127.0.0.1", resolve);
+        });
+      if (when === "before startup") await occupyPort();
+      else {
+        const build = runtime.start.getMockImplementation()!;
+        runtime.start.mockImplementationOnce(async () => {
+          await build();
+          await occupyPort();
+        });
+      }
+      const onReady = vi.fn(async (context: { port: number }) => {
+        expect(context.port).not.toBe(port);
+        const response = await fetch(
+          `http://127.0.0.1:${context.port}/main.js`,
+        );
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain('"A"');
+      });
+
+      const handle = await serve(
+        { config: { entry: [{ name: "main", import: "./entry.js" }] } },
+        projectPath,
+        projectPath,
+        {
+          port,
+          hostname: "127.0.0.1",
+          returnHandle: true,
+          handleSignals: false,
+          logServerInfo: false,
+          onReady,
+        },
+      );
+      handles.push(handle);
+
+      expect(onReady).toHaveBeenCalledTimes(1);
+      expect(handle.port).toBe(onReady.mock.calls[0][0].port);
+      const socket = new WebSocket(
+        `ws://${handle.hostname}:${handle.port}/turbopack-hmr`,
+      );
+      await new Promise<void>((resolve, reject) => {
+        socket.once("open", resolve);
+        socket.once("error", reject);
+      });
+      await handle.close();
+
+      expect(occupied.listening).toBe(true);
+      expect(runtime.close).toHaveBeenCalledTimes(1);
+      await expectPortCanBeReused(handle.port);
+    },
+  );
+
   it("closes idempotently, releases the HTTP port, and keeps the caller running", async () => {
     const { runtime } = createRuntime();
     const exit = vi.spyOn(process, "exit").mockImplementation(() => {
@@ -308,6 +369,37 @@ describe("dev server handle", () => {
     expect(exit).not.toHaveBeenCalled();
     await expectPortCanBeReused(handle.port);
   });
+
+  it.each(["EADDRNOTAVAIL", "EADDRINUSE"])(
+    "cleans up after a terminal %s listen error without retrying indefinitely",
+    async (code) => {
+      const { runtime } = createRuntime();
+      const error = Object.assign(new Error("Cannot bind the HTTP listener"), {
+        code,
+      });
+      const build = runtime.start.getMockImplementation()!;
+      const listen = vi.fn(function (this: http.Server) {
+        queueMicrotask(() => this.emit("error", error));
+        return this;
+      });
+      runtime.start.mockImplementationOnce(async () => {
+        await build();
+        vi.spyOn(http.Server.prototype, "listen").mockImplementation(listen);
+      });
+
+      await expect(startServer()).rejects.toBe(error);
+
+      expect(listen).toHaveBeenCalledTimes(code === "EADDRINUSE" ? 2 : 1);
+      expect(runtime.close).toHaveBeenCalledTimes(1);
+      expect(serverMocks.servers[0].listening).toBe(false);
+      expect(serverMocks.servers[0].listenerCount("error")).toBe(0);
+      for (const event of listenerEvents) {
+        expect(getProcessListeners(event)).toEqual(
+          originalListeners.get(event),
+        );
+      }
+    },
+  );
 
   it("still releases the HTTP listener when closing the runtime fails", async () => {
     const { runtime } = createRuntime();

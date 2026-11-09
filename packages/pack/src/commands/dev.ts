@@ -584,12 +584,21 @@ async function runDev(
     const httpServer = server;
 
     if (!httpServer.listening) {
+      let retried = false;
       await new Promise<void>((resolve, reject) => {
         const onListening = () => {
           httpServer.off("error", onError);
           resolve();
         };
-        const onError = (error: Error) => {
+        const onError = (error: NodeJS.ErrnoException) => {
+          // The port probe precedes the initial build. If another process took
+          // that port meanwhile, let the OS choose and bind a new one atomically.
+          if (!retried && error.code === "EADDRINUSE") {
+            retried = true;
+            httpServer.once("error", onError);
+            httpServer.listen(0, serveOptsBase.hostname);
+            return;
+          }
           httpServer.off("listening", onListening);
           reject(error);
         };
@@ -597,6 +606,17 @@ async function runDev(
         httpServer.once("listening", onListening);
         httpServer.once("error", onError);
       });
+      if (retried) {
+        const address = httpServer.address();
+        if (!address || typeof address === "string") {
+          throw new Error("Expected a TCP listener address");
+        }
+        console.warn(
+          `Port ${serveOptsBase.port} is in use, using available port ${address.port} instead.`,
+        );
+        serveOptsBase.port = address.port;
+        handle.port = address.port;
+      }
     }
 
     await serverOptions?.onReady?.({
