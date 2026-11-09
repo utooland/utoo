@@ -1,0 +1,136 @@
+crates/pack-tests/tests/snapshot/basic/alias/issues/Export-notFound-doesn-t-exist-in-target-module-942f39.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/basic/multi_server_entries/output/server/entries/server.882b3b69.js
+  h_05d0a07afcde4c 23,520-552,579
+crates/pack-tests/tests/snapshot/basic/multi_server_entries/output/server/stats.json
+  h_05d0a07afcde4c 88,100,112,148,160,172
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_sourcemap/output/server/entries/server.ae483216.js
+  h_05d0a07afcde4c 520-552,579
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_sourcemap/output/server/entries/server.ae483216.js.map
+  h_05d0a07afcde4c 5-9
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_sourcemap/output/server/stats.json
+  h_05d0a07afcde4c 88,100,112,172,184,196,208,220,232
+crates/pack-tests/tests/snapshot/basic/sourcemap_filename_hash/output/scripts/main.0e1c54cb.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/basic/sourcemap_filename_hash/output/scripts/main.0e1c54cb.js.map
+  h_05d0a07afcde4c 5-8
+crates/pack-tests/tests/snapshot/dynamic_import/very-dynamic/issues/lint-TP1001-import(-0-)-is-very-dynamic-d36eeb.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/dynamic_import/very-dynamic/issues/lint-TP1002-require(-0-)-is-very-dynamic-95f331.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/externals/basic/output/turbopack-1xbfs77n3m0s1.js
+  h_05d0a07afcde4c 531-563,590,924-926,942-955,995,1044,1055,1117,1129,1751
+crates/pack-tests/tests/snapshot/externals/basic/output/turbopack-1xbfs77n3m0s1.js.map
+  h_05d0a07afcde4c 5-10
+crates/pack-tests/tests/snapshot/hmr/lazy_dynamic_imports/output/main.js
+  h_05d0a07afcde4c 38,535-567,594,928-930,946-959,999,1048,1059,1121,1133
+crates/pack-tests/tests/snapshot/library/extract-comments-sourcemap/output/main.ab5ee3cf.js
+  h_05d0a07afcde4c 2
+crates/pack-tests/tests/snapshot/library/extract-comments-sourcemap/output/main.ab5ee3cf.js.map
+  h_05d0a07afcde4c 5
+crates/pack-tests/tests/snapshot/library/extract-comments/output/main.188a777b.js
+  h_05d0a07afcde4c 2
+crates/pack-tests/tests/snapshot/public_path/auto/output/turbopack-14q6bk3t4to75.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/public_path/auto/output/turbopack-14q6bk3t4to75.js.map
+  h_05d0a07afcde4c 5-8
+crates/pack-tests/tests/snapshot/public_path/basic/output/turbopack-1rv82u1j82g18.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/public_path/basic/output/turbopack-1rv82u1j82g18.js.map
+  h_05d0a07afcde4c 5-8
+crates/pack-tests/tests/snapshot/public_path/runtime/output/turbopack-2kh3jaln2ka8e.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/public_path/runtime/output/turbopack-2kh3jaln2ka8e.js.map
+  h_05d0a07afcde4c 5-8
+crates/pack-tests/tests/snapshot/public_path/runtime_isolation/output/turbopack-2b7lje1oy3654.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/public_path/runtime_isolation/output/turbopack-2b7lje1oy3654.js.map
+  h_05d0a07afcde4c 1-9
+crates/pack-tests/tests/snapshot/runtime/app_build_runtime/output/turbopack-14o8z-jmbj54u.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/runtime/app_build_runtime/output/turbopack-14o8z-jmbj54u.js.map
+  h_05d0a07afcde4c 1-9
+crates/pack-tests/tests/snapshot/runtime/app_dev_runtime/output/turbopack-22ycgr1gd20zn.js
+  h_05d0a07afcde4c 535-567,594,928-930,946-959,999,1048,1059,1121,1133,2913
+crates/pack-tests/tests/snapshot/runtime/app_dev_runtime/output/turbopack-22ycgr1gd20zn.js.map
+  h_05d0a07afcde4c 5-12
+crates/pack-tests/tests/snapshot/runtime/browser_library_commonjs_external/output/main.js
+  h_05d0a07afcde4c 520-552,579
+crates/pack-tests/tests/snapshot/runtime/browser_library_commonjs_external/output/main.js.map
+  h_05d0a07afcde4c 5-9
+crates/pack-tests/tests/snapshot/runtime/browser_library_promise_external/output/main.js
+  h_05d0a07afcde4c 520-552,579
+crates/pack-tests/tests/snapshot/runtime/browser_library_promise_external/output/main.js.map
+  h_05d0a07afcde4c 5-10
+crates/pack-tests/tests/snapshot/runtime/cross_origin_loading_anonymous/output/turbopack-1gm_br8hxqkmn.js
+  h_05d0a07afcde4c 531-563,590,792-794,810-823,863,912,923,985,997,1543
+crates/pack-tests/tests/snapshot/runtime/cross_origin_loading_anonymous/output/turbopack-1gm_br8hxqkmn.js.map
+  h_05d0a07afcde4c 1-9
+crates/pack-tests/tests/snapshot/runtime/export_entry_exports/output/turbopack-2nvnz9c7kbsd7.js
+  h_05d0a07afcde4c 572-604,631,833-835,851-864,904,953,964,1026,1038,1600
+crates/pack-tests/tests/snapshot/runtime/export_entry_exports/output/turbopack-2nvnz9c7kbsd7.js.map
+  h_05d0a07afcde4c 6-9
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/output/main.js
+  h_05d0a07afcde4c 520-552,579
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/output/main.js.map
+  h_05d0a07afcde4c 5-10
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime_legacy/output/main.js
+  h_05d0a07afcde4c 164,741-787,829
+crates/pack-tests/tests/snapshot/runtime/node_library_build_runtime/output/main.js
+  h_05d0a07afcde4c 520-552,579
+crates/pack-tests/tests/snapshot/runtime/node_library_build_runtime/output/main.js.map
+  h_05d0a07afcde4c 5-10
+crates/pack-tests/tests/snapshot/runtime/script_external_reexport/output/main.js
+  h_05d0a07afcde4c 184,761-807,849
+crates/pack-tests/tests/snapshot/runtime/target_node_runtime/output/_turbopack__runtime.js
+  h_05d0a07afcde4c 511-543,570
+crates/pack-tests/tests/snapshot/runtime/target_node_runtime/output/_turbopack__runtime.js.map
+  h_05d0a07afcde4c 5-9
+crates/pack-tests/tests/snapshot/static-assets/dynamic_url_alternatives/issues/lint-TP1201-new-URL((-0-undefined-2-),-import.meta-360bb9.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/static-assets/dynamic_url_alternatives/issues/lint-TP1201-new-URL(-0-,-import.meta-1-[-url-])-is-0c0829.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/style/invalid_pseudo_class/issues/Module-not-found-Can-t-resolve-791687.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/style/invalid_pseudo_class/issues/Module-not-found-Can-t-resolve-path-to-image-03e98d.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/style/less/issues/Module-not-found-Can-t-resolve-mixins-~antd-reset.-e006b9.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/typeof/output/2lk38_r68xghe.js
+  h_05d0a07afcde4c 46
+crates/pack-tests/tests/snapshot/typeof/output/2lk38_r68xghe.js.map
+  h_05d0a07afcde4c 5-8
+crates/pack-tests/tests/snapshot/typeof/output/turbopack-14feyu916xv9t.js
+  h_05d0a07afcde4c 3
+crates/pack-tests/tests/snapshot/typescript/interface_export/issues/Export-Args-doesn-t-exist-in-target-module-481c74.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/typescript/interface_export/issues/Export-Target-doesn-t-exist-in-target-module-b023d9.txt
+  h_05d0a07afcde4c 1
+crates/pack-tests/tests/snapshot/typescript/verbatim_module_syntax/output/31lxwheeszap1.js
+  h_05d0a07afcde4c 10-12,15,19-20,44
+crates/pack-tests/tests/snapshot/typescript/verbatim_module_syntax/output/31lxwheeszap1.js.map
+  h_05d0a07afcde4c 5-6
+crates/pack-tests/tests/snapshot/typescript/verbatim_module_syntax/output/turbopack-3bozfytr0sqnl.js
+  h_05d0a07afcde4c 3
+crates/pack-tests/tests/snapshot/webpack-loaders/frontmatter-path-guard/output/1iv5uyde1qhgr.js
+  h_05d0a07afcde4c 25,38,48,68
+crates/pack-tests/tests/snapshot/webpack-loaders/frontmatter-path-guard/output/1iv5uyde1qhgr.js.map
+  h_05d0a07afcde4c 6-7
+crates/pack-tests/tests/snapshot/webpack-loaders/frontmatter-path-guard/output/turbopack-1my4e89_1_ayx.js
+  h_05d0a07afcde4c 3
+crates/pack-tests/tests/snapshot/webpack-loaders/internal-runtime/output/_root-of-the-server___144rmk6z_rwo0.js
+  h_05d0a07afcde4c 775,777,781
+crates/pack-tests/tests/snapshot/webpack-loaders/internal-runtime/output/input_index_mjs_11lo8plvb-si2.js
+  h_05d0a07afcde4c 3,5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bb9dd27f63e52e8c6b5c81b103f542fcc66d8146",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
