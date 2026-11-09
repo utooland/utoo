@@ -10,10 +10,10 @@ use turbo_tasks_hash::HashAlgorithm;
 use turbopack_browser::BrowserChunkingContext;
 use turbopack_core::{
     asset::{Asset, AssetContent, no_hash_salt},
-    chunk::{ContentHashing, SourceMapsType},
+    chunk::ContentHashing,
     environment::{BrowserEnvironment, Environment, ExecutionEnvironment},
     output::{OutputAsset, OutputAssetsReference},
-    source_map::GenerateSourceMap,
+    source_map::{GenerateSourceMap, SourceMapType},
     virtual_source::VirtualSource,
 };
 use turbopack_ecmascript::single_file_ecmascript_output::SingleFileEcmascriptOutput;
@@ -64,11 +64,7 @@ async fn context(
         environment,
         Mode::Production.runtime_type(),
     )
-    .source_maps(if maps {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    })
+    .emitted_source_map_type(maps.then_some(SourceMapType::Full))
     .debug_ids(true)
     .hash_salt(ResolvedVc::cell(RcStr::from(salt)))
     .chunk_content_hashing(ContentHashing::Direct { length: 13 });
@@ -140,8 +136,11 @@ async fn verify_single_file_output_hashing() -> Result<()> {
             );
 
             // Renaming only the source changes its map while keeping output JS bytes identical.
-            let first_map = file_text(first.generate_source_map()).await?;
-            assert_ne!(first_map, file_text(renamed.generate_source_map()).await?);
+            let first_map = file_text(first.generate_source_map(SourceMapType::Full)).await?;
+            assert_ne!(
+                first_map,
+                file_text(renamed.generate_source_map(SourceMapType::Full)).await?
+            );
             let renamed_path = renamed.path().await?;
             let references = first.references().await?;
             let references = references.assets.await?;

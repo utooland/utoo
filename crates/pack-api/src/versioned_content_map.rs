@@ -11,7 +11,7 @@ use turbo_tasks_fs::{FileContent, FileSystemPath};
 use turbopack_core::{
     asset::Asset,
     output::{ExpandedOutputAssets, OptionOutputAsset, OutputAsset},
-    source_map::GenerateSourceMap,
+    source_map::{GenerateSourceMap, SourceMapType},
     version::OptionVersionedContent,
 };
 
@@ -188,9 +188,9 @@ impl VersionedContentMap {
             ResolvedVc::try_sidecast::<Box<dyn GenerateSourceMap>>(*asset)
         {
             Ok(if let Some(section) = section {
-                generate_source_map.by_section(section)
+                generate_source_map.by_section(section, SourceMapType::Full)
             } else {
-                generate_source_map.generate_source_map()
+                generate_source_map.generate_source_map(SourceMapType::Full)
             })
         } else {
             let path = path.to_string();

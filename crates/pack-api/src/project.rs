@@ -50,9 +50,7 @@ use turbopack::evaluate_context::node_build_environment;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME,
     changed::content_changed,
-    chunk::{
-        ChunkingContext, EvaluatableAssets, SourceMapsType, chunk_id_strategy::ModuleIdStrategy,
-    },
+    chunk::{ChunkingContext, EvaluatableAssets, chunk_id_strategy::ModuleIdStrategy},
     compile_time_info::CompileTimeInfo,
     issue::{CollectibleIssuesExt, Issue, IssueSeverity, IssueStage, StyledString},
     module_graph::{
@@ -65,6 +63,7 @@ use turbopack_core::{
     },
     raw_output::RawOutput,
     reference::all_assets_from_entries,
+    source_map::SourceMapType,
     version::{
         NotFoundVersion, OptionVersionedContent, Update, Version, VersionState, VersionedContent,
     },
@@ -1126,11 +1125,7 @@ impl Project {
 
         let project_root = self.project_path().owned().await?;
         let node_root_to_root_path = self.node_root_to_root_path().owned().await?;
-        let source_maps = if *self.config().source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
+        let source_maps = *self.config().source_maps().await?;
 
         #[cfg(not(any(feature = "process_pool", feature = "worker_pool")))]
         bail!("execution_context requires process_pool or worker_pool feature");
@@ -1157,12 +1152,9 @@ impl Project {
                     build_environment,
                     mode.runtime_type(),
                 )
-                .source_maps(
-                    if cfg!(all(target_family = "wasm", target_os = "unknown")) {
-                        SourceMapsType::None
-                    } else {
-                        source_maps
-                    },
+                .emitted_source_map_type(
+                    (source_maps && !cfg!(all(target_family = "wasm", target_os = "unknown")))
+                        .then_some(SourceMapType::Full),
                 )
                 // Build-time transforms create independent module graphs that all emit the same
                 // runtime chunk, so no individual graph can safely omit optional runtime helpers.
@@ -1341,11 +1333,7 @@ impl Project {
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let mode = self.mode();
         let config = self.config();
-        let source_maps = if *config.source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
+        let emitted_source_map_type = (*config.source_maps().await?).then_some(SourceMapType::Full);
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode,
             root_path: self.project_path().owned().await?,
@@ -1358,7 +1346,7 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: source_maps.cell(),
+            emitted_source_map_type: Vc::cell(emitted_source_map_type),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
@@ -1377,11 +1365,7 @@ impl Project {
     ) -> Result<Vc<NodeJsChunkingContext>> {
         let mode = self.mode();
         let config = self.config();
-        let source_maps = if *config.source_maps().await? {
-            SourceMapsType::Full
-        } else {
-            SourceMapsType::None
-        };
+        let emitted_source_map_type = (*config.source_maps().await?).then_some(SourceMapType::Full);
         let server_root = self.dist_root().owned().await?;
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
@@ -1395,7 +1379,7 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            source_maps: source_maps.cell(),
+            emitted_source_map_type: Vc::cell(emitted_source_map_type),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),

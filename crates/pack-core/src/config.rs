@@ -22,6 +22,7 @@ use turbopack_core::{
         CrossOrigin as RuntimeCrossOriginLoading,
     },
     issue::{Issue, IssueExt, IssueStage, StyledString},
+    loader::{WebpackLoaderItem, WebpackLoaderItems},
     module_graph::style_groups::StyleGroupsAlgorithm,
     resolve::ResolveAliasMap,
 };
@@ -32,7 +33,6 @@ use turbopack_ecmascript::transform::{
 use turbopack_ecmascript_plugins::transform::{
     emotion::EmotionTransformConfig, styled_components::StyledComponentsTransformConfig,
 };
-use turbopack_node::transforms::webpack::{WebpackLoaderItem, WebpackLoaderItems};
 
 use crate::{
     mode::Mode,

@@ -276,6 +276,7 @@ impl InlineCssModuleType {
         let css = CssModule::new(
             *source,
             *asset_context,
+            module_options_context.css.source_map_generation_options,
             css_type,
             import_context.map(|context| *context),
             Some(*environment),

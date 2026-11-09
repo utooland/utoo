@@ -5,7 +5,7 @@ use serde_json::Value as JsonValue;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{ResolvedVc, Vc};
 use turbopack::module_options::LoaderRuleItem;
-use turbopack_node::transforms::webpack::WebpackLoaderItem;
+use turbopack_core::loader::WebpackLoaderItem;
 
 fn get_less_loader_name(less_options: &mut serde_json::Map<String, JsonValue>) -> Result<RcStr> {
     match less_options.remove("loader") {
