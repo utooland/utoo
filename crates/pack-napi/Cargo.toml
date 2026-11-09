@@ -86,9 +86,7 @@ __internal_dhat-ad-hoc = ["dhat"]
 __internal_dhat-heap   = ["dhat"]
 plugin                 = [
   "pack-core/plugin",
-  "swc_core/plugin_transform_host_native",
   "swc_core/plugin_transform_host_native_filesystem_cache",
-  "swc_core/plugin_transform_host_native_shared_runtime",
 ]
 # Enable support for the tokio console: https://github.com/tokio-rs/console
 tokio-console          = ["dep:console-subscriber"]

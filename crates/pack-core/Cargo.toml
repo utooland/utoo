@@ -78,7 +78,8 @@ turbopack-ecmascript-plugins = { workspace = true, default-features = true, feat
 
 [features]
 default          = ["process_pool"]
-plugin           = ["swc_core/plugin_transform_host_native"]
+# Turbopack's plugin crate already enables the native SWC host with Wasmtime.
+plugin           = []
 process_pool     = ["turbopack-node/process_pool"]
 test             = ["turbopack-browser/test", "turbopack-ecmascript-runtime/test"]
 worker_pool      = ["turbopack-node/worker_pool"]
