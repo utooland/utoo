@@ -35,7 +35,7 @@ use turbopack_core::{
         style_groups::StyleGroupsAlgorithm,
     },
     output::{OutputAsset, OutputAssets},
-    source_map::{OptionSourceMapType, SourceMapType},
+    source_map::{OptionSourceMapType, SourceMapGenerationOptions, SourceMapType},
 };
 use turbopack_css::chunk::{CssChunk, CssChunkType};
 use turbopack_ecmascript::{
@@ -122,6 +122,11 @@ impl LibraryChunkingContextBuilder {
 
     pub fn emitted_source_map_type(mut self, source_map_type: Option<SourceMapType>) -> Self {
         self.chunking_context.emitted_source_map_type = source_map_type;
+        self
+    }
+
+    pub fn source_map_generation_options(mut self, options: SourceMapGenerationOptions) -> Self {
+        self.chunking_context.source_map_generation_options = Some(options);
         self
     }
 
@@ -230,6 +235,8 @@ pub struct LibraryChunkingContext {
     extract_comments: bool,
     /// The source map variant emitted to disk.
     emitted_source_map_type: Option<SourceMapType>,
+    /// Source maps generated for chunk code, including any maps used only for analysis.
+    source_map_generation_options: Option<SourceMapGenerationOptions>,
     /// Whether to use manifest chunks for lazy compilation
     manifest_chunks: bool,
     /// The module id strategy to use
@@ -283,6 +290,7 @@ impl LibraryChunkingContext {
                 minify_type: MinifyType::NoMinify,
                 extract_comments: false,
                 emitted_source_map_type: Some(SourceMapType::Full),
+                source_map_generation_options: None,
                 module_id_strategy: None,
                 export_usage: None,
                 unused_references: None,
@@ -648,6 +656,15 @@ impl ChunkingContext for LibraryChunkingContext {
     #[turbo_tasks::function]
     fn emitted_source_map_type(&self) -> Vc<OptionSourceMapType> {
         Vc::cell(self.emitted_source_map_type)
+    }
+
+    #[turbo_tasks::function]
+    fn source_map_generation_options(&self) -> Vc<SourceMapGenerationOptions> {
+        self.source_map_generation_options
+            .unwrap_or_else(|| {
+                SourceMapGenerationOptions::from_emitted(self.emitted_source_map_type)
+            })
+            .cell()
     }
 
     #[turbo_tasks::function]
