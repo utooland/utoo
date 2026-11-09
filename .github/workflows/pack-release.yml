@@ -386,8 +386,14 @@ jobs:
           : "${VERSION:?VERSION is required}"
 
           # npm publish can succeed before registry metadata exposes the version.
-          # Include the native binding used by the Ubuntu ecosystem runners.
-          packages=(@utoo/pack @utoo/pack-shared @utoo/pack-cli @utoo/pack-linux-x64-gnu)
+          # Include the native bindings used by Linux and Windows ecosystem runners.
+          packages=(
+            @utoo/pack
+            @utoo/pack-shared
+            @utoo/pack-cli
+            @utoo/pack-linux-x64-gnu
+            @utoo/pack-win32-x64-msvc
+          )
           for attempt in {1..12}; do
             ready=true
             for package in "${packages[@]}"; do
