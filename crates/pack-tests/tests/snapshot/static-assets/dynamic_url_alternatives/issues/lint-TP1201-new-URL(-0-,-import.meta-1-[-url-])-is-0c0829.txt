@@ -1,4 +1,4 @@
-[92;4msuggestion - [analysis] /static-assets/dynamic_url_alternatives/input/index.js:9:6  lint TP1201 new URL(???*0*, import.meta*1*["url"]) is very dynamic
+suggestion - [analysis] /static-assets/dynamic_url_alternatives/input/index.js:9:7  lint TP1201 new URL(???*0*, import.meta*1*["url"]) is very dynamic
   
        5 | };
        6 | 

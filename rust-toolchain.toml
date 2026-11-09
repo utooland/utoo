@@ -1,5 +1,5 @@
 [toolchain]
 # Same channel with turbo of next.js
-channel    = "nightly-2026-10-06"
+channel    = "nightly-2026-11-06"
 components = ["rustfmt", "clippy", "rust-analyzer"]
 profile    = "minimal"

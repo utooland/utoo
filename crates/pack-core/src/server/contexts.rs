@@ -12,12 +12,13 @@ use turbopack::module_options::{
 };
 use turbopack_core::{
     chunk::{
-        ChunkingConfig, MangleType, MinifyType, SourceMapSourceType, SourceMapsType,
-        UnusedReferences, chunk_id_strategy::ModuleIdStrategy,
+        ChunkingConfig, MangleType, MinifyType, SourceMapSourceType, UnusedReferences,
+        chunk_id_strategy::ModuleIdStrategy,
     },
     compile_time_info::CompileTimeInfo,
     environment::{Environment, ExecutionEnvironment, NodeJsEnvironment, NodeJsVersion},
     module_graph::binding_usage_info::OptionBindingUsageInfo,
+    source_map::{OptionSourceMapType, SourceMapGenerationOptions, SourceMapType},
 };
 use turbopack_css::chunk::CssChunkType;
 use turbopack_ecmascript::{chunk::EcmascriptChunkType, transform::ReactCompilerTarget};
@@ -244,11 +245,9 @@ pub async fn get_server_module_options_context(
     let enable_foreign_postcss_transform = postcss_foreign_transform_options
         .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
 
-    let source_maps = if *config.source_maps().await? {
-        SourceMapsType::Full
-    } else {
-        SourceMapsType::None
-    };
+    let source_map_generation_options = SourceMapGenerationOptions::from_emitted(
+        (*config.source_maps().await?).then_some(SourceMapType::Full),
+    );
     let css_modules_pattern = styles
         .css_modules
         .as_ref()
@@ -259,7 +258,7 @@ pub async fn get_server_module_options_context(
 
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
-            source_maps,
+            source_map_generation_options,
             import_externals: true,
             enable_typescript_transform: Some(
                 TypescriptTransformOptions::default().resolved_cell(),
@@ -271,7 +270,7 @@ pub async fn get_server_module_options_context(
             ..Default::default()
         },
         css: CssOptionsContext {
-            source_maps,
+            source_map_generation_options,
             module_css_condition: Some(module_styles_rule_condition()),
             module_css_debuggable_idents: mode_ref.is_development(),
             css_modules_pattern,
@@ -435,7 +434,7 @@ pub struct ServerChunkingContextOptions {
     pub unused_references: Vc<UnusedReferences>,
     pub minify: Vc<bool>,
     pub compress: Vc<OptionCompressType>,
-    pub source_maps: Vc<SourceMapsType>,
+    pub emitted_source_map_type: Vc<OptionSourceMapType>,
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
@@ -460,7 +459,7 @@ pub async fn get_server_chunking_context(
         unused_references,
         minify,
         compress,
-        source_maps,
+        emitted_source_map_type,
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
@@ -503,7 +502,7 @@ pub async fn get_server_chunking_context(
     } else {
         MinifyType::NoMinify
     })
-    .source_maps(*source_maps.await?)
+    .emitted_source_map_type(*emitted_source_map_type.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)

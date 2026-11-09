@@ -298,7 +298,7 @@ impl AppEntrypoint {
         let asset_context = origin.asset_context();
         let origin_path = origin.origin_path();
 
-        let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
+        let ty = ReferenceType::Entry(EntryReferenceSubType::default());
 
         Ok(Vc::cell(
             asset_context
@@ -780,7 +780,7 @@ impl AppProject {
                 let resolve_options = origin.resolve_options();
                 let asset_context = origin.asset_context();
                 let origin_path = origin.origin_path();
-                let ty = ReferenceType::Entry(EntryReferenceSubType::Undefined);
+                let ty = ReferenceType::Entry(EntryReferenceSubType::default());
                 let modules = asset_context
                     .resolve_asset(origin_path, entry_request, resolve_options, ty)
                     .await?

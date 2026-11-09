@@ -1,4 +1,4 @@
-warning - [bindings] /basic/alias/input/index.ts:10:0  Export notFound doesn't exist in target module
+warning - [bindings] /basic/alias/input/index.ts:10:1  Export notFound doesn't exist in target module
   
        6 | import style from '@/index.less';
        7 | import { a } from '@/a?query';

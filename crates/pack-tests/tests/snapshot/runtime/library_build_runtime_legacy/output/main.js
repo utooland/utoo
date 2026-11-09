@@ -161,7 +161,7 @@ function _type_of(obj) {
     /**
  * Describes why a module was instantiated.
  * Shared between browser and Node.js runtimes.
- */ var SourceType = function(SourceType) {
+ */ var SourceType = /*#__PURE__*/ function(SourceType) {
         /**
    * The module was instantiated because it was included in an evaluated chunk's
    * runtime.
@@ -738,7 +738,53 @@ function _type_of(obj) {
     }
     /**
  * `require.context` and require/import expression runtime.
- */ function moduleContext(map) {
+ */ function moduleContextFactory(ids) {
+        var _loop = function(i) {
+            var entry = ids[i + 1];
+            var id = void 0;
+            var _$module = void 0;
+            if (typeof entry === 'function') {
+                // A function is given for a module without an id to load it by: mostly a
+                // request that throws an error (e.g. one that can't be resolved), and also an
+                // external. As there is no id, `resolve` calls the function too, so that it
+                // throws the same error.
+                id = _$module = entry;
+            } else {
+                id = function id() {
+                    return entry;
+                };
+                if (mode === 0) {
+                    // inlined require implementation, which gives an ignored module empty exports
+                    _$module = function module1() {
+                        return entry === undefined ? {} : getOrInstantiateModuleFromParent(entry, parentModule).exports;
+                    };
+                } else if (entry === undefined) {
+                    _$module = function module1() {
+                        return Promise.resolve({});
+                    };
+                } else if (mode === 1) {
+                    // Like `import()`, the module is evaluated asynchronously.
+                    _$module = function module1() {
+                        return Promise.resolve().then(function() {
+                            return esmImport.call(context, entry);
+                        });
+                    };
+                } else {
+                    _$module = function module1() {
+                        return asyncLoader.call(context, entry);
+                    };
+                }
+            }
+            map[ids[i]] = {
+                id: id,
+                module: _$module
+            };
+        };
+        var mode = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : 0;
+        var context = this;
+        var parentModule = this.m;
+        var map = {};
+        for(var i = 0; i < ids.length; i += 2)_loop(i);
         function moduleContext(id) {
             id = parseRequest(id);
             if (hasOwnProperty.call(map, id)) {
@@ -780,7 +826,7 @@ function _type_of(obj) {
         };
         return moduleContext;
     }
-    contextPrototype.f = moduleContext;
+    contextPrototype.f = moduleContextFactory;
     /**
  * Returns the path of a chunk defined by its data.
  */ function getChunkPath(chunkData) {

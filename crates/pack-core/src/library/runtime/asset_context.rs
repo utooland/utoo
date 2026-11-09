@@ -6,13 +6,14 @@ use turbopack::{
 };
 use turbopack_core::{
     compile_time_info::CompileTimeInfo, context::AssetContext, environment::Environment,
-    ident::Layer,
+    ident::Layer, source_map::SourceMapGenerationOptions,
 };
 
 /// Returns the runtime asset context to use to process runtime code assets.
 #[turbo_tasks::function]
 pub async fn get_runtime_asset_context(
     environment: Vc<Environment>,
+    source_map_generation_options: SourceMapGenerationOptions,
 ) -> Result<Vc<Box<dyn AssetContext>>> {
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
@@ -20,6 +21,7 @@ pub async fn get_runtime_asset_context(
                 TypescriptTransformOptions::default().resolved_cell(),
             ),
             ignore_dynamic_requests: true,
+            source_map_generation_options,
             ..Default::default()
         },
         // Downlevel the assembled library, including its generated wrappers, in one pass.

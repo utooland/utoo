@@ -772,13 +772,13 @@ self.$RefreshInterceptModuleExecution$ = function(webpackModuleId) {
 
 
 __turbopack_context__.s([]);
-var __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$internal$2d$runtime$2f$input$2f$value$2e$js$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/webpack-loaders/internal-runtime/input/value.js.js [client] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$internal$2d$runtime$2f$input$2f$value$2e$js__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/webpack-loaders/internal-runtime/input/value.js [client] (ecmascript)");
 ;
-console.log(__TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$internal$2d$runtime$2f$input$2f$value$2e$js$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"]);
+console.log(__TURBOPACK__imported__module__$5b$project$5d2f$webpack$2d$loaders$2f$internal$2d$runtime$2f$input$2f$value$2e$js__$5b$client$5d$__$28$ecmascript$29$__["default"]);
 if (typeof globalThis.$RefreshHelpers$ === 'object' && globalThis.$RefreshHelpers !== null) {
     __turbopack_context__.k.registerExports(__turbopack_context__.m, globalThis.$RefreshHelpers$);
 }
-}),"[project]/webpack-loaders/internal-runtime/input/value.js.js [client] (ecmascript)",((__turbopack_context__) => {
+}),"[project]/webpack-loaders/internal-runtime/input/value.js [client] (ecmascript)",((__turbopack_context__) => {
 
 
 __turbopack_context__.s([

@@ -1,18 +1,6 @@
 (globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,(()=>{"use strict";return["[project]/typeof/input/esm-automatic.js [client] (ecmascript)",((__turbopack_context__) => {
 
 
-var __TURBOPACK__import$2e$meta__ = {
-    get url () {
-        return __turbopack_context__.F("input/esm-automatic.js");
-    },
-    env: {
-        DEV: false,
-        PROD: true,
-        MODE: "production",
-        BASE_URL: "/",
-        SSR: false
-    }
-};
 ;
 console.log('typeof require', ("TURBOPACK compile-time value", "function"));
 console.log('typeof import.meta', ("TURBOPACK compile-time value", "object"));
@@ -25,18 +13,6 @@ __turbopack_context__.s([]);
 }),"[project]/typeof/input/esm-specified.mjs [client] (ecmascript)",((__turbopack_context__) => {
 
 
-var __TURBOPACK__import$2e$meta__ = {
-    get url () {
-        return __turbopack_context__.F("input/esm-specified.mjs");
-    },
-    env: {
-        DEV: false,
-        PROD: true,
-        MODE: "production",
-        BASE_URL: "/",
-        SSR: false
-    }
-};
 console.log('typeof require', ("TURBOPACK compile-time value", "function"));
 console.log('typeof import.meta', ("TURBOPACK compile-time value", "object"));
 // ESM, should be `undefined`
@@ -57,18 +33,6 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$typeof$2f$input$2f$esm$2d$sp
 __turbopack_context__.s([]);
 })]})(),"[project]/typeof/input/cjs.js [client] (ecmascript)",((__turbopack_context__, module, exports) => {
 
-var __TURBOPACK__import$2e$meta__ = {
-    get url () {
-        return __turbopack_context__.F("input/cjs.js");
-    },
-    env: {
-        DEV: false,
-        PROD: true,
-        MODE: "production",
-        BASE_URL: "/",
-        SSR: false
-    }
-};
 console.log('typeof require', ("TURBOPACK compile-time value", "function"));
 console.log('typeof import.meta', ("TURBOPACK compile-time value", "object"));
 // CJS, should be `object`
@@ -79,4 +43,4 @@ console.log(/*TURBOPACK member replacement*/ __turbopack_context__.t);
 require(/* turbopackIgnore: true */ '');
 })]);
 
-//# sourceMappingURL=17-8l1txl6n0f.js.map
+//# sourceMappingURL=2lk38_r68xghe.js.map

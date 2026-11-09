@@ -20,7 +20,7 @@ use turbopack_core::{
         ChunkGroupResult, ChunkItem, ChunkItemOrBatchWithAsyncModuleInfo,
         ChunkItemWithAsyncModuleInfo, ChunkType, ChunkableModule, ChunkingConfig, ChunkingConfigs,
         ChunkingContext, EntryChunkGroupResult, EvaluatableAsset, MinifyType, SourceMapSourceType,
-        SourceMapsType, UnusedReferences,
+        UnusedReferences,
         availability_info::AvailabilityInfo,
         chunk_group::{MakeChunkGroupResult, make_chunk_group},
         chunk_id_strategy::ModuleIdStrategy,
@@ -35,8 +35,9 @@ use turbopack_core::{
         style_groups::StyleGroupsAlgorithm,
     },
     output::{OutputAsset, OutputAssets},
+    source_map::{OptionSourceMapType, SourceMapType},
 };
-use turbopack_css::chunk::{CssChunk, CssChunkType, source_map::CssChunkSourceMapAsset};
+use turbopack_css::chunk::{CssChunk, CssChunkType};
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
     chunk::{ChunkMinification, EcmascriptChunk, EcmascriptChunkType},
@@ -119,8 +120,8 @@ impl LibraryChunkingContextBuilder {
         self
     }
 
-    pub fn source_maps(mut self, source_maps: SourceMapsType) -> Self {
-        self.chunking_context.source_maps_type = source_maps;
+    pub fn emitted_source_map_type(mut self, source_map_type: Option<SourceMapType>) -> Self {
+        self.chunking_context.emitted_source_map_type = source_map_type;
         self
     }
 
@@ -227,8 +228,8 @@ pub struct LibraryChunkingContext {
     minify_type: MinifyType,
     /// Whether to extract legal comments from minified library chunks.
     extract_comments: bool,
-    /// Whether to generate source maps
-    source_maps_type: SourceMapsType,
+    /// The source map variant emitted to disk.
+    emitted_source_map_type: Option<SourceMapType>,
     /// Whether to use manifest chunks for lazy compilation
     manifest_chunks: bool,
     /// The module id strategy to use
@@ -281,7 +282,7 @@ impl LibraryChunkingContext {
                 runtime_type,
                 minify_type: MinifyType::NoMinify,
                 extract_comments: false,
-                source_maps_type: SourceMapsType::Full,
+                emitted_source_map_type: Some(SourceMapType::Full),
                 module_id_strategy: None,
                 export_usage: None,
                 unused_references: None,
@@ -309,11 +310,6 @@ impl LibraryChunkingContext {
     /// when `RuntimeType` has a single variant.
     pub fn runtime_type(&self) -> RuntimeType {
         self.runtime_type
-    }
-
-    /// Returns the minify type.
-    pub fn source_maps_type(&self) -> SourceMapsType {
-        self.source_maps_type
     }
 
     /// Returns the minify type.
@@ -407,7 +403,18 @@ impl LibraryChunkingContext {
                 hasher.write_value(this.is_node_platform);
                 hasher.write_value(this.output_root_to_root_path.as_str());
                 hasher.write_ref(&this.asset_base_path);
-                hasher.write_ref(&this.source_maps_type);
+                // Keep the source map mode's original discriminant in the filename hash.
+                #[derive(DeterministicHash)]
+                enum FilenameSourceMapMode {
+                    Full,
+                    Partial,
+                    None,
+                }
+                hasher.write_value(match this.emitted_source_map_type {
+                    Some(SourceMapType::Full) => FilenameSourceMapMode::Full,
+                    Some(SourceMapType::Shallow) => FilenameSourceMapMode::Partial,
+                    None => FilenameSourceMapMode::None,
+                });
                 for asset in other_chunks.iter() {
                     hasher.write_value(asset.path().await?.path.as_str());
                 }
@@ -550,10 +557,7 @@ impl ChunkingContext for LibraryChunkingContext {
             match asset {
                 Some(asset) => {
                     let resolved_asset = asset.to_resolved().await?;
-                    if ResolvedVc::try_downcast_type::<CssChunk>(resolved_asset).is_some()
-                        || ResolvedVc::try_downcast_type::<CssChunkSourceMapAsset>(resolved_asset)
-                            .is_some()
-                    {
+                    if ResolvedVc::try_downcast_type::<CssChunk>(resolved_asset).is_some() {
                         match &self.css_filename {
                             Some(filename_template) => {
                                 let query = QString::from(ident.await?.query.as_str());
@@ -638,20 +642,12 @@ impl ChunkingContext for LibraryChunkingContext {
 
     #[turbo_tasks::function]
     fn reference_chunk_source_maps(&self, _chunk: Vc<Box<dyn OutputAsset>>) -> Vc<bool> {
-        Vc::cell(match self.source_maps_type {
-            SourceMapsType::Full => true,
-            SourceMapsType::Partial => true,
-            SourceMapsType::None => false,
-        })
+        Vc::cell(self.emitted_source_map_type.is_some())
     }
 
     #[turbo_tasks::function]
-    fn reference_module_source_maps(&self, _module: Vc<Box<dyn Module>>) -> Vc<bool> {
-        Vc::cell(match self.source_maps_type {
-            SourceMapsType::Full => true,
-            SourceMapsType::Partial => true,
-            SourceMapsType::None => false,
-        })
+    fn emitted_source_map_type(&self) -> Vc<OptionSourceMapType> {
+        Vc::cell(self.emitted_source_map_type)
     }
 
     #[turbo_tasks::function]
