@@ -1,0 +1,14 @@
+packages/pack/src/binding.d.ts
+  h_05d0a07afcde4c 16-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1bfb3a1efe42c557c3c317f9b6b0b3ad348075c",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
