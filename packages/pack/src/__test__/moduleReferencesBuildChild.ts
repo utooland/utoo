@@ -177,7 +177,10 @@ async function main() {
         /module reference resource must be an existing file/,
       );
     } else {
-      await assert.rejects(buildFixture);
+      await assert.rejects(
+        buildFixture,
+        /read_dir called with unresolved path/,
+      );
     }
     assert.deepEqual(outputFiles(output), []);
     return;
