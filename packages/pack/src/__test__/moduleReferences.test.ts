@@ -35,9 +35,28 @@ describe("native module reference capability", () => {
     await expect(serializeConfig(config, false)).rejects.toThrow(
       "native binary does not support module.references",
     );
-    await expect(serializeConfig({ entry: [] }, false)).resolves.toBeTypeOf(
-      "string",
-    );
+  });
+
+  it.each([
+    { name: "no module configuration", config: { entry: [] } },
+    {
+      name: "existing loader rules without references",
+      config: {
+        entry: [],
+        module: {
+          rules: { "*.txt": { loaders: ["raw-loader"], as: "*.js" } },
+        },
+      },
+    },
+    {
+      name: "an empty reference list",
+      config: { entry: [], module: { references: [] } },
+    },
+  ])("accepts $name with an older native binary", async ({ config }) => {
+    vi.doMock("../binding", () => ({}));
+    const { serializeConfig } = await import("../core/project");
+    const serialized = JSON.parse(await serializeConfig(config, false));
+    expect(serialized.module).toEqual(config.module);
   });
 
   it("forwards the complete reference configuration to a supporting binary", async () => {

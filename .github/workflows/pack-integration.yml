@@ -92,6 +92,10 @@ jobs:
           # Check worker cycles, content hashes and SharedWorker identity against this build.
           npm test --workspace @utoo/pack -- src/__test__/workerContentHash.test.ts
 
+          # Check exact module replacement, alternate import paths, and opt-in behavior
+          # against the freshly built native binary.
+          npm test --workspace @utoo/pack -- src/__test__/moduleReferences.test.ts src/__test__/moduleReferencesBuild.test.ts
+
           # Regression coverage for independent PostCSS and loader evaluator graphs sharing one
           # build-time runtime (utooland/utoo#3316).
           npm test --workspace shared-runtime-async-module

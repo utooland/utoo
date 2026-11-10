@@ -51,6 +51,13 @@ or an absolute path. Supply the canonical resolved file path when using aliases
 or symlinks. Relative factory imports resolve from the replaced file's directory;
 absolute paths and package specifiers follow normal module resolution.
 
+Matching uses the resolved file path, not the basename or export name. Aliases,
+symlink imports, and barrel reexports that resolve to the configured file receive
+the same replacement; unrelated files with the same name keep their original
+behavior. A query string does not bypass replacement, but different queries keep
+their normal distinct module identities. Omitting `module.references` or supplying
+an empty list leaves normal module processing in place.
+
 The browser build replaces the source before parsing and dependency traversal,
 and bypasses user loaders for that source. Its generated identity contains only
 reference code, including in source maps. The original implementation remains
