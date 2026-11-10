@@ -62,6 +62,15 @@ async function createBrowserHarness(sendResults: boolean[] = [true]) {
         eventListeners.set(type, listeners);
       },
     ),
+    removeEventListener: vi.fn(
+      (type: string, listener: (event: unknown) => void) => {
+        const listeners = eventListeners.get(type) ?? [];
+        eventListeners.set(
+          type,
+          listeners.filter((registered) => registered !== listener),
+        );
+      },
+    ),
   });
   vi.stubGlobal(
     "requestAnimationFrame",
@@ -90,7 +99,7 @@ async function createBrowserHarness(sendResults: boolean[] = [true]) {
     originalConsoleSpies,
     sentMessages,
     sendMessage,
-    connect(browserToTerminal: BrowserToTerminal) {
+    connect(browserToTerminal?: BrowserToTerminal) {
       if (!messageListener) throw new Error("message listener was not added");
       messageListener({ type: "turbopack-connected", browserToTerminal });
     },
@@ -114,6 +123,139 @@ afterEach(() => {
 });
 
 describe("browser log forwarding", () => {
+  it("preserves the original console methods before receiving configuration", async () => {
+    const harness = await createBrowserHarness();
+
+    for (const method of CONSOLE_METHODS) {
+      expect(harness.consoleSpies[method], method).toBe(
+        harness.originalConsoleSpies[method],
+      );
+    }
+    harness.consoleSpies.log("before configuration");
+    expect(window.addEventListener).not.toHaveBeenCalled();
+    expect(harness.pendingAnimationFrames).toBe(0);
+
+    harness.connect(true);
+    harness.consoleSpies.log("after configuration");
+    harness.flushAnimationFrame();
+
+    expect(harness.sentMessages[0].entries.map(({ args }) => args)).toEqual([
+      ["after configuration"],
+    ]);
+  });
+
+  it.each([false, undefined] as const)(
+    "leaves console and error listeners untouched when forwarding is %s",
+    async (level) => {
+      const harness = await createBrowserHarness();
+      harness.connect(level);
+
+      for (const method of CONSOLE_METHODS) {
+        expect(harness.consoleSpies[method], method).toBe(
+          harness.originalConsoleSpies[method],
+        );
+        harness.consoleSpies[method]("local only");
+        expect(
+          harness.originalConsoleSpies[method],
+          method,
+        ).toHaveBeenCalledWith("local only");
+      }
+      expect(window.addEventListener).not.toHaveBeenCalled();
+      harness.dispatch("error", { message: "local error" });
+      harness.dispatch("unhandledrejection", { reason: "local rejection" });
+      expect(harness.pendingAnimationFrames).toBe(0);
+      expect(harness.sendMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps one console wrapper and error listener across reconnects", async () => {
+    const harness = await createBrowserHarness();
+    harness.connect("warn");
+    const wrappedConsole = { ...harness.consoleSpies };
+
+    harness.connect();
+    harness.connect("warn");
+    for (const method of CONSOLE_METHODS) {
+      expect(harness.consoleSpies[method], method).toBe(wrappedConsole[method]);
+    }
+    harness.consoleSpies.warn("once");
+    harness.dispatch("error", { message: "one error" });
+    harness.dispatch("unhandledrejection", { reason: "one rejection" });
+    harness.flushAnimationFrame();
+
+    expect(harness.originalConsoleSpies.warn).toHaveBeenCalledTimes(1);
+    expect(harness.sentMessages[0].entries.map(({ args }) => args)).toEqual([
+      ["once"],
+      ["Uncaught Error: one error"],
+      ["Unhandled Promise rejection: one rejection"],
+    ]);
+  });
+
+  it("restores console and removes error listeners when forwarding is disabled", async () => {
+    const harness = await createBrowserHarness();
+    harness.connect(true);
+    harness.consoleSpies.log("discard pending log");
+
+    harness.connect(false);
+    for (const method of CONSOLE_METHODS) {
+      expect(harness.consoleSpies[method], method).toBe(
+        harness.originalConsoleSpies[method],
+      );
+    }
+    harness.consoleSpies.log("local only");
+    harness.dispatch("error", { message: "local error" });
+    harness.dispatch("unhandledrejection", { reason: "local rejection" });
+    expect(window.removeEventListener).toHaveBeenCalledWith(
+      "error",
+      expect.any(Function),
+    );
+    expect(window.removeEventListener).toHaveBeenCalledWith(
+      "unhandledrejection",
+      expect.any(Function),
+    );
+    harness.flushAnimationFrame();
+    expect(harness.sendMessage).not.toHaveBeenCalled();
+
+    harness.connect("error");
+    harness.consoleSpies.error("forward again");
+    harness.dispatch("error", { message: "one error" });
+    harness.dispatch("unhandledrejection", { reason: "one rejection" });
+    harness.flushAnimationFrame();
+
+    expect(harness.sentMessages[0].entries.map(({ args }) => args)).toEqual([
+      ["forward again"],
+      ["Uncaught Error: one error"],
+      ["Unhandled Promise rejection: one rejection"],
+    ]);
+  });
+
+  it.each([
+    ["error", ["assert", "error"]],
+    ["warn", ["assert", "warn", "error"]],
+  ] as const)(
+    "forwards only matching console methods when configured as %s",
+    async (level, expected) => {
+      const harness = await createBrowserHarness();
+      harness.connect(level);
+
+      for (const method of CONSOLE_METHODS) {
+        if (method === "assert") harness.consoleSpies.assert(false, method);
+        else harness.consoleSpies[method](method);
+      }
+      harness.flushAnimationFrame();
+
+      expect(
+        harness.sentMessages[0].entries.map(({ method }) => method),
+      ).toEqual(expected);
+      for (const method of CONSOLE_METHODS) {
+        expect(
+          harness.originalConsoleSpies[method],
+          method,
+        ).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
   it.each([
     ["error", ["assert", "error"]],
     ["warn", ["assert", "error", "warn"]],
@@ -226,15 +368,14 @@ describe("browser log forwarding", () => {
     }
   });
 
-  it("queues logs before connection and caps the pending queue", async () => {
+  it("caps the pending queue after forwarding is enabled", async () => {
     const harness = await createBrowserHarness();
+    harness.connect("warn");
 
     for (let index = 0; index < 1_001; index++) {
       harness.consoleSpies.warn(index);
     }
-    expect(harness.pendingAnimationFrames).toBe(0);
 
-    harness.connect("warn");
     expect(harness.pendingAnimationFrames).toBe(1);
     harness.flushAnimationFrame();
 
