@@ -48,7 +48,8 @@ a class instance and sending a request are runtime responsibilities.
 
 `resource` must identify a file within the project, using a project-relative path
 or an absolute path. Supply the canonical resolved file path when using aliases
-or symlinks. Relative factory imports resolve from the replaced file's directory;
+or symlinks; registrations that still contain symlink segments fail the build.
+Relative factory imports resolve from the replaced file's directory;
 absolute paths and package specifiers follow normal module resolution.
 
 Matching uses the resolved file path, not the basename or export name. Aliases,

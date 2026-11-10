@@ -170,6 +170,15 @@ pub async fn rules(project: FileSystemPath, config: Vc<Config>) -> Result<Vec<Tr
         let code = generate_reference_module(&normalized)
             .with_context(|| format!("invalid module reference for {resource}"))?;
         let path = project.join(&resource)?;
+        // Reject symlinks in any segment before exact matching. Checking only the
+        // final entry type can otherwise silently miss a symlinked directory.
+        let real_path = path.realpath().await?.with_context(|| {
+            format!("module reference resource must be an existing file: {resource}")
+        })?;
+        ensure!(
+            real_path == path,
+            "module reference resource must use its canonical path: {resource}"
+        );
         ensure!(
             matches!(*path.get_type().await?, FileSystemEntryType::File),
             "module reference resource must be an existing file: {resource}"

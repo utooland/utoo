@@ -171,17 +171,10 @@ async function main() {
   if (scenario.startsWith("symlink-")) {
     // The low-level contract requires a canonical resource. Noncanonical
     // registrations must fail closed, never silently emit the original source.
-    if (scenario === "symlink-file-resource") {
-      await assert.rejects(
-        buildFixture,
-        /module reference resource must be an existing file/,
-      );
-    } else {
-      await assert.rejects(
-        buildFixture,
-        /read_dir called with unresolved path/,
-      );
-    }
+    await assert.rejects(
+      buildFixture,
+      /module reference resource must use its canonical path/,
+    );
     assert.deepEqual(outputFiles(output), []);
     return;
   }
