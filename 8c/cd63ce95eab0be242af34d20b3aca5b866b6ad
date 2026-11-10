@@ -1,0 +1,20 @@
+crates/pack-core/src/module_reference.rs
+  s_fc70035ec6ca69::t_e4122ac40230fd 135-142,144-148,165-166,321-342
+  s_fc70035ec6ca69::t_496c3951230b8e 130-134,143,149-150,161-164,167-168,318-320,343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8ccd63ce95eab0be242af34d20b3aca5b866b6ad",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
