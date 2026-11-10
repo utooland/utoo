@@ -1,0 +1,19 @@
+packages/pack/src/__test__/moduleReferencesBuildChild.ts
+  s_fc70035ec6ca69::t_972afb27f82eec 180-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a73a1cab68eff45a4c9802fd82ad958ed76340c1",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
