@@ -1,0 +1,18 @@
+crates/pack-tests/tests/snapshot/basic/public_hmr_api/output/input_index_11lo8plvb-si2.js
+  h_05d0a07afcde4c 5
+crates/pack-tests/tests/snapshot/webpack-loaders/internal-runtime/output/_root-of-the-server___144rmk6z_rwo0.js
+  h_05d0a07afcde4c 43,76-101,103-108,111-129,135-143
+crates/pack-tests/tests/snapshot/webpack-loaders/internal-runtime/output/input_index_mjs_11lo8plvb-si2.js
+  h_05d0a07afcde4c 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "95258b09c539d6f2a49844fd03c0a33034cc83f8",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
