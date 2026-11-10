@@ -58,13 +58,20 @@ test("builds and rebuilds the utooweb demo and previews dist/index.html", async 
   page,
   context,
 }) => {
-  // The fixture lock and demo registry both use npmmirror. Fetch real packages
-  // from npm directly so mirror redirects do not exhaust the CI install timeout.
-  await context.route(/^https:\/\/registry\.npmmirror\.com\//, async (route) => {
-    const url = new URL(route.request().url());
-    url.host = "registry.npmjs.org";
-    await route.continue({ url: url.toString() });
+  // Select npm before initialization so dependency resolution uses npm's API.
+  await context.addInitScript(() => {
+    localStorage.setItem("utoo-config", JSON.stringify({ registry: "npm" }));
   });
+  // The fixture lock still pins mirror tarballs. Keep their versions and
+  // integrity checks while avoiding slow mirror redirects in CI.
+  await context.route(
+    /^https:\/\/registry\.npmmirror\.com\/.*\.tgz$/,
+    async (route) => {
+      const url = new URL(route.request().url());
+      url.host = "registry.npmjs.org";
+      await route.continue({ url: url.toString() });
+    },
+  );
 
   const consoleMessages = collectConsoleMessages(page);
   const pageErrors: string[] = [];
