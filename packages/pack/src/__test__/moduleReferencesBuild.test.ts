@@ -12,6 +12,9 @@ const execute = promisify(execFile);
 describe("native module reference matching", () => {
   it.each([
     "enabled",
+    "legacy",
+    "legacy-tree-shaking",
+    "modern-tree-shaking",
     "omitted",
     "empty",
     "symlink-file-resource",

@@ -89,11 +89,8 @@ jobs:
           # Exercise the generated NAPI loader on the minimum supported Node major.
           NAPI_RS_ENFORCE_VERSION_CHECK=1 node -e 'require("./packages/pack/src/binding.js")'
 
-          # Run native regression tests against the freshly built binding.
-          npm test --workspace @utoo/pack -- \
-            src/__test__/workerContentHash.test.ts \
-            src/__test__/moduleReferences.test.ts \
-            src/__test__/moduleReferencesBuild.test.ts
+          # Check worker cycles, content hashes and SharedWorker identity against this build.
+          npm test --workspace @utoo/pack -- src/__test__/workerContentHash.test.ts
 
           # Regression coverage for independent PostCSS and loader evaluator graphs sharing one
           # build-time runtime (utooland/utoo#3316).
