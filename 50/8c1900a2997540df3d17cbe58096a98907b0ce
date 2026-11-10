@@ -1,0 +1,39 @@
+.github/workflows/utooweb-ci.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 7,17-19,21-22,39-45,122,127
+.github/workflows/pm-ci.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 7,17-19,21-22,56-57,72-79,110-111,193-199,227-228,234
+.github/workflows/ci-changes.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 1-39
+.github/workflows/pm-e2e-bench.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 10,23,108-110,119,123,215,220,248,252,281,284,324,327,356,359,388,391,437,440,496,501
+.github/workflows/pack-perf.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 19-21,24-25,29-31,58-65
+.github/workflows/clippy.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 7,17-19,21-22,25-27,36-42
+.github/workflows/pack-ci.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 7,17-19,21-22,63,65,69,71-73,76,80,98-99,105,126-149,182-184,189-207,218,223
+.github/scripts/ci-changes.mjs
+  s_f5365a637ce9e9::t_6300e947dfafc4 1-117
+.github/scripts/ci-changes.test.mjs
+  s_f5365a637ce9e9::t_6300e947dfafc4 1-166
+.github/workflows/pack-ecosystem.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 8,28-30,32-33
+.github/workflows/pack-integration.yml
+  s_f5365a637ce9e9::t_6300e947dfafc4 7,17-19,21-22,27-29,80-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "508c1900a2997540df3d17cbe58096a98907b0ce",
+  "prompts": {},
+  "sessions": {
+    "s_f5365a637ce9e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c3ed-5655-72b0-8477-612bc2c75ccf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
