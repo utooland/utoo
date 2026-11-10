@@ -161,6 +161,21 @@ fn test(resource: PathBuf) {
     }
 
     let _guard = SNAPSHOT_TEST_LOCK.lock().unwrap();
+    let expected_error = resource.join("expected-error.txt");
+    if expected_error.exists() {
+        let expected = fs::read_to_string(expected_error).unwrap();
+        let output = resource.join("output");
+        let error = run(resource).expect_err("fixture must fail before producing output");
+        assert!(
+            format!("{error:#}").contains(expected.trim()),
+            "unexpected build failure: {error:#}"
+        );
+        assert!(
+            !output.exists(),
+            "rejected fixture must not emit browser assets"
+        );
+        return;
+    }
     let project_path = run(resource).unwrap();
     run_assertion(&project_path).unwrap();
 }
@@ -190,6 +205,7 @@ fn run_assertion(resource: &Path) -> Result<()> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn run(resource: PathBuf) -> Result<PathBuf> {
+    let expect_build_error = resource.join("expected-error.txt").exists();
     let snapshot_ignore_prefixes = snapshot_ignore_prefixes(&resource)?;
     let SnapshotProjectOptions {
         project: project_options,
@@ -326,7 +342,7 @@ async fn run(resource: PathBuf) -> Result<PathBuf> {
         let snapshot_ignore_prefixes = Vc::<SnapshotIgnorePrefixes>::cell(snapshot_ignore_prefixes)
             .to_resolved()
             .await?;
-        let out_op = run_test_operation(container_op, snapshot_ignore_prefixes);
+        let out_op = run_test_operation(container_op, snapshot_ignore_prefixes, expect_build_error);
         read_strongly_consistent_and_apply_effects(snapshot_effects_operation(out_op), |e| e)
             .await?;
         read_strongly_consistent_and_apply_effects(output_effects_operation(out_op), |e| e).await?;
@@ -524,6 +540,7 @@ fn project_options_from_resource(resource: &Path) -> Result<SnapshotProjectOptio
 async fn run_test_operation(
     container_op: OperationVc<ProjectContainer>,
     snapshot_ignore_prefixes: ResolvedVc<SnapshotIgnorePrefixes>,
+    expect_build_error: bool,
 ) -> Result<Vc<FileSystemPath>> {
     let project_container = container_op.resolve().strongly_consistent().await?;
 
@@ -532,11 +549,25 @@ async fn run_test_operation(
         get_all_written_entrypoints_with_issues_operation(project_container);
     let EntrypointsWithIssues {
         entrypoints: _,
-        issues: _,
+        issues,
         effects: _,
     } = &*entrypoints_with_issues_op
         .read_strongly_consistent()
         .await?;
+
+    if expect_build_error {
+        // Match compiler diagnostics, never snapshot mismatch text. Do not apply
+        // output effects for rejected builds, matching the public build command.
+        let errors = issues
+            .iter()
+            .filter(|issue| issue.severity <= IssueSeverity::Error)
+            .collect::<Vec<_>>();
+        anyhow::ensure!(
+            !errors.is_empty(),
+            "expected compiler error diagnostics but build succeeded"
+        );
+        anyhow::bail!("compiler error diagnostics: {errors:?}");
+    }
 
     // Get output assets and walk through them
     let project = project_container.project();

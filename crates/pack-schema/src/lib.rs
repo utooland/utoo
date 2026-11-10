@@ -985,6 +985,42 @@ pub struct SchemaModuleConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Module rules configuration")]
     pub rules: Option<HashMap<String, SchemaModuleRule>>,
+    /// Exact source modules replaced with generated references in browser builds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub references: Option<Vec<SchemaModuleReferenceConfig>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaModuleReferenceConfig {
+    /// Project-relative path, or absolute path within the project.
+    pub resource: String,
+    pub references: Vec<SchemaModuleReference>,
+    pub exports: Vec<SchemaModuleReferenceExport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaModuleReference {
+    pub id: String,
+    pub factory: SchemaModuleReferenceFactory,
+    /// Browser-visible JSON passed to the factory without protocol interpretation.
+    pub data: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaModuleReferenceFactory {
+    /// Resolved from the replaced resource's directory.
+    pub module: String,
+    pub export: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SchemaModuleReferenceExport {
+    pub name: String,
+    pub reference: String,
 }
 
 /// Module rule configuration

@@ -1250,6 +1250,16 @@
       "description": "Module configuration",
       "type": "object",
       "properties": {
+        "references": {
+          "description": "Exact source modules replaced with generated references in browser builds.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/SchemaModuleReferenceConfig"
+          }
+        },
         "rules": {
           "description": "Module rules configuration",
           "type": [
@@ -1269,6 +1279,86 @@
         "named",
         "deterministic"
       ]
+    },
+    "SchemaModuleReference": {
+      "type": "object",
+      "required": [
+        "data",
+        "factory",
+        "id"
+      ],
+      "properties": {
+        "data": {
+          "description": "Browser-visible JSON passed to the factory without protocol interpretation."
+        },
+        "factory": {
+          "$ref": "#/definitions/SchemaModuleReferenceFactory"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SchemaModuleReferenceConfig": {
+      "type": "object",
+      "required": [
+        "exports",
+        "references",
+        "resource"
+      ],
+      "properties": {
+        "exports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaModuleReferenceExport"
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SchemaModuleReference"
+          }
+        },
+        "resource": {
+          "description": "Project-relative path, or absolute path within the project.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SchemaModuleReferenceExport": {
+      "type": "object",
+      "required": [
+        "name",
+        "reference"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SchemaModuleReferenceFactory": {
+      "type": "object",
+      "required": [
+        "export",
+        "module"
+      ],
+      "properties": {
+        "export": {
+          "type": "string"
+        },
+        "module": {
+          "description": "Resolved from the replaced resource's directory.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "SchemaModuleRule": {
       "description": "Module rule configuration",

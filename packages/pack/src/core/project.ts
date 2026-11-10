@@ -24,6 +24,7 @@ import { resolveRootPath } from "../utils/findRoot";
 import { normalizePath } from "../utils/normalizePath";
 import { DiagnosticSources } from "./diagnosticSources";
 import { runLoaderWorkerPool } from "./loaderWorkerPool";
+import { moduleReferencesVersion } from "./moduleReferences";
 import {
   AnalyzeData,
   Endpoint,
@@ -209,6 +210,11 @@ export async function serializeConfig(
   config: ConfigComplete,
   isDev: boolean,
 ): Promise<string> {
+  if (config.module?.references?.length && moduleReferencesVersion !== 1) {
+    throw new Error(
+      "The loaded Utoopack native binary does not support module.references version 1.",
+    );
+  }
   const configSerializable = {
     ...config,
     styles: normalizeStyles(config.styles, isDev),
