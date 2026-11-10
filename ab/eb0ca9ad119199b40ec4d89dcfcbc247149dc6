@@ -1,0 +1,26 @@
+docs/pack-module-references.md
+  s_fc70035ec6ca69::t_fd19f111d56a74 51-52
+crates/pack-core/src/module_reference.rs
+  s_fc70035ec6ca69::t_55c4dfb5b6d6ee 175-181
+  s_fc70035ec6ca69::t_fd19f111d56a74 173-174
+packages/pack/src/__test__/moduleReferencesBuildChild.ts
+  s_fc70035ec6ca69::t_55c4dfb5b6d6ee 174-177
+.github/workflows/pack-integration.yml
+  s_fc70035ec6ca69::t_e441d79f7a02bb 92-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "abeb0ca9ad119199b40ec4d89dcfcbc247149dc6",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
