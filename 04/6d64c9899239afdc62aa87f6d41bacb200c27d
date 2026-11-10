@@ -1,0 +1,19 @@
+e2e/utoo-web/utooweb-demo.spec.ts
+  s_520c270035d39b::t_9aca65e94e070e 59,61-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "046d64c9899239afdc62aa87f6d41bacb200c27d",
+  "prompts": {},
+  "sessions": {
+    "s_520c270035d39b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf75-6a0b-7c42-9932-23d66c8bcbb7",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
