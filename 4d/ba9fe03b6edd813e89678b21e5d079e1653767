@@ -1,0 +1,30 @@
+packages/pack/src/__test__/moduleReferencesBuildChild.ts
+  s_fc70035ec6ca69::t_4e5a65a43aff2f 1-135,140-156,162-164,170-173,182-189,194-196,202,215-221,226,241,249,255,261,270,275-279,285,287,293-294,296-298
+  s_fc70035ec6ca69::t_68e1e0548a5f12 136-139,157-161,165-169,190-193,197-201,203-214,222-225,227-240,242-246,250-254,256-260,262-269,271-274,280-284,288-292
+  s_fc70035ec6ca69::t_ce9da0323f9bce 174-181,247-248,286,295
+  s_fc70035ec6ca69::t_464987e64c5f3c 299-301
+packages/pack/src/__test__/moduleReferences.test.ts
+  s_fc70035ec6ca69::t_ef4b5f7c700ac7 38-59
+docs/pack-module-references.md
+  s_fc70035ec6ca69::t_16e10b0e60af9f 54-60
+.github/workflows/pack-integration.yml
+  s_fc70035ec6ca69::t_db3c124b2ddbc0 89-92
+packages/pack/src/__test__/moduleReferencesBuild.test.ts
+  s_fc70035ec6ca69::t_4e5a65a43aff2f 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4dba9fe03b6edd813e89678b21e5d079e1653767",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
