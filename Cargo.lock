@@ -4265,6 +4265,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
+ "byteorder",
  "either",
  "futures",
  "pack-core",
@@ -4284,6 +4285,7 @@ dependencies = [
  "turbo-tasks-hash",
  "turbo-unix-path",
  "turbopack",
+ "turbopack-analyze",
  "turbopack-browser",
  "turbopack-core",
  "turbopack-css",
@@ -9084,6 +9086,21 @@ dependencies = [
  "turbopack-resolve",
  "turbopack-static",
  "turbopack-wasm",
+]
+
+[[package]]
+name = "turbopack-analyze"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "flate2",
+ "rustc-hash 2.1.1",
+ "serde",
+ "turbo-rcstr",
+ "turbo-tasks",
+ "turbo-tasks-fs",
+ "turbopack-core",
 ]
 
 [[package]]

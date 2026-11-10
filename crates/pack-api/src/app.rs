@@ -1,4 +1,5 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use bincode::{Decode, Encode};
 use pack_core::client::context::{
     get_client_module_options_context, get_client_resolve_options_context,
     get_client_runtime_entries,
@@ -14,7 +15,9 @@ use pack_core::server::contexts::{
 use pack_core::util::convert_to_project_relative;
 use tracing::Instrument;
 use turbo_rcstr::{RcStr, rcstr};
-use turbo_tasks::{Completion, JoinIterExt, ResolvedVc, TryJoinIterExt, ValueToString, Vc};
+use turbo_tasks::{
+    Completion, JoinIterExt, NonLocalValue, ResolvedVc, TryJoinIterExt, ValueToString, Vc,
+};
 use turbopack::{
     ModuleAssetContext, module_options::ModuleOptionsContext, transition::TransitionOptions,
 };
@@ -626,13 +629,36 @@ impl Endpoint for AppEndpoint {
     }
 }
 
-/// Server function build support
+#[derive(Clone, Debug, PartialEq, Eq, NonLocalValue, Encode, Decode)]
+pub(crate) struct ServerBuildEntry {
+    pub name: RcStr,
+    pub modules: Vec<ResolvedVc<Box<dyn Module>>>,
+    pub assets: ResolvedVc<OutputAssets>,
+}
+
+#[turbo_tasks::value]
+pub(crate) struct ServerBuild {
+    pub graph: Option<ResolvedVc<ModuleGraph>>,
+    pub entries: Vec<ServerBuildEntry>,
+}
+
 #[turbo_tasks::value_impl]
 impl AppProject {
-    /// Discovers `ServerReferenceModule`s in the client module graph and builds
-    /// their inner server modules as Node.js chunks.
     #[turbo_tasks::function]
     async fn server_output_assets(self: Vc<Self>) -> Result<Vc<OutputAssets>> {
+        Ok(OutputAssets::concat(
+            self.server_build()
+                .await?
+                .entries
+                .iter()
+                .map(|entry| *entry.assets)
+                .collect(),
+        ))
+    }
+
+    /// Build each configured server entry and any server modules discovered through client references.
+    #[turbo_tasks::function]
+    pub(crate) async fn server_build(self: Vc<Self>) -> Result<Vc<ServerBuild>> {
         let this = self.await?;
         let project = *this.project;
         let entrypoints = self.resolved_entrypoints().await?.to_vec();
@@ -773,7 +799,7 @@ impl AppProject {
                     false,
                 );
                 let origin = PlainResolveOrigin::new(
-                    server_asset_context.expect("server asset context is created for imports"),
+                    server_asset_context.context("missing module context for server entry")?,
                     project_path.join("_")?,
                 )
                 .await?;
@@ -802,7 +828,11 @@ impl AppProject {
         }
 
         if build_entries.is_empty() {
-            return Ok(OutputAssets::empty());
+            return Ok(ServerBuild {
+                graph: None,
+                entries: vec![],
+            }
+            .cell());
         }
 
         // Build one graph for all server entries so shared modules can be identified across
@@ -920,44 +950,46 @@ impl AppProject {
             }
         }
 
-        let output_assets = build_entries
+        let entries = build_entries
             .iter()
             .enumerate()
-            .map(
-                |(entry_index, (name, evaluatable_assets, preserve_entry_name))| {
-                    let project_path = project_path.clone();
-                    let shared_assets =
-                        OutputAssets::concat(shared_assets_by_entry[entry_index].clone());
-                    async move {
-                        let modules = evaluatable_assets
-                            .iter()
-                            .map(|entry| ResolvedVc::upcast(*entry))
-                            .collect();
-                        let chunk_query = if *preserve_entry_name {
-                            format!("?name={name}&preserveEntryName=1")
-                        } else {
-                            format!("?name={name}")
-                        };
-                        let ident =
-                            AssetIdent::from_path(project_path.join(&format!("{name}.js"))?)
-                                .with_query(chunk_query.into())
-                                .into_vc();
-                        let chunk_group_result = server_chunking_context
-                            .evaluated_chunk_group(
-                                ident,
-                                ChunkGroupKey::Entry(modules),
-                                server_module_graph,
-                                shared_assets,
-                                entry_availability,
-                            )
-                            .await?;
-                        Ok(*chunk_group_result.assets)
-                    }
-                },
-            )
+            .map(|(entry_index, (name, _, preserve_entry_name))| {
+                let project_path = project_path.clone();
+                let modules = &entry_modules[entry_index];
+                let shared_assets =
+                    OutputAssets::concat(shared_assets_by_entry[entry_index].clone());
+                async move {
+                    let chunk_query = if *preserve_entry_name {
+                        format!("?name={name}&preserveEntryName=1")
+                    } else {
+                        format!("?name={name}")
+                    };
+                    let ident = AssetIdent::from_path(project_path.join(&format!("{name}.js"))?)
+                        .with_query(chunk_query.into())
+                        .into_vc();
+                    let chunk_group_result = server_chunking_context
+                        .evaluated_chunk_group(
+                            ident,
+                            ChunkGroupKey::Entry(modules.clone()),
+                            server_module_graph,
+                            shared_assets,
+                            entry_availability,
+                        )
+                        .await?;
+                    Ok(ServerBuildEntry {
+                        name: name.clone(),
+                        modules: modules.clone(),
+                        assets: chunk_group_result.assets,
+                    })
+                }
+            })
             .try_join()
             .await?;
 
-        Ok(OutputAssets::concat(output_assets))
+        Ok(ServerBuild {
+            graph: Some(server_module_graph.to_resolved().await?),
+            entries,
+        }
+        .cell())
     }
 }

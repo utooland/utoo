@@ -29,7 +29,7 @@ use turbopack_core::{
     ident::Layer,
     module_graph::binding_usage_info::OptionBindingUsageInfo,
     resolve::options::{ImportMap, ImportMapping},
-    source_map::{OptionSourceMapType, SourceMapGenerationOptions, SourceMapType},
+    source_map::{OptionSourceMapType, SourceMapGenerationOptions},
     virtual_source::VirtualSource,
 };
 use turbopack_css::chunk::CssChunkType;
@@ -293,9 +293,7 @@ pub async fn get_client_module_options_context(
         .await?;
     let target_browsers = env.runtime_versions();
 
-    let source_map_generation_options = SourceMapGenerationOptions::from_emitted(
-        (*config.source_maps().await?).then_some(SourceMapType::Full),
-    );
+    let source_map_generation_options = *config.source_map_generation_options().await?;
     let postcss_config_content = (*config.postcss_config_content().await?).clone();
     let postcss_package_mapping = get_postcss_package_mapping(config).to_resolved().await?;
     let postcss_transform_options = Some(PostCssTransformOptions {
@@ -329,7 +327,7 @@ pub async fn get_client_module_options_context(
             *execution_context,
             options.config_location,
             options.config_content.clone(),
-            source_map_generation_options.full,
+            source_map_generation_options.should_generate_any_source_maps(),
         )
     };
 
@@ -586,6 +584,7 @@ pub async fn get_client_resolve_options_context(
         project_path.clone(),
         project_path.root().owned().await?,
         external_config,
+        false,
     )
     .to_resolved()
     .await?;
@@ -665,6 +664,7 @@ pub struct ClientChunkingContextOptions {
     pub minify: Vc<bool>,
     pub compress: Vc<OptionCompressType>,
     pub emitted_source_map_type: Vc<OptionSourceMapType>,
+    pub source_map_generation_options: Vc<SourceMapGenerationOptions>,
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
@@ -692,6 +692,7 @@ pub async fn get_client_chunking_context(
         minify,
         compress,
         emitted_source_map_type,
+        source_map_generation_options,
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
@@ -739,6 +740,7 @@ pub async fn get_client_chunking_context(
         MinifyType::NoMinify
     })
     .emitted_source_map_type(*emitted_source_map_type.await?)
+    .source_map_generation_options(*source_map_generation_options.await?)
     .chunk_base_path(Some(public_path.clone()))
     .asset_base_path(Some(public_path))
     .current_chunk_method(CurrentChunkMethod::DocumentCurrentScript)

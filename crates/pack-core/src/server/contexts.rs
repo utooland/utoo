@@ -7,21 +7,24 @@ use turbo_tasks::{ResolvedVc, Vc};
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fs::FileSystemPath;
 use turbopack::module_options::{
-    CssOptionsContext, EcmascriptOptionsContext, JsxTransformOptions, ModuleOptionsContext,
-    ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
+    CssOptionsContext, EcmascriptOptionsContext, ExternalsTracingOptions, JsxTransformOptions,
+    ModuleOptionsContext, ModuleRule, TypescriptTransformOptions, side_effect_free_packages_glob,
 };
 use turbopack_core::{
     chunk::{
         ChunkingConfig, MangleType, MinifyType, SourceMapSourceType, UnusedReferences,
         chunk_id_strategy::ModuleIdStrategy,
     },
+    compile_time_defines,
     compile_time_info::CompileTimeInfo,
     environment::{Environment, ExecutionEnvironment, NodeJsEnvironment, NodeJsVersion},
     module_graph::binding_usage_info::OptionBindingUsageInfo,
-    source_map::{OptionSourceMapType, SourceMapGenerationOptions, SourceMapType},
+    source_map::{OptionSourceMapType, SourceMapGenerationOptions},
 };
 use turbopack_css::chunk::CssChunkType;
-use turbopack_ecmascript::{chunk::EcmascriptChunkType, transform::ReactCompilerTarget};
+use turbopack_ecmascript::{
+    AnalyzeMode, chunk::EcmascriptChunkType, transform::ReactCompilerTarget,
+};
 use turbopack_node::{
     execution_context::ExecutionContext,
     transforms::postcss::{PostCssConfigLocation, PostCssTransformOptions},
@@ -113,6 +116,22 @@ pub async fn get_server_compile_time_info(
     .defines(defines(define_env).to_resolved().await?)
     .free_var_references(free_vars(define_env, provider_config).to_resolved().await?)
     .import_meta_env_base_url(import_meta_env_base_url)
+    .cell()
+    .await
+}
+
+#[turbo_tasks::function]
+async fn tracing_compile_time_info() -> Result<Vc<CompileTimeInfo>> {
+    CompileTimeInfo::builder(
+        Environment::new(ExecutionEnvironment::NodeJsLambda(
+            NodeJsEnvironment::default().resolved_cell(),
+        ))
+        .to_resolved()
+        .await?,
+    )
+    // External packages execute in Node, outside Pack's compile-time environment. Keep both
+    // branches of environment checks, as Next does for Node's CommonJS named-export detection.
+    .defines(compile_time_defines!(process.env.TURBOPACK = "1").resolved_cell())
     .cell()
     .await
 }
@@ -245,9 +264,7 @@ pub async fn get_server_module_options_context(
     let enable_foreign_postcss_transform = postcss_foreign_transform_options
         .map(|postcss_foreign_transform_options| postcss_foreign_transform_options.resolved_cell());
 
-    let source_map_generation_options = SourceMapGenerationOptions::from_emitted(
-        (*config.source_maps().await?).then_some(SourceMapType::Full),
-    );
+    let source_map_generation_options = *config.source_map_generation_options().await?;
     let css_modules_pattern = styles
         .css_modules
         .as_ref()
@@ -256,6 +273,18 @@ pub async fn get_server_module_options_context(
     let rust_react_compiler_target: ReactCompilerTarget =
         *config.rust_react_compiler_target().await?;
 
+    let bundle_analysis = *config.is_bundle_analysis().await?;
+    let enable_externals_tracing = if bundle_analysis {
+        Some(
+            ExternalsTracingOptions {
+                tracing_root: project_path.clone(),
+                compile_time_info: tracing_compile_time_info().to_resolved().await?,
+            }
+            .resolved_cell(),
+        )
+    } else {
+        None
+    };
     let module_options_context = ModuleOptionsContext {
         ecmascript: EcmascriptOptionsContext {
             source_map_generation_options,
@@ -277,6 +306,12 @@ pub async fn get_server_module_options_context(
             ..Default::default()
         },
         environment: Some(env),
+        analyze_mode: if bundle_analysis {
+            AnalyzeMode::code_generation_and_tracing()
+        } else {
+            AnalyzeMode::code_generation()
+        },
+        enable_externals_tracing,
         execution_context: Some(execution_context),
         follow_reexports: true,
         module_fragments_enabled: module_fragments_enabled_for_user_code,
@@ -367,6 +402,7 @@ pub async fn get_server_resolve_options_context(
         project_path.clone(),
         project_path.root().owned().await?,
         external_config,
+        *config.is_bundle_analysis().await?,
     )
     .to_resolved()
     .await?;
@@ -435,6 +471,7 @@ pub struct ServerChunkingContextOptions {
     pub minify: Vc<bool>,
     pub compress: Vc<OptionCompressType>,
     pub emitted_source_map_type: Vc<OptionSourceMapType>,
+    pub source_map_generation_options: Vc<SourceMapGenerationOptions>,
     pub no_mangling: Vc<bool>,
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
@@ -460,6 +497,7 @@ pub async fn get_server_chunking_context(
         minify,
         compress,
         emitted_source_map_type,
+        source_map_generation_options,
         no_mangling,
         scope_hoisting,
         nested_async_chunking,
@@ -503,6 +541,7 @@ pub async fn get_server_chunking_context(
         MinifyType::NoMinify
     })
     .emitted_source_map_type(*emitted_source_map_type.await?)
+    .source_map_generation_options(*source_map_generation_options.await?)
     .module_id_strategy(module_id_strategy.to_resolved().await?)
     .export_usage(*export_usage.await?)
     .unused_references(unused_references.to_resolved().await?)

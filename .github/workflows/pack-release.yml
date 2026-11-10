@@ -295,6 +295,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.ref_name }}
+          submodules: true
       - name: Setup node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -327,7 +328,8 @@ jobs:
       - name: Build JS
         run: |
           npm run build --workspace=@utoo/pack-shared
-          npm run build:js --workspace=@utoo/pack
+          npm run build:cjs --workspace=@utoo/pack
+          npm run build:esm --workspace=@utoo/pack
           npm run build --workspace=@utoo/pack-cli
       - name: Get version from tag
         id: get_version
@@ -386,9 +388,21 @@ jobs:
           : "${VERSION:?VERSION is required}"
 
           # npm publish can succeed before registry metadata exposes the version.
-          # Include the native binding used by the Ubuntu ecosystem runners.
-          packages=(@utoo/pack @utoo/pack-shared @utoo/pack-cli @utoo/pack-linux-x64-gnu)
-          for attempt in {1..12}; do
+          # Wait for every native package: an unavailable optional dependency can
+          # be skipped during install even if the JS packages are already visible.
+          packages=(
+            @utoo/pack
+            @utoo/pack-shared
+            @utoo/pack-cli
+            @utoo/pack-darwin-arm64
+            @utoo/pack-darwin-x64
+            @utoo/pack-linux-arm64-gnu
+            @utoo/pack-linux-arm64-musl
+            @utoo/pack-linux-x64-gnu
+            @utoo/pack-linux-x64-musl
+            @utoo/pack-win32-x64-msvc
+          )
+          for attempt in {1..18}; do
             ready=true
             for package in "${packages[@]}"; do
               if version=$(npm view "${package}@${VERSION}" version \
@@ -397,7 +411,7 @@ jobs:
                 [[ "$version" == "$VERSION" ]]; then
                 echo "${package}@${VERSION} is available"
               else
-                echo "Waiting for ${package}@${VERSION} (attempt ${attempt}/12)"
+                echo "Waiting for ${package}@${VERSION} (attempt ${attempt}/18)"
                 ready=false
                 break
               fi
@@ -407,7 +421,7 @@ jobs:
               echo "All ecosystem packages are available on npm"
               exit 0
             fi
-            if (( attempt < 12 )); then
+            if (( attempt < 18 )); then
               sleep 45
             fi
           done

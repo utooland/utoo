@@ -640,6 +640,7 @@ impl ProjectContainer {
     }
 }
 
+#[derive(Clone)]
 #[turbo_tasks::value]
 pub struct Project {
     /// A root path from which all files must be nested under. Trying to access
@@ -1079,6 +1080,15 @@ impl Project {
     }
 
     #[turbo_tasks::function]
+    pub(super) async fn with_analyze_config(&self) -> Result<Vc<Self>> {
+        Ok(Self {
+            config: self.config.with_bundle_analysis().to_resolved().await?,
+            ..self.clone()
+        }
+        .cell())
+    }
+
+    #[turbo_tasks::function]
     pub(super) fn mode(&self) -> Vc<Mode> {
         self.config.mode()
     }
@@ -1333,7 +1343,6 @@ impl Project {
     pub async fn client_chunking_context(self: Vc<Self>) -> Result<Vc<Box<dyn ChunkingContext>>> {
         let mode = self.mode();
         let config = self.config();
-        let emitted_source_map_type = (*config.source_maps().await?).then_some(SourceMapType::Full);
         Ok(get_client_chunking_context(ClientChunkingContextOptions {
             mode,
             root_path: self.project_path().owned().await?,
@@ -1346,7 +1355,8 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            emitted_source_map_type: Vc::cell(emitted_source_map_type),
+            emitted_source_map_type: config.emitted_source_map_type(),
+            source_map_generation_options: config.source_map_generation_options(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),
@@ -1365,7 +1375,6 @@ impl Project {
     ) -> Result<Vc<NodeJsChunkingContext>> {
         let mode = self.mode();
         let config = self.config();
-        let emitted_source_map_type = (*config.source_maps().await?).then_some(SourceMapType::Full);
         let server_root = self.dist_root().owned().await?;
         Ok(get_server_chunking_context(ServerChunkingContextOptions {
             mode,
@@ -1379,7 +1388,8 @@ impl Project {
             unused_references: self.unused_references(),
             minify: config.minify(mode),
             compress: self.compress(),
-            emitted_source_map_type: Vc::cell(emitted_source_map_type),
+            emitted_source_map_type: config.emitted_source_map_type(),
+            source_map_generation_options: config.source_map_generation_options(),
             no_mangling: self.no_mangling(),
             scope_hoisting: config.concatenate_modules(mode),
             nested_async_chunking: config.nested_async_chunking(mode),

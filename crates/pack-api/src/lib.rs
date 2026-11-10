@@ -2,6 +2,7 @@
 #![feature(arbitrary_self_types_pointers)]
 #![allow(unexpected_cfgs)]
 
+pub mod analyze;
 pub mod app;
 pub mod endpoint;
 pub mod entrypoint;

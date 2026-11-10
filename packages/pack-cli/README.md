@@ -61,6 +61,22 @@ Build your project for production:
 utx up build
 ```
 
+### Native Bundle Analyzer
+
+```bash
+utx up analyze                              # Analyze and serve on localhost:4000
+utx up analyze --port 4100
+utx up analyze --output                     # Export .utoo/analyze without serving
+utx up analyze --output --output-dir reports/bundle
+```
+
+Supports browser applications and MPA. The report provides entry selection,
+module sizes, a treemap, search and import chains. It uses production settings,
+writes to a separate report directory, and leaves existing bundles and
+`stats.json` intact. Existing `ANALYZE=true up build` continues to use the
+Webpack-compatible analyzer. `--project`, `--root`, `--webpack` and
+`--no-tracing` work as for `up build`.
+
 ### Webpack Compatibility Mode
 
 If you have an existing `webpack.config.js`, you can run `@utoo/pack` in compatibility mode:
@@ -75,6 +91,7 @@ utx up dev --webpack
 
 - `utx up dev`: Start development server.
 - `utx up build`: Build for production.
+- `utx up analyze`: Analyze browser bundles and show a static report.
 - `utx up help`: Show help for all commands.
 
 You can see [examples/*](../../examples/) for more usage scenarios.
