@@ -125,6 +125,33 @@ export type TurbopackRuleConfigCollection =
 
 export interface ModuleOptions {
   rules?: Record<string, TurbopackRuleConfigCollection>;
+  /** Replace exact source modules in browser builds before parsing their implementation. */
+  references?: ModuleReferenceConfig[];
+}
+
+export type ModuleReferenceData =
+  | null
+  | boolean
+  | number
+  | string
+  | ModuleReferenceData[]
+  | { [key: string]: ModuleReferenceData };
+
+export interface ModuleReferenceConfig {
+  /** Exact project-relative path, or absolute path within the project. */
+  resource: string;
+  references: {
+    /** Local identity, shared by every export that refers to this id. */
+    id: string;
+    factory: {
+      /** Module specifier resolved from the replaced resource's directory. */
+      module: string;
+      export: string;
+    };
+    /** Browser-visible JSON passed unchanged to the factory. */
+    data: ModuleReferenceData;
+  }[];
+  exports: { name: string; reference: string }[];
 }
 
 /**

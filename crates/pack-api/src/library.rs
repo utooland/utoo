@@ -143,6 +143,15 @@ impl LibraryEndpoint {
         Ok(ModuleAssetContext::new(
             // FIXME:
             TransitionOptions {
+                transition_rules: if matches!(platform, Platform::Web) {
+                    pack_core::module_reference::rules(
+                        project.project_path().owned().await?,
+                        project.config(),
+                    )
+                    .await?
+                } else {
+                    Vec::new()
+                },
                 ..Default::default()
             }
             .cell(),

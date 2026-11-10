@@ -13,6 +13,12 @@ export declare function endpointServerChangedSubscribe(endpoint: { __napiType: "
 
 export declare function endpointWriteToDisk(endpoint: { __napiType: "Endpoint" }): Promise<TurbopackResult<NapiWrittenEndpoint>>
 
+/**
+ * Capability of the loaded native binary, used by framework integrations to
+ * reject unsupported module replacement instead of compiling original sources.
+ */
+export declare function getModuleReferencesVersion(): number
+
 export interface HmrIdentifiers {
   identifiers: Array<string>
 }

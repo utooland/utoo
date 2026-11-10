@@ -703,6 +703,7 @@ module.exports = nativeBinding
 module.exports.endpointClientChangedSubscribe = nativeBinding.endpointClientChangedSubscribe
 module.exports.endpointServerChangedSubscribe = nativeBinding.endpointServerChangedSubscribe
 module.exports.endpointWriteToDisk = nativeBinding.endpointWriteToDisk
+module.exports.getModuleReferencesVersion = nativeBinding.getModuleReferencesVersion
 module.exports.initCustomTraceSubscriber = nativeBinding.initCustomTraceSubscriber
 module.exports.lockfileTryAcquire = nativeBinding.lockfileTryAcquire
 module.exports.lockfileTryAcquireSync = nativeBinding.lockfileTryAcquireSync

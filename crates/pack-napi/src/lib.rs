@@ -40,6 +40,13 @@ pub mod pack_api;
 pub mod util;
 pub mod worker_pool;
 
+/// Capability of the loaded native binary, used by framework integrations to
+/// reject unsupported module replacement instead of compiling original sources.
+#[napi]
+pub fn get_module_references_version() -> u32 {
+    1
+}
+
 #[cfg(not(any(feature = "__internal_dhat-heap", feature = "__internal_dhat-ad-hoc")))]
 #[global_allocator]
 static ALLOC: turbo_tasks_malloc::TurboMalloc = turbo_tasks_malloc::TurboMalloc;

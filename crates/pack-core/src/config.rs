@@ -1090,9 +1090,51 @@ pub struct ExperimentalConfig {
 #[derive(Clone, Debug, Deserialize, OperationValue)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleConfig {
+    #[serde(default)]
     #[bincode(with = "turbo_bincode::indexmap")]
     pub rules: FxIndexMap<RcStr, RuleConfigCollection>,
+    #[serde(default)]
+    pub references: Vec<ModuleReferenceConfig>,
 }
+
+/// Browser-only replacement of a source module with framework-provided references.
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModuleReferenceConfig {
+    pub resource: RcStr,
+    pub references: Vec<ModuleReference>,
+    pub exports: Vec<ModuleReferenceExport>,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleReference {
+    pub id: RcStr,
+    pub factory: ModuleReferenceFactory,
+    #[bincode(with = "turbo_bincode::serde_self_describing")]
+    pub data: JsonValue,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleReferenceFactory {
+    pub module: RcStr,
+    pub export: RcStr,
+}
+
+#[turbo_tasks::value]
+#[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleReferenceExport {
+    pub name: RcStr,
+    pub reference: RcStr,
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct ModuleReferences(Vec<ModuleReferenceConfig>);
 
 #[turbo_tasks::value]
 #[derive(Clone, Debug, Serialize, Deserialize, OperationValue)]
@@ -1658,6 +1700,16 @@ impl Config {
     #[turbo_tasks::function]
     pub fn entries(&self) -> Vc<Entries> {
         Vc::cell(self.entry.clone())
+    }
+
+    #[turbo_tasks::function]
+    pub fn module_references(&self) -> Vc<ModuleReferences> {
+        Vc::cell(
+            self.module
+                .as_ref()
+                .map(|module| module.references.clone())
+                .unwrap_or_default(),
+        )
     }
 
     #[turbo_tasks::function]
