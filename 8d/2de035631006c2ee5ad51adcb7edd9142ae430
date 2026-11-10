@@ -1,0 +1,19 @@
+next.js
+  s_fc70035ec6ca69::t_dda7bd6fdfcd03 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8d2de035631006c2ee5ad51adcb7edd9142ae430",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
