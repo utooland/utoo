@@ -1,0 +1,92 @@
+packages/pack/src/binding.js
+  s_fc70035ec6ca69::t_9844869cb68dfa 726
+packages/pack/src/core/project.ts
+  s_fc70035ec6ca69::t_2f7c7e693fe575 27,213-215
+  s_fc70035ec6ca69::t_3f4512185dfeb5 216-217
+crates/pack-tests/tests/snapshot/module_references/browser/reject-loader.cjs
+  s_fc70035ec6ca69::t_893b96356e50de 1-3
+crates/pack-api/src/library.rs
+  s_fc70035ec6ca69::t_2fef2f756a3128 146-150
+  s_fc70035ec6ca69::t_ee0ca8b7547a57 151-153
+crates/pack-tests/tests/snapshot/module_references/node/input/index.js
+  s_fc70035ec6ca69::t_893b96356e50de 1
+docs/pack-module-references.md
+  s_fc70035ec6ca69::t_2fef2f756a3128 70-71
+  s_fc70035ec6ca69::t_a9edd5ee1eb3ef 1-8,10-14,16-69,72
+  s_fc70035ec6ca69::t_cef9a8c56c5d83 9,15
+crates/pack-core/src/config.rs
+  s_fc70035ec6ca69::t_491df5712c9f9c 1093,1096-1117,1120-1134
+  s_fc70035ec6ca69::t_a4e3bf9910111d 1707-1712
+  s_fc70035ec6ca69::t_237d82883386a4 1713-1714
+  s_fc70035ec6ca69::t_e3eb0280517144 1136-1138,1705-1706
+  s_fc70035ec6ca69::t_92de07af5c515e 1135
+crates/pack-core/src/module_reference.rs
+  s_fc70035ec6ca69::t_a4e3bf9910111d 4-7,23,31-38,42-58,73-84,94-97,100-103,105-126,164-168,237-242,245-250,253-258,263-270
+  s_fc70035ec6ca69::t_3b913444c2286d 13-17,19-22,130,159,169,172-187,189-191,196-206,278-282
+  s_fc70035ec6ca69::t_e3eb0280517144 93,170-171
+  s_fc70035ec6ca69::t_2f7c7e693fe575 142,146
+  s_fc70035ec6ca69::t_2fef2f756a3128 145,147,150,154,188,193-195,207,273-277,283-286
+  s_fc70035ec6ca69::t_97008e4aa0bf48 1-3,8-11,18,24-30,39-41,59-72,85-92,98-99,104,127-129,131-141,148-149,151-153,155-158,160,162-163,192,208-236,243-244,251-252,259-262,271-272,287-288
+  s_fc70035ec6ca69::t_be0278ab96992d 12,143-144,161
+  s_fc70035ec6ca69::t_e73dd48c52ed76 289-290
+packages/pack/src/__test__/moduleReferences.test.ts
+  s_fc70035ec6ca69::t_893b96356e50de 1-28,30,34-36,40-45,49,53-54
+  s_fc70035ec6ca69::t_e3eb0280517144 31-33,37-39,46-48,50-52
+  s_fc70035ec6ca69::t_daab4e5b080220 29
+crates/pack-tests/tests/snapshot/module_references/browser/input/runtime.js
+  s_fc70035ec6ca69::t_893b96356e50de 1-12
+packages/pack/src/core/moduleReferences.ts
+  s_fc70035ec6ca69::t_daab4e5b080220 6
+  s_fc70035ec6ca69::t_2f7c7e693fe575 1-5,7-9
+crates/pack-tests/tests/snapshot/module_references/node/input/greeting.js
+  s_fc70035ec6ca69::t_893b96356e50de 1-5
+crates/pack-tests/tests/snapshot/module_references/node/assert.js
+  s_fc70035ec6ca69::t_893b96356e50de 1-3
+crates/pack-api/src/app.rs
+  s_fc70035ec6ca69::t_2fef2f756a3128 156-160
+  s_fc70035ec6ca69::t_b5ba5de8ad27fa 161-163
+packages/pack-shared/src/config.ts
+  s_fc70035ec6ca69::t_237d82883386a4 128-154
+crates/pack-core/src/lib.rs
+  s_fc70035ec6ca69::t_237d82883386a4 11
+crates/pack-tests/tests/snapshot/module_references/browser/input/index.js
+  s_fc70035ec6ca69::t_893b96356e50de 1-6
+packages/pack/src/binding.d.ts
+  s_fc70035ec6ca69::t_9844869cb68dfa 4-5
+crates/pack-tests/tests/snapshot/module_references/browser/config.json
+  s_fc70035ec6ca69::t_893b96356e50de 1-16
+crates/pack-napi/src/lib.rs
+  s_fc70035ec6ca69::t_2f7c7e693fe575 43-49
+crates/pack-tests/tests/snapshot/module_references/browser/assert.js
+  s_fc70035ec6ca69::t_893b96356e50de 1-16,18-36
+  s_fc70035ec6ca69::t_cbba5bc807c6e1 17
+crates/pack-schema/src/lib.rs
+  s_fc70035ec6ca69::t_ab8f957ac1f93f 988-1023
+crates/pack-tests/tests/snapshot/module_references/node/config.json
+  s_fc70035ec6ca69::t_893b96356e50de 1-15
+crates/pack-tests/tests/snapshot.rs
+  s_fc70035ec6ca69::t_be0278ab96992d 167,169-172
+  s_fc70035ec6ca69::t_3b913444c2286d 164-166,168,177-178
+  s_fc70035ec6ca69::t_3a7c89e1704690 173-176,208,345,543,552,558-564
+  s_fc70035ec6ca69::t_373e08239478cc 565-567
+crates/pack-tests/tests/snapshot/module_references/browser/input/greeting.ts
+  s_fc70035ec6ca69::t_893b96356e50de 1-10
+packages/pack/src/index.ts
+  s_fc70035ec6ca69::t_dd2951b00f3f1c 32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e28e0e19d8755f14af19bb1851ea5bd1c96e5e93",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}

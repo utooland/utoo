@@ -1,0 +1,14 @@
+crates/pack-core/src/module_reference.rs
+  h_05d0a07afcde4c 144-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ddfcb28c7a78b239039596aae9de37941b63ad90",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
