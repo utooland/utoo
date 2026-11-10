@@ -1,0 +1,14 @@
+.github/workflows/pack-ci.yml
+  h_05d0a07afcde4c 79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f3e32f4f9a7b1a860de093099392e75b1243143",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
