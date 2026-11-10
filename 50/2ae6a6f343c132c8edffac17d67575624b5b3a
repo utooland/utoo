@@ -1,0 +1,35 @@
+.github/workflows/clippy.yml
+  s_f5365a637ce9e9::t_1f872887bc9b15 15,23
+.github/workflows/pm-e2e-bench.yml
+  s_f5365a637ce9e9::t_fa31bc8f7d4d51 10,119-120,216-217,248-249,280-281,321,324-325,354,357-358,387,390-391,437,440-441,497
+.github/workflows/pack-ci.yml
+  s_f5365a637ce9e9::t_9206397212803d 18,218
+.github/workflows/pack-perf.yml
+  s_f5365a637ce9e9::t_21a3c69f599889 21
+.github/workflows/pack-ecosystem.yml
+  s_f5365a637ce9e9::t_21a3c69f599889 29-32
+.github/workflows/ci-changes.yml
+  s_f5365a637ce9e9::t_1f872887bc9b15 1,6-7,11,17-18,23-39
+.github/workflows/pm-ci.yml
+  s_f5365a637ce9e9::t_fa31bc8f7d4d51 18,52,105,178,184,197-201,219-226,229,242
+.github/workflows/pack-integration.yml
+  s_f5365a637ce9e9::t_21a3c69f599889 18
+.github/workflows/utooweb-ci.yml
+  s_f5365a637ce9e9::t_1f872887bc9b15 15,23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "502ae6a6f343c132c8edffac17d67575624b5b3a",
+  "prompts": {},
+  "sessions": {
+    "s_f5365a637ce9e9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c3ed-5655-72b0-8477-612bc2c75ccf",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
