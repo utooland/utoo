@@ -40,6 +40,7 @@ function initializeBrowserLogForwarding(options) {
     if (initialized || ("TURBOPACK compile-time value", "object") === "undefined") return;
     initialized = true;
     let level;
+    let stopForwarding;
     let flushScheduled = false;
     const entries = [];
     const flush = ()=>{
@@ -72,51 +73,74 @@ function initializeBrowserLogForwarding(options) {
         entries.push(entry);
         scheduleFlush();
     };
-    const browserConsole = console;
-    for (const method of CONSOLE_METHODS){
-        const original = browserConsole[method].bind(console);
-        browserConsole[method] = (...args)=>{
-            original(...args);
-            if (method === "assert" && args[0]) return;
-            if (isInternalHmrLog(args)) return;
-            const forwardedArgs = method === "assert" ? args.slice(1) : args;
+    const startForwarding = ()=>{
+        const browserConsole = console;
+        const restoreConsole = [];
+        for (const method of CONSOLE_METHODS){
+            const original = browserConsole[method];
+            const wrapped = (...args)=>{
+                original.apply(browserConsole, args);
+                if (method === "assert" && args[0]) return;
+                if (isInternalHmrLog(args)) return;
+                const forwardedArgs = method === "assert" ? args.slice(1) : args;
+                enqueue({
+                    method,
+                    kind: "console",
+                    args: forwardedArgs.slice(0, MAX_ITEMS).map((arg)=>serializeValue(arg)),
+                    stack: captureStack(2)
+                });
+            };
+            browserConsole[method] = wrapped;
+            restoreConsole.push(()=>{
+                if (browserConsole[method] === wrapped) {
+                    browserConsole[method] = original;
+                }
+            });
+        }
+        const onError = (event)=>{
+            const error = event.error instanceof Error ? event.error : undefined;
             enqueue({
-                method,
-                kind: "console",
-                args: forwardedArgs.slice(0, MAX_ITEMS).map((arg)=>serializeValue(arg)),
-                stack: captureStack(2)
+                method: "error",
+                kind: "uncaught-error",
+                args: [
+                    error ? `Uncaught ${error.name}: ${error.message}` : `Uncaught Error: ${event.message}`
+                ],
+                stack: error?.stack
             });
         };
-    }
-    window.addEventListener("error", (event)=>{
-        const error = event.error instanceof Error ? event.error : undefined;
-        enqueue({
-            method: "error",
-            kind: "uncaught-error",
-            args: [
-                error ? `Uncaught ${error.name}: ${error.message}` : `Uncaught Error: ${event.message}`
-            ],
-            stack: error?.stack
-        });
-    });
-    window.addEventListener("unhandledrejection", (event)=>{
-        const reason = event.reason;
-        enqueue({
-            method: "error",
-            kind: "unhandled-rejection",
-            args: [
-                reason instanceof Error ? `Unhandled Promise rejection: ${reason.name}: ${reason.message}` : `Unhandled Promise rejection: ${serializeValue(reason)}`
-            ],
-            stack: reason instanceof Error ? reason.stack : undefined
-        });
-    });
+        const onUnhandledRejection = (event)=>{
+            const reason = event.reason;
+            enqueue({
+                method: "error",
+                kind: "unhandled-rejection",
+                args: [
+                    reason instanceof Error ? `Unhandled Promise rejection: ${reason.name}: ${reason.message}` : `Unhandled Promise rejection: ${serializeValue(reason)}`
+                ],
+                stack: reason instanceof Error ? reason.stack : undefined
+            });
+        };
+        window.addEventListener("error", onError);
+        window.addEventListener("unhandledrejection", onUnhandledRejection);
+        return ()=>{
+            for (const restore of restoreConsole)restore();
+            window.removeEventListener("error", onError);
+            window.removeEventListener("unhandledrejection", onUnhandledRejection);
+        };
+    };
     options.addMessageListener((event)=>{
         if (event.type !== "turbopack-connected" || event.browserToTerminal === undefined) {
             return;
         }
         level = event.browserToTerminal;
-        if (level === false) entries.length = 0;
-        else scheduleFlush();
+        if (level === false) {
+            stopForwarding?.();
+            stopForwarding = undefined;
+            entries.length = 0;
+        } else {
+            // Preserve native console call sites until forwarding is explicitly enabled.
+            stopForwarding ??= startForwarding();
+            scheduleFlush();
+        }
     });
 }
 function shouldForward(level, method) {
