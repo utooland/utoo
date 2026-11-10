@@ -1,0 +1,21 @@
+packages/pack/src/__test__/browserLogs.test.ts
+  s_ffb4fbf47ac349::t_69512ea179a92e 65-73,102,126-258,371,373
+crates/pack-core/js/src/hmr/browser-logs.ts
+  s_ffb4fbf47ac349::t_69512ea179a92e 68,107-138,140-147,151-173,183-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9be98e30b83a890dccc264f480ede3bfb5688285",
+  "prompts": {},
+  "sessions": {
+    "s_ffb4fbf47ac349": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c496-dc43-7ff1-91f2-dfbdb084eabd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
