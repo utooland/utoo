@@ -56,7 +56,16 @@ const collectConsoleMessages = (page: Page) => {
 
 test("builds and rebuilds the utooweb demo and previews dist/index.html", async ({
   page,
+  context,
 }) => {
+  // The fixture lock and demo registry both use npmmirror. Fetch real packages
+  // from npm directly so mirror redirects do not exhaust the CI install timeout.
+  await context.route(/^https:\/\/registry\.npmmirror\.com\//, async (route) => {
+    const url = new URL(route.request().url());
+    url.host = "registry.npmjs.org";
+    await route.continue({ url: url.toString() });
+  });
+
   const consoleMessages = collectConsoleMessages(page);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => {
