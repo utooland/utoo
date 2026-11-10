@@ -76,7 +76,7 @@ jobs:
               export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
               cargo check -p pack-napi --features plugin --target aarch64-unknown-linux-musl &&
-              cargo test -p pack-tests --target aarch64-unknown-linux-musl
+              CARGO_PROFILE_TEST_DEBUG=0 busybox time -v cargo test -p pack-tests --target aarch64-unknown-linux-musl
           # swc_plugin_runner not supported on aarch64 windows now
           # - host: windows-latest
           #   target: aarch64-pc-windows-msvc
