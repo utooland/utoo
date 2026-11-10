@@ -20,7 +20,7 @@ on:
   push:
     branches: ["next", "e2e-pm"]
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened, edited, labeled]
   workflow_dispatch:
     inputs:
       target:

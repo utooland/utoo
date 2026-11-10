@@ -5,7 +5,7 @@ on:
     branches: ["next"]
   pull_request:
     branches: ["next", "zoomdong-sync-turbopack-*", "zoomdong-pack-*-compat"]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
     inputs:
       suite:
