@@ -1,0 +1,16 @@
+{
+  "config": {
+    "entry": [{ "import": "input/index.js", "name": "main", "library": { "name": "ReferenceDemo" } }],
+    "sourceMaps": true,
+    "module": {
+      "rules": { "*.ts": { "loaders": ["./reject-loader.cjs"], "as": "*.js" } },
+      "references": [{
+        "resource": "input/greeting.ts",
+        "references": [{ "id": "greeting", "factory": { "module": "./runtime.js", "export": "createReference" }, "data": { "operation": "greet" } }],
+        "exports": [{ "name": "Greeting", "reference": "greeting" }, { "name": "default", "reference": "greeting" }]
+      }]
+    },
+    "optimization": { "minify": false, "moduleIds": "named" }
+  },
+  "runtimeType": "Production"
+}

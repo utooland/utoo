@@ -29,6 +29,8 @@ export type {
   DevServerReadyContext,
   StartServerOptions,
 } from "./commands/dev";
+/** Version of the native browser module-reference configuration contract. */
+export { moduleReferencesVersion } from "./core/moduleReferences";
 export { defineConfig } from "./defineConfig";
 
 const utoopack = { build, serve, analyze };

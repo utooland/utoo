@@ -8,6 +8,7 @@ pub mod emit;
 pub mod import_map;
 pub mod library;
 pub mod mode;
+pub mod module_reference;
 pub mod node_polyfill;
 pub mod server;
 pub mod server_reference;

@@ -1,0 +1,15 @@
+{
+  "config": {
+    "entry": [{ "import": "input/index.js", "name": "main", "library": { "name": "ReferenceDemo" } }],
+    "target": "node",
+    "module": {
+      "references": [{
+        "resource": "input/greeting.js",
+        "references": [{ "id": "greeting", "factory": { "module": "missing-client-runtime", "export": "createReference" }, "data": { "operation": "greet" } }],
+        "exports": [{ "name": "Greeting", "reference": "greeting" }]
+      }]
+    },
+    "optimization": { "minify": false, "moduleIds": "named" }
+  },
+  "runtimeType": "Production"
+}

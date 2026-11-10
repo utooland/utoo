@@ -723,6 +723,7 @@ module.exports.projectShutdown = nativeBinding.projectShutdown
 module.exports.projectTraceSource = nativeBinding.projectTraceSource
 module.exports.projectUpdate = nativeBinding.projectUpdate
 module.exports.projectUpdateInfoSubscribe = nativeBinding.projectUpdateInfoSubscribe
+module.exports.getModuleReferencesVersion = nativeBinding.getModuleReferencesVersion
 module.exports.projectWriteAllEntrypointsToDisk = nativeBinding.projectWriteAllEntrypointsToDisk
 module.exports.projectWriteAnalyzeData = nativeBinding.projectWriteAnalyzeData
 module.exports.recvTaskMessageInWorker = nativeBinding.recvTaskMessageInWorker

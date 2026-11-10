@@ -1,0 +1,1 @@
+export const SERVER_IMPLEMENTATION_MUST_NOT_REACH_BROWSER = "server only";
