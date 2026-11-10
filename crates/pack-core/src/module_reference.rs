@@ -127,6 +127,27 @@ fn relative_resource(resource: &str, project: Option<&Path>) -> Result<String> {
     Ok(relative)
 }
 
+fn factory_specifier(module: &str, resource: &str, project: Option<&Path>) -> Result<String> {
+    let module_path = Path::new(module);
+    if !module_path.is_absolute() {
+        return Ok(module.to_owned());
+    }
+    let resource_path = project
+        .context("absolute reference factories require a disk filesystem")?
+        .join(resource);
+    let directory = resource_path
+        .parent()
+        .context("module reference resource must identify a file")?;
+    let relative = pathdiff::diff_paths(module_path, directory)
+        .context("reference factory must be on the same filesystem as the resource")?;
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    Ok(if relative.starts_with("./") || relative.starts_with("../") {
+        relative
+    } else {
+        format!("./{relative}")
+    })
+}
+
 pub async fn rules(project: FileSystemPath, config: Vc<Config>) -> Result<Vec<TransitionRule>> {
     let references = config.module_references().await?;
     let disk_project = to_sys_path(project.clone()).await?;
@@ -137,7 +158,14 @@ pub async fn rules(project: FileSystemPath, config: Vc<Config>) -> Result<Vec<Tr
         if !seen.insert(resource.clone()) {
             bail!("duplicate module reference resource: {resource}");
         }
-        let code = generate_reference_module(reference)
+        let mut normalized = reference.clone();
+        for item in &mut normalized.references {
+            // A leading slash in an ECMAScript request means server-relative,
+            // not an absolute OS path. Convert explicit disk paths before emit.
+            item.factory.module =
+                factory_specifier(&item.factory.module, &resource, disk_project.as_deref())?.into();
+        }
+        let code = generate_reference_module(&normalized)
             .with_context(|| format!("invalid module reference for {resource}"))?;
         let path = project.join(&resource)?;
         ensure!(
@@ -286,5 +314,31 @@ mod tests {
         assert!(supported_reference_type(&ReferenceType::EcmaScriptModules(
             EcmaScriptModulesReferenceSubType::Import
         )));
+    }
+
+    #[test]
+    fn absolute_factory_paths_become_module_relative_imports() {
+        assert_eq!(
+            factory_specifier(
+                "/app/runtime/client.js",
+                "src/greeting.ts",
+                Some(Path::new("/app"))
+            )
+            .unwrap(),
+            "../runtime/client.js"
+        );
+        assert_eq!(
+            factory_specifier(
+                "/app/src/runtime.js",
+                "src/greeting.ts",
+                Some(Path::new("/app"))
+            )
+            .unwrap(),
+            "./runtime.js"
+        );
+        assert_eq!(
+            factory_specifier("example-client", "src/greeting.ts", None).unwrap(),
+            "example-client"
+        );
     }
 }
