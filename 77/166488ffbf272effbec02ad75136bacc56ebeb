@@ -1,0 +1,28 @@
+packages/pack/src/__test__/moduleReferencesBuild.test.ts
+  s_fc70035ec6ca69::t_d5d104cfeb3568 16-17
+  s_fc70035ec6ca69::t_bdef2fee206588 15
+packages/pack/src/__test__/moduleReferencesBuildChild.ts
+  s_fc70035ec6ca69::t_0f6d3adc0abe4c 322,324-328,337,455
+  s_fc70035ec6ca69::t_d5d104cfeb3568 15-16,24-26,49-66,89,94,99-144,189,196,200-204,207,268-276,304,383-399,443
+  s_fc70035ec6ca69::t_1856887337f20c 3,6,14,305-321,323,329-336,338,444-454,456
+.github/workflows/pack-integration.yml
+  s_fc70035ec6ca69::t_8b031f59ab1925 92-93
+next.js
+  s_fc70035ec6ca69::t_774dc4f5534cdd 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "77166488ffbf272effbec02ad75136bacc56ebeb",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
