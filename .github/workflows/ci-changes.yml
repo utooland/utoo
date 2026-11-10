@@ -1,0 +1,39 @@
+name: CI change detection
+
+on:
+  workflow_call:
+    outputs:
+      pack:
+        value: ${{ jobs.changes.outputs.pack }}
+      pm:
+        value: ${{ jobs.changes.outputs.pm }}
+      web:
+        value: ${{ jobs.changes.outputs.web }}
+      rust:
+        value: ${{ jobs.changes.outputs.rust }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      pack: ${{ steps.filter.outputs.pack }}
+      pm: ${{ steps.filter.outputs.pm }}
+      web: ${{ steps.filter.outputs.web }}
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PR merge commit plus both parents; push batches fetch their base below.
+          fetch-depth: 2
+          ref: ${{ github.sha }}
+      - name: Test change routing
+        run: node --test .github/scripts/ci-changes.test.mjs
+      - name: Detect affected checks
+        id: filter
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BEFORE_SHA: ${{ github.event.before }}
+        run: node .github/scripts/ci-changes.mjs

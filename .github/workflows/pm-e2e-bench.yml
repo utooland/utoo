@@ -7,7 +7,7 @@ name: utoopm-e2e-bench
 # jobs reuse the uploaded artifact.
 #
 # Triggers (event → consumers):
-#   pull_request / push with `(pm)` in title/msg → e2e jobs
+#   pull_request / push affecting PM inputs → e2e jobs
 #   pull_request labeled `benchmark` → bench-phases (utoo / utoo-npm / bun)
 #   workflow_dispatch with `target` choice → manual one-off runs
 #     (pm-bench-all = full PM shootout vs pnpm/pnpm12/yarn/bun/aube;
@@ -20,7 +20,7 @@ on:
   push:
     branches: ["next", "e2e-pm"]
   pull_request:
-    types: [opened, synchronize, reopened, edited, labeled]
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
     inputs:
       target:
@@ -105,6 +105,9 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+
   # ============================================================
   # BUILD JOBS
   # One per target, runs whenever any downstream consumer needs it.
@@ -113,11 +116,11 @@ jobs:
   # ============================================================
 
   build-linux:
+    needs: changes
     # Linux serves: e2e-linux, bench-phases-linux, pm-bench-all-linux, pm-bench-pcap-linux.
     # Gate is the union of all linux consumers' gates.
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
+      (github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true') ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'benchmark')) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -209,12 +212,12 @@ jobs:
           retention-days: 1
 
   build-mac-arm64:
+    needs: changes
     # Mac arm64 serves: e2e-mac-arm64, bench-phases-mac (manual only),
     # pm-bench-all-mac (manual only). Label-triggered benches now stick
     # to linux, so we no longer build on the `benchmark` label.
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)')) ||
+      (github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.target != 'pm-bench-pcap')
     runs-on: macos-latest
     steps:
@@ -242,11 +245,11 @@ jobs:
           retention-days: 1
 
   build-mac-x64:
+    needs: changes
     # Mac x86_64 serves: e2e-mac-x64 only. Cross-compiled on macos-latest
     # (arm64 host) via `rustup target add x86_64-apple-darwin`.
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+      github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -275,10 +278,10 @@ jobs:
           retention-days: 1
 
   build-windows:
+    needs: changes
     # Windows serves: e2e-windows only.
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+      github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -318,11 +321,10 @@ jobs:
   # ============================================================
 
   e2e-linux:
-    needs: [build-linux]
+    needs: [changes, build-linux]
     name: utoopm-e2e-ubuntu-latest-x86_64-unknown-linux-gnu
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+      github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -351,11 +353,10 @@ jobs:
           if-no-files-found: ignore
 
   e2e-mac-arm64:
-    needs: [build-mac-arm64]
+    needs: [changes, build-mac-arm64]
     name: utoopm-e2e-macos-latest-aarch64-apple-darwin
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+      github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -384,11 +385,10 @@ jobs:
           if-no-files-found: ignore
 
   e2e-mac-x64:
-    needs: [build-mac-x64]
+    needs: [changes, build-mac-x64]
     name: utoopm-e2e-macos-latest-x86_64-apple-darwin
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+      github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -434,11 +434,10 @@ jobs:
           if-no-files-found: ignore
 
   e2e-windows:
-    needs: [build-windows]
+    needs: [changes, build-windows]
     name: utoopm-e2e-windows-latest-x86_64-pc-windows-msvc
     if: >
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
+      github.event_name != 'workflow_dispatch' && needs.changes.outputs.pm == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -494,11 +493,12 @@ jobs:
     name: utoopm-e2e-success
     runs-on: ubuntu-latest
     if: always()
-    needs: [build-linux, build-mac-arm64, build-mac-x64, build-windows, e2e-linux, e2e-mac-arm64, e2e-mac-x64, e2e-windows]
+    needs: [changes, build-linux, build-mac-arm64, build-mac-x64, build-windows, e2e-linux, e2e-mac-arm64, e2e-mac-x64, e2e-windows]
     steps:
       - name: Check success
         run: |
           for result in \
+            "${{ needs.changes.result }}" \
             "${{ needs.build-linux.result }}" \
             "${{ needs.build-mac-arm64.result }}" \
             "${{ needs.build-mac-x64.result }}" \

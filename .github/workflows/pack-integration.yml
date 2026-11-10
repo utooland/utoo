@@ -4,7 +4,7 @@ on:
   push:
     branches: ["next"]
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -14,12 +14,19 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+
   integration:
-    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pack)'))
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.pack == 'true') }}
     name: Pack Integration Test
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check change detection
+        if: needs.changes.result != 'success'
+        run: exit 1
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -70,8 +77,14 @@ jobs:
           toolchain: nightly-2026-11-06
           components: rustfmt, clippy
 
-      # - name: Rust Cache
-      #   uses: swatinem/rust-cache@v2
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          # The performance workflow builds the same native binding and profile.
+          shared-key: pack-napi-release-local-${{ runner.arch }}
+          cache-bin: false
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Integration Test
         run: |

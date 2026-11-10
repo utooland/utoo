@@ -4,7 +4,7 @@ on:
   push:
     branches: ["next"]
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -14,8 +14,12 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+
   test:
-    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pack)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pack)'))
+    needs: changes
+    if: needs.changes.outputs.pack == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -56,30 +60,24 @@ jobs:
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0 -Ctarget-feature=-crt-static' &&
               cargo check -p pack-napi --features plugin --target x86_64-unknown-linux-musl &&
               cargo test -p pack-tests --target x86_64-unknown-linux-musl
-          - host: ubuntu-latest
+          - host: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian-aarch64
+            setup: sudo apt-get update && sudo apt-get install -y build-essential pkg-config clang llvm-dev libclang-dev
             test: |
-              apt-get update && apt-get install -y libc6-dev-arm64-cross libgcc-s1-arm64-cross &&
-              rustup install nightly-2026-11-06 &&
-              rustup default nightly-2026-11-06 &&
-              rustup target add aarch64-unknown-linux-gnu &&
-              export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu &&
               cargo check -p pack-napi --features plugin --target aarch64-unknown-linux-gnu &&
               cargo test -p pack-tests --target aarch64-unknown-linux-gnu
-          - host: ubuntu-latest
+          - host: ubuntu-22.04-arm
             target: aarch64-unknown-linux-musl
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
+            # This official image has an arm64 manifest; the napi-rs Alpine
+            # image used by the x64 job is an x64 cross-compilation image.
+            docker: rust:1.85-alpine3.21@sha256:4333721398de61f53ccbe53b0b855bcc4bb49e55828e8f652d7a8ac33dd0c118
             test: |
               set -ex &&
-              rm /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" >> /etc/apk/repositories &&
-              echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories &&
-              apk update &&
-              apk add --no-cache libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static llvm-dev &&
+              apk add --no-cache build-base git nodejs npm libc6-compat pkgconfig dav1d libdav1d dav1d-dev clang-static clang-dev llvm-dev &&
               rustup install nightly-2026-11-06 &&
               rustup default nightly-2026-11-06 &&
               rustup target add aarch64-unknown-linux-musl &&
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=cc &&
               export RUSTFLAGS='--cfg tokio_unstable -Zshare-generics=y -Zthreads=8 -Csymbol-mangling-version=v0' &&
               cargo check -p pack-napi --features plugin --target aarch64-unknown-linux-musl &&
               cargo test -p pack-tests --target aarch64-unknown-linux-musl
@@ -97,12 +95,14 @@ jobs:
           #     cargo test -p pack-tests --target x86_64-pc-windows-msvc
     name: utoopack-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
+    env:
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
       - name: Init git submodules
         run: git submodule update --init --recursive --depth 1
       - name: Free disk space
-        if: matrix.settings.host == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
@@ -112,9 +112,6 @@ jobs:
           sudo rm -rf /usr/local/share/powershell
           sudo rm -rf /usr/share/miniconda
           sudo docker image prune --all --force
-      - name: Set up QEMU
-        if: matrix.settings.docker && contains(matrix.settings.target, 'aarch64')
-        uses: docker/setup-qemu-action@v3
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
@@ -126,10 +123,30 @@ jobs:
         with:
           toolchain: nightly-2026-11-06
           targets: ${{ matrix.settings.target }}
-      # - name: Cache cargo
-      #   uses: Swatinem/rust-cache@v2
-      #   with:
-      #     shared-key: pack-ci-${{ matrix.settings.target }}
+      - name: Cache cargo
+        if: ${{ !matrix.settings.docker }}
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: true
+        with:
+          shared-key: pack-ci-${{ matrix.settings.target }}
+          cache-bin: false
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      # Container Cargo uses /usr/local/cargo and /build/target rather than
+      # the host toolchain's Cargo home, so cache its mounted paths explicitly.
+      - name: Cache container cargo
+        id: container-cache
+        if: ${{ matrix.settings.docker }}
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: |
+            .cargo-cache/git
+            .cargo/registry
+            target
+            !target/**/incremental
+          key: pack-ci-docker-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.settings.target }}-${{ hashFiles('rust-toolchain.toml', '.cargo/config.toml', 'Cargo.toml', '.github/workflows/pack-ci.yml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            pack-ci-docker-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.settings.target }}-${{ hashFiles('rust-toolchain.toml', '.cargo/config.toml', 'Cargo.toml', '.github/workflows/pack-ci.yml') }}-
       - name: Setup toolchain
         run: ${{ matrix.settings.setup }}
         if: ${{ matrix.settings.setup }}
@@ -162,13 +179,32 @@ jobs:
           EOF
           chmod +x test_script.sh
           docker run --rm \
-            -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db \
-            -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache \
-            -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index \
+            -e CARGO_INCREMENTAL \
+            -v ${{ github.workspace }}/.cargo-cache/git:/usr/local/cargo/git \
+            -v ${{ github.workspace }}/.cargo/registry:/usr/local/cargo/registry \
             -v ${{ github.workspace }}:/build \
             -w /build \
             ${{ matrix.settings.docker }} \
             /bin/sh /build/test_script.sh
+      - name: Normalize container cache permissions
+        if: ${{ always() && matrix.settings.docker }}
+        run: |
+          mkdir -p target .cargo-cache .cargo
+          sudo chown -R "$(id -u):$(id -g)" target .cargo-cache .cargo
+      - name: Save container cargo cache
+        if: >-
+          success() && matrix.settings.docker &&
+          steps.container-cache.outputs.cache-hit != 'true' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: |
+            .cargo-cache/git
+            .cargo/registry
+            target
+            !target/**/incremental
+          key: ${{ steps.container-cache.outputs.cache-primary-key }}
       - name: Test
         run: ${{ matrix.settings.test }}
         if: ${{ !matrix.settings.docker }}
@@ -179,11 +215,12 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - changes
       - test
     steps:
       - name: Check success
         run: |
-          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ]; then
+          if [ "${{ needs.changes.result }}" != "success" ] || [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ]; then
             echo "Tests failed or were cancelled"
             exit 1
           else
