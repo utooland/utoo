@@ -1,0 +1,19 @@
+.github/workflows/pack-ci.yml
+  s_fc70035ec6ca69::t_e2acec4f887cc7 36,38-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "863dd40e13e9a6252e83ebad5f64ea1bb3333c13",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
