@@ -141,11 +141,13 @@ fn factory_specifier(module: &str, resource: &str, project: Option<&Path>) -> Re
     let relative = pathdiff::diff_paths(module_path, directory)
         .context("reference factory must be on the same filesystem as the resource")?;
     let relative = relative.to_string_lossy().replace('\\', "/");
-    Ok(if relative.starts_with("./") || relative.starts_with("../") {
-        relative
-    } else {
-        format!("./{relative}")
-    })
+    Ok(
+        if relative.starts_with("./") || relative.starts_with("../") {
+            relative
+        } else {
+            format!("./{relative}")
+        },
+    )
 }
 
 pub async fn rules(project: FileSystemPath, config: Vc<Config>) -> Result<Vec<TransitionRule>> {
