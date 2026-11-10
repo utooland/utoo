@@ -1,0 +1,27 @@
+.github/workflows/pack-ci.yml
+  s_fc70035ec6ca69::t_05d1919807c69a 7
+.github/workflows/pack-ecosystem.yml
+  s_fc70035ec6ca69::t_aca78e42d49184 8
+.github/workflows/pack-integration.yml
+  s_fc70035ec6ca69::t_bba828574bf73f 7
+.github/workflows/pm-ci.yml
+  s_fc70035ec6ca69::t_ab187a4c3bd450 7
+.github/workflows/pm-e2e-bench.yml
+  s_fc70035ec6ca69::t_3479e811e2fa6a 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cf2e28fdfb311dbd901080a640e4e418917b0855",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
