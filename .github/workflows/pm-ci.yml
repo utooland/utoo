@@ -14,12 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  changes:
-    uses: ./.github/workflows/ci-changes.yml
-
   npm-launcher-package-managers:
-    needs: changes
-    if: needs.changes.outputs.pm == 'true'
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     name: npm-launcher-${{ matrix.host }}
     runs-on: ${{ matrix.host }}
     strategy:
@@ -53,8 +49,7 @@ jobs:
         run: node e2e/npm-launcher-package-managers.mjs
 
   binary-size:
-    needs: changes
-    if: needs.changes.outputs.pm == 'true'
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     name: utoopm-binary-size
     runs-on: ubuntu-latest
     steps:
@@ -107,8 +102,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   test:
-    needs: changes
-    if: needs.changes.outputs.pm == 'true'
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '(pm)')) || (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pm)'))
     strategy:
       fail-fast: false
       matrix:
@@ -181,11 +175,13 @@ jobs:
       
       - name: Setup node
         uses: actions/setup-node@v4
+        if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        if: ${{ !matrix.settings.docker }}
         with:
           toolchain: nightly-2026-11-06
           targets: ${{ matrix.settings.target }}
@@ -197,6 +193,11 @@ jobs:
           shared-key: pm-ci-${{ matrix.settings.target }}-dev
           cache-bin: false
           save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      
+      - name: Setup toolchain
+        run: ${{ matrix.settings.setup }}
+        if: ${{ matrix.settings.setup }}
+        shell: bash
       
       - name: Postinstall OS-detection e2e
         run: sh e2e/postinstall-os-detect.sh
@@ -215,8 +216,17 @@ jobs:
       - name: Setup node x86
         uses: actions/setup-node@v4
       
+      - name: Test in docker
+        uses: addnab/docker-run-action@v3
+        if: ${{ matrix.settings.docker }}
+        with:
+          image: ${{ matrix.settings.docker }}
+          options: "-v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build"
+          run: ${{ matrix.settings.test }}
+      
       - name: Test
         run: ${{ matrix.settings.test }}
+        if: ${{ !matrix.settings.docker }}
         shell: bash
 
   success:
@@ -224,14 +234,12 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - changes
-      - binary-size
       - npm-launcher-package-managers
       - test
     steps:
       - name: Check success
         run: |
-          if [ "${{ needs.changes.result }}" != "success" ] || [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]; then
+          if [ "${{ needs.test.result }}" == "failure" ] || [ "${{ needs.test.result }}" == "cancelled" ] || [ "${{ needs.npm-launcher-package-managers.result }}" == "failure" ] || [ "${{ needs.npm-launcher-package-managers.result }}" == "cancelled" ]; then
             echo "Tests failed or were cancelled"
             exit 1
           else

@@ -25,12 +25,11 @@ permissions:
   contents: read
 
 jobs:
-  changes:
-    uses: ./.github/workflows/ci-changes.yml
-
   ecosystem:
-    needs: changes
-    if: needs.changes.outputs.pack == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(pack)')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '(pack)'))
     uses: utooland/utoo-ecosystem-ci/.github/workflows/ecosystem-ci.yml@e95e8271c1683b0c26329a40ed1ebcd69887b6c5
     with:
       candidate_mode: source
