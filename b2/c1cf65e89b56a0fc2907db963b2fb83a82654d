@@ -1,0 +1,40 @@
+crates/pack-core/js/src/hmr/browser-logs.ts
+  s_ffb4fbf47ac349::t_e80b39bedfe9ed 1,30,68-69,76,88,98,172-175,183
+crates/pack-core/js/src/hmr/client.ts
+  s_ffb4fbf47ac349::t_e80b39bedfe9ed 3-6,11,13-17
+crates/pack-core/src/client/context.rs
+  s_ffb4fbf47ac349::t_14b83c4e1d212d 211-223,225
+crates/pack-core/src/config.rs
+  s_ffb4fbf47ac349::t_3d8cb1f1cf0f97 143
+  s_ffb4fbf47ac349::t_14b83c4e1d212d 144-188,2207-2237,2239,2245,2253-2255
+  s_fc70035ec6ca69::t_f90d3bec388854 2238,2240-2244,2246-2252,2256
+crates/pack-tests/tests/snapshot/webpack-loaders/internal-runtime/config.json
+  s_ffb4fbf47ac349::t_14b83c4e1d212d 12-13
+packages/pack/src/__test__/browserLogs.test.ts
+  s_ffb4fbf47ac349::t_96122920e087b7 155-160,447
+  s_ffb4fbf47ac349::t_681b9f6af95689 44-47,94,154,181-232,433-434,440-443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b2c1cf65e89b56a0fc2907db963b2fb83a82654d",
+  "prompts": {},
+  "sessions": {
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_ffb4fbf47ac349": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c496-dc43-7ff1-91f2-dfbdb084eabd",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
