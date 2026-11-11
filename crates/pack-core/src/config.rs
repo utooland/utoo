@@ -140,6 +140,52 @@ pub struct DevServer {
     pub dynamic_hmr_chunk_lists: Option<bool>,
     /// Compile client dynamic import targets when their manifest chunk is first requested.
     pub lazy_dynamic_imports: Option<bool>,
+    /// Forward browser console output to the development terminal.
+    pub browser_to_terminal: Option<BrowserToTerminal>,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(untagged)]
+pub enum BrowserToTerminal {
+    Enabled(bool),
+    Level(BrowserToTerminalLevel),
+}
+
+impl Default for BrowserToTerminal {
+    fn default() -> Self {
+        Self::Enabled(false)
+    }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserToTerminalLevel {
+    Error,
+    Warn,
 }
 
 /// Provider configuration item - can be a module name string or [module, export] tuple.
@@ -2209,6 +2255,56 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_to_terminal_preserves_supported_levels() {
+        for (value, expected) in [
+            (serde_json::json!(false), BrowserToTerminal::Enabled(false)),
+            (serde_json::json!(true), BrowserToTerminal::Enabled(true)),
+            (
+                serde_json::json!("error"),
+                BrowserToTerminal::Level(BrowserToTerminalLevel::Error),
+            ),
+            (
+                serde_json::json!("warn"),
+                BrowserToTerminal::Level(BrowserToTerminalLevel::Warn),
+            ),
+        ] {
+            let dev_server: DevServer = serde_json::from_value(serde_json::json!({
+                "browserToTerminal": value
+            }))
+            .unwrap();
+            assert_eq!(dev_server.browser_to_terminal, Some(expected));
+            assert_eq!(serde_json::to_value(expected).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn browser_to_terminal_defaults_to_disabled() {
+        let dev_server: DevServer = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(
+            dev_server.browser_to_terminal.unwrap_or_default(),
+            BrowserToTerminal::Enabled(false)
+        );
+    }
+
+    #[test]
+    fn browser_to_terminal_rejects_invalid_levels() {
+        for value in [
+            serde_json::json!("info"),
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::json!({}),
+            serde_json::json!([]),
+        ] {
+            assert!(
+                serde_json::from_value::<DevServer>(serde_json::json!({
+                    "browserToTerminal": value
+                }))
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn postcss_implementation_accepts_absolute_paths() {

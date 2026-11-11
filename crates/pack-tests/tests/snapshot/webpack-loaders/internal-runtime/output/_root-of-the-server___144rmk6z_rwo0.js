@@ -4,7 +4,7 @@
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/hmr/client.ts [client] (ecmascript)");
 ;
-(0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initHMR"])("TURBOPACK_CHUNK_UPDATE_LISTENERS");
+(0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initHMR"])("TURBOPACK_CHUNK_UPDATE_LISTENERS", "error");
 }),"[@utoo/pack-runtime]/hmr/browser-logs.ts [client] (ecmascript)",((__turbopack_context__) => {
 
 
@@ -39,12 +39,14 @@ let initialized = false;
 function initializeBrowserLogForwarding(options) {
     if (initialized || ("TURBOPACK compile-time value", "object") === "undefined") return;
     initialized = true;
-    let level;
+    let level = options.browserToTerminal ?? false;
+    let connected = false;
+    let stopForwarding;
     let flushScheduled = false;
     const entries = [];
     const flush = ()=>{
         flushScheduled = false;
-        if (level === undefined || level === false || entries.length === 0) return;
+        if (!connected || level === false || entries.length === 0) return;
         const forwarded = entries.filter((entry)=>shouldForward(level, entry.method));
         entries.length = 0;
         if (forwarded.length === 0) return;
@@ -56,7 +58,7 @@ function initializeBrowserLogForwarding(options) {
         }
     };
     const scheduleFlush = ()=>{
-        if (flushScheduled || level === undefined || level === false) return;
+        if (flushScheduled || !connected || level === false) return;
         flushScheduled = true;
         if (typeof requestAnimationFrame === "function") {
             requestAnimationFrame(flush);
@@ -65,58 +67,82 @@ function initializeBrowserLogForwarding(options) {
         }
     };
     const enqueue = (entry)=>{
-        if (level === false || level !== undefined && !shouldForward(level, entry.method)) {
-            return;
-        }
+        if (!shouldForward(level, entry.method)) return;
         if (entries.length === MAX_QUEUED_ENTRIES) entries.shift();
         entries.push(entry);
         scheduleFlush();
     };
-    const browserConsole = console;
-    for (const method of CONSOLE_METHODS){
-        const original = browserConsole[method].bind(console);
-        browserConsole[method] = (...args)=>{
-            original(...args);
-            if (method === "assert" && args[0]) return;
-            if (isInternalHmrLog(args)) return;
-            const forwardedArgs = method === "assert" ? args.slice(1) : args;
+    const startForwarding = ()=>{
+        const browserConsole = console;
+        const restoreConsole = [];
+        for (const method of CONSOLE_METHODS){
+            const original = browserConsole[method];
+            const wrapped = (...args)=>{
+                original.apply(browserConsole, args);
+                if (method === "assert" && args[0]) return;
+                if (isInternalHmrLog(args)) return;
+                const forwardedArgs = method === "assert" ? args.slice(1) : args;
+                enqueue({
+                    method,
+                    kind: "console",
+                    args: forwardedArgs.slice(0, MAX_ITEMS).map((arg)=>serializeValue(arg)),
+                    stack: captureStack(2)
+                });
+            };
+            browserConsole[method] = wrapped;
+            restoreConsole.push(()=>{
+                if (browserConsole[method] === wrapped) {
+                    browserConsole[method] = original;
+                }
+            });
+        }
+        const onError = (event)=>{
+            const error = event.error instanceof Error ? event.error : undefined;
             enqueue({
-                method,
-                kind: "console",
-                args: forwardedArgs.slice(0, MAX_ITEMS).map((arg)=>serializeValue(arg)),
-                stack: captureStack(2)
+                method: "error",
+                kind: "uncaught-error",
+                args: [
+                    error ? `Uncaught ${error.name}: ${error.message}` : `Uncaught Error: ${event.message}`
+                ],
+                stack: error?.stack
             });
         };
-    }
-    window.addEventListener("error", (event)=>{
-        const error = event.error instanceof Error ? event.error : undefined;
-        enqueue({
-            method: "error",
-            kind: "uncaught-error",
-            args: [
-                error ? `Uncaught ${error.name}: ${error.message}` : `Uncaught Error: ${event.message}`
-            ],
-            stack: error?.stack
-        });
-    });
-    window.addEventListener("unhandledrejection", (event)=>{
-        const reason = event.reason;
-        enqueue({
-            method: "error",
-            kind: "unhandled-rejection",
-            args: [
-                reason instanceof Error ? `Unhandled Promise rejection: ${reason.name}: ${reason.message}` : `Unhandled Promise rejection: ${serializeValue(reason)}`
-            ],
-            stack: reason instanceof Error ? reason.stack : undefined
-        });
-    });
+        const onUnhandledRejection = (event)=>{
+            const reason = event.reason;
+            enqueue({
+                method: "error",
+                kind: "unhandled-rejection",
+                args: [
+                    reason instanceof Error ? `Unhandled Promise rejection: ${reason.name}: ${reason.message}` : `Unhandled Promise rejection: ${serializeValue(reason)}`
+                ],
+                stack: reason instanceof Error ? reason.stack : undefined
+            });
+        };
+        window.addEventListener("error", onError);
+        window.addEventListener("unhandledrejection", onUnhandledRejection);
+        return ()=>{
+            for (const restore of restoreConsole)restore();
+            window.removeEventListener("error", onError);
+            window.removeEventListener("unhandledrejection", onUnhandledRejection);
+        };
+    };
+    // The bootstrap supplies the configuration before the application starts.
+    // Capture enabled startup diagnostics while waiting for the HMR connection.
+    if (level !== false) stopForwarding = startForwarding();
     options.addMessageListener((event)=>{
         if (event.type !== "turbopack-connected" || event.browserToTerminal === undefined) {
             return;
         }
+        connected = true;
         level = event.browserToTerminal;
-        if (level === false) entries.length = 0;
-        else scheduleFlush();
+        if (level === false) {
+            stopForwarding?.();
+            stopForwarding = undefined;
+            entries.length = 0;
+        } else {
+            stopForwarding ??= startForwarding();
+            scheduleFlush();
+        }
     });
 }
 function shouldForward(level, method) {
@@ -190,16 +216,17 @@ var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$web
 ;
 ;
 ;
-function initHMR(chunkUpdateListenersGlobal = "TURBOPACK_CHUNK_UPDATE_LISTENERS") {
+function initHMR(chunkUpdateListenersGlobal = "TURBOPACK_CHUNK_UPDATE_LISTENERS", browserToTerminal = false) {
+    (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$browser$2d$logs$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initializeBrowserLogForwarding"])({
+        browserToTerminal,
+        addMessageListener: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["addMessageListener"],
+        sendMessage: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["sendMessage"]
+    });
     (0, __TURBOPACK__imported__module__$5b$turbopack$5d2f$browser$2f$dev$2f$hmr$2d$client$2f$hmr$2d$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["connect"])({
         addMessageListener: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["addMessageListener"],
         sendMessage: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["sendMessage"],
         onUpdateError: console.error,
         chunkUpdateListenersGlobal
-    });
-    (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$browser$2d$logs$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initializeBrowserLogForwarding"])({
-        addMessageListener: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["addMessageListener"],
-        sendMessage: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["sendMessage"]
     });
     (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["connectHMR"])({
         path: "/turbopack-hmr"

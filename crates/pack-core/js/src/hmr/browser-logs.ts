@@ -1,4 +1,4 @@
-type BrowserToTerminal = boolean | "error" | "warn";
+export type BrowserToTerminal = boolean | "error" | "warn";
 type BrowserLogMethod =
   | "assert"
   | "debug"
@@ -27,6 +27,7 @@ interface BrowserLogsMessage {
 }
 
 interface BrowserLogForwardingOptions {
+  browserToTerminal?: BrowserToTerminal;
   addMessageListener(
     callback: (event: {
       type: string;
@@ -64,13 +65,15 @@ export function initializeBrowserLogForwarding(
   if (initialized || typeof window === "undefined") return;
   initialized = true;
 
-  let level: BrowserToTerminal | undefined;
+  let level: BrowserToTerminal = options.browserToTerminal ?? false;
+  let connected = false;
+  let stopForwarding: (() => void) | undefined;
   let flushScheduled = false;
   const entries: BrowserLogEntry[] = [];
 
   const flush = () => {
     flushScheduled = false;
-    if (level === undefined || level === false || entries.length === 0) return;
+    if (!connected || level === false || entries.length === 0) return;
     const forwarded = entries.filter((entry) =>
       shouldForward(level, entry.method),
     );
@@ -82,7 +85,7 @@ export function initializeBrowserLogForwarding(
   };
 
   const scheduleFlush = () => {
-    if (flushScheduled || level === undefined || level === false) return;
+    if (flushScheduled || !connected || level === false) return;
     flushScheduled = true;
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(flush);
@@ -92,66 +95,83 @@ export function initializeBrowserLogForwarding(
   };
 
   const enqueue = (entry: BrowserLogEntry) => {
-    if (
-      level === false ||
-      (level !== undefined && !shouldForward(level, entry.method))
-    ) {
-      return;
-    }
+    if (!shouldForward(level, entry.method)) return;
     if (entries.length === MAX_QUEUED_ENTRIES) entries.shift();
     entries.push(entry);
     scheduleFlush();
   };
 
-  const browserConsole = console as unknown as Record<
-    BrowserLogMethod,
-    (...args: unknown[]) => void
-  >;
-  for (const method of CONSOLE_METHODS) {
-    const original = browserConsole[method].bind(console);
-    browserConsole[method] = (...args: unknown[]) => {
-      original(...args);
-      if (method === "assert" && args[0]) return;
-      if (isInternalHmrLog(args)) return;
-      const forwardedArgs = method === "assert" ? args.slice(1) : args;
+  const startForwarding = () => {
+    const browserConsole = console as unknown as Record<
+      BrowserLogMethod,
+      (...args: unknown[]) => void
+    >;
+    const restoreConsole: Array<() => void> = [];
+    for (const method of CONSOLE_METHODS) {
+      const original = browserConsole[method];
+      const wrapped = (...args: unknown[]) => {
+        original.apply(browserConsole, args);
+        if (method === "assert" && args[0]) return;
+        if (isInternalHmrLog(args)) return;
+        const forwardedArgs = method === "assert" ? args.slice(1) : args;
+        enqueue({
+          method,
+          kind: "console",
+          args: forwardedArgs
+            .slice(0, MAX_ITEMS)
+            .map((arg) => serializeValue(arg)),
+          stack: captureStack(2),
+        });
+      };
+      browserConsole[method] = wrapped;
+      restoreConsole.push(() => {
+        if (browserConsole[method] === wrapped) {
+          browserConsole[method] = original;
+        }
+      });
+    }
+
+    const onError = (event: ErrorEvent) => {
+      const error = event.error instanceof Error ? event.error : undefined;
       enqueue({
-        method,
-        kind: "console",
-        args: forwardedArgs
-          .slice(0, MAX_ITEMS)
-          .map((arg) => serializeValue(arg)),
-        stack: captureStack(2),
+        method: "error",
+        kind: "uncaught-error",
+        args: [
+          error
+            ? `Uncaught ${error.name}: ${error.message}`
+            : `Uncaught Error: ${event.message}`,
+        ],
+        stack: error?.stack,
       });
     };
-  }
 
-  window.addEventListener("error", (event) => {
-    const error = event.error instanceof Error ? event.error : undefined;
-    enqueue({
-      method: "error",
-      kind: "uncaught-error",
-      args: [
-        error
-          ? `Uncaught ${error.name}: ${error.message}`
-          : `Uncaught Error: ${event.message}`,
-      ],
-      stack: error?.stack,
-    });
-  });
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      enqueue({
+        method: "error",
+        kind: "unhandled-rejection",
+        args: [
+          reason instanceof Error
+            ? `Unhandled Promise rejection: ${reason.name}: ${reason.message}`
+            : `Unhandled Promise rejection: ${serializeValue(reason)}`,
+        ],
+        stack: reason instanceof Error ? reason.stack : undefined,
+      });
+    };
 
-  window.addEventListener("unhandledrejection", (event) => {
-    const reason = event.reason;
-    enqueue({
-      method: "error",
-      kind: "unhandled-rejection",
-      args: [
-        reason instanceof Error
-          ? `Unhandled Promise rejection: ${reason.name}: ${reason.message}`
-          : `Unhandled Promise rejection: ${serializeValue(reason)}`,
-      ],
-      stack: reason instanceof Error ? reason.stack : undefined,
-    });
-  });
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+
+    return () => {
+      for (const restore of restoreConsole) restore();
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  };
+
+  // The bootstrap supplies the configuration before the application starts.
+  // Capture enabled startup diagnostics while waiting for the HMR connection.
+  if (level !== false) stopForwarding = startForwarding();
 
   options.addMessageListener((event) => {
     if (
@@ -160,9 +180,16 @@ export function initializeBrowserLogForwarding(
     ) {
       return;
     }
+    connected = true;
     level = event.browserToTerminal;
-    if (level === false) entries.length = 0;
-    else scheduleFlush();
+    if (level === false) {
+      stopForwarding?.();
+      stopForwarding = undefined;
+      entries.length = 0;
+    } else {
+      stopForwarding ??= startForwarding();
+      scheduleFlush();
+    }
   });
 }
 
