@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -9,7 +10,24 @@ use anyhow::{Context, Result};
 /// The lock file is intentionally retained after release. Removing it could
 /// split waiters and new contenders across different filesystem objects.
 pub struct ProcessLock {
-    _file: File,
+    file: File,
+}
+
+impl ProcessLock {
+    /// Windows locks are mandatory for other file handles, including handles
+    /// opened by this process. Read/write metadata through the locking handle.
+    pub(crate) fn read_contents(&mut self) -> std::io::Result<String> {
+        self.file.rewind()?;
+        let mut content = String::new();
+        self.file.read_to_string(&mut content)?;
+        Ok(content)
+    }
+
+    pub(crate) fn write_contents(&mut self, content: &[u8]) -> std::io::Result<()> {
+        self.file.rewind()?;
+        self.file.set_len(0)?;
+        self.file.write_all(content)
+    }
 }
 
 fn open_lock_file(lock_path: &Path) -> Result<File> {
@@ -44,7 +62,7 @@ pub fn lock_exclusive_sync(lock_path: &Path) -> Result<ProcessLock> {
     let file = open_lock_file(lock_path)?;
     file.lock()
         .with_context(|| format!("Failed to acquire lock on {}", lock_path.display()))?;
-    Ok(ProcessLock { _file: file })
+    Ok(ProcessLock { file })
 }
 
 /// Return a stable sibling lock path outside the directory being protected.
@@ -82,6 +100,19 @@ mod tests {
             sibling_lock_path(target, ".lock").unwrap(),
             Path::new("cache/tapable/.2.3.3.lock")
         );
+    }
+
+    #[test]
+    fn lock_owner_can_read_and_replace_provenance() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("package.clone.lock");
+        let mut lock = lock_exclusive_sync(&path).unwrap();
+        lock.write_contents(b"old-long-source").unwrap();
+        assert_eq!(lock.read_contents().unwrap(), "old-long-source");
+        lock.write_contents(b"new").unwrap();
+        assert_eq!(lock.read_contents().unwrap(), "new");
+        lock.write_contents(b"").unwrap();
+        assert_eq!(lock.read_contents().unwrap(), "");
     }
 
     #[test]
