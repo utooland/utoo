@@ -1,0 +1,72 @@
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/app.ts
+  s_be38007f9e3e43::t_8475b2fbc80d05 1
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/detail.server.ts
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-4
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/server.ts
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-4
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/shared-all.css
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-3
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/shared-primary.css
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-3
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/detail.css
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-3
+crates/pack-core/src/library/chunking_context.rs
+  s_be38007f9e3e43::t_f6777c491c674e 552-563,579-584
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/config.json
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-46
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/index.css
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-3
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/assert.js
+  s_be38007f9e3e43::t_de4e1e6dd98d48 50-52
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-49,53-60
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/input/index.server.ts
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-5
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/.snapshotignore
+  s_be38007f9e3e43::t_8475b2fbc80d05 1-2
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css
+  s_be38007f9e3e43::t_8fad789f6cf711 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css.map
+  s_be38007f9e3e43::t_04e08f482a5609 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css
+  s_be38007f9e3e43::t_502c269430c288 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css.map
+  s_be38007f9e3e43::t_2d272f67cdf661 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css
+  s_be38007f9e3e43::t_7b436635c38268 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css.map
+  s_be38007f9e3e43::t_3397744b4b7f69 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css
+  s_be38007f9e3e43::t_9d10d70f8a8e8f 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css.map
+  s_be38007f9e3e43::t_b1bc2e85c06f00 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/detail-server.js
+  s_be38007f9e3e43::t_efd16992f5a7e7 1-22
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/detail-server.js.map
+  s_be38007f9e3e43::t_002f2256cb0137 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/index-server.js
+  s_be38007f9e3e43::t_d0f558ef7b3bc2 1-23
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/index-server.js.map
+  s_be38007f9e3e43::t_ec8609095d4102 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/server.js
+  s_be38007f9e3e43::t_6ad834a38eeff5 1-22
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/server.js.map
+  s_be38007f9e3e43::t_76ccaf34a01827 1-6
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/output/server/stats.json
+  s_be38007f9e3e43::t_153fc48b6ebaa2 1-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cc9e2437f2e3740769622845ec984eeba7d8cf56",
+  "prompts": {},
+  "sessions": {
+    "s_be38007f9e3e43": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9a1-a60d-7230-ad6e-0d296f56c5a4",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
