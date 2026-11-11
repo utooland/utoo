@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries_dev_css/input/index.server.ts"],"sourcesContent":["import \"./shared-all.css\";\nimport \"./shared-primary.css\";\nimport \"./index.css\";\n\nexport const indexEntry = \"index page\";\n"],"names":["indexEntry"],"mappings":";;;;;;;AAIO,MAAMA,aAAa"}}]
+}

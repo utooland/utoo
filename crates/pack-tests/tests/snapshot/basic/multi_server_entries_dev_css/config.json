@@ -1,0 +1,46 @@
+{
+  "runtimeType": "dummy",
+  "config": {
+    "mode": "development",
+    "entry": [
+      {
+        "import": "input/app.ts",
+        "name": "app"
+      }
+    ],
+    "output": {
+      "path": "output/client",
+      "filename": "[name].js",
+      "chunkFilename": "[name].js",
+      "cssFilename": "[name].css",
+      "cssChunkFilename": "[name].css"
+    },
+    "sourceMaps": true,
+    "server": {
+      "entry": [
+        {
+          "name": "server",
+          "import": "input/server.ts"
+        },
+        {
+          "name": "index-server",
+          "import": "input/index.server.ts"
+        },
+        {
+          "name": "detail-server",
+          "import": "input/detail.server.ts"
+        }
+      ],
+      "output": {
+        "path": "output/server",
+        "filename": "[name].js",
+        "chunkFilename": "[name].js"
+      }
+    },
+    "optimization": {
+      "minify": false,
+      "moduleIds": "named"
+    },
+    "stats": true
+  }
+}
