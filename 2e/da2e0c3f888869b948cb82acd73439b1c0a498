@@ -1,0 +1,19 @@
+crates/pack-tests/tests/snapshot/basic/multi_server_entries_dev_css/.snapshotignore
+  s_be38007f9e3e43::t_6133430be63717 3-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2eda2e0c3f888869b948cb82acd73439b1c0a498",
+  "prompts": {},
+  "sessions": {
+    "s_be38007f9e3e43": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9a1-a60d-7230-ad6e-0d296f56c5a4",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
