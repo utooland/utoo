@@ -1,0 +1,6 @@
+# Only the server output is relevant to the CSS filename regression.
+client/
+# Keep runtime wrappers and their source maps out of this CSS regression.
+server/server.js
+server/index-server.js
+server/detail-server.js

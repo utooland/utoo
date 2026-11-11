@@ -1,0 +1,347 @@
+{
+  "entrypoints": {
+    "detail-server": {
+      "name": "detail-server",
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css",
+        "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css",
+        "detail-server.js"
+      ],
+      "assets": [
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css"
+        },
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css"
+        },
+        {
+          "name": "detail-server.js"
+        }
+      ]
+    },
+    "index-server": {
+      "name": "index-server",
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css",
+        "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css",
+        "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css",
+        "index-server.js"
+      ],
+      "assets": [
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css"
+        },
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css"
+        },
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css"
+        },
+        {
+          "name": "index-server.js"
+        }
+      ]
+    },
+    "server": {
+      "name": "server",
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css",
+        "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css",
+        "server.js"
+      ],
+      "assets": [
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css"
+        },
+        {
+          "name": "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css"
+        },
+        {
+          "name": "server.js"
+        }
+      ]
+    }
+  },
+  "chunks": [
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css",
+      "size": 220,
+      "hash": "",
+      "files": [
+        "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css",
+      "size": 216,
+      "hash": "",
+      "files": [
+        "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css",
+      "size": 225,
+      "hash": "",
+      "files": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css",
+      "size": 238,
+      "hash": "",
+      "files": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "detail-server.js",
+      "size": 679,
+      "hash": "",
+      "files": [
+        "detail-server.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "index-server.js",
+      "size": 757,
+      "hash": "",
+      "files": [
+        "index-server.js"
+      ]
+    },
+    {
+      "rendered": false,
+      "initial": false,
+      "entry": false,
+      "recorded": false,
+      "id": "server.js",
+      "size": 655,
+      "hash": "",
+      "files": [
+        "server.js"
+      ]
+    }
+  ],
+  "assets": [
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css",
+      "info": {},
+      "size": 220,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css.map",
+      "info": {},
+      "size": 293,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_detail_0uphw8isdne4c.css.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css",
+      "info": {},
+      "size": 216,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css.map",
+      "info": {},
+      "size": 290,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_index_1yw3jtpqgv-xr.css.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css",
+      "info": {},
+      "size": 225,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css.map",
+      "info": {},
+      "size": 294,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-all_0_qk64o00_cr0.css.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css",
+      "info": {},
+      "size": 238,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css.map",
+      "info": {},
+      "size": 303,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "_project__basic_multi_server_entries_dev_css_input_shared-primary_0dnr1m72eavl4.css.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "detail-server.js",
+      "info": {},
+      "size": 679,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "detail-server.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "detail-server.js.map",
+      "info": {},
+      "size": 395,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "detail-server.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "index-server.js",
+      "info": {},
+      "size": 757,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "index-server.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "index-server.js.map",
+      "info": {},
+      "size": 425,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "index-server.js.map"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "server.js",
+      "info": {},
+      "size": 655,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server.js"
+      ]
+    },
+    {
+      "type": "asset",
+      "name": "server.js.map",
+      "info": {},
+      "size": 399,
+      "emitted": false,
+      "comparedForEmit": false,
+      "cached": false,
+      "chunks": [
+        "server.js.map"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "basic/multi_server_entries_dev_css/input/detail.server.ts",
+      "id": "[project]/basic/multi_server_entries_dev_css/input/detail.server.ts [server] (ecmascript)",
+      "chunks": [
+        "detail-server.js"
+      ],
+      "size": 155
+    },
+    {
+      "name": "basic/multi_server_entries_dev_css/input/index.server.ts",
+      "id": "[project]/basic/multi_server_entries_dev_css/input/index.server.ts [server] (ecmascript)",
+      "chunks": [
+        "index-server.js"
+      ],
+      "size": 153
+    },
+    {
+      "name": "basic/multi_server_entries_dev_css/input/server.ts",
+      "id": "[project]/basic/multi_server_entries_dev_css/input/server.ts [server] (ecmascript)",
+      "chunks": [
+        "server.js"
+      ],
+      "size": 158
+    }
+  ]
+}

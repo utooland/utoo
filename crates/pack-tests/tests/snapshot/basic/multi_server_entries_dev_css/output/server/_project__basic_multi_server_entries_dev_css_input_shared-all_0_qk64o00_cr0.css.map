@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries_dev_css/input/shared-all.css"],"sourcesContent":[".all-servers {\n  color: red;\n}\n"],"names":[],"mappings":"AAAA"}}]
+}

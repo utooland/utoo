@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries_dev_css/input/index.css"],"sourcesContent":[".index-page {\n  color: green;\n}\n"],"names":[],"mappings":"AAAA"}}]
+}

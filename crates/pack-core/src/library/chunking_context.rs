@@ -549,12 +549,18 @@ impl ChunkingContext for LibraryChunkingContext {
         let filename_prefix = filename_template
             .and_then(|filename| filename.rsplit_once("/").map(|(prefix, _)| prefix.into()));
 
-        let output_name = ident_to_output_filename(
-            ident,
-            self.root_path.clone(),
-            extension.clone(),
-            filename_prefix,
-        )
+        let output_name = if self.shared_chunks && extension == ".css" {
+            // Shared server CSS groups may have the same common path but contain different
+            // modules or cascade orders. Preserve the full chunk identity in their names.
+            ident.output_name(self.root_path.clone(), None, extension.clone())
+        } else {
+            ident_to_output_filename(
+                ident,
+                self.root_path.clone(),
+                extension.clone(),
+                filename_prefix,
+            )
+        }
         .owned()
         .await?
         .to_string();
@@ -570,10 +576,12 @@ impl ChunkingContext for LibraryChunkingContext {
                             Some(filename_template) => {
                                 let query = QString::from(ident.await?.query.as_str());
 
-                                let name = query
-                                    .get("name")
-                                    .or_else(|| self.name.as_ref().map(|name| name.as_str()))
-                                    .unwrap_or(output_name.as_str());
+                                let fallback_name = if self.shared_chunks {
+                                    output_name.as_str()
+                                } else {
+                                    self.name.as_deref().unwrap_or(output_name.as_str())
+                                };
+                                let name = query.get("name").unwrap_or(fallback_name);
                                 let name = escape_file_path(name);
 
                                 let mut filename = filename_template.to_string();
