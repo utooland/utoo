@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 8, "column": 0}, "map": {"version":3,"sources":["turbopack:///[project]/basic/multi_server_entries_dev_css/input/server.ts"],"sourcesContent":["import \"./shared-all.css\";\nimport \"./shared-primary.css\";\n\nexport const serverEntry = \"server runtime\";\n"],"names":["serverEntry"],"mappings":";;;;;;AAGO,MAAMA,cAAc"}}]
-}
