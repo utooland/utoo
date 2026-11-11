@@ -52,10 +52,10 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN rustup target add x86_64-pc-windows-msvc
 
-# Use the prebuilt cargo-xwin binary from the version evaluated by Next.js in
-# vercel/next.js#92594. The checksum is published with that release.
-ARG CARGO_XWIN_VERSION=0.21.5
-ARG CARGO_XWIN_SHA256=42928296cfaaede33b85cc1b96c0db424070f32dfbd5c0a2abbd6d0d64f05334
+# Pin cargo-xwin with support for the current Microsoft SDK manifests.
+# Verify the prebuilt binary against its published release digest.
+ARG CARGO_XWIN_VERSION=0.23.1
+ARG CARGO_XWIN_SHA256=c492c6dfb7e5ac0eee586b796e0fc950ba13077e7f0bbb046f445d71790d5360
 RUN curl --retry 5 --retry-all-errors -fsSLo /tmp/cargo-xwin.tar.gz \
       "https://github.com/rust-cross/cargo-xwin/releases/download/v${CARGO_XWIN_VERSION}/cargo-xwin-v${CARGO_XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz" && \
     echo "${CARGO_XWIN_SHA256}  /tmp/cargo-xwin.tar.gz" | sha256sum --check --strict && \
