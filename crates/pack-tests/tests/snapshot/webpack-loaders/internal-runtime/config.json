@@ -9,7 +9,8 @@
     ],
     "mode": "development",
     "devServer": {
-      "hot": true
+      "hot": true,
+      "browserToTerminal": "error"
     },
     "module": {
       "rules": {

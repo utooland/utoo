@@ -1,4 +1,4 @@
-type BrowserToTerminal = boolean | "error" | "warn";
+export type BrowserToTerminal = boolean | "error" | "warn";
 type BrowserLogMethod =
   | "assert"
   | "debug"
@@ -27,6 +27,7 @@ interface BrowserLogsMessage {
 }
 
 interface BrowserLogForwardingOptions {
+  browserToTerminal?: BrowserToTerminal;
   addMessageListener(
     callback: (event: {
       type: string;
@@ -64,14 +65,15 @@ export function initializeBrowserLogForwarding(
   if (initialized || typeof window === "undefined") return;
   initialized = true;
 
-  let level: BrowserToTerminal | undefined;
+  let level: BrowserToTerminal = options.browserToTerminal ?? false;
+  let connected = false;
   let stopForwarding: (() => void) | undefined;
   let flushScheduled = false;
   const entries: BrowserLogEntry[] = [];
 
   const flush = () => {
     flushScheduled = false;
-    if (level === undefined || level === false || entries.length === 0) return;
+    if (!connected || level === false || entries.length === 0) return;
     const forwarded = entries.filter((entry) =>
       shouldForward(level, entry.method),
     );
@@ -83,7 +85,7 @@ export function initializeBrowserLogForwarding(
   };
 
   const scheduleFlush = () => {
-    if (flushScheduled || level === undefined || level === false) return;
+    if (flushScheduled || !connected || level === false) return;
     flushScheduled = true;
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(flush);
@@ -93,12 +95,7 @@ export function initializeBrowserLogForwarding(
   };
 
   const enqueue = (entry: BrowserLogEntry) => {
-    if (
-      level === false ||
-      (level !== undefined && !shouldForward(level, entry.method))
-    ) {
-      return;
-    }
+    if (!shouldForward(level, entry.method)) return;
     if (entries.length === MAX_QUEUED_ENTRIES) entries.shift();
     entries.push(entry);
     scheduleFlush();
@@ -172,6 +169,10 @@ export function initializeBrowserLogForwarding(
     };
   };
 
+  // The bootstrap supplies the configuration before the application starts.
+  // Capture enabled startup diagnostics while waiting for the HMR connection.
+  if (level !== false) stopForwarding = startForwarding();
+
   options.addMessageListener((event) => {
     if (
       event.type !== "turbopack-connected" ||
@@ -179,13 +180,13 @@ export function initializeBrowserLogForwarding(
     ) {
       return;
     }
+    connected = true;
     level = event.browserToTerminal;
     if (level === false) {
       stopForwarding?.();
       stopForwarding = undefined;
       entries.length = 0;
     } else {
-      // Preserve native console call sites until forwarding is explicitly enabled.
       stopForwarding ??= startForwarding();
       scheduleFlush();
     }

@@ -208,9 +208,21 @@ pub async fn get_client_runtime_entries(
                 .as_ref()
                 .map_or("TURBOPACK", RcStr::as_str),
         );
+        let init_hmr_args = serde_json::to_string(&chunk_update_listeners_global)?;
+        #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+        let init_hmr_args = {
+            let browser_to_terminal = config
+                .dev_server()
+                .await?
+                .browser_to_terminal
+                .unwrap_or_default();
+            format!(
+                "{init_hmr_args}, {}",
+                serde_json::to_string(&browser_to_terminal)?
+            )
+        };
         let hmr_bootstrap = format!(
-            "import {{ initHMR }} from {hmr_client_path:?};\n\ninitHMR({});\n",
-            serde_json::to_string(&chunk_update_listeners_global)?,
+            "import {{ initHMR }} from {hmr_client_path:?};\n\ninitHMR({init_hmr_args});\n",
         );
 
         runtime_entries.push(

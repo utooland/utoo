@@ -4,7 +4,7 @@
 __turbopack_context__.s([]);
 var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[@utoo/pack-runtime]/hmr/client.ts [client] (ecmascript)");
 ;
-(0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initHMR"])("TURBOPACK_CHUNK_UPDATE_LISTENERS");
+(0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initHMR"])("TURBOPACK_CHUNK_UPDATE_LISTENERS", "error");
 }),"[@utoo/pack-runtime]/hmr/browser-logs.ts [client] (ecmascript)",((__turbopack_context__) => {
 
 
@@ -39,13 +39,14 @@ let initialized = false;
 function initializeBrowserLogForwarding(options) {
     if (initialized || ("TURBOPACK compile-time value", "object") === "undefined") return;
     initialized = true;
-    let level;
+    let level = options.browserToTerminal ?? false;
+    let connected = false;
     let stopForwarding;
     let flushScheduled = false;
     const entries = [];
     const flush = ()=>{
         flushScheduled = false;
-        if (level === undefined || level === false || entries.length === 0) return;
+        if (!connected || level === false || entries.length === 0) return;
         const forwarded = entries.filter((entry)=>shouldForward(level, entry.method));
         entries.length = 0;
         if (forwarded.length === 0) return;
@@ -57,7 +58,7 @@ function initializeBrowserLogForwarding(options) {
         }
     };
     const scheduleFlush = ()=>{
-        if (flushScheduled || level === undefined || level === false) return;
+        if (flushScheduled || !connected || level === false) return;
         flushScheduled = true;
         if (typeof requestAnimationFrame === "function") {
             requestAnimationFrame(flush);
@@ -66,9 +67,7 @@ function initializeBrowserLogForwarding(options) {
         }
     };
     const enqueue = (entry)=>{
-        if (level === false || level !== undefined && !shouldForward(level, entry.method)) {
-            return;
-        }
+        if (!shouldForward(level, entry.method)) return;
         if (entries.length === MAX_QUEUED_ENTRIES) entries.shift();
         entries.push(entry);
         scheduleFlush();
@@ -127,17 +126,20 @@ function initializeBrowserLogForwarding(options) {
             window.removeEventListener("unhandledrejection", onUnhandledRejection);
         };
     };
+    // The bootstrap supplies the configuration before the application starts.
+    // Capture enabled startup diagnostics while waiting for the HMR connection.
+    if (level !== false) stopForwarding = startForwarding();
     options.addMessageListener((event)=>{
         if (event.type !== "turbopack-connected" || event.browserToTerminal === undefined) {
             return;
         }
+        connected = true;
         level = event.browserToTerminal;
         if (level === false) {
             stopForwarding?.();
             stopForwarding = undefined;
             entries.length = 0;
         } else {
-            // Preserve native console call sites until forwarding is explicitly enabled.
             stopForwarding ??= startForwarding();
             scheduleFlush();
         }
@@ -214,16 +216,17 @@ var __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$web
 ;
 ;
 ;
-function initHMR(chunkUpdateListenersGlobal = "TURBOPACK_CHUNK_UPDATE_LISTENERS") {
+function initHMR(chunkUpdateListenersGlobal = "TURBOPACK_CHUNK_UPDATE_LISTENERS", browserToTerminal = false) {
+    (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$browser$2d$logs$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initializeBrowserLogForwarding"])({
+        browserToTerminal,
+        addMessageListener: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["addMessageListener"],
+        sendMessage: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["sendMessage"]
+    });
     (0, __TURBOPACK__imported__module__$5b$turbopack$5d2f$browser$2f$dev$2f$hmr$2d$client$2f$hmr$2d$client$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["connect"])({
         addMessageListener: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["addMessageListener"],
         sendMessage: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["sendMessage"],
         onUpdateError: console.error,
         chunkUpdateListenersGlobal
-    });
-    (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$browser$2d$logs$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["initializeBrowserLogForwarding"])({
-        addMessageListener: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["addMessageListener"],
-        sendMessage: __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["sendMessage"]
     });
     (0, __TURBOPACK__imported__module__$5b40$utoo$2f$pack$2d$runtime$5d2f$hmr$2f$websocket$2e$ts__$5b$client$5d$__$28$ecmascript$29$__["connectHMR"])({
         path: "/turbopack-hmr"

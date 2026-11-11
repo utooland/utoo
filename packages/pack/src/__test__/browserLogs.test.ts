@@ -41,7 +41,10 @@ type BrowserLogMessage = {
   }>;
 };
 
-async function createBrowserHarness(sendResults: boolean[] = [true]) {
+async function createBrowserHarness(
+  sendResults: boolean[] = [true],
+  browserToTerminal?: BrowserToTerminal,
+) {
   vi.resetModules();
 
   const consoleSpies = Object.fromEntries(
@@ -88,6 +91,7 @@ async function createBrowserHarness(sendResults: boolean[] = [true]) {
     "../../../../crates/pack-core/js/src/hmr/browser-logs"
   );
   initializeBrowserLogForwarding({
+    browserToTerminal,
     addMessageListener(listener) {
       messageListener = listener;
     },
@@ -147,7 +151,13 @@ describe("browser log forwarding", () => {
   it.each([false, undefined] as const)(
     "leaves console and error listeners untouched when forwarding is %s",
     async (level) => {
-      const harness = await createBrowserHarness();
+      const harness = await createBrowserHarness([true], level);
+      for (const method of CONSOLE_METHODS) {
+        expect(harness.consoleSpies[method], method).toBe(
+          harness.originalConsoleSpies[method],
+        );
+      }
+      expect(window.addEventListener).not.toHaveBeenCalled();
       harness.connect(level);
 
       for (const method of CONSOLE_METHODS) {
@@ -165,6 +175,58 @@ describe("browser log forwarding", () => {
       harness.dispatch("unhandledrejection", { reason: "local rejection" });
       expect(harness.pendingAnimationFrames).toBe(0);
       expect(harness.sendMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [true, ["startup error", "startup warning", "startup log"]],
+    ["warn", ["startup error", "startup warning"]],
+    ["error", ["startup error"]],
+  ] as const)(
+    "captures startup logs and bound loggers before the %s handshake",
+    async (level, expectedConsoleArgs) => {
+      const harness = await createBrowserHarness([true], level);
+      const startupError = new TypeError("startup failure");
+      const startupRejection = new Error("startup rejection");
+      const boundError = harness.consoleSpies.error.bind(harness.consoleSpies);
+
+      harness.consoleSpies.error("startup error");
+      harness.consoleSpies.warn("startup warning");
+      harness.consoleSpies.log("startup log");
+      harness.dispatch("error", {
+        error: startupError,
+        message: startupError.message,
+      });
+      harness.dispatch("unhandledrejection", { reason: startupRejection });
+
+      expect(harness.pendingAnimationFrames).toBe(0);
+      expect(harness.sendMessage).not.toHaveBeenCalled();
+
+      harness.connect(level);
+      boundError("bound startup logger");
+      harness.flushAnimationFrame();
+
+      expect(harness.sendMessage).toHaveBeenCalledTimes(1);
+      expect(harness.sentMessages[0].entries).toEqual([
+        ...expectedConsoleArgs.map((arg) =>
+          expect.objectContaining({ kind: "console", args: [arg] }),
+        ),
+        expect.objectContaining({
+          kind: "uncaught-error",
+          args: ["Uncaught TypeError: startup failure"],
+          stack: startupError.stack,
+        }),
+        expect.objectContaining({
+          kind: "unhandled-rejection",
+          args: ["Unhandled Promise rejection: Error: startup rejection"],
+          stack: startupRejection.stack,
+        }),
+        expect.objectContaining({
+          kind: "console",
+          args: ["bound startup logger"],
+        }),
+      ]);
+      expect(harness.originalConsoleSpies.error).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -368,17 +430,21 @@ describe("browser log forwarding", () => {
     }
   });
 
-  it("caps the pending queue after forwarding is enabled", async () => {
-    const harness = await createBrowserHarness();
-    harness.connect("warn");
+  it("queues startup logs and caps the pending queue before the handshake", async () => {
+    const harness = await createBrowserHarness([true], "warn");
 
     for (let index = 0; index < 1_001; index++) {
       harness.consoleSpies.warn(index);
     }
 
+    expect(harness.pendingAnimationFrames).toBe(0);
+    expect(harness.sendMessage).not.toHaveBeenCalled();
+
+    harness.connect("warn");
     expect(harness.pendingAnimationFrames).toBe(1);
     harness.flushAnimationFrame();
 
+    expect(harness.sendMessage).toHaveBeenCalledTimes(1);
     expect(harness.sentMessages[0].entries).toHaveLength(1_000);
     expect(harness.sentMessages[0].entries[0].args).toEqual(["1"]);
     expect(harness.sentMessages[0].entries.at(-1)?.args).toEqual(["1000"]);
