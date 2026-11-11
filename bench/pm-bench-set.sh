@@ -178,7 +178,7 @@ fi
 
 if [ "$COLD" = "--cold" ]; then
   case "$PM" in
-    utoo|utoo-next) rm -rf "$UTOO_CACHE_DIR" ;;
+    utoo|utoo-next) rm -rf "$UTOO_CACHE_DIR" "$UTOO_CACHE_DIR.utoo-v2" ;;
     pnpm) pnpm store prune 2>/dev/null || rm -rf "$PNPM_STORE_DIR" ;;
     yarn) yarn cache clean 2>/dev/null || rm -rf ~/.yarn/cache "$(yarn cache dir 2>/dev/null)" ;;
     bun)  rm -rf "$BUN_INSTALL_DIR"; bun pm cache rm 2>/dev/null || true ;;
@@ -318,6 +318,16 @@ dir_kb() {
   { du -sk "$1" 2>/dev/null || true; } | awk 'END{print $1+0}'
 }
 
+# Include the sibling v2 namespace when measuring a utoo cache.
+cache_kb() {
+  local pm=$1 path=$2
+  local total; total=$(dir_kb "$path")
+  case "$pm" in
+    utoo|utoo-next) total=$(( total + $(dir_kb "$path.utoo-v2") )) ;;
+  esac
+  echo "$total"
+}
+
 # Global cache/store dir for a PM (what --cold purges).
 cache_dir_for() {
   case "$1" in
@@ -364,13 +374,13 @@ validate_and_prime() {
     bash "$PREPARE_SCRIPT" "$project_dir" "$pm" || true
     # Cache size before this install — the delta is the project's footprint in
     # the PM's store (prior project's cold run purged it, so this is ~per-project).
-    local cache_dir cache_before; cache_dir=$(cache_dir_for "$pm"); cache_before=$(dir_kb "$cache_dir")
+    local cache_dir cache_before; cache_dir=$(cache_dir_for "$pm"); cache_before=$(cache_kb "$pm" "$cache_dir")
     if ( cd "$project_dir" && eval "$install_cmd" ) > "$cell_log" 2>&1; then
       echo -e "    ${GREEN}✓ $pm${NC}"
       VALID_PMS+=("$pm")
       # Record node_modules footprint + cache delta for the resources table.
       node_modules_kb "$project_dir" > "$RESULTS_DIR/${project}_${reg_short}_nm_${pm}.txt"
-      local cache_after; cache_after=$(dir_kb "$cache_dir")
+      local cache_after; cache_after=$(cache_kb "$pm" "$cache_dir")
       echo $(( cache_after - cache_before )) > "$RESULTS_DIR/${project}_${reg_short}_cache_${pm}.txt"
     else
       echo -e "    ${RED}✗ $pm install FAILED — cmd: ${NC}$install_cmd"
