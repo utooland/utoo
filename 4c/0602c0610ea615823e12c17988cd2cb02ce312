@@ -1,0 +1,22 @@
+packages/pack/src/commands/dev.ts
+  s_371450ac90b92f::t_ce52805348504a 357
+packages/pack/src/__test__/serveSignals.test.ts
+  s_371450ac90b92f::t_2cd749c0d4dcab 98-99,101-104
+  s_371450ac90b92f::t_ce52805348504a 16,59,105-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4c0602c0610ea615823e12c17988cd2cb02ce312",
+  "prompts": {},
+  "sessions": {
+    "s_371450ac90b92f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf11-36be-7d03-8f9a-adabee6e5b71",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
