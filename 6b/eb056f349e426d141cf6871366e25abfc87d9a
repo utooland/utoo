@@ -1,0 +1,28 @@
+packages/pack/src/__test__/serveSignals.fixture.config.ts
+  s_371450ac90b92f::t_5c57461381b005 1-28,35-48
+  s_371450ac90b92f::t_f68bfe7e01d39b 29-34
+packages/pack/src/commands/dev.ts
+  s_371450ac90b92f::t_e0d6e72407520a 419-423
+packages/pack/src/__test__/serveSignalsChild.ts
+  s_371450ac90b92f::t_5c57461381b005 1-13
+packages/pack/src/__test__/serveSignals.test.ts
+  s_371450ac90b92f::t_f68bfe7e01d39b 68
+  s_371450ac90b92f::t_5c57461381b005 1-18,20-67,69-117
+  s_371450ac90b92f::t_e0d6e72407520a 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6beb056f349e426d141cf6871366e25abfc87d9a",
+  "prompts": {},
+  "sessions": {
+    "s_371450ac90b92f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf11-36be-7d03-8f9a-adabee6e5b71",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
