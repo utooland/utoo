@@ -354,6 +354,7 @@ async function runDev(
     );
   };
   const closeResources = async () => {
+    process.off("SIGINT", onSignal);
     process.off("rejectionHandled", rejectionHandled);
     process.off("uncaughtException", exception);
     process.off("unhandledRejection", exception);
@@ -418,7 +419,6 @@ async function runDev(
     close() {
       // Keep handling forwarded signals until the pending cache flush finishes.
       closePromise ??= closeResources().finally(() => {
-        process.off("SIGINT", onSignal);
         process.off("SIGTERM", onSignal);
       });
       return closePromise;

@@ -13,6 +13,7 @@ const viteNode = path.join(repoRoot, "node_modules/vite-node/vite-node.mjs");
 async function runSignalsFixture(
   secondSignal: "SIGTERM" | "SIGINT",
   failClose = false,
+  firstSignal: "SIGTERM" | "SIGINT" = "SIGTERM",
 ) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "utoo-signals-"));
   try {
@@ -55,7 +56,7 @@ async function runSignalsFixture(
         output += chunk;
       });
       child.on("message", (message) => {
-        if (message === "ready") child.kill("SIGTERM");
+        if (message === "ready") child.kill(firstSignal);
         if (message === "closing") {
           child.kill(secondSignal);
           // Keep the flush pending long enough for the second OS signal to run.
@@ -94,17 +95,21 @@ async function runSignalsFixture(
 }
 
 describe.skipIf(process.platform === "win32")("dev server signals", () => {
-  it.each(["SIGTERM", "SIGINT"] as const)(
-    "finishes shutdown when %s arrives during an existing SIGTERM shutdown",
-    async (secondSignal) => {
-      const result = await runSignalsFixture(secondSignal);
+  it("finishes shutdown after repeated SIGTERM", async () => {
+    const result = await runSignalsFixture("SIGTERM");
 
-      expect(result.signal, result.output).toBeNull();
-      expect(result.code, result.output).toBe(0);
-      expect(result.flushed).toEqual({ closeCalls: 1 });
-    },
-    20_000,
-  );
+    expect(result.signal, result.output).toBeNull();
+    expect(result.code, result.output).toBe(0);
+    expect(result.flushed).toEqual({ closeCalls: 1 });
+  }, 20_000);
+
+  it("preserves forced exit on a second SIGINT", async () => {
+    const result = await runSignalsFixture("SIGINT", false, "SIGINT");
+
+    expect(result.signal, result.output).toBe("SIGINT");
+    expect(result.code, result.output).toBeNull();
+    expect(result.flushed).toBeNull();
+  }, 20_000);
 
   it("preserves a failed shutdown exit after repeated SIGTERM", async () => {
     const result = await runSignalsFixture("SIGTERM", true);
