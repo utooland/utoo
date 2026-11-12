@@ -311,6 +311,9 @@ impl InlineCssModuleType {
                 follow_reexports: module_options_context.follow_reexports,
                 module_fragments_enabled: module_options_context.module_fragments_enabled,
                 mangle_export_names: module_options_context.ecmascript.mangle_export_names,
+                source_map_generation_options: module_options_context
+                    .ecmascript
+                    .source_map_generation_options,
                 ..Default::default()
             }
             .resolved_cell(),

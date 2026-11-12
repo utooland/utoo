@@ -1,0 +1,25 @@
+{
+  "runtimeType": "Production",
+  "config": {
+    "entry": [
+      {
+        "import": "input/index.js",
+        "name": "main",
+        "library": {
+          "name": "InlineCssMinifiedLibrary"
+        }
+      }
+    ],
+    "optimization": {
+      "minify": true,
+      "moduleIds": "named"
+    },
+    "output": {
+      "filename": "main.min.js"
+    },
+    "sourceMaps": false,
+    "styles": {
+      "inlineCss": {}
+    }
+  }
+}
