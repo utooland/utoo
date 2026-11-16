@@ -3401,9 +3401,9 @@ dependencies = [
 
 [[package]]
 name = "link-section"
-version = "0.18.1"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "014e440054ce8170890229eeef5bcda955305e056ec713de40ed366944483f09"
+checksum = "24670b639492630905459a6c7d47f063d33c2d4fcd5362f6e5827c5613976c9f"
 dependencies = [
  "linktime-proc-macro",
 ]

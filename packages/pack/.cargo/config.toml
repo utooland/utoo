@@ -1,0 +1,82 @@
+# Cargo discovers these settings when invoked from this Pack package directory.
+# Match Turbopack's native release flags:
+# https://github.com/vercel/next.js/blob/9225ea753fb03796aabd12034b66137b7be665c9/.cargo/config.toml
+
+[profile.release]
+opt-level     = 3
+codegen-units = 1
+
+# Match Turbopack's size/performance balance for native Pack releases.
+# This package-local config keeps root PM and sibling wasm profiles unchanged.
+[profile.release.package.browserslist-rs]
+opt-level = "s"
+
+[profile.release.package.cranelift-codegen]
+opt-level = "s"
+
+[profile.release.package.handlebars]
+opt-level = "s"
+
+[profile.release.package.lightningcss]
+opt-level = "s"
+
+[profile.release.package.markdown]
+opt-level = "s"
+
+[profile.release.package.mdxjs]
+opt-level = "s"
+
+[profile.release.package.regalloc2]
+opt-level = "s"
+
+[profile.release.package.regex-syntax]
+opt-level = "s"
+
+[profile.release.package.reqwest]
+opt-level = "s"
+
+[profile.release.package.styled_jsx]
+opt-level = "s"
+
+[profile.release.package.swc_css_prefixer]
+opt-level = "s"
+
+[profile.release.package.swc_ecma_compat_bugfixes]
+opt-level = "s"
+
+[profile.release.package.swc_ecma_compat_es2015]
+opt-level = "s"
+
+[profile.release.package.swc_ecma_compat_es2022]
+opt-level = "s"
+
+[profile.release.package.swc_ecma_preset_env]
+opt-level = "s"
+
+[profile.release.package.swc_ecma_transforms_proposal]
+opt-level = "s"
+
+[profile.release.package.swc_plugin_backend_wasmtime]
+opt-level = "s"
+
+[profile.release.package.swc_plugin_runner]
+opt-level = "s"
+
+[profile.release.package.wasmtime]
+opt-level = "s"
+
+[profile.release.package.wasmtime-internal-cranelift]
+opt-level = "s"
+
+[target.'cfg(target_os = "macos")']
+linker    = "rust-lld"
+rustflags = ["-Clink-arg=--icf=all"]
+
+[target.'cfg(true)']
+rustflags = [
+  # Target rustflags replace [build].rustflags, including this required cfg.
+  "--cfg=tokio_unstable",
+  "-Zshare-generics=y",
+  "-Zthreads=8",
+  "-Zunstable-options",
+]
