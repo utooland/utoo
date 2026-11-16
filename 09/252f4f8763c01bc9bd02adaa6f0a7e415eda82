@@ -1,0 +1,27 @@
+.github/workflows/pack-release-m1-check.yml
+  s_5c0cc8abe77780::t_8fa19669dbb848 1-87,90-104,106-152,154-155
+  s_5c0cc8abe77780::t_4beaa8365c8744 88-89,105,153
+scripts/ci/pack-native-override.cjs
+  s_5c0cc8abe77780::t_9753863da247db 1-45
+scripts/ci/m1-release-compare.mjs
+  s_5c0cc8abe77780::t_58550a51fcc7f3 135-139,148-149
+  s_5c0cc8abe77780::t_9753863da247db 1-134,140-147,150-210
+scripts/ci/measure_native_package.py
+  s_5c0cc8abe77780::t_056fdb5e32021b 1-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09252f4f8763c01bc9bd02adaa6f0a7e415eda82",
+  "prompts": {},
+  "sessions": {
+    "s_5c0cc8abe77780": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e24d-7000-74a2-9e76-b97e25d6fd12",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
