@@ -1,0 +1,128 @@
+name: Pack Windows release diagnostic
+
+on:
+  push:
+    branches: [zoomdong/diagnose-pack-windows-release-20261116]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnostic:
+    name: Windows Umi (${{ matrix.variant }})
+    runs-on: windows-2022
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [candidate, baseline]
+    env:
+      DIAGNOSTIC_VARIANT: ${{ matrix.variant }}
+    steps:
+      - name: Checkout diagnostic scripts
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: diagnostics
+          persist-credentials: false
+      - name: Checkout the original ecosystem harness
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: utooland/utoo-ecosystem-ci
+          ref: e95e8271c1683b0c26329a40ed1ebcd69887b6c5
+          path: harness
+          persist-credentials: false
+      - name: Use the same Node version as the failed run
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Reuse the exact failed source candidate
+        if: matrix.variant == 'candidate'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          repository: utooland/utoo
+          run-id: 43823358297
+          name: utoopack-windows-candidate
+          github-token: ${{ github.token }}
+          path: candidate-artifacts
+      - name: Prepare and verify native probe input
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic-results native-input
+          if [[ "$DIAGNOSTIC_VARIANT" == candidate ]]; then
+            node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const metadata = JSON.parse(fs.readFileSync('candidate-artifacts/metadata.json', 'utf8'));
+          assert.equal(metadata.commit, 'e15628f3c19b33838ce323142d683f510c52a4ea');
+          for (const entry of Object.values(metadata.packages)) {
+            const bytes = fs.readFileSync('candidate-artifacts/' + entry.file);
+            assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), entry.sha256);
+          }
+          NODE
+            tar -xzf candidate-artifacts/utoo-pack.tgz -C native-input
+          else
+            npm pack @utoo/pack-win32-x64-msvc@1.6.3 --ignore-scripts --pack-destination native-input
+            tar -xzf native-input/utoo-pack-win32-x64-msvc-1.6.3.tgz -C native-input
+          fi
+      - name: Record direct native load exit status
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const { spawnSync } = require('node:child_process');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const name = process.env.DIAGNOSTIC_VARIANT === 'candidate'
+            ? 'native-input/package/cjs/pack.win32-x64-msvc.node'
+            : 'native-input/package/pack.win32-x64-msvc.node';
+          const native = path.resolve(name);
+          const code = `console.log('BEFORE_NATIVE_REQUIRE'); const binding = require(process.argv[1]); console.log('AFTER_NATIVE_REQUIRE', Object.keys(binding)); if (binding.getModuleReferencesVersion) console.log('MODULE_VERSION', binding.getModuleReferencesVersion());`;
+          const result = spawnSync(process.execPath, ['-e', code, native], {
+            encoding: 'utf8', timeout: 30_000,
+          });
+          const report = {
+            variant: process.env.DIAGNOSTIC_VARIANT, native,
+            sha256: crypto.createHash('sha256').update(fs.readFileSync(native)).digest('hex'),
+            status: result.status, signal: result.signal,
+            windowsCode: typeof result.status === 'number' ? '0x' + (result.status >>> 0).toString(16) : null,
+            error: result.error?.stack, stdout: result.stdout, stderr: result.stderr,
+            node: process.version, architecture: process.arch,
+          };
+          fs.writeFileSync('diagnostic-results/native-load.json', JSON.stringify(report, null, 2) + '\n');
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+      - name: Run the pinned Umi suite with exit diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          preload=$(node -p 'require("node:path").resolve("diagnostics/scripts/ci/windows-release-preload.cjs").replaceAll("\\", "/")')
+          export NODE_OPTIONS="--max-old-space-size=6144 --require=$preload"
+          if [[ "$DIAGNOSTIC_VARIANT" == candidate ]]; then
+            pack_spec="$GITHUB_WORKSPACE/candidate-artifacts/utoo-pack.tgz"
+            shared_spec="$GITHUB_WORKSPACE/candidate-artifacts/utoo-pack-shared.tgz"
+            cli_spec="$GITHUB_WORKSPACE/candidate-artifacts/utoo-pack-cli.tgz"
+          else
+            pack_spec=1.6.3
+            shared_spec=1.6.3
+            cli_spec=1.6.3
+          fi
+          node harness/src/cli.mjs \
+            --suite umi --ref 418cd35b267d3882e1fc8c277ecce9a5a370614a \
+            --pack "$pack_spec" --pack-shared "$shared_spec" --pack-cli "$cli_spec" \
+            --workspace "$GITHUB_WORKSPACE/workspace-$DIAGNOSTIC_VARIANT" \
+            2>&1 | tee "diagnostic-results/umi-$DIAGNOSTIC_VARIANT.log"
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-release-diagnostic-${{ matrix.variant }}
+          path: diagnostic-results/
+          if-no-files-found: warn
+          retention-days: 7
