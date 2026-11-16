@@ -95,7 +95,7 @@
     "build:esm": "rm -rf esm && tsc -p ./tsconfig.json --module esnext --outDir esm && cp src/*.d.ts esm/ && node ../../scripts/add-esm-extensions.cjs && node scripts/inject-esm-dirname.cjs",
     "build:local": "npm run build:binding:local && npx turbo run build --filter=@utoo/pack-shared && npm run build:js && cp src/*.node cjs/ && cp src/*.node esm/",
     "artifacts": "napi artifacts --output-dir ./src --npm-dir npm",
-    "build:binding": "napi build --platform --profile pack-release -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
+    "build:binding": "napi build --platform --release -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
     "build:binding:local": "napi build --platform --profile release-local -p pack-napi --manifest-path ../../Cargo.toml -o src --features plugin --js binding.js --dts binding.d.ts",
     "check:binding-version": "node scripts/check-binding-version.cjs",
     "test": "vitest run",
