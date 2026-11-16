@@ -1,0 +1,30 @@
+scripts/ci/windows-release-preload.cjs
+  s_5c0cc8abe77780::t_747031781c2477 7,15,48-80,97-99
+.github/workflows/pack-windows-release-diagnostic.yml
+  s_5c0cc8abe77780::t_275c88d8def73b 20,101-116,137-149,158-212
+  s_fc70035ec6ca69::t_3ba86f0abf9b78 213-214
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3fb25585dc6b107b29ece87f2ddb3d1c2dc08dda",
+  "prompts": {},
+  "sessions": {
+    "s_5c0cc8abe77780": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e24d-7000-74a2-9e76-b97e25d6fd12",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_fc70035ec6ca69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1be65-7997-7ca3-ac19-d0c16ac7324d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
