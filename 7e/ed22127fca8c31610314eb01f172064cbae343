@@ -1,0 +1,37 @@
+packages/pack/scripts/build-binding.cjs
+  s_5c0cc8abe77780::t_2a7b1433771228 1-33
+  s_5c0cc8abe77780::t_3fbc622576d8be 34-35
+.cargo/pack-release.toml
+  s_5c0cc8abe77780::t_2a7b1433771228 1-14,16
+  s_5c0cc8abe77780::t_76ce5879ad8ff2 15
+packages/pack/package.json
+  s_5c0cc8abe77780::t_2a7b1433771228 98
+Cargo.toml
+  s_5c0cc8abe77780::t_bb76c6979c65b1 177
+  s_5c0cc8abe77780::t_e69c690a43c5c3 178-242
+  s_f3bfe0c35e9388::t_9ed4c33e08f44d 243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7eed22127fca8c31610314eb01f172064cbae343",
+  "prompts": {},
+  "sessions": {
+    "s_5c0cc8abe77780": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e24d-7000-74a2-9e76-b97e25d6fd12",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    },
+    "s_f3bfe0c35e9388": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18b11-f104-7253-848f-9de948d2b970",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
