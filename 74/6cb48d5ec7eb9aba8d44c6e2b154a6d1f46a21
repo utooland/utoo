@@ -1,0 +1,21 @@
+.github/workflows/pack-windows-symbols-diagnostic.yml
+  s_5c0cc8abe77780::t_bfcc2cfbc4b653 1-310
+scripts/ci/windows-release-preload.cjs
+  s_5c0cc8abe77780::t_bfcc2cfbc4b653 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "746cb48d5ec7eb9aba8d44c6e2b154a6d1f46a21",
+  "prompts": {},
+  "sessions": {
+    "s_5c0cc8abe77780": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e24d-7000-74a2-9e76-b97e25d6fd12",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
