@@ -1,0 +1,23 @@
+.github/workflows/pack-windows-release-diagnostic.yml
+  s_5c0cc8abe77780::t_6abdedf47d6503 1-44,46-128
+  s_5c0cc8abe77780::t_738515f99b58cb 45
+scripts/ci/windows-release-preload.cjs
+  s_5c0cc8abe77780::t_5c7682ca0019ec 1-25,29-48,63-74
+  s_5c0cc8abe77780::t_721d1f47e5a18d 26-28,49-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f9e6b44841e753ba270d352d25aab578cf84d23",
+  "prompts": {},
+  "sessions": {
+    "s_5c0cc8abe77780": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e24d-7000-74a2-9e76-b97e25d6fd12",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
