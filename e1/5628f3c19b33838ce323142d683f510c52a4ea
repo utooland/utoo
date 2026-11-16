@@ -1,0 +1,21 @@
+packages/pack/package.json
+  s_5c0cc8abe77780::t_83c7d4476da316 98
+packages/pack/.cargo/config.toml
+  s_5c0cc8abe77780::t_83c7d4476da316 5-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e15628f3c19b33838ce323142d683f510c52a4ea",
+  "prompts": {},
+  "sessions": {
+    "s_5c0cc8abe77780": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e24d-7000-74a2-9e76-b97e25d6fd12",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
