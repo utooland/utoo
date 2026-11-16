@@ -1,0 +1,155 @@
+name: Pack release M1 check
+
+on:
+  push:
+    branches: [zoomdong/ci-pack-release-m1-20261116]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Build aligned native on macOS
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      CI: '1'
+      CARGO_BUILD_JOBS: '2'
+      npm_new_version: '1.6.3'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.14.0
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: nightly-2026-11-06
+          targets: aarch64-apple-darwin
+      - name: Install the pinned NAPI CLI outside the checkout
+        run: npm install --prefix "$RUNNER_TEMP/napi-cli" --no-audit --no-fund --ignore-scripts @napi-rs/cli@3.8.6
+      - name: Build with the final release wrapper
+        working-directory: packages/pack
+        env:
+          NODE_PATH: ${{ runner.temp }}/napi-cli/node_modules
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain --untracked-files=all)"
+          mkdir -p "$RUNNER_TEMP/aligned-native"
+          node scripts/build-binding.cjs \
+            --platform --profile pack-release -p pack-napi \
+            --manifest-path ../../Cargo.toml -o "$RUNNER_TEMP/aligned-native" \
+            --features plugin --js binding.js --dts binding.d.ts \
+            --target aarch64-apple-darwin -- --locked \
+            2>&1 | tee "$RUNNER_TEMP/aligned-native/build.log"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Record applied flags and clean build identity
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, shutil, subprocess
+          root = pathlib.Path(os.environ['CARGO_TARGET_DIR'])
+          output = pathlib.Path(os.environ['RUNNER_TEMP']) / 'aligned-native'
+          fingerprint = next(root.rglob('fingerprint/lib-pack_napi.json'))
+          data = json.loads(fingerprint.read_text())
+          for flag in ['--cfg=tokio_unstable', '-Zshare-generics=y', '-Zthreads=8', '-Zunstable-options', '-Clink-arg=--icf=all']:
+              assert flag in data['rustflags'], flag
+          shutil.copyfile(fingerprint, output / 'cargo-fingerprint.json')
+          records = [p for p in root.rglob('*') if p.name in ('stdout', 'output') and p.is_file() and 'pack-napi' in str(p)]
+          identity = '\n'.join(p.read_text(errors='replace') for p in records)
+          assert 'cargo:rustc-env=VERGEN_GIT_DIRTY=false' in identity, 'Native must embed a clean checkout identity'
+          (output / 'build-identity.txt').write_text(identity)
+          (output / 'source-sha.txt').write_text(subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True))
+          PY
+          codesign --verify --verbose=2 "$RUNNER_TEMP/aligned-native/pack.darwin-arm64.node"
+          shasum -a 256 "$RUNNER_TEMP/aligned-native/pack.darwin-arm64.node" > "$RUNNER_TEMP/aligned-native/native.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: aligned-native-darwin-arm64
+          path: ${{ runner.temp }}/aligned-native/
+          if-no-files-found: error
+          retention-days: 14
+
+  benchmark:
+    name: Original M1 dashboard cold build and native size
+    needs: native
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+      BENCHMARK_ROOT: ${{ github.workspace }}/benchmark
+      RESULTS_DIRECTORY: ${{ github.workspace }}/m1-results
+      CANDIDATE_NATIVE: ${{ github.workspace }}/aligned-native/pack.darwin-arm64.node
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          path: candidate
+          persist-credentials: false
+      - name: Checkout the exact original benchmark
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: rstackjs/build-tools-performance
+          ref: 0dffa8f53bf349fab294d1d91add14cf882ebef8
+          path: benchmark
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aligned-native-darwin-arm64
+          path: ${{ github.workspace }}/aligned-native
+      - name: Install Pnpm as in the original workflow
+        run: npm i -g corepack@latest --force && corepack enable
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24.22.2
+          package-manager-cache: false
+      - name: Install original locked dependencies
+        working-directory: benchmark
+        run: |
+          pnpm --version
+          pnpm install --frozen-lockfile
+      - name: Compare original and final native in alternating order
+        run: node candidate/scripts/ci/m1-release-compare.mjs
+      - name: Measure actual npm platform tarballs with identical metadata
+        run: |
+          set -euo pipefail
+          metadata=$(node -p 'require(process.env.RESULTS_DIRECTORY + "/native-inputs.json").metadata')
+          baseline=$(node -p 'require(process.env.RESULTS_DIRECTORY + "/native-inputs.json").baseline')
+          python3 candidate/scripts/ci/measure_native_package.py \
+            --variant baseline --native "$baseline" --already-stripped \
+            --metadata "$metadata" --output-root "$RESULTS_DIRECTORY/native-package-sizes"
+          python3 candidate/scripts/ci/measure_native_package.py \
+            --variant aligned --native "$CANDIDATE_NATIVE" --already-stripped \
+            --metadata "$metadata" --output-root "$RESULTS_DIRECTORY/native-package-sizes"
+          python3 - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['RESULTS_DIRECTORY'])
+          sizes = [json.loads((root / 'native-package-sizes' / variant / 'size.json').read_text()) for variant in ('baseline', 'aligned')]
+          assert all(x['signature']['valid'] for x in sizes)
+          for field in ('metadataManifestSha256', 'metadataReadmeSha256', 'nativeMode'):
+              assert sizes[0][field] == sizes[1][field], field
+          (root / 'native-package-sizes/comparison.json').write_text(json.dumps(sizes, indent=2) + '\n')
+          with (root / 'summary.md').open('a') as summary:
+              summary.write('\n| Native package | Uncompressed bytes | npm tarball bytes |\n| --- | ---: | ---: |\n')
+              for item in sizes:
+                  summary.write(f"| {item['variant']} | {item['packagedNativeBytes']} | {item['npmTarballBytes']} |\n")
+          PY
+      - name: Publish experiment summary
+        if: always()
+        run: |
+          if [ -f "$RESULTS_DIRECTORY/summary.md" ]; then
+            cat "$RESULTS_DIRECTORY/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: m1-release-comparison
+          path: ${{ github.workspace }}/m1-results/
+          if-no-files-found: warn
+          retention-days: 14
