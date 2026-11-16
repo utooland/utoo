@@ -1,0 +1,14 @@
+Cargo.lock
+  h_05d0a07afcde4c 3404,3406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d04ed8840baa380fec3cb609aef82f5605ec6f0",
+  "prompts": {},
+  "humans": {
+    "h_05d0a07afcde4c": {
+      "author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
