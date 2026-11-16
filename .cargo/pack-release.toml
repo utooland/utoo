@@ -1,0 +1,16 @@
+# Loaded only by @utoo/pack's build:binding script.
+# Match Turbopack's native release flags:
+# https://github.com/vercel/next.js/blob/9225ea753fb03796aabd12034b66137b7be665c9/.cargo/config.toml
+
+[target.'cfg(true)']
+rustflags = [
+  # Target rustflags replace [build].rustflags, including this required cfg.
+  "--cfg=tokio_unstable",
+  "-Zshare-generics=y",
+  "-Zthreads=8",
+  "-Zunstable-options",
+]
+
+[target.'cfg(target_os = "macos")']
+linker    = "rust-lld"
+rustflags = ["-Clink-arg=--icf=all"]
