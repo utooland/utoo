@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [candidate, baseline]
+        variant: [candidate]
     env:
       DIAGNOSTIC_VARIANT: ${{ matrix.variant }}
     steps:
@@ -98,6 +98,22 @@ jobs:
           fs.writeFileSync('diagnostic-results/native-load.json', JSON.stringify(report, null, 2) + '\n');
           console.log(JSON.stringify(report, null, 2));
           NODE
+      - name: Prepare Microsoft ProcDump for the Umi worker
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'Procdump.zip'
+          $tools = Join-Path $env:RUNNER_TEMP 'procdump'
+          Invoke-WebRequest 'https://download.sysinternals.com/files/Procdump.zip' -OutFile $zip
+          Expand-Archive $zip -DestinationPath $tools -Force
+          $exe = Join-Path $tools 'procdump64.exe'
+          $signature = Get-AuthenticodeSignature $exe
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+            throw 'ProcDump must have a valid Microsoft signature'
+          }
+          $dumps = Join-Path $env:GITHUB_WORKSPACE 'diagnostic-results/dumps'
+          New-Item -ItemType Directory -Force $dumps | Out-Null
+          "WIN_RELEASE_PROCDUMP=$exe" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "WIN_RELEASE_DUMP_DIR=$dumps" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
       - name: Run the pinned Umi suite with exit diagnostics
         shell: bash
         run: |
@@ -118,11 +134,81 @@ jobs:
             --pack "$pack_spec" --pack-shared "$shared_spec" --pack-cli "$cli_spec" \
             --workspace "$GITHUB_WORKSPACE/workspace-$DIAGNOSTIC_VARIANT" \
             2>&1 | tee "diagnostic-results/umi-$DIAGNOSTIC_VARIANT.log"
+      - name: Finish crash collection
+        if: always()
+        shell: pwsh
+        run: |
+          $deadline = (Get-Date).AddSeconds(45)
+          while ((Get-Process procdump64 -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 1
+          }
+          Get-ChildItem diagnostic-results -Recurse | Select-Object FullName, Length
+          Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-30)} -ErrorAction SilentlyContinue |
+            Where-Object { $_.Id -eq 1000 -and $_.Message -match 'node.exe' } |
+            Format-List TimeCreated, Id, Message |
+            Out-File diagnostic-results/windows-application-errors.txt
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-release-diagnostic-${{ matrix.variant }}
           path: diagnostic-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  analyze_dump:
+    name: Analyze native crash dump
+    needs: diagnostic
+    if: always() && needs.diagnostic.result != 'cancelled'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: windows-release-diagnostic-candidate
+          path: diagnostic-results
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          repository: utooland/utoo
+          run-id: 43823358297
+          name: utoopack-windows-candidate
+          github-token: ${{ github.token }}
+          path: candidate-artifacts
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
+      - name: Analyze using CDB and the exact native image
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force native-image, analysis-results | Out-Null
+          tar -xzf candidate-artifacts/utoo-pack.tgz -C native-image package/cjs/pack.win32-x64-msvc.node
+          $native = 'native-image/package/cjs/pack.win32-x64-msvc.node'
+          if ((Get-FileHash $native -Algorithm SHA256).Hash.ToLower() -ne '4fa124588e571b0af4e7dcf05bfdfb7b9942704684e71c0954f0a4cfae3306d3') {
+            throw 'Native image does not match the crashing candidate'
+          }
+          $cdb = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+            (Get-Command cdb.exe -ErrorAction SilentlyContinue).Source
+          ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $cdb) {
+            'CDB unavailable; preserve dumps for offline analysis.' | Out-File analysis-results/status.txt
+            exit 0
+          }
+          $dumps = @(Get-ChildItem diagnostic-results -Recurse -Filter *.dmp)
+          if ($dumps.Count -eq 0) {
+            'No native crash dump was captured.' | Out-File analysis-results/status.txt
+            exit 0
+          }
+          $images = "$(Resolve-Path native-image/package/cjs);$(Split-Path (Get-Command node).Source)"
+          foreach ($dump in $dumps) {
+            $log = Join-Path (Resolve-Path analysis-results) "$($dump.Name).cdb.txt"
+            & $cdb -sins -y "$env:RUNNER_TEMP/local-symbols" -i $images -z $dump.FullName -logo $log -c '.exr -1; .ecxr; r; lmv a (@rip); kv 40; dps @rsp L80; lmf; ~* kv 10; q'
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-native-crash-analysis
+          path: analysis-results/
           if-no-files-found: warn
           retention-days: 7
