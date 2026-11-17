@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
 
-use crate::model::graph::DependencyGraph;
+use crate::model::graph::{DependencyGraph, DependencyLookup};
 use crate::model::manifest::CoreVersionManifest;
 use crate::model::node::{DevDeps, EdgeType, PeerDeps};
 use crate::model::package_json::PackageJson;
@@ -19,7 +19,8 @@ pub struct DependencyEdgeInfo {
     pub edge_type: EdgeType,
 }
 
-/// Collect only unresolved dependency edges from a node.
+/// Collect unresolved dependencies that may introduce packages. Optional peers
+/// wait until the ordinary dependency tree is complete.
 pub fn collect_unresolved_edges(
     graph: &DependencyGraph,
     node_index: NodeIndex,
@@ -27,7 +28,7 @@ pub fn collect_unresolved_edges(
     graph
         .get_dependency_edges(node_index)
         .into_iter()
-        .filter(|(_, dep)| !dep.valid)
+        .filter(|(_, dep)| !dep.valid && !dep.optional_peer)
         .map(|(edge_id, dep)| DependencyEdgeInfo {
             edge_id,
             name: dep.name.clone(),
@@ -35,6 +36,36 @@ pub fn collect_unresolved_edges(
             edge_type: dep.edge_type,
         })
         .collect()
+}
+
+/// Resolve optional peers only when their supplier is already in the live tree.
+/// Waiting until ordinary dependencies settle also covers suppliers discovered
+/// at a deeper BFS level and avoids reviving orphaned lockfile entries.
+pub(crate) fn collect_optional_peer_edges(
+    graph: &DependencyGraph,
+) -> Vec<(NodeIndex, DependencyEdgeInfo)> {
+    let reachable = graph.reachable_nodes();
+    let mut pending = Vec::new();
+    for from in graph.graph.node_indices().filter(|n| reachable.contains(n)) {
+        for (edge_id, dep) in graph.get_dependency_edges(from) {
+            if !dep.valid
+                && dep.optional_peer
+                && let DependencyLookup::Found(target) = graph.lookup_dependency(from, &dep.name)
+                && reachable.contains(&target)
+            {
+                pending.push((
+                    from,
+                    DependencyEdgeInfo {
+                        edge_id,
+                        name: dep.name.clone(),
+                        spec: dep.spec.clone(),
+                        edge_type: dep.edge_type,
+                    },
+                ));
+            }
+        }
+    }
+    pending
 }
 
 #[inline]

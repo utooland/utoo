@@ -369,6 +369,19 @@ pub async fn is_pkg_lock_outdated(root_path: &Path) -> Result<bool> {
             tracing::warn!("package-lock.json is outdated, {name} peerDependencies changed");
             return Ok(true);
         }
+
+        if pkg
+            .peer_dependencies_meta
+            .as_ref()
+            .filter(|m| !m.is_empty())
+            != lock
+                .peer_dependencies_meta
+                .as_ref()
+                .filter(|m| !m.is_empty())
+        {
+            tracing::warn!("package-lock.json is outdated, {name} peerDependenciesMeta changed");
+            return Ok(true);
+        }
     }
 
     // engines: root only — derived from the same loaded `root_pkg`
@@ -516,6 +529,20 @@ mod tests {
             expected,
             "package.json:\n{pkg_json}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_is_pkg_lock_outdated_peer_metadata_changed() {
+        assert_outdated(
+            json!({
+                "name": "test-package", "version": "1.0.0",
+                "dependencies": { "lodash": "^4.17.20" },
+                "devDependencies": { "typescript": "^4.9.0" },
+                "peerDependenciesMeta": { "sass": { "optional": true } }
+            }),
+            true,
+        )
+        .await;
     }
 
     #[tokio::test]

@@ -175,6 +175,8 @@ pub struct DependencyEdge {
     pub spec: String,
     /// Type of dependency
     pub edge_type: EdgeType,
+    /// Optional peers may bind to a supplied package but do not introduce one.
+    pub optional_peer: bool,
     /// Whether this edge has been resolved
     pub valid: bool,
     /// Target node index if resolved
@@ -193,6 +195,7 @@ impl DependencyEdge {
                 spec_str
             },
             edge_type,
+            optional_peer: false,
             valid: false,
             to: None,
         }
@@ -324,7 +327,13 @@ impl DependencyGraph {
         spec: impl Into<String>,
         edge_type: EdgeType,
     ) -> EdgeIndex {
-        let dep_edge = DependencyEdge::new(name, spec, edge_type);
+        let mut dep_edge = DependencyEdge::new(name, spec, edge_type);
+        dep_edge.optional_peer = edge_type == EdgeType::Peer
+            && self.graph[from]
+                .manifest
+                .peer_dependencies_meta()
+                .and_then(|meta| meta.get(&dep_edge.name))
+                .is_some_and(|meta| meta.optional == Some(true));
         self.graph
             .add_edge(from, from, GraphEdge::Dependency(Box::new(dep_edge)))
     }

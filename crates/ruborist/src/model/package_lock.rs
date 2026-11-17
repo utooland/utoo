@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::compatibility::PlatformConstraint;
 use super::graph::DependencyGraph;
 use super::node::EdgeType;
-use super::package_json::BinField;
+use super::package_json::{BinField, PeerDependencyMeta};
 
 /// Serialize a string-keyed map with its keys in sorted order. The resolver
 /// fills these maps from `HashMap`s, whose iteration order is randomized per
@@ -90,6 +90,12 @@ pub struct LockPackage {
         serialize_with = "sorted_opt_map"
     )]
     pub peer_dependencies: Option<HashMap<String, String>>,
+    #[serde(
+        rename = "peerDependenciesMeta",
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "sorted_opt_map"
+    )]
+    pub peer_dependencies_meta: Option<HashMap<String, PeerDependencyMeta>>,
     #[serde(
         rename = "optionalDependencies",
         skip_serializing_if = "Option::is_none",
@@ -402,6 +408,7 @@ fn create_root_lock_package(graph: &DependencyGraph, node_index: NodeIndex) -> L
         name: Some(node.name.clone()),
         version: Some(node.version.clone()),
         engines: manifest.engines().cloned(),
+        peer_dependencies_meta: manifest.peer_dependencies_meta().cloned(),
         workspaces: manifest.workspaces().map(|w| w.patterns().to_vec()),
         ..LockPackage::default()
     };
@@ -471,6 +478,7 @@ fn create_non_root_lock_package(
     pkg.engines = manifest.engines().cloned();
     pkg.os = manifest.os().cloned();
     pkg.cpu = manifest.cpu().cloned();
+    pkg.peer_dependencies_meta = manifest.peer_dependencies_meta().cloned();
 
     // Script markers are NOT stamped on link nodes — npm keeps link entries
     // minimal, and the link's source/target owns the lifecycle: a workspace runs

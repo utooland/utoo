@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use crate::model::manifest::{CoreVersionManifest, FullManifest};
-use crate::model::node::{DevDeps, PeerDeps};
+use crate::model::node::{DevDeps, EdgeType, PeerDeps};
 use crate::resolver::edges::DependencySource;
 use crate::resolver::semver::normalize_spec;
 use crate::service::ManifestJob;
@@ -29,8 +29,14 @@ fn collect_registry_prefetches(
     peer_deps: PeerDeps,
 ) -> Vec<(String, String)> {
     let mut deps = Vec::new();
-    manifest.for_each_dep(peer_deps, DevDeps::Exclude, |_, name, spec| {
-        if spec.is_registry_spec() {
+    manifest.for_each_dep(peer_deps, DevDeps::Exclude, |edge_type, name, spec| {
+        let optional_peer = edge_type == EdgeType::Peer
+            && manifest
+                .peer_dependencies_meta
+                .as_ref()
+                .and_then(|meta| meta.get(name))
+                .is_some_and(|meta| meta.optional == Some(true));
+        if !optional_peer && spec.is_registry_spec() {
             deps.push((name.to_string(), spec.to_string()));
         }
     });

@@ -47,6 +47,13 @@ where
     })
 }
 
+/// An optional peer constrains a supplied package without requiring its install.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerDependencyMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optional: Option<bool>,
+}
+
 /// Parsed package.json content.
 ///
 /// This is the primary type for representing package.json in ruborist.
@@ -73,6 +80,9 @@ pub struct PackageJson {
     /// Peer dependencies
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_dependencies: Option<HashMap<String, String>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_dependencies_meta: Option<HashMap<String, PeerDependencyMeta>>,
 
     /// Optional dependencies
     #[serde(default, skip_serializing_if = "Option::is_none")]
