@@ -43,3 +43,6 @@ pub mod semver;
 pub(crate) mod tar;
 pub mod version;
 pub mod workspace;
+
+#[cfg(test)]
+mod optional_peer_tests;

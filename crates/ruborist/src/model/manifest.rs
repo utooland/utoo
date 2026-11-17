@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::compatibility::PlatformConstraint;
-use super::package_json::{BinField, PackageJson, WorkspacesConfig};
+use super::package_json::{BinField, PackageJson, PeerDependencyMeta, WorkspacesConfig};
 use crate::util::spawn_cpu;
 
 /// Borrowed view of the data needed to resolve a version spec — a slice of
@@ -406,6 +406,13 @@ pub struct CoreVersionManifest {
     )]
     pub peer_dependencies: Option<HashMap<String, String>>,
 
+    #[serde(
+        rename = "peerDependenciesMeta",
+        deserialize_with = "skip_on_error",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub peer_dependencies_meta: Option<HashMap<String, PeerDependencyMeta>>,
+
     #[serde(rename = "optionalDependencies")]
     #[serde(
         deserialize_with = "skip_on_error",
@@ -610,6 +617,13 @@ impl NodeManifest {
             |m| m.peer_dependencies.as_ref(),
         )
         .filter(|m| !m.is_empty())
+    }
+
+    pub fn peer_dependencies_meta(&self) -> Option<&HashMap<String, PeerDependencyMeta>> {
+        self.pick(
+            |p| p.peer_dependencies_meta.as_ref(),
+            |m| m.peer_dependencies_meta.as_ref(),
+        )
     }
 
     /// Get optional dependencies (empty map → None).

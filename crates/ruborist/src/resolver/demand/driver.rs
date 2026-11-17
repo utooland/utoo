@@ -17,7 +17,9 @@ use crate::resolver::builder::{
     BuildDepsConfig, ProcessResult, chain_err, handle_resolved_registry_manifest,
     process_dependency, resolve_override, try_reuse_dependency,
 };
-use crate::resolver::edges::{DependencyEdgeInfo, collect_unresolved_edges};
+use crate::resolver::edges::{
+    DependencyEdgeInfo, collect_optional_peer_edges, collect_unresolved_edges,
+};
 use crate::resolver::registry::ResolveError;
 use crate::resolver::reuse::ResolvedDependency;
 use crate::resolver::semver::normalize_spec;
@@ -100,6 +102,7 @@ fn seed_level<E: EventReceiver>(
     receiver: &E,
     current_level: &[NodeIndex],
     root_idx: NodeIndex,
+    peer_deps: PeerDeps,
 ) -> (Vec<NodeIndex>, VecDeque<WaitingEdge>) {
     let mut next_level = Vec::new();
     let mut level_pending = VecDeque::new();
@@ -116,7 +119,11 @@ fn seed_level<E: EventReceiver>(
             }
         }
 
-        let unresolved = collect_unresolved_edges(graph, *node_index);
+        let mut unresolved = collect_unresolved_edges(graph, *node_index);
+        // Seeded lock edges also need to honor legacy-peer-deps on revalidation.
+        if peer_deps == PeerDeps::Skip {
+            unresolved.retain(|edge| edge.edge_type != EdgeType::Peer);
+        }
         receiver.on_event(BuildEvent::DependencyCount {
             count: unresolved.len(),
         });
@@ -444,16 +451,18 @@ where
 
     let root_idx = graph.root_index;
     let mut current_level = vec![root_idx];
+    let mut optional_pending = VecDeque::new();
 
     // Resolve the graph one BFS level at a time; each iteration discovers the
     // next level from the edges it resolves.
-    while !current_level.is_empty() {
+    while !current_level.is_empty() || !optional_pending.is_empty() {
         receiver.on_event(BuildEvent::LevelStart {
             node_count: current_level.len(),
         });
 
         let (mut next_level, mut level_pending) =
-            seed_level(graph, receiver, &current_level, root_idx);
+            seed_level(graph, receiver, &current_level, root_idx, config.peer_deps);
+        level_pending.append(&mut optional_pending);
 
         // Fetch phase: keep the fetch pipeline saturated and *settle* edges as
         // their manifests arrive — buffering each into `placements` rather than
@@ -536,6 +545,9 @@ where
             next_level_count: next_level.len(),
         });
         current_level = next_level;
+        if current_level.is_empty() && config.peer_deps == PeerDeps::Include {
+            optional_pending = collect_optional_peer_edges(graph).into();
+        }
     }
 
     Ok(())

@@ -201,6 +201,7 @@ pub fn lock_to_graph(graph: &mut DependencyGraph, lock: &PackageLock, root_path:
             .into_iter()
             .filter_map(|(edge_id, edge)| {
                 if edge.valid
+                    || edge.optional_peer
                     || !graph.override_names.contains(&edge.name)
                     || !matches_locked_requirement(edge, pkg)
                     || !graph.override_rules_affect_dependency(locked_rules, edge, &chain, false)
@@ -307,9 +308,10 @@ fn to_lock_key(path: &str) -> Cow<'_, str> {
 /// resolved against the slot the lockfile hoisted it to. A target may still be
 /// absent for a non-prod edge (an optional/peer dep with no entry) or one that
 /// resolves through a skipped link; such edges are left unresolved — they
-/// round-trip into the re-emitted lock entry but never enter the BFS, since a
-/// seeded node is not a freshly-created one. Prod-dep targets are guaranteed
-/// present: [`lock_is_consistent`] gates seeding on every prod dep resolving.
+/// round-trip into the re-emitted lock entry. Override revalidation can revisit
+/// seeded nodes, so the resolver must still apply peer policy to these edges.
+/// Optional peers are bound after ordinary dependencies resolve. Prod-dep targets
+/// are guaranteed present: [`lock_is_consistent`] gates seeding on every prod dep resolving.
 fn seed_resolved_edges(
     graph: &mut DependencyGraph,
     path: &str,
@@ -326,6 +328,16 @@ fn seed_resolved_edges(
     for (deps, edge_type) in groups {
         for (dep_name, dep_spec) in deps.into_iter().flatten() {
             let edge_id = graph.add_dependency_edge(index, dep_name, dep_spec, edge_type);
+            if edge_type == EdgeType::Peer
+                && pkg
+                    .peer_dependencies_meta
+                    .as_ref()
+                    .and_then(|meta| meta.get(dep_name))
+                    .is_some_and(|meta| meta.optional == Some(true))
+            {
+                // A removed supplier must not stay reachable solely through an optional peer.
+                continue;
+            }
             if let Some(target) = resolve_dep_target(path_index, path, dep_name) {
                 graph.mark_dependency_resolved(edge_id, target);
             } else {
@@ -453,6 +465,7 @@ fn lock_package_to_manifest(name: &str, pkg: &LockPackage) -> CoreVersionManifes
         dependencies: pkg.dependencies.clone(),
         dev_dependencies: pkg.dev_dependencies.clone(),
         peer_dependencies: pkg.peer_dependencies.clone(),
+        peer_dependencies_meta: pkg.peer_dependencies_meta.clone(),
         optional_dependencies: pkg.optional_dependencies.clone(),
         dist: Dist {
             tarball: pkg.resolved.clone(),
