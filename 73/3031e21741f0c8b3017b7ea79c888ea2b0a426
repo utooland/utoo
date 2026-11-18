@@ -1,0 +1,46 @@
+packages/pack/src/core/types.ts
+  s_de4c608d34aebf::t_8dba69739548aa 65-67
+packages/pack/README.md
+  s_de4c608d34aebf::t_a58a6ace96fb9b 143-144
+  s_de4c608d34aebf::t_8dba69739548aa 114-142,145-150
+packages/pack/src/binding.js
+  s_de4c608d34aebf::t_184def302ea5c0 723
+packages/pack/src/__test__/devServerHandle.test.ts
+  s_de4c608d34aebf::t_00a14f2a67064e 255-278
+  s_de4c608d34aebf::t_d8e8c0310beb4a 99,139,157,193-254
+packages/pack/src/core/project.ts
+  s_de4c608d34aebf::t_9fa4d2b924d731 557-562
+packages/pack/src/binding.d.ts
+  s_de4c608d34aebf::t_ccc1c0f1da5f82 281-282
+packages/pack-cli/src/index.ts
+  s_de4c608d34aebf::t_8dba69739548aa 13
+packages/pack/src/commands/dev.ts
+  s_de4c608d34aebf::t_a58a6ace96fb9b 465-468
+  s_de4c608d34aebf::t_8dba69739548aa 21-25,160-163,177-178,351-355,414-420,424,442-443,469-470
+packages/pack/src/core/agentHmr.ts
+  s_de4c608d34aebf::t_3d9f144e203a77 1-147
+crates/pack-api/src/project.rs
+  s_de4c608d34aebf::t_fed1423a9f75cc 587
+  s_de4c608d34aebf::t_d21d58de7bb768 574-586,588
+crates/pack-napi/src/pack_api/project.rs
+  s_de4c608d34aebf::t_de00122712969a 586-599
+packages/pack-cli/src/commands/hmr.ts
+  s_de4c608d34aebf::t_1e35a101f43be5 1-21,24-97
+  s_de4c608d34aebf::t_a58a6ace96fb9b 22-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "733031e21741f0c8b3017b7ea79c888ea2b0a426",
+  "prompts": {},
+  "sessions": {
+    "s_de4c608d34aebf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ecb4-09be-78b1-b98f-96aa351a4b02",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
