@@ -18,6 +18,11 @@ import {
   resolveBundleOptions,
   type WebpackConfig,
 } from "../config/webpackCompat";
+import {
+  AGENT_HMR_PATH,
+  createAgentHmrController,
+  createAgentHmrRoutes,
+} from "../core/agentHmr";
 import type { HotReloaderInterface } from "../core/hmr";
 import { createHotReloader } from "../core/hmr";
 import { createHttpProxyMiddleware } from "../core/proxyHono";
@@ -152,6 +157,10 @@ export interface DevServerHandle {
   hostname: string;
   /** Write current entrypoints and their HTML before an integration publishes its build. */
   writeAllEntrypointsToDisk: Project["writeAllEntrypointsToDisk"];
+  /** Defer watcher-triggered rebuilds for up to 30 seconds and return the batch ID. */
+  beginHmrBatch(): Promise<string>;
+  /** Release the batch. Resolves before its rebuild and browser update complete. */
+  endHmrBatch(id: string): Promise<void>;
   /** Close the HTTP server, HMR connections and project without exiting the process. */
   close(): Promise<void>;
 }
@@ -165,6 +174,8 @@ export interface StartServerOptions {
   historyApiFallback?: boolean;
   /** Handle process signals and errors. Defaults to true; embedded servers can opt out. */
   handleSignals?: boolean;
+  /** Opt in to local, authenticated control of agent edit batches. */
+  agentHmrToken?: string;
   selfSignedCertificate?: SelfSignedCertificate;
   /**
    * Awaited after successful client output, stats and HTML writes, including
@@ -337,6 +348,11 @@ async function runDev(
     rootPathResolved,
     serverOptions?.onClientBuild,
   );
+  const agentHmr = createAgentHmrController(async (held) => {
+    const project = hotReloader.turbopackProject;
+    if (!project) throw new Error("Agent HMR requires a watched project");
+    await project.setWatchBatchHold(held);
+  });
   let server: ReturnType<typeof honoServe> | undefined;
   let webSocket: ReturnType<typeof createNodeWebSocket> | undefined;
   let closePromise: Promise<void> | undefined;
@@ -395,10 +411,17 @@ async function runDev(
         else resolve();
       });
     });
+    const closeProject = async () => {
+      try {
+        await agentHmr.close();
+      } finally {
+        await hotReloader.close();
+      }
+    };
     const results = await Promise.allSettled([
       closeHttp,
       closeWebSocket,
-      hotReloader.close(),
+      closeProject(),
     ]);
     const errors = results.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],
@@ -416,6 +439,8 @@ async function runDev(
       }
       return hotReloader.writeAllEntrypointsToDisk();
     },
+    beginHmrBatch: agentHmr.begin,
+    endHmrBatch: agentHmr.end,
     close() {
       // Keep handling forwarded signals until the pending cache flush finishes.
       closePromise ??= closeResources().finally(() => {
@@ -437,6 +462,12 @@ async function runDev(
         : "";
 
     const app = new Hono();
+    const agentHmrToken = (
+      serverOptions?.agentHmrToken ?? process.env.UTOO_PACK_AGENT_HMR_TOKEN
+    )?.trim();
+    if (agentHmrToken) {
+      app.route(AGENT_HMR_PATH, createAgentHmrRoutes(agentHmrToken, agentHmr));
+    }
     webSocket = createNodeWebSocket({ app });
     const { injectWebSocket, upgradeWebSocket } = webSocket;
 

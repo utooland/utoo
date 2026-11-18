@@ -62,6 +62,9 @@ export interface ProjectOptions extends BundleOptions {
 export interface Project {
   update(options: Partial<ProjectOptions>): Promise<void>;
 
+  /** Holds or releases pending filesystem watcher batches. */
+  setWatchBatchHold(held: boolean): Promise<void>;
+
   writeAllEntrypointsToDisk(): Promise<TurbopackResult<RawEntrypoints>>;
 
   /** Writes native analysis data for browser entries, without emitting bundles. */

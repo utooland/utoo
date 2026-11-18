@@ -571,6 +571,21 @@ impl ProjectContainer {
         .instrument(span_clone)
         .await
     }
+
+    /// Holds or releases filesystem watcher batches for this project.
+    ///
+    /// Call inside `TurboTasks::run`, outside of a memoized task.
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    pub async fn set_watch_batch_hold(self: ResolvedVc<Self>, held: bool) -> Result<()> {
+        let project = project_operation(self)
+            .resolve()
+            .strongly_consistent()
+            .await?;
+        let project_fs = project_fs_operation(project)
+            .read_strongly_consistent()
+            .await?;
+        project_fs.set_watch_batch_hold(held).await
+    }
 }
 
 #[turbo_tasks::value_impl]

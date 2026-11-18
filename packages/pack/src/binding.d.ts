@@ -278,6 +278,8 @@ export declare function projectNew(options: NapiProjectOptions, turboEngineOptio
  */
 export declare function projectOnExit(project: { __napiType: "Project" }): Promise<void>
 
+export declare function projectSetWatchBatchHold(project: { __napiType: "Project" }, held: boolean): Promise<void>
+
 /**
  * Runs `project_on_exit`, and then waits for turbo_tasks to gracefully shut down.
  *

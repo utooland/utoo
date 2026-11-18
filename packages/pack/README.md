@@ -111,6 +111,43 @@ Do not call `writeAllEntrypointsToDisk()` or await `close()` inside this callbac
 Startup callback failures reject `serve()`; background failures are logged and
 later builds can retry. Failed compilations do not invoke the callback.
 
+### Batch edits from an agent
+
+In the dev server process, use the handle returned by `serve()` with
+`returnHandle: true`. Await `beginHmrBatch()` before the first write and release
+the batch after the final write.
+
+```javascript
+const batchId = await server.beginHmrBatch();
+try {
+  await writeFiles();
+} finally {
+  await server.endHmrBatch(batchId);
+}
+```
+
+For an agent in another process, set `UTOO_PACK_AGENT_HMR_TOKEN` to a shared
+secret in both processes. Start `up dev`, then use its listening port.
+
+```sh
+batch_id=$(up hmr begin --port 3000)
+# Write all files that need to change together.
+up hmr end "$batch_id" --port 3000
+```
+
+The Node API and CLI share one active batch per server. The watcher keeps
+collecting edits from all writers during the batch. An in-progress build can
+finish. `end` returns after releasing the hold, and rebuilding and browser
+updates happen asynchronously. Opening a new batch immediately can also defer
+pending edits from the previous batch. The server automatically releases an
+abandoned batch after 30 seconds, and an expired batch ID returns an error.
+Saves outside a batch update normally.
+
+The Node API works without a token. The CLI uses a local HTTP endpoint that
+requires a token and only accepts loopback requests. When starting the server
+via `serve()`, you can pass its token as `agentHmrToken` in the fourth argument.
+For an HTTPS server, pass `--https` and ensure Node trusts the certificate.
+
 ### Native Bundle Analyzer
 
 Analyze production client and server applications using Turbopack's module graph,

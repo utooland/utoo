@@ -96,6 +96,7 @@ function createRuntime() {
   fs.writeFileSync(sourcePath, "A");
   fs.writeFileSync(entryPath, 'import heading from "./dependency.js";\n');
   const project = {
+    setWatchBatchHold: vi.fn(async (_held: boolean) => {}),
     writeAllEntrypointsToDisk: vi.fn(async function (this: unknown) {
       expect(this).toBe(project);
       const heading = fs.readFileSync(sourcePath, "utf8");
@@ -135,6 +136,7 @@ function createRuntime() {
 async function startServer(
   handleSignals?: boolean,
   onReady?: () => void | Promise<void>,
+  agentHmrToken?: string,
 ) {
   const handle = await serve(
     {
@@ -152,6 +154,7 @@ async function startServer(
       returnHandle: true,
       logServerInfo: false,
       onReady,
+      agentHmrToken,
     },
   );
   handles.push(handle);
@@ -187,6 +190,92 @@ afterEach(async () => {
 });
 
 describe("dev server handle", () => {
+  it("only opens and releases an agent HMR batch for the authorized caller", async () => {
+    const { project } = createRuntime();
+    const token = "test-agent-token";
+    const handle = await startServer(false, undefined, token);
+    const post = (route: string, authorized = true) =>
+      fetch(`http://127.0.0.1:${handle.port}/__utoopack/agent-hmr${route}`, {
+        method: "POST",
+        headers: authorized ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+    expect((await post("/begin", false)).status).toBe(401);
+    expect(project.setWatchBatchHold).not.toHaveBeenCalled();
+    const begin = await post("/begin");
+    expect(begin.status).toBe(200);
+    const { id } = (await begin.json()) as { id: string };
+    expect(id).toBeTruthy();
+    expect((await post("/begin")).status).toBe(409);
+    expect((await post("/end/another-batch")).status).toBe(404);
+    expect(project.setWatchBatchHold.mock.calls).toEqual([[true]]);
+    expect((await post(`/end/${id}`)).status).toBe(204);
+    expect(project.setWatchBatchHold.mock.calls).toEqual([[true], [false]]);
+    expect((await post("/begin")).status).toBe(200);
+    await handle.close();
+    expect(project.setWatchBatchHold.mock.calls).toEqual([
+      [true],
+      [false],
+      [true],
+      [false],
+    ]);
+  });
+
+  it("shares the HMR batch between the dev server handle and HTTP callers", async () => {
+    const { project } = createRuntime();
+    const token = "test-agent-token";
+    const handle = await startServer(false, undefined, token);
+    const post = (route: string) =>
+      fetch(`http://127.0.0.1:${handle.port}/__utoopack/agent-hmr${route}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+    const batchId = await handle.beginHmrBatch();
+    expect((await post("/begin")).status).toBe(409);
+    expect((await post(`/end/${batchId}`)).status).toBe(204);
+
+    const response = await post("/begin");
+    expect(response.status).toBe(200);
+    const { id } = (await response.json()) as { id: string };
+    await expect(handle.beginHmrBatch()).rejects.toThrow(/already open/);
+    await expect(handle.endHmrBatch(batchId)).rejects.toThrow(/expired/);
+    await handle.endHmrBatch(id);
+    expect(project.setWatchBatchHold.mock.calls).toEqual([
+      [true],
+      [false],
+      [true],
+      [false],
+    ]);
+
+    await handle.close();
+    await expect(handle.beginHmrBatch()).rejects.toThrow(/closing/);
+  });
+
+  it("releases an abandoned HMR batch and accepts a new one", async () => {
+    const { project } = createRuntime();
+    const handle = await startServer(false);
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const expiredId = await handle.beginHmrBatch();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(project.setWatchBatchHold.mock.calls).toEqual([[true], [false]]);
+      await expect(handle.endHmrBatch(expiredId)).rejects.toThrow(/expired/);
+
+      const nextId = await handle.beginHmrBatch();
+      await handle.endHmrBatch(nextId);
+      expect(project.setWatchBatchHold.mock.calls).toEqual([
+        [true],
+        [false],
+        [true],
+        [false],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["webpack entry", undefined],
     ["webpack entry", true],
