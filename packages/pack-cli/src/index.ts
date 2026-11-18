@@ -10,6 +10,7 @@ const main = defineCommand({
   subCommands: {
     build: () => import("./commands/build").then((module) => module.default),
     dev: () => import("./commands/dev").then((module) => module.default),
+    hmr: () => import("./commands/hmr").then((module) => module.default),
     analyze: () =>
       import("./commands/analyze").then((module) => module.default),
   },

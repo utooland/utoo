@@ -554,6 +554,12 @@ export function projectFactory(endpointWatchOptions?: {
       );
     }
 
+    setWatchBatchHold(held: boolean): Promise<void> {
+      return withErrorCause(() =>
+        binding.projectSetWatchBatchHold(this._nativeProject, held),
+      );
+    }
+
     async writeAllEntrypointsToDisk(): Promise<
       TurbopackResult<RawEntrypoints>
     > {

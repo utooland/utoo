@@ -720,6 +720,7 @@ module.exports.projectHmrEvents = nativeBinding.projectHmrEvents
 module.exports.projectHmrIdentifiersSubscribe = nativeBinding.projectHmrIdentifiersSubscribe
 module.exports.projectNew = nativeBinding.projectNew
 module.exports.projectOnExit = nativeBinding.projectOnExit
+module.exports.projectSetWatchBatchHold = nativeBinding.projectSetWatchBatchHold
 module.exports.projectShutdown = nativeBinding.projectShutdown
 module.exports.projectTraceSource = nativeBinding.projectTraceSource
 module.exports.projectUpdate = nativeBinding.projectUpdate

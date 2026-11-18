@@ -583,6 +583,20 @@ pub async fn project_update(
         .await
 }
 
+#[napi]
+pub async fn project_set_watch_batch_hold(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+    held: bool,
+) -> napi::Result<()> {
+    let ctx = &project.turbopack_ctx;
+    let container = project.container;
+
+    ctx.turbo_tasks()
+        .run(async move { container.set_watch_batch_hold(held).await })
+        .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
+        .await
+}
+
 /// Runs exit handlers for the project registered using the [`ExitHandler`] API.
 ///
 /// This is called by `project_shutdown`, so if you're calling that API, you shouldn't call this
