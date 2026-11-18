@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
@@ -265,6 +266,7 @@ struct SchedulerState {
     clone_done_rx: mpsc::UnboundedReceiver<StageReport>,
     async_ops: FuturesUnordered<tokio::task::JoinHandle<StageReport>>,
     counts: InstallCounts,
+    git_clones: Arc<utoo_ruborist::git::GitCloneCache>,
 }
 
 impl SchedulerState {
@@ -294,6 +296,7 @@ impl SchedulerState {
             clone_done_rx,
             async_ops: FuturesUnordered::new(),
             counts: InstallCounts::default(),
+            git_clones: Arc::default(),
         }
     }
 
@@ -398,11 +401,12 @@ impl SchedulerState {
 
     fn resolve_cache_for_clone(&mut self, spec: CloneSpec) {
         let task_spec = spec.clone();
+        let git_clones = Arc::clone(&self.git_clones);
         self.async_ops.push(tokio::spawn(async move {
             let result = resolve_cache_plan(
                 &task_spec.package.name,
-                &task_spec.package.version,
                 &task_spec.package.tarball_url,
+                &git_clones,
             )
             .await
             .map_err(|e| format!("{e:#}"));

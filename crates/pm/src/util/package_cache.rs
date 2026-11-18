@@ -85,37 +85,38 @@ pub enum ExtractOutcome {
     Extracted(PathBuf),
 }
 
-/// Look up the cache path for a git-resolved package.
-///
-/// Git packages are cloned during BFS resolution (inside ruborist) and
-/// stored at `<cache_dir>/<name>/<commit_sha>/`.
-pub async fn git_cache_lookup(name: &str, version: &str, tarball_url: &str) -> Option<PathBuf> {
-    let commit_sha = tarball_url.split_once('#').map(|(_, frag)| frag)?;
-    if commit_sha.contains("..") || commit_sha.contains('/') || commit_sha.contains('\\') {
-        tracing::warn!("Suspicious commit SHA fragment in URL: {}", tarball_url);
-        return None;
-    }
-    let cache_dir = get_cache_dir();
-    let cache_path = cache_dir.join(name).join(commit_sha);
-    if crate::fs::try_exists(&cache_path.join("_resolved"))
-        .await
-        .unwrap_or(false)
-    {
-        return Some(cache_path);
-    }
-    tracing::warn!(
-        "Git package {}@{} not found in cache, expected pre-resolution",
-        name,
-        version
+/// Recover the exact Git checkout recorded by the lockfile, including on a
+/// fresh machine. A branch/tag is not a lock and must never silently move.
+async fn ensure_locked_git(
+    name: &str,
+    tarball_url: &str,
+    clones: &utoo_ruborist::git::GitCloneCache,
+) -> Result<PathBuf> {
+    let (url, commit) = tarball_url
+        .rsplit_once('#')
+        .context("locked Git dependency has no commit")?;
+    anyhow::ensure!(
+        (commit.len() == 40 || commit.len() == 64) && commit.bytes().all(|c| c.is_ascii_hexdigit()),
+        "locked Git dependency must reference a full commit: {tarball_url}"
     );
-    None
+    let cached =
+        utoo_ruborist::git::ensure_repo_cached(&get_cache_dir(), url, Some(commit), name, clones)
+            .await?;
+    anyhow::ensure!(
+        cached
+            .resolved_url
+            .rsplit_once('#')
+            .is_some_and(|(_, sha)| sha.eq_ignore_ascii_case(commit)),
+        "Git checkout does not match locked commit {commit}"
+    );
+    Ok(cached.path.clone())
 }
 
 /// How the install phase should materialize a lockfile entry, decided purely
 /// by classifying its `resolved` URL by host/scheme (the lockfile stores no
 /// source tag — see [`is_registry_tarball`]).
 pub enum CachePlan {
-    /// A git dep, already cloned into the global cache during BFS at
+    /// A git dep, recovered at its locked commit in the global cache at
     /// `<cache>/<name>/<commit_sha>/`; clone from there.
     GitCache(PathBuf),
     /// A registry-host tarball: use the v2 `<name>/<version>/<source-and-digest>`
@@ -130,16 +131,19 @@ pub enum CachePlan {
 /// Classify a lockfile entry's `resolved` URL into a [`CachePlan`].
 ///
 /// Routing is by host/scheme only:
-/// - `git+…` / git URLs → [`CachePlan::GitCache`] (errors if the BFS-seeded
-///   git slot is missing, which would indicate a corrupt lockfile/cache).
+/// - `git+…` / git URLs → [`CachePlan::GitCache`] (recover a missing checkout
+///   from the locked URL and commit).
 /// - a trusted registry-host tarball → [`CachePlan::RegistryDownload`].
 /// - anything else (untrusted https or `file:`) → [`CachePlan::DirectExtract`].
-pub async fn resolve_cache_plan(name: &str, version: &str, tarball_url: &str) -> Result<CachePlan> {
+pub async fn resolve_cache_plan(
+    name: &str,
+    tarball_url: &str,
+    clones: &utoo_ruborist::git::GitCloneCache,
+) -> Result<CachePlan> {
     if is_git_url(tarball_url) {
-        return git_cache_lookup(name, version, tarball_url)
+        return ensure_locked_git(name, tarball_url, clones)
             .await
-            .map(CachePlan::GitCache)
-            .ok_or_else(|| anyhow::anyhow!("git cache not found for {name}@{version}"));
+            .map(CachePlan::GitCache);
     }
     if is_registry_tarball(tarball_url) {
         return Ok(CachePlan::RegistryDownload);
