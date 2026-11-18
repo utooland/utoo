@@ -99,6 +99,37 @@ fn assert_success(output: &Output) {
 }
 
 #[test]
+fn failed_optional_reinstall_does_not_run_retained_hooks() {
+    let mut registry = mockito::Server::new();
+    let fixture = tempdir().unwrap();
+    let project = fixture.path().join("project");
+    let manifest = json!({"name":"fixture","version":"1.0.0","scripts":{"install":"node -e \"require('fs').writeFileSync('../../hook-ran', 'yes')\""}});
+    let tarball = registry
+        .mock("GET", "/fixture.tgz")
+        .with_body(archive(&manifest, "invalid"))
+        .expect_at_least(1)
+        .create();
+    locked_project(
+        &project,
+        &format!("{}/fixture.tgz", registry.url()),
+        Some(&integrity(b"wrong")),
+        true,
+    );
+    let installed = project.join("node_modules/fixture");
+    fs::create_dir_all(&installed).unwrap();
+    fs::write(installed.join("package.json"), manifest.to_string()).unwrap();
+    assert_success(
+        &command(&project, &fixture.path().join("cache"), &registry.url())
+            .arg("install")
+            .output()
+            .unwrap(),
+    );
+    assert!(!project.join("hook-ran").exists());
+    assert!(!installed.exists());
+    tarball.assert();
+}
+
+#[test]
 fn integrity_rejects_corruption_before_scripts_and_optional_dependencies_skip_it() {
     let mut registry = mockito::Server::new();
     let fixture = tempdir().unwrap();
@@ -272,32 +303,39 @@ fn clean_removes_legacy_and_verified_package_caches() {
 }
 
 #[test]
-fn failed_optional_reinstall_does_not_run_retained_hooks() {
-    let mut registry = mockito::Server::new();
+fn source_identity_separates_caches_and_existing_targets_without_digests() {
     let fixture = tempdir().unwrap();
     let project = fixture.path().join("project");
-    let manifest = json!({"name":"fixture","version":"1.0.0","scripts":{"install":"node -e \"require('fs').writeFileSync('../../hook-ran', 'yes')\""}});
-    let tarball = registry
-        .mock("GET", "/fixture.tgz")
-        .with_body(archive(&manifest, "invalid"))
-        .expect_at_least(1)
-        .create();
-    locked_project(
-        &project,
-        &format!("{}/fixture.tgz", registry.url()),
-        Some(&integrity(b"wrong")),
-        true,
-    );
-    let installed = project.join("node_modules/fixture");
-    fs::create_dir_all(&installed).unwrap();
-    fs::write(installed.join("package.json"), manifest.to_string()).unwrap();
-    assert_success(
-        &command(&project, &fixture.path().join("cache"), &registry.url())
-            .arg("install")
-            .output()
-            .unwrap(),
-    );
-    assert!(!project.join("hook-ran").exists());
-    assert!(!installed.exists());
-    tarball.assert();
+    let cache = fixture.path().join("cache");
+    let mut first = mockito::Server::new();
+    let mut second = mockito::Server::new();
+    for (registry, marker) in [(&mut first, "registry A"), (&mut second, "registry B")] {
+        let tarball = registry
+            .mock("GET", "/fixture.tgz")
+            .with_body(archive(
+                &json!({"name":"fixture", "version":"1.0.0"}),
+                marker,
+            ))
+            .expect(1)
+            .create();
+        for _ in 0..2 {
+            locked_project(
+                &project,
+                &format!("{}/fixture.tgz", registry.url()),
+                None,
+                false,
+            );
+            assert_success(
+                &command(&project, &cache, &registry.url())
+                    .args(["install", "--ignore-scripts"])
+                    .output()
+                    .unwrap(),
+            );
+            assert_eq!(
+                fs::read_to_string(project.join("node_modules/fixture/marker.txt")).unwrap(),
+                marker
+            );
+        }
+        tarball.assert();
+    }
 }

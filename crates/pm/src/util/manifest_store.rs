@@ -1,8 +1,8 @@
 //! Disk-backed [`ManifestStore`] for the package manager.
 //!
 //! Layout:
-//! - `<cache_dir>/<name>/versions.json`              ← `VersionsInfo` (etag + version list)
-//! - `<cache_dir>/<name>/manifests/<version>.json`   ← `CoreVersionManifest`
+//! - `<cache_dir>.utoo-v2/manifests/<registry>/<name>/versions.json`              ← `VersionsInfo` (etag + version list)
+//! - `<cache_dir>.utoo-v2/manifests/<registry>/<name>/manifests/<version>.json`   ← `CoreVersionManifest`
 //!
 //! Writes are fire-and-forget: each `store_*` call enqueues a background write
 //! and returns immediately, so the resolver hot path never waits on the disk.
@@ -20,6 +20,7 @@ use std::thread::JoinHandle;
 
 use async_trait::async_trait;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use utoo_ruborist::manifest::CoreVersionManifest;
 use utoo_ruborist::service::{ManifestStore, VersionsInfo};
 
@@ -35,9 +36,15 @@ pub struct DiskManifestStore {
 }
 
 impl DiskManifestStore {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: PathBuf, registry: &str) -> Self {
+        let identity = format!(
+            "{:x}",
+            Sha256::digest(registry.trim_end_matches('/').as_bytes())
+        );
         Self {
-            cache_dir,
+            cache_dir: super::cache::versioned_cache_dir(&cache_dir)
+                .join("manifests")
+                .join(identity),
             writer: Some(ManifestWriter::spawn()),
         }
     }
@@ -194,8 +201,11 @@ mod tests {
     #[test]
     fn drop_flushes_queued_manifest_writes() {
         let dir = tempdir().unwrap();
+        let cache_root;
         {
-            let store = DiskManifestStore::new(dir.path().to_path_buf());
+            let store =
+                DiskManifestStore::new(dir.path().join("cache"), "https://registry.example");
+            cache_root = store.cache_dir.clone();
             store.store_versions(
                 "pkg",
                 Arc::new(VersionsInfo {
@@ -220,15 +230,37 @@ mod tests {
         }
 
         let versions: VersionsInfo =
-            serde_json::from_slice(&std::fs::read(dir.path().join("pkg/versions.json")).unwrap())
+            serde_json::from_slice(&std::fs::read(cache_root.join("pkg/versions.json")).unwrap())
                 .unwrap();
         assert_eq!(versions.versions.version_list, ["1.0.0"]);
 
         let manifest: CoreVersionManifest = serde_json::from_slice(
-            &std::fs::read(dir.path().join("pkg/manifests/1.0.0.json")).unwrap(),
+            &std::fs::read(cache_root.join("pkg/manifests/1.0.0.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(manifest.name, "pkg");
         assert_eq!(manifest.version, "1.0.0");
+    }
+    #[tokio::test]
+    async fn registry_identity_isolates_manifests_and_etags() {
+        let dir = tempdir().unwrap();
+        let cache = dir.path().join("cache");
+        {
+            let first = DiskManifestStore::new(cache.clone(), "https://first.example");
+            first.store_version_manifest(
+                "pkg",
+                "1.0.0",
+                Arc::new(CoreVersionManifest {
+                    name: "pkg".into(),
+                    version: "1.0.0".into(),
+                    ..Default::default()
+                }),
+            );
+        }
+        let first = DiskManifestStore::new(cache.clone(), "https://first.example/");
+        let second = DiskManifestStore::new(cache, "https://second.example");
+        assert!(first.load_version_manifest("pkg", "1.0.0").await.is_some());
+        assert!(second.load_version_manifest("pkg", "1.0.0").await.is_none());
+        assert_ne!(first.versions_path("pkg"), second.versions_path("pkg"));
     }
 }
