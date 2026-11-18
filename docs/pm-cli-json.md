@@ -28,8 +28,8 @@ Failure:
 
 - `command` is the canonical first-level command; aliases are normalized. /
   `command` 是规范化的一级命令，别名会归一化。
-- `subcommand` is present for commands such as `config get`. /
-  `config get` 等命令使用 `subcommand`。
+- `subcommand` is present for commands such as `config get` and `config delete` (`rm`). /
+  `config get`、`config delete`（`rm`）等命令使用 `subcommand`。
 - `command` may be `null` only when argument parsing cannot identify it. /
   仅当参数解析无法识别命令时，`command` 才可能为 `null`。
 - `result` and `error` are mutually exclusive. / `result` 与 `error` 互斥。
@@ -46,7 +46,7 @@ Failure:
 | `execute`, `custom` | Captured process execution / 捕获的进程执行结果 |
 | `view`, `pack`, `publish` | Registry or package artifact metadata / Registry 与包产物元数据 |
 | `ping`, `whoami`, `logout` | Registry/authentication result / Registry 与认证结果 |
-| `config` | KV values plus `set`, `get`, or `list` / KV 值及对应子命令 |
+| `config` | KV values plus `set`, `get`, `delete` (`rm`), or `list` / KV 值及 `set`、`get`、`delete`（`rm`）、`list` 子命令 |
 | `init`, `completions`, `help`, `version` | Generated artifact or CLI metadata / 生成产物或 CLI 元数据 |
 
 `login --json` returns the usage error `interactive_required`; the browser login

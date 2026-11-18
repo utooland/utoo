@@ -621,6 +621,7 @@ fn detect_subcommand(args: &[String]) -> Option<&'static str> {
             "set" => Some("set"),
             "get" => Some("get"),
             "list" => Some("list"),
+            "delete" | "rm" => Some("delete"),
             _ => None,
         };
     }
