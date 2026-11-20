@@ -150,38 +150,6 @@ fn json_version_is_one_machine_document() {
     assert!(value["result"]["version"].is_string());
 }
 
-#[cfg(windows)]
-#[test]
-fn install_runs_postinstall_with_only_git_cmd_on_path() {
-    let git = Command::new("git").arg("--exec-path").output().unwrap();
-    assert!(git.status.success());
-    let exec_path = String::from_utf8(git.stdout).unwrap();
-    let git_cmd = Path::new(exec_path.trim())
-        .ancestors()
-        .map(|root| root.join("cmd"))
-        .find(|cmd| cmd.join("git.exe").is_file())
-        .expect("Git for Windows installation");
-    let project = tempdir().unwrap();
-    fs::write(
-        project.path().join("package.json"),
-        r#"{"name":"fixture","version":"1.0.0","scripts":{"postinstall":"sh -c 'echo ok > postinstall.ok'"}}"#,
-    )
-    .unwrap();
-    let output = utoo()
-        .current_dir(project.path())
-        .env("PATH", git_cmd)
-        .arg("install")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(
-        fs::read_to_string(project.path().join("postinstall.ok"))
-            .unwrap()
-            .trim(),
-        "ok"
-    );
-}
-
 #[test]
 fn json_help_is_one_machine_document() {
     let output = utoo().args(["--json", "view", "--help"]).output().unwrap();

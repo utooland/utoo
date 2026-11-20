@@ -26,6 +26,84 @@ fn tarball(manifest: Value, source: &str) -> Vec<u8> {
     archive.into_inner().unwrap().finish().unwrap()
 }
 
+#[cfg(windows)]
+#[test]
+fn install_finds_git_shell_and_diagnoses_missing_shell_for_package_hooks() {
+    let git = Command::new("git").arg("--exec-path").output().unwrap();
+    assert!(git.status.success());
+    let exec_path = String::from_utf8(git.stdout).unwrap();
+    let git_cmd = Path::new(exec_path.trim())
+        .ancestors()
+        .map(|root| root.join("cmd"))
+        .find(|cmd| cmd.join("git.exe").is_file())
+        .expect("Git for Windows installation");
+
+    let dependency = tarball(
+        json!({"name": "shell-probe", "version": "1.0.0", "scripts": {
+            "postinstall": "sh -c 'echo dependency > hook.ok'"
+        }}),
+        "",
+    );
+    // Each case installs from scratch. A missing dependency shell fails the
+    // install before the root hook runs, so exercise that diagnostic separately.
+    for (has_git, has_dependency) in [(true, true), (false, true), (false, false)] {
+        let project = tempdir().unwrap();
+        let cache = tempdir().unwrap();
+        let mut manifest = json!({"name": "consumer", "version": "1.0.0", "scripts": {
+            "postinstall": "sh -c 'echo root > hook.ok'"
+        }});
+        if has_dependency {
+            fs::write(project.path().join("probe.tgz"), &dependency).unwrap();
+            manifest["dependencies"] = json!({"shell-probe": "file:./probe.tgz"});
+        }
+        fs::write(project.path().join("package.json"), manifest.to_string()).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_utoo"))
+            .current_dir(project.path())
+            .env(
+                "PATH",
+                if has_git {
+                    git_cmd.as_path()
+                } else {
+                    cache.path()
+                },
+            )
+            .env("UTOO_CACHE_DIR", cache.path())
+            .env("NO_UPDATE_NOTIFIER", "1")
+            .args(["install", "--registry", "https://registry.npmjs.org"])
+            .output()
+            .unwrap();
+        if has_git {
+            assert!(output.status.success(), "{output:?}");
+            for (file, marker) in [
+                ("hook.ok", "root"),
+                ("node_modules/shell-probe/hook.ok", "dependency"),
+            ] {
+                assert_eq!(
+                    fs::read_to_string(project.path().join(file))
+                        .unwrap()
+                        .trim(),
+                    marker
+                );
+            }
+        } else {
+            assert!(!output.status.success(), "{output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains("install Git for Windows") && stderr.contains("sh.exe"),
+                "{stderr}"
+            );
+            assert!(
+                stderr.contains(if has_dependency {
+                    "shell-probe"
+                } else {
+                    "project install lifecycle"
+                }),
+                "{stderr}"
+            );
+        }
+    }
+}
+
 fn check_tarball_deduplication(
     dependency_tarball: &str,
     override_rule: Option<(&str, &str)>,

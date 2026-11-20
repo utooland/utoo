@@ -31,6 +31,24 @@ use crate::util::user_config::get_install_scope;
 /// UI's per-script tap), so output capture isn't coupled to the display.
 pub(crate) type OutputSink = Arc<dyn Fn(&str) + Send + Sync>;
 
+fn spawn_script(cmd: Command, context: &'static str) -> Result<tokio::process::Child> {
+    let mut cmd = tokio::process::Command::from(cmd);
+    cmd.spawn().map_err(|error| {
+        let missing_shell = cfg!(windows)
+            && error.kind() == io::ErrorKind::NotFound
+            && cmd.as_std().get_program() == "sh";
+        let error = anyhow::Error::new(error);
+        let error = if missing_shell {
+            error.context(
+                "Could not start sh.exe (install Git for Windows or add a POSIX shell to PATH)",
+            )
+        } else {
+            error
+        };
+        error.context(context)
+    })
+}
+
 /// Build a `Command` with the standard npm env vars for script execution.
 async fn build_script_command(
     package: &PackageInfo,
@@ -38,7 +56,7 @@ async fn build_script_command(
     script_content: &str,
 ) -> Result<Command> {
     let bin_paths = ScriptService::collect_bin_paths(package).await?;
-    let env_path = ScriptService::build_path_env(&bin_paths);
+    let env_path = ScriptService::build_path_env(&bin_paths).await?;
     let init_cwd =
         env::current_dir().context("failed to read current working directory for INIT_CWD")?;
 
@@ -353,8 +371,8 @@ impl ScriptService {
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit());
 
-                let status = tokio::process::Command::from(cmd)
-                    .status()
+                let status = spawn_script(cmd, "Failed to execute script")?
+                    .wait()
                     .await
                     .context("Failed to execute script")?;
 
@@ -435,28 +453,14 @@ impl ScriptService {
     /// a [`std::process::Output`], so callers keep the same failure-dump /
     /// debug-log behaviour they had with `.output()`.
     pub(super) async fn run_captured(
-        cmd: Command,
+        mut cmd: Command,
         sink: Option<&OutputSink>,
     ) -> Result<std::process::Output> {
-        let mut cmd = tokio::process::Command::from(cmd);
-        let mut child = cmd
-            // Null stdin, matching the replaced `.output()`: a dependency script
-            // that reads stdin must get immediate EOF, not inherit the user's
-            // terminal — otherwise it blocks forever waiting for input it'll
-            // never get, hanging the install (and holding a concurrency slot).
-            .stdin(std::process::Stdio::null())
+        // A dependency script that reads stdin must get EOF immediately.
+        cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                #[cfg(windows)]
-                if error.kind() == io::ErrorKind::NotFound && cmd.as_std().get_program() == "sh" {
-                    return anyhow::Error::new(error).context(
-                        "Failed to spawn script with sh.exe (install Git for Windows or add a POSIX shell to PATH)",
-                    );
-                }
-                anyhow::Error::new(error).context("Failed to spawn script")
-            })?;
+            .stderr(std::process::Stdio::piped());
+        let mut child = spawn_script(cmd, "Failed to spawn script")?;
 
         // Drain both pipes and wait for the child concurrently on this one task
         // (no `tokio::spawn`): the drains keep the pipes from filling while
@@ -583,18 +587,22 @@ impl ScriptService {
         Ok(bin_paths)
     }
 
-    fn build_path_env(bin_paths: &[PathBuf]) -> String {
+    async fn build_path_env(bin_paths: &[PathBuf]) -> Result<String> {
         let path_separator = PATH_SEPARATOR;
         let original_path = env::var("PATH").unwrap_or_default();
         #[cfg(windows)]
-        let original_path = super::windows_shell::script_path(&original_path);
+        let original_path = {
+            use super::windows_shell::ShellPathCache;
+            static CACHE: ShellPathCache = ShellPathCache::new();
+            CACHE.resolve(original_path).await?
+        };
         let additional_paths = bin_paths
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join(path_separator);
 
-        format!(
+        Ok(format!(
             "{}{}{}",
             additional_paths,
             if additional_paths.is_empty() {
@@ -603,7 +611,7 @@ impl ScriptService {
                 path_separator
             },
             original_path
-        )
+        ))
     }
 
     pub async fn execute_custom_script(
@@ -625,8 +633,8 @@ impl ScriptService {
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
 
-        let status = tokio::process::Command::from(cmd)
-            .status()
+        let status = spawn_script(cmd, "Failed to execute custom script")?
+            .wait()
             .await
             .context("Failed to execute custom script")?;
 
@@ -657,8 +665,8 @@ impl ScriptService {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        tokio::process::Command::from(cmd)
-            .output()
+        spawn_script(cmd, "Failed to execute custom script")?
+            .wait_with_output()
             .await
             .context("Failed to execute custom script")
     }
