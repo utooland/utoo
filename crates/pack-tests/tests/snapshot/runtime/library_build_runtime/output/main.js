@@ -912,6 +912,8 @@ function registerChunk(registration) {
     return placeholderFileUrl(decodeURIComponent(modulePath ?? ""), root);
 }
 contextPrototype.F = resolveFileUrl;
+// Library asset URLs already include the configured public path and need no suffix.
+contextPrototype.q = exportValue;
 const loadedScripts = new Map();
 /**
  * Load an external script by creating a <script> tag.
@@ -984,6 +986,9 @@ __turbopack_context__.S([
     "[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript) <locals>",
     "entryEnv,j,entryUrl,K,readEntryUrl,P",
     0,
+    "[project]/runtime/library_build_runtime/input/icon.svg (static in ecmascript)",
+    "icon,default",
+    0,
     "[project]/runtime/library_build_runtime/input/meta space % 中文.mjs [library-client] (ecmascript)",
     "answer,r,dependencyEnv,N,dependencyUrl,n,readDependencyUrl,W"
 ]);
@@ -991,6 +996,7 @@ __turbopack_context__.S([
 "[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript) <locals>", ((__turbopack_context__) => {
 "use strict";
 
+var __TURBOPACK__imported__module__$5b$project$5d2f$runtime$2f$library_build_runtime$2f$input$2f$icon$2e$svg__$28$static__in__ecmascript$29$__ = __turbopack_context__.i("[project]/runtime/library_build_runtime/input/icon.svg (static in ecmascript)");
 var __TURBOPACK__import$2e$meta__ = {
     get url () {
         return __turbopack_context__.F("input/index.js");
@@ -1003,7 +1009,9 @@ var __TURBOPACK__import$2e$meta__ = {
         SSR: false
     }
 };
+;
 console.log('Hello, world!');
+;
 ;
 const meta = __TURBOPACK__import$2e$meta__;
 const entryUrl = meta.url;
@@ -1060,6 +1068,9 @@ __turbopack_context__.s([
     readDependencyUrl
 ]);
 }),
+"[project]/runtime/library_build_runtime/input/icon.svg (static in ecmascript)", ((__turbopack_context__) => {
+
+__turbopack_context__.q("/static/icon.12f86be3.svg");}),
 ],
 ["main.js", {"otherChunks":[],"runtimeModuleIds":["[project]/runtime/library_build_runtime/input/index.js [library-client] (ecmascript)"]}],
 ]);

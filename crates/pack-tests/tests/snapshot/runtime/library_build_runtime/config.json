@@ -8,7 +8,10 @@
           "name": "MyLibrary"
         }
       }
-    ]
+    ],
+    "output": {
+      "assetModuleFilename": "static/[name].[contenthash:8]"
+    }
   },
   "runtimeType": "Production"
-} 
+}
