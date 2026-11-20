@@ -438,7 +438,8 @@ impl ScriptService {
         cmd: Command,
         sink: Option<&OutputSink>,
     ) -> Result<std::process::Output> {
-        let mut child = tokio::process::Command::from(cmd)
+        let mut cmd = tokio::process::Command::from(cmd);
+        let mut child = cmd
             // Null stdin, matching the replaced `.output()`: a dependency script
             // that reads stdin must get immediate EOF, not inherit the user's
             // terminal — otherwise it blocks forever waiting for input it'll
@@ -447,7 +448,15 @@ impl ScriptService {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .context("Failed to spawn script")?;
+            .map_err(|error| {
+                #[cfg(windows)]
+                if error.kind() == io::ErrorKind::NotFound && cmd.as_std().get_program() == "sh" {
+                    return anyhow::Error::new(error).context(
+                        "Failed to spawn script with sh.exe (install Git for Windows or add a POSIX shell to PATH)",
+                    );
+                }
+                anyhow::Error::new(error).context("Failed to spawn script")
+            })?;
 
         // Drain both pipes and wait for the child concurrently on this one task
         // (no `tokio::spawn`): the drains keep the pipes from filling while
@@ -577,6 +586,8 @@ impl ScriptService {
     fn build_path_env(bin_paths: &[PathBuf]) -> String {
         let path_separator = PATH_SEPARATOR;
         let original_path = env::var("PATH").unwrap_or_default();
+        #[cfg(windows)]
+        let original_path = super::windows_shell::script_path(&original_path);
         let additional_paths = bin_paths
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
