@@ -1044,6 +1044,8 @@ function registerChunk(registration) {
     return placeholderFileUrl(decodeURIComponent(modulePath ?? ""), root);
 }
 contextPrototype.F = resolveFileUrl;
+// Library asset URLs already include the configured public path and need no suffix.
+contextPrototype.q = exportValue;
 const loadedScripts = new Map();
 /**
  * Load an external script by creating a <script> tag.

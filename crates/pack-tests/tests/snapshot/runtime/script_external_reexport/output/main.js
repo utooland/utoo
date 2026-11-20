@@ -1332,6 +1332,8 @@ function _type_of(obj) {
         return placeholderFileUrl(decodeURIComponent(modulePath !== null && modulePath !== void 0 ? modulePath : ""), root);
     }
     contextPrototype.F = resolveFileUrl;
+    // Library asset URLs already include the configured public path and need no suffix.
+    contextPrototype.q = exportValue;
     var loadedScripts = new Map();
     /**
  * Load an external script by creating a <script> tag.
