@@ -26,6 +26,9 @@ function resolveFileUrl(modulePath?: string, root?: string): string {
 }
 contextPrototype.F = resolveFileUrl;
 
+// Library asset URLs already include the configured public path and need no suffix.
+contextPrototype.q = exportValue;
+
 const loadedScripts = new Map<string, Promise<void>>();
 
 /**

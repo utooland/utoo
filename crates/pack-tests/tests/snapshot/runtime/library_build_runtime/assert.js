@@ -26,6 +26,12 @@ const expectedEnv = {
 
 for (const library of [globalContext.MyLibrary, commonJsContext.module.exports]) {
   assert.equal(library.answer, 42, "the imported .mjs module must be bundled");
+  assert.match(library.icon, /^\/static\/icon\.[0-9a-f]{8}\.svg$/);
+  // Snapshot fixtures trim surrounding whitespace when writing text outputs.
+  assert.equal(
+    fs.readFileSync(path.join(__dirname, "output", library.icon), "utf8").trim(),
+    fs.readFileSync(path.join(__dirname, "input/icon.svg"), "utf8").trim(),
+  );
   assert.equal(library.entryUrl, entryUrl);
   assert.equal(library.readEntryUrl(), entryUrl);
   assert.equal(library.dependencyUrl, dependencyUrl);
