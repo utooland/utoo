@@ -1,0 +1,19 @@
+packages/pack-analyzer/build.mjs
+  s_430ac4440b2a57::t_c65d2b3c5f2a51 116-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a58e01db3882ba7da8988ee2030768e2b397afe",
+  "prompts": {},
+  "sessions": {
+    "s_430ac4440b2a57": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f6eb-fc2d-77f1-a119-993958c7da8b",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
