@@ -581,10 +581,17 @@ impl ScriptService {
 
         while let Some(path) = current_path {
             let bin_path = path.join("node_modules/.bin");
-            if crate::fs::try_exists(&bin_path).await?
-                && let Ok(absolute_path) = crate::fs::canonicalize(&bin_path).await
-            {
-                bin_paths.push(absolute_path);
+            if crate::fs::try_exists(&bin_path).await? {
+                // cmd exposes a batch file's directory through %~dp0. Keep ordinary
+                // drive and UNC paths usable with the relative targets in .cmd shims;
+                // canonicalize adds a verbatim prefix where ".." is not normalized.
+                #[cfg(windows)]
+                let absolute_path = std::path::absolute(&bin_path);
+                #[cfg(not(windows))]
+                let absolute_path = crate::fs::canonicalize(&bin_path).await;
+                if let Ok(path) = absolute_path {
+                    bin_paths.push(path);
+                }
             }
             current_path = path.parent();
         }

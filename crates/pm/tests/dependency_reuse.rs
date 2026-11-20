@@ -48,6 +48,7 @@ fn windows_package_scripts_work_with_only_node_on_path() {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_utoo"));
         cmd.current_dir(root)
             .env("PATH", tools.path())
+            .env("HOME", cache.path())
             .env("USERPROFILE", cache.path())
             .env_remove("npm_config_script_shell")
             .env("UTOO_CACHE_DIR", cache.path())
@@ -69,7 +70,7 @@ require('fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)));
         "name":"consumer","version":"1.0.0","dependencies":{"shell-probe":"file:./probe.tgz"},
         "scripts":{
             "postinstall": r#"node -e "require('fs').writeFileSync('hook.ok',process.env.npm_lifecycle_event)""#,
-            "probe":"arg-probe", "fail":"exit /b 23"
+            "probe":"arg-probe", "fail":"exit /b 23", "bin-dir-probe":"bin-dir"
         }
     }).to_string()).unwrap();
     let installed = cli()
@@ -86,8 +87,29 @@ require('fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)));
         "[]"
     );
 
+    // Check the path as seen by cmd itself; Node versions differ in their
+    // handling of verbatim paths containing the shim's relative target.
+    fs::write(
+        root.join("node_modules/.bin/bin-dir.cmd"),
+        "@echo %~dp0>bin-dir.txt\r\n",
+    )
+    .unwrap();
+    let bin_dir = cli().args(["run", "bin-dir-probe"]).output().unwrap();
+    assert!(bin_dir.status.success(), "{bin_dir:?}");
+    assert!(
+        !fs::read_to_string(root.join("bin-dir.txt"))
+            .unwrap()
+            .starts_with(r"\\?\")
+    );
+
     // The package bin is a .cmd shim and reparses the forwarded arguments.
-    let args = ["two words", "", "a&b", "trailing slash \\"];
+    let args = [
+        "two words",
+        "",
+        "a&b",
+        "embedded\"quote",
+        "trailing slash \\",
+    ];
     let run = cli()
         .args(["run", "probe", "--"])
         .args(args)
@@ -105,6 +127,7 @@ require('fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)));
 
 #[test]
 fn package_scripts_honor_script_shell_overrides() {
+    let home = tempdir().unwrap();
     let project = tempdir().unwrap();
     let root = project.path();
     fs::write(
@@ -120,6 +143,8 @@ fn package_scripts_honor_script_shell_overrides() {
     let cli = || {
         let mut cli = Command::new(env!("CARGO_BIN_EXE_utoo"));
         cli.current_dir(root)
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
             .env("NO_UPDATE_NOTIFIER", "1")
             .env_remove("npm_config_script_shell")
             .args(["run", "probe"]);
