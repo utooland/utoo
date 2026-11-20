@@ -1,0 +1,35 @@
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/input/index.js
+  s_882bec005a6a60::t_8c3d6dcefef57c 1-2,11
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/assert.js
+  s_882bec005a6a60::t_50f722f2ee9e52 30-33
+  s_882bec005a6a60::t_5fe43108efa215 29,34
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/input/icon.svg
+  s_882bec005a6a60::t_5fe43108efa215 1
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/config.json
+  s_882bec005a6a60::t_317cbe055456b0 17
+  s_882bec005a6a60::t_5fe43108efa215 11-14
+crates/pack-core/js/src/library/runtime-backend-dom.ts
+  s_882bec005a6a60::t_d95230839bd144 29-31
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/output/main.js
+  s_882bec005a6a60::t_90847871a34064 915-916,989-991,999,1012,1015,1071-1073
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/output/main.js.map
+  s_882bec005a6a60::t_7eb88e8b020da1 8-10
+crates/pack-tests/tests/snapshot/runtime/library_build_runtime/output/static/icon.12f86be3.svg
+  s_882bec005a6a60::t_a4a1bc5be692fa 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "70ed86cd229d90bf582561506f51b505dba27ee0",
+  "prompts": {},
+  "sessions": {
+    "s_882bec005a6a60": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f6e6-8ab0-71b1-a953-55413948dc4d",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
