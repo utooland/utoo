@@ -7,6 +7,7 @@
 //!
 //! Supported subset:
 //! - `registry=<url>`
+//! - `script-shell=<executable>`
 //! - `//host[/path]/:_authToken=<token>` credentials, matched with npm's
 //!   walk-up ("nerf dart") rules
 //! - `${VAR}` environment interpolation in values
@@ -68,6 +69,14 @@ impl Npmrc {
     /// `registry=` from the user `~/.npmrc`, if any.
     pub fn user_registry(&self) -> Option<String> {
         registry_value(&self.user)
+    }
+
+    pub fn script_shell(&self) -> Option<&str> {
+        [&self.project, &self.user]
+            .into_iter()
+            .filter_map(|values| values.get("script-shell"))
+            .find(|value| !value.is_empty())
+            .map(String::as_str)
     }
 
     /// The `//host[/path]/:_authToken` credential for `registry`, matched with

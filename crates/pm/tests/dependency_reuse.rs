@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -28,80 +27,115 @@ fn tarball(manifest: Value, source: &str) -> Vec<u8> {
 
 #[cfg(windows)]
 #[test]
-fn install_finds_git_shell_and_diagnoses_missing_shell_for_package_hooks() {
-    let git = Command::new("git").arg("--exec-path").output().unwrap();
-    assert!(git.status.success());
-    let exec_path = String::from_utf8(git.stdout).unwrap();
-    let git_cmd = Path::new(exec_path.trim())
-        .ancestors()
-        .map(|root| root.join("cmd"))
-        .find(|cmd| cmd.join("git.exe").is_file())
-        .expect("Git for Windows installation");
+fn windows_package_scripts_work_with_only_node_on_path() {
+    let tools = tempdir().unwrap();
+    let node = Command::new("node")
+        .args(["-p", "process.execPath"])
+        .output()
+        .unwrap();
+    assert!(node.status.success());
+    fs::copy(
+        String::from_utf8(node.stdout).unwrap().trim(),
+        tools.path().join("node.exe"),
+    )
+    .unwrap();
 
-    let dependency = tarball(
-        json!({"name": "shell-probe", "version": "1.0.0", "scripts": {
-            "postinstall": "sh -c 'echo dependency > hook.ok'"
-        }}),
-        "",
-    );
-    // Each case installs from scratch. A missing dependency shell fails the
-    // install before the root hook runs, so exercise that diagnostic separately.
-    for (has_git, has_dependency) in [(true, true), (false, true), (false, false)] {
-        let project = tempdir().unwrap();
-        let cache = tempdir().unwrap();
-        let mut manifest = json!({"name": "consumer", "version": "1.0.0", "scripts": {
-            "postinstall": "sh -c 'echo root > hook.ok'"
-        }});
-        if has_dependency {
-            fs::write(project.path().join("probe.tgz"), &dependency).unwrap();
-            manifest["dependencies"] = json!({"shell-probe": "file:./probe.tgz"});
-        }
-        fs::write(project.path().join("package.json"), manifest.to_string()).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_utoo"))
-            .current_dir(project.path())
-            .env(
-                "PATH",
-                if has_git {
-                    git_cmd.as_path()
-                } else {
-                    cache.path()
-                },
-            )
+    let project = tempdir().unwrap();
+    let cache = tempdir().unwrap();
+    let root = project.path();
+    let cli = || {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_utoo"));
+        cmd.current_dir(root)
+            .env("PATH", tools.path())
+            .env("USERPROFILE", cache.path())
+            .env_remove("npm_config_script_shell")
             .env("UTOO_CACHE_DIR", cache.path())
-            .env("NO_UPDATE_NOTIFIER", "1")
-            .args(["install", "--registry", "https://registry.npmjs.org"])
-            .output()
-            .unwrap();
-        if has_git {
-            assert!(output.status.success(), "{output:?}");
-            for (file, marker) in [
-                ("hook.ok", "root"),
-                ("node_modules/shell-probe/hook.ok", "dependency"),
-            ] {
-                assert_eq!(
-                    fs::read_to_string(project.path().join(file))
-                        .unwrap()
-                        .trim(),
-                    marker
-                );
-            }
-        } else {
-            assert!(!output.status.success(), "{output:?}");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                stderr.contains("install Git for Windows") && stderr.contains("sh.exe"),
-                "{stderr}"
-            );
-            assert!(
-                stderr.contains(if has_dependency {
-                    "shell-probe"
-                } else {
-                    "project install lifecycle"
-                }),
-                "{stderr}"
-            );
+            .env("NO_UPDATE_NOTIFIER", "1");
+        cmd
+    };
+
+    // Match core-js's quoted node -e hook, and verify the JS actually ran.
+    let dependency = tarball(
+        json!({"name":"shell-probe","version":"1.0.0","scripts":{
+            "postinstall": r#"node -e "try{require('./index')}catch(e){}""#
+        }, "bin":{"arg-probe":"index.js"}}),
+        r#"#!/usr/bin/env node
+require('fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)));
+"#,
+    );
+    fs::write(root.join("probe.tgz"), dependency).unwrap();
+    fs::write(root.join("package.json"), json!({
+        "name":"consumer","version":"1.0.0","dependencies":{"shell-probe":"file:./probe.tgz"},
+        "scripts":{
+            "postinstall": r#"node -e "require('fs').writeFileSync('hook.ok',process.env.npm_lifecycle_event)""#,
+            "probe":"arg-probe", "fail":"exit /b 23"
         }
-    }
+    }).to_string()).unwrap();
+    let installed = cli()
+        .args(["install", "--registry", "https://registry.npmjs.org"])
+        .output()
+        .unwrap();
+    assert!(installed.status.success(), "{installed:?}");
+    assert_eq!(
+        fs::read_to_string(root.join("hook.ok")).unwrap(),
+        "postinstall"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("node_modules/shell-probe/args.json")).unwrap(),
+        "[]"
+    );
+
+    // The package bin is a .cmd shim and reparses the forwarded arguments.
+    let args = ["two words", "", "a&b", "trailing slash \\"];
+    let run = cli()
+        .args(["run", "probe", "--"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{run:?}");
+    assert_eq!(
+        serde_json::from_slice::<Vec<String>>(&fs::read(root.join("args.json")).unwrap()).unwrap(),
+        args
+    );
+
+    let failed = cli().args(["run", "fail"]).output().unwrap();
+    assert_eq!(failed.status.code(), Some(23), "{failed:?}");
+}
+
+#[test]
+fn package_scripts_honor_script_shell_overrides() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"consumer","scripts":{"probe":"echo ok"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(".npmrc"),
+        "script-shell=utoo-missing-script-shell",
+    )
+    .unwrap();
+    let cli = || {
+        let mut cli = Command::new(env!("CARGO_BIN_EXE_utoo"));
+        cli.current_dir(root)
+            .env("NO_UPDATE_NOTIFIER", "1")
+            .env_remove("npm_config_script_shell")
+            .args(["run", "probe"]);
+        cli
+    };
+    let missing = cli().output().unwrap();
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("utoo-missing-script-shell"),
+        "{missing:?}"
+    );
+    let shell = if cfg!(windows) { "cmd.exe" } else { "sh" };
+    let override_run = cli()
+        .env("npm_config_script_shell", shell)
+        .output()
+        .unwrap();
+    assert!(override_run.status.success(), "{override_run:?}");
 }
 
 fn check_tarball_deduplication(

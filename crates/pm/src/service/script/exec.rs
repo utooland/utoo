@@ -33,19 +33,11 @@ pub(crate) type OutputSink = Arc<dyn Fn(&str) + Send + Sync>;
 
 fn spawn_script(cmd: Command, context: &'static str) -> Result<tokio::process::Child> {
     let mut cmd = tokio::process::Command::from(cmd);
-    cmd.spawn().map_err(|error| {
-        let missing_shell = cfg!(windows)
-            && error.kind() == io::ErrorKind::NotFound
-            && cmd.as_std().get_program() == "sh";
-        let error = anyhow::Error::new(error);
-        let error = if missing_shell {
-            error.context(
-                "Could not start sh.exe (install Git for Windows or add a POSIX shell to PATH)",
-            )
-        } else {
-            error
-        };
-        error.context(context)
+    cmd.spawn().with_context(|| {
+        format!(
+            "{context}: could not start script shell {:?}",
+            cmd.as_std().get_program()
+        )
     })
 }
 
@@ -54,16 +46,29 @@ async fn build_script_command(
     package: &PackageInfo,
     script_name: &str,
     script_content: &str,
+    script_args: &[&str],
 ) -> Result<Command> {
     let bin_paths = ScriptService::collect_bin_paths(package).await?;
-    let env_path = ScriptService::build_path_env(&bin_paths).await?;
+    let env_path = ScriptService::build_path_env(&bin_paths);
     let init_cwd =
         env::current_dir().context("failed to read current working directory for INIT_CWD")?;
 
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c")
-        .arg(script_content)
-        .current_dir(&package.path)
+    let config = crate::util::npmrc::load().await;
+    let shell = env::var_os("npm_config_script_shell")
+        .filter(|s| !s.is_empty())
+        .or_else(|| config.script_shell().map(Into::into));
+    #[cfg(windows)]
+    let mut cmd =
+        super::windows_shell::command(shell, script_content, script_args, &package.path, &env_path)
+            .await;
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = Command::new(shell.unwrap_or_else(|| "sh".into()));
+        cmd.arg("-c")
+            .arg(join_script_args(script_content, script_args).as_ref());
+        cmd
+    };
+    cmd.current_dir(&package.path)
         .env("PATH", env_path)
         .env("npm_lifecycle_event", script_name)
         .env("INIT_CWD", init_cwd)
@@ -363,7 +368,7 @@ impl ScriptService {
                 Self::ensure_node_gyp().await?;
             }
 
-            let mut cmd = build_script_command(package, hook.into(), script).await?;
+            let mut cmd = build_script_command(package, hook.into(), script, &[]).await?;
             tracing::debug!("Executing command: {cmd:?}");
 
             if output == ScriptOutput::Verbose {
@@ -587,22 +592,16 @@ impl ScriptService {
         Ok(bin_paths)
     }
 
-    async fn build_path_env(bin_paths: &[PathBuf]) -> Result<String> {
+    fn build_path_env(bin_paths: &[PathBuf]) -> String {
         let path_separator = PATH_SEPARATOR;
         let original_path = env::var("PATH").unwrap_or_default();
-        #[cfg(windows)]
-        let original_path = {
-            use super::windows_shell::ShellPathCache;
-            static CACHE: ShellPathCache = ShellPathCache::new();
-            CACHE.resolve(original_path).await?
-        };
         let additional_paths = bin_paths
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join(path_separator);
 
-        Ok(format!(
+        format!(
             "{}{}{}",
             additional_paths,
             if additional_paths.is_empty() {
@@ -611,7 +610,7 @@ impl ScriptService {
                 path_separator
             },
             original_path
-        ))
+        )
     }
 
     pub async fn execute_custom_script(
@@ -626,9 +625,8 @@ impl ScriptService {
             script_name
         );
 
-        let cmd_content = join_script_args(script_content, &script_args);
-
-        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
+        let mut cmd =
+            build_script_command(package, script_name, script_content, &script_args).await?;
         cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
@@ -658,9 +656,8 @@ impl ScriptService {
         script_content: &str,
         script_args: Vec<&str>,
     ) -> Result<std::process::Output> {
-        let cmd_content = join_script_args(script_content, &script_args);
-
-        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
+        let mut cmd =
+            build_script_command(package, script_name, script_content, &script_args).await?;
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());

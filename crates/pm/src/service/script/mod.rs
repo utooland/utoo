@@ -8,7 +8,7 @@
 mod exec;
 mod lifecycle;
 mod node_gyp;
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 mod windows_shell;
 
 pub(crate) use exec::script_failure_details;

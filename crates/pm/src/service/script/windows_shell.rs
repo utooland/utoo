@@ -1,126 +1,134 @@
-use std::{borrow::Cow, env, ffi::OsStr};
-use tokio::sync::Mutex;
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    os::windows::process::CommandExt,
+    path::Path,
+    process::Command,
+};
 
-/// Package hooks share the host PATH, but a global bin link can change it
-/// within this process. Keep only the last snapshot and coalesce concurrent probes.
-pub(super) struct ShellPathCache(Mutex<Option<(String, String)>>);
-
-impl ShellPathCache {
-    pub(super) const fn new() -> Self {
-        Self(Mutex::const_new(None))
-    }
-
-    pub(super) async fn resolve(&self, path: String) -> anyhow::Result<String> {
-        let mut cache = self.0.lock().await;
-        if let Some((host, resolved)) = cache.as_ref()
-            && host == &path
-        {
-            return Ok(resolved.clone());
-        }
-
-        let (host, resolved) = tokio::task::spawn_blocking(move || {
-            let resolved = discover_script_path(&path).into_owned();
-            (path, resolved)
-        })
-        .await?;
-        *cache = Some((host, resolved.clone()));
-        Ok(resolved)
-    }
-}
-
-/// Git for Windows adds its `cmd` directory to PATH by default, while its
-/// POSIX shell lives in the sibling `bin`. Make it available to nested scripts
-/// as well as the initial `sh -c`, without displacing any existing tools.
-fn discover_script_path(path: &str) -> Cow<'_, str> {
-    let dirs = || env::split_paths(path).filter(|dir| dir.is_absolute());
-    if dirs().any(|dir| dir.join("sh.exe").is_file()) {
-        return Cow::Borrowed(path);
-    }
-
-    for cmd in dirs() {
-        if !cmd
-            .file_name()
-            .is_some_and(|name| name.eq_ignore_ascii_case(OsStr::new("cmd")))
-            || !cmd.join("git.exe").is_file()
-        {
-            continue;
-        }
-        let Some(root) = cmd.parent() else { continue };
-        for bin in [root.join("bin"), root.join("usr").join("bin")] {
-            if bin.join("sh.exe").is_file()
-                && let Ok(joined) = env::join_paths(env::split_paths(path).chain([bin]))
-            {
-                return Cow::Owned(joined.to_string_lossy().into_owned());
+/// Keep the manifest script as shell syntax. Only forwarded CLI arguments
+/// are literals and need escaping. cmd reads a raw command line after /c.
+pub(super) async fn command(
+    shell: Option<OsString>,
+    script: &str,
+    args: &[&str],
+    cwd: &Path,
+    path: &str,
+) -> Command {
+    let shell = shell
+        .or_else(|| env::var_os("ComSpec").filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "cmd.exe".into());
+    let mut command = Command::new(&shell);
+    let is_cmd = Path::new(&shell).file_name().is_some_and(|name| {
+        name.eq_ignore_ascii_case("cmd") || name.eq_ignore_ascii_case("cmd.exe")
+    });
+    let mut line = script.to_owned();
+    if is_cmd {
+        let batch = !args.is_empty() && starts_with_batch_file(script, cwd, path).await;
+        for arg in args {
+            line.push(' ');
+            let escaped = escape_cmd_arg(arg);
+            if batch && !arg.is_empty() {
+                line.push_str(&escape_meta(&escaped));
+            } else {
+                line.push_str(&escaped);
             }
         }
+        command
+            .args(["/d", "/s", "/c"])
+            .raw_arg(format!("\"{line}\""));
+    } else {
+        for arg in args {
+            line.push_str(" '");
+            line.push_str(&arg.replace('\'', "'\\''"));
+            line.push('\'');
+        }
+        command.arg("-c").arg(line);
     }
-    Cow::Borrowed(path)
+    command
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn exposes_the_shell_from_the_git_installation() {
-        let temp = tempdir().unwrap();
-        let root = temp.path().join("Portable Git");
-        let cmd = root.join("cmd");
-        let bin = root.join("bin");
-        let usr_bin = root.join("usr").join("bin");
-        for dir in [&cmd, &bin, &usr_bin] {
-            fs::create_dir_all(dir).unwrap();
+// cmd reparses arguments once more when a package binary is a .cmd shim.
+async fn starts_with_batch_file(script: &str, cwd: &Path, path: &str) -> bool {
+    let mut token = String::new();
+    let mut quoted = false;
+    let mut chars = script.trim_start().chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => quoted = !quoted,
+            '^' if !quoted => token.extend(chars.next()),
+            ch if !quoted && ch.is_whitespace() => break,
+            ch => token.push(ch),
         }
-        let host = env::join_paths([&cmd]).unwrap();
-        let host = host.to_str().unwrap();
-        fs::write(usr_bin.join("sh.exe"), "").unwrap();
-        assert_eq!(discover_script_path(host), host);
-        fs::write(cmd.join("git.exe"), "").unwrap();
-        assert_eq!(
-            env::split_paths(&*discover_script_path(host)).collect::<Vec<_>>(),
-            [cmd.as_path(), usr_bin.as_path()]
-        );
-        fs::write(bin.join("sh.exe"), "").unwrap();
-        assert_eq!(
-            env::split_paths(&*discover_script_path(host)).collect::<Vec<_>>(),
-            [cmd.as_path(), bin.as_path()]
-        );
-
-        let custom_shell = temp.path().join("tools");
-        fs::create_dir(&custom_shell).unwrap();
-        fs::write(custom_shell.join("sh.exe"), "").unwrap();
-        let host = env::join_paths([&cmd, &custom_shell]).unwrap();
-        let host = host.to_str().unwrap();
-        assert_eq!(discover_script_path(host), host);
     }
-
-    #[tokio::test]
-    async fn reuses_the_probe_until_the_host_path_changes() {
-        let cache = ShellPathCache::new();
-        let root = tempdir().unwrap();
-        let cmd = root.path().join("cmd");
-        let bin = root.path().join("bin");
-        fs::create_dir(&cmd).unwrap();
-        fs::create_dir(&bin).unwrap();
-        fs::write(cmd.join("git.exe"), "").unwrap();
-        fs::write(bin.join("sh.exe"), "").unwrap();
-        let host = cmd.to_str().unwrap().to_owned();
-        let expected = env::join_paths([&cmd, &bin]).unwrap();
-        assert_eq!(
-            cache.resolve(host.clone()).await.unwrap(),
-            expected.to_str().unwrap()
-        );
-        fs::remove_file(bin.join("sh.exe")).unwrap();
-        assert_eq!(
-            cache.resolve(host).await.unwrap(),
-            expected.to_str().unwrap()
-        );
-        let changed = env::join_paths([&cmd, root.path()])
-            .unwrap()
-            .into_string()
-            .unwrap();
-        assert_eq!(cache.resolve(changed.clone()).await.unwrap(), changed);
+    let program = Path::new(&token);
+    let is_batch = |ext: &OsStr| ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd");
+    if let Some(ext) = program.extension()
+        && is_batch(ext)
+    {
+        return true;
     }
+    if token.is_empty() {
+        return false;
+    }
+    let extensions = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    let has_path = program.components().count() > 1;
+    for dir in std::iter::once(cwd.to_owned()).chain(env::split_paths(path)) {
+        let base = cwd.join(dir).join(program);
+        if program.extension().is_some() && tokio::fs::metadata(&base).await.is_ok() {
+            return false;
+        }
+        for ext in extensions.split(';').filter(|ext| !ext.is_empty()) {
+            let mut candidate = base.as_os_str().to_owned();
+            candidate.push(ext);
+            if tokio::fs::metadata(candidate)
+                .await
+                .is_ok_and(|m| m.is_file())
+            {
+                return is_batch(OsStr::new(ext.trim_start_matches('.')));
+            }
+        }
+        if has_path {
+            break;
+        }
+    }
+    false
+}
+
+fn escape_meta(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if " !%^&()<>|\"".contains(ch) {
+            out.push('^');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+// Quote for the executable's argv parser, then escape cmd's metacharacters.
+fn escape_cmd_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".into();
+    }
+    if !arg.contains([' ', '\t', '\n', '\u{b}', '"']) {
+        return escape_meta(arg);
+    }
+    let mut out = String::from("\"");
+    let mut slashes = 0;
+    for ch in arg.chars() {
+        if ch == '\\' {
+            slashes += 1;
+            continue;
+        }
+        out.extend(std::iter::repeat_n(
+            '\\',
+            if ch == '"' { 2 * slashes + 1 } else { slashes },
+        ));
+        slashes = 0;
+        out.push(ch);
+    }
+    out.extend(std::iter::repeat_n('\\', slashes * 2));
+    out.push('"');
+    escape_meta(&out)
 }
