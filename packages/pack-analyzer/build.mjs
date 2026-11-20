@@ -113,6 +113,9 @@ const [bundle] = await Promise.all([
     alias: {
       "@": upstream,
       "next/link": path.join(workspace, "src/static-link.tsx"),
+      // Resolve React and its subpaths from the analyzer workspace for all importers.
+      react: "react",
+      "react-dom": "react-dom",
     },
     nodePaths: [
       path.join(workspace, "node_modules"),
