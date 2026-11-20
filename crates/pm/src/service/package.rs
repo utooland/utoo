@@ -615,6 +615,14 @@ mod tests {
     use tempfile::TempDir;
     use utoo_ruborist::manifest::BinField;
 
+    const RECORD_PACKAGE_JSON: &str =
+        r#"node -e "require('fs').writeFileSync('hook-path',process.env.npm_package_json)""#;
+
+    fn assert_hook_path(project: &Path) {
+        let actual = fs::read_to_string(project.join("hook-path")).unwrap();
+        assert_eq!(Path::new(&actual), project.join("package.json"));
+    }
+
     /// Test helper: build a single-binary `BinField::Map`.
     fn bin_map(name: &str, path: &str) -> Option<BinField> {
         Some(BinField::Map(std::collections::BTreeMap::from([(
@@ -759,7 +767,7 @@ mod tests {
             "name": "test-subproject",
             "version": "1.0.0",
             "scripts": {
-                "preinstall": "pwd | grep subproject"
+                "preinstall": r#"node -e "require('assert').strictEqual(require('path').basename(process.cwd()),'subproject')""#
             }
         });
 
@@ -789,7 +797,7 @@ mod tests {
             "name": "test-project",
             "version": "1.0.0",
             "scripts": {
-                "preinstall": format!("test \"$npm_package_json\" = \"{}\"", expected_package_json_path.display())
+                "preinstall": RECORD_PACKAGE_JSON
             }
         });
 
@@ -806,6 +814,7 @@ mod tests {
             result.is_ok(),
             "npm_package_json environment variable should point to the correct package.json path"
         );
+        assert_hook_path(project_path);
     }
 
     #[tokio::test]
@@ -914,7 +923,7 @@ mod tests {
             "name": "project1",
             "version": "1.0.0",
             "scripts": {
-                "preinstall": format!("test \"$npm_package_json\" = \"{}\"", project1_path.join("package.json").display())
+                "preinstall": RECORD_PACKAGE_JSON
             }
         });
 
@@ -922,7 +931,7 @@ mod tests {
             "name": "project2",
             "version": "2.0.0",
             "scripts": {
-                "preinstall": format!("test \"$npm_package_json\" = \"{}\"", project2_path.join("package.json").display())
+                "preinstall": RECORD_PACKAGE_JSON
             }
         });
 
@@ -952,6 +961,8 @@ mod tests {
             result2.is_ok(),
             "Project2 hooks should succeed with correct environment"
         );
+        assert_hook_path(&project1_path);
+        assert_hook_path(&project2_path);
     }
 
     #[tokio::test]
@@ -1660,12 +1671,12 @@ mod tests {
         // distinct marker file from a `prepare` script.
         fs::write(
             a_dir.join("package.json"),
-            r#"{ "scripts": { "prepare": "touch marker-a" } }"#,
+            r#"{ "scripts": { "prepare": "echo ok>marker-a" } }"#,
         )
         .unwrap();
         fs::write(
             b_dir.join("package.json"),
-            r#"{ "scripts": { "prepare": "touch marker-b" } }"#,
+            r#"{ "scripts": { "prepare": "echo ok>marker-b" } }"#,
         )
         .unwrap();
 

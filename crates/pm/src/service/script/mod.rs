@@ -8,6 +8,8 @@
 mod exec;
 mod lifecycle;
 mod node_gyp;
+#[cfg(windows)]
+mod windows_shell;
 
 pub(crate) use exec::script_failure_details;
 pub use exec::{ScriptExit, ScriptService};

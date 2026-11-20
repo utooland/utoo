@@ -31,21 +31,44 @@ use crate::util::user_config::get_install_scope;
 /// UI's per-script tap), so output capture isn't coupled to the display.
 pub(crate) type OutputSink = Arc<dyn Fn(&str) + Send + Sync>;
 
+fn spawn_script(cmd: Command, context: &'static str) -> Result<tokio::process::Child> {
+    let mut cmd = tokio::process::Command::from(cmd);
+    cmd.spawn().with_context(|| {
+        format!(
+            "{context}: could not start script shell {:?}",
+            cmd.as_std().get_program()
+        )
+    })
+}
+
 /// Build a `Command` with the standard npm env vars for script execution.
 async fn build_script_command(
     package: &PackageInfo,
     script_name: &str,
     script_content: &str,
+    script_args: &[&str],
 ) -> Result<Command> {
     let bin_paths = ScriptService::collect_bin_paths(package).await?;
     let env_path = ScriptService::build_path_env(&bin_paths);
     let init_cwd =
         env::current_dir().context("failed to read current working directory for INIT_CWD")?;
 
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c")
-        .arg(script_content)
-        .current_dir(&package.path)
+    let config = crate::util::npmrc::load().await;
+    let shell = env::var_os("npm_config_script_shell")
+        .filter(|s| !s.is_empty())
+        .or_else(|| config.script_shell().map(Into::into));
+    #[cfg(windows)]
+    let mut cmd =
+        super::windows_shell::command(shell, script_content, script_args, &package.path, &env_path)
+            .await;
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = Command::new(shell.unwrap_or_else(|| "sh".into()));
+        cmd.arg("-c")
+            .arg(join_script_args(script_content, script_args).as_ref());
+        cmd
+    };
+    cmd.current_dir(&package.path)
         .env("PATH", env_path)
         .env("npm_lifecycle_event", script_name)
         .env("INIT_CWD", init_cwd)
@@ -345,7 +368,7 @@ impl ScriptService {
                 Self::ensure_node_gyp().await?;
             }
 
-            let mut cmd = build_script_command(package, hook.into(), script).await?;
+            let mut cmd = build_script_command(package, hook.into(), script, &[]).await?;
             tracing::debug!("Executing command: {cmd:?}");
 
             if output == ScriptOutput::Verbose {
@@ -353,8 +376,8 @@ impl ScriptService {
                     .stdout(std::process::Stdio::inherit())
                     .stderr(std::process::Stdio::inherit());
 
-                let status = tokio::process::Command::from(cmd)
-                    .status()
+                let status = spawn_script(cmd, "Failed to execute script")?
+                    .wait()
                     .await
                     .context("Failed to execute script")?;
 
@@ -435,19 +458,14 @@ impl ScriptService {
     /// a [`std::process::Output`], so callers keep the same failure-dump /
     /// debug-log behaviour they had with `.output()`.
     pub(super) async fn run_captured(
-        cmd: Command,
+        mut cmd: Command,
         sink: Option<&OutputSink>,
     ) -> Result<std::process::Output> {
-        let mut child = tokio::process::Command::from(cmd)
-            // Null stdin, matching the replaced `.output()`: a dependency script
-            // that reads stdin must get immediate EOF, not inherit the user's
-            // terminal — otherwise it blocks forever waiting for input it'll
-            // never get, hanging the install (and holding a concurrency slot).
-            .stdin(std::process::Stdio::null())
+        // A dependency script that reads stdin must get EOF immediately.
+        cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("Failed to spawn script")?;
+            .stderr(std::process::Stdio::piped());
+        let mut child = spawn_script(cmd, "Failed to spawn script")?;
 
         // Drain both pipes and wait for the child concurrently on this one task
         // (no `tokio::spawn`): the drains keep the pipes from filling while
@@ -563,10 +581,17 @@ impl ScriptService {
 
         while let Some(path) = current_path {
             let bin_path = path.join("node_modules/.bin");
-            if crate::fs::try_exists(&bin_path).await?
-                && let Ok(absolute_path) = crate::fs::canonicalize(&bin_path).await
-            {
-                bin_paths.push(absolute_path);
+            if crate::fs::try_exists(&bin_path).await? {
+                // cmd exposes a batch file's directory through %~dp0. Keep ordinary
+                // drive and UNC paths usable with the relative targets in .cmd shims;
+                // canonicalize adds a verbatim prefix where ".." is not normalized.
+                #[cfg(windows)]
+                let absolute_path = std::path::absolute(&bin_path);
+                #[cfg(not(windows))]
+                let absolute_path = crate::fs::canonicalize(&bin_path).await;
+                if let Ok(path) = absolute_path {
+                    bin_paths.push(path);
+                }
             }
             current_path = path.parent();
         }
@@ -607,15 +632,14 @@ impl ScriptService {
             script_name
         );
 
-        let cmd_content = join_script_args(script_content, &script_args);
-
-        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
+        let mut cmd =
+            build_script_command(package, script_name, script_content, &script_args).await?;
         cmd.stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit());
 
-        let status = tokio::process::Command::from(cmd)
-            .status()
+        let status = spawn_script(cmd, "Failed to execute custom script")?
+            .wait()
             .await
             .context("Failed to execute custom script")?;
 
@@ -639,15 +663,14 @@ impl ScriptService {
         script_content: &str,
         script_args: Vec<&str>,
     ) -> Result<std::process::Output> {
-        let cmd_content = join_script_args(script_content, &script_args);
-
-        let mut cmd = build_script_command(package, script_name, &cmd_content).await?;
+        let mut cmd =
+            build_script_command(package, script_name, script_content, &script_args).await?;
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        tokio::process::Command::from(cmd)
-            .output()
+        spawn_script(cmd, "Failed to execute custom script")?
+            .wait_with_output()
             .await
             .context("Failed to execute custom script")
     }

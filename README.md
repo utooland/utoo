@@ -76,6 +76,12 @@ are resolved from the current working directory, including when packing a
 package at an explicit path. Missing output directories are created on a live
 run. `--dry-run` creates neither the output directory nor the tarball.
 
+Package lifecycle hooks and `ut run` use the Windows command processor
+(`ComSpec`, falling back to `cmd.exe`) on Windows and `sh` on Unix.
+To use a different shell, set `script-shell` to its executable path in your
+project or user `.npmrc`. The `npm_config_script_shell` environment variable
+takes precedence over both files.
+
 Pin the project to an exact Utoo release so every contributor and CI runner
 uses the same package-manager implementation:
 
