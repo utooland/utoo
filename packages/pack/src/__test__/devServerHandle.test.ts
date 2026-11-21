@@ -204,30 +204,33 @@ describe("dev server handle", () => {
   it.each([
     [true, "lazyDynamicImports"],
     [false, "matching Node @utoo/pack native binding"],
-  ] as const)("rejects explicit edit batches before hot reload for lazyDynamicImports=%s", async (lazyDynamicImports, message) => {
-    await expect(
-      serve(
-        {
-          config: {
-            entry: [{ name: "main", import: "./entry.js" }],
-            output: { path: "./dist" },
-            devServer: { lazyDynamicImports },
+  ] as const)(
+    "rejects explicit edit batches before hot reload for lazyDynamicImports=%s",
+    async (lazyDynamicImports, message) => {
+      await expect(
+        serve(
+          {
+            config: {
+              entry: [{ name: "main", import: "./entry.js" }],
+              output: { path: "./dist" },
+              devServer: { lazyDynamicImports },
+            },
           },
-        },
-        projectPath,
-        projectPath,
-        {
-          port: await getAvailablePort(),
-          editBatch: { timeout: { action: "none" }, afterBuild: "hold" },
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: "UNSUPPORTED_BATCH_CONFIGURATION",
-      message: expect.stringContaining(message),
-    });
-    expect(serverMocks.createHotReloader).not.toHaveBeenCalled();
-    expect(serverMocks.servers).toHaveLength(0);
-  });
+          projectPath,
+          projectPath,
+          {
+            port: await getAvailablePort(),
+            editBatch: { timeout: { action: "none" }, afterBuild: "hold" },
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "UNSUPPORTED_BATCH_CONFIGURATION",
+        message: expect.stringContaining(message),
+      });
+      expect(serverMocks.createHotReloader).not.toHaveBeenCalled();
+      expect(serverMocks.servers).toHaveLength(0);
+    },
+  );
 
   it("authenticates begin, commit and recovery reads on the same Node controller", async () => {
     const { project, runtime } = createRuntime();

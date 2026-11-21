@@ -343,7 +343,9 @@ function assertBatchConfiguration(bundleOptions: BundleOptions): void {
   }
 }
 
-async function assertExplicitEditBatchSupport(bundleOptions: BundleOptions): Promise<void> {
+async function assertExplicitEditBatchSupport(
+  bundleOptions: BundleOptions,
+): Promise<void> {
   assertBatchConfiguration(bundleOptions);
   const binding = await import("../binding.js");
   if (
@@ -356,7 +358,6 @@ async function assertExplicitEditBatchSupport(bundleOptions: BundleOptions): Pro
     );
   }
 }
-
 
 async function runDev(
   options: BundleOptions,
