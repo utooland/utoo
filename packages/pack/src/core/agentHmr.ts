@@ -1,127 +1,56 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
+import {
+  type EditBatchController,
+  EditBatchRequestError,
+  EditBatchWaitTimeoutError,
+} from "./editBatch";
 
 export const AGENT_HMR_PATH = "/__utoopack/agent-hmr";
-const HOLD_TIMEOUT_MS = 30_000;
-
-interface Batch {
-  id: string;
-  hold: Promise<void>;
-  timer?: NodeJS.Timeout;
-  release?: Promise<void>;
-}
-
-const batchErrorStatus = {
-  alreadyOpen: 409,
-  unknownBatch: 404,
-  closing: 503,
-} as const;
-
-class HmrBatchError extends Error {
-  constructor(
-    readonly code: keyof typeof batchErrorStatus,
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-export function createAgentHmrController(
-  setWatchBatchHold: (held: boolean) => Promise<void>,
-) {
-  let active: Batch | undefined;
-  let closed = false;
-
-  async function release(batch: Batch) {
-    batch.release ??= setWatchBatchHold(false)
-      .then(() => {
-        clearTimeout(batch.timer);
-        if (active === batch) active = undefined;
-      })
-      .catch((error: unknown) => {
-        batch.release = undefined;
-        throw error;
-      });
-    await batch.release;
-  }
-
-  function expire(batch: Batch) {
-    if (closed || active !== batch) return;
-    void release(batch).catch((error) => {
-      console.error("Could not release the agent HMR batch", error);
-      if (!closed && active === batch) {
-        batch.timer = setTimeout(() => expire(batch), 1000).unref();
-      }
-    });
-  }
-
-  function checkOpen() {
-    if (closed) {
-      throw new HmrBatchError("closing", "Dev server is closing or closed");
-    }
-  }
-
-  return {
-    async begin() {
-      checkOpen();
-      if (active) {
-        throw new HmrBatchError(
-          "alreadyOpen",
-          "An agent HMR batch is already open",
-        );
-      }
-      const batch: Batch = {
-        id: randomUUID(),
-        hold: Promise.resolve().then(() => setWatchBatchHold(true)),
-      };
-      active = batch;
-      try {
-        await batch.hold;
-      } catch (error) {
-        if (active === batch) active = undefined;
-        throw error;
-      }
-      checkOpen();
-      batch.timer = setTimeout(() => expire(batch), HOLD_TIMEOUT_MS).unref();
-      return batch.id;
-    },
-    async end(id: string) {
-      checkOpen();
-      const batch = active;
-      if (!batch || batch.id !== id) {
-        throw new HmrBatchError(
-          "unknownBatch",
-          "Unknown or expired agent HMR batch",
-        );
-      }
-      await release(batch);
-    },
-    async close() {
-      closed = true;
-      const batch = active;
-      if (!batch) return;
-      clearTimeout(batch.timer);
-      await batch.hold.catch(() => {});
-      if (active === batch) await release(batch);
-    },
-  };
-}
 
 function hash(value: string) {
   return createHash("sha256").update(value).digest();
 }
 
+/** Transport wait budget only: this never changes the hold or build policy. */
+function waitBudget(value: string | undefined) {
+  if (value === undefined) return 10_000;
+  const ms = Number(value);
+  if (
+    !/^\d+$/.test(value) ||
+    !Number.isInteger(ms) ||
+    ms < 1 ||
+    ms > 2_147_483_647
+  ) {
+    throw new EditBatchRequestError(
+      "INVALID_WAIT_OPTIONS",
+      "timeoutMs must be a positive timer-safe integer",
+    );
+  }
+  return ms;
+}
+
 export function createAgentHmrRoutes(
   token: string,
-  batches: ReturnType<typeof createAgentHmrController>,
+  batches: EditBatchController,
 ) {
   const routes = new Hono();
   const authorization = hash(`Bearer ${token}`);
 
   routes.onError((error, c) => {
-    if (error instanceof HmrBatchError) {
-      return c.text(error.message, batchErrorStatus[error.code]);
+    if (error instanceof EditBatchRequestError) {
+      return c.json(
+        {
+          code: error.code,
+          message: error.message,
+          ...(error.failure ? { failure: error.failure } : {}),
+        },
+        error.status,
+      );
+    }
+    if (error instanceof EditBatchWaitTimeoutError) {
+      return c.json({ outcome: "pending", batchId: error.batchId }, 202);
     }
     throw error;
   });
@@ -132,15 +61,34 @@ export function createAgentHmrRoutes(
       (address !== "::1" && !/^(?:::ffff:)?127\./.test(address ?? "")) ||
       !timingSafeEqual(hash(c.req.header("Authorization") ?? ""), authorization)
     ) {
-      return c.text("Unauthorized", 401);
+      return c.json({ code: "UNAUTHORIZED", message: "Unauthorized" }, 401);
     }
     await next();
   });
 
-  routes.post("/begin", async (c) => c.json({ id: await batches.begin() }));
-  routes.post("/end/:id", async (c) => {
-    await batches.end(c.req.param("id"));
-    return c.body(null, 204);
+  // Recover a lost begin response without creating a second batch.
+  routes.get("/active", (c) => c.json({ batchId: batches.activeId() ?? null }));
+  routes.post("/begin", async (c) =>
+    c.json({ batchId: await batches.begin() }),
+  );
+  routes.post("/commit/:id", async (c) => {
+    const timeoutMs = waitBudget(c.req.query("timeoutMs"));
+    const id = c.req.param("id");
+    // Accepted operations always resolve with a terminal result. Disconnects only
+    // detach the transport waiter; they must not cancel this server-side commit.
+    batches.commit(id);
+    return c.json(
+      await batches.wait(id, { timeoutMs, signal: c.req.raw.signal }),
+    );
+  });
+  routes.get("/wait/:id", async (c) => {
+    const timeoutMs = waitBudget(c.req.query("timeoutMs"));
+    return c.json(
+      await batches.wait(c.req.param("id"), {
+        timeoutMs,
+        signal: c.req.raw.signal,
+      }),
+    );
   });
 
   return routes;

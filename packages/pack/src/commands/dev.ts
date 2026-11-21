@@ -18,11 +18,16 @@ import {
   resolveBundleOptions,
   type WebpackConfig,
 } from "../config/webpackCompat";
+import { AGENT_HMR_PATH, createAgentHmrRoutes } from "../core/agentHmr";
 import {
-  AGENT_HMR_PATH,
-  createAgentHmrController,
-  createAgentHmrRoutes,
-} from "../core/agentHmr";
+  createEditBatchController,
+  type EditBatchEvent,
+  type EditBatchPolicy,
+  EditBatchRequestError,
+  type EditBatchResult,
+  type EditBatchWaitOptions,
+  resolveEditBatchPolicy,
+} from "../core/editBatch";
 import type { HotReloaderInterface } from "../core/hmr";
 import { createHotReloader } from "../core/hmr";
 import { createHttpProxyMiddleware } from "../core/proxyHono";
@@ -157,10 +162,15 @@ export interface DevServerHandle {
   hostname: string;
   /** Write current entrypoints and their HTML before an integration publishes its build. */
   writeAllEntrypointsToDisk: Project["writeAllEntrypointsToDisk"];
-  /** Defer watcher-triggered rebuilds for up to 30 seconds and return the batch ID. */
-  beginHmrBatch(): Promise<string>;
-  /** Release the batch. Resolves before its rebuild and browser update complete. */
-  endHmrBatch(id: string): Promise<void>;
+  /** Hold subsequent watcher batches; in-flight work is not cancelled. */
+  beginEditBatch(): Promise<string>;
+  /** Complete this batch's controlled output and confirmed afterBuild policy. */
+  commitEditBatch(batchId: string): Promise<EditBatchResult>;
+  /** Wait or reconnect without cancelling the batch when this wait ends. */
+  waitForEditBatch(
+    batchId: string,
+    options?: EditBatchWaitOptions,
+  ): Promise<EditBatchResult>;
   /** Close the HTTP server, HMR connections and project without exiting the process. */
   close(): Promise<void>;
 }
@@ -176,6 +186,10 @@ export interface StartServerOptions {
   handleSignals?: boolean;
   /** Opt in to local, authenticated control of agent edit batches. */
   agentHmrToken?: string;
+  /** Single policy source. Defaults to 30s release/expired and resume after commit. */
+  editBatch?: EditBatchPolicy;
+  /** Observation only; failures cannot change an already recorded build result. */
+  onEditBatchEvent?: (event: EditBatchEvent) => void | Promise<void>;
   selfSignedCertificate?: SelfSignedCertificate;
   /**
    * Awaited after successful client output, stats and HTML writes, including
@@ -320,12 +334,38 @@ export function serve(
 
 const HMR_PATH = "/turbopack-hmr";
 
+function assertBatchConfiguration(bundleOptions: BundleOptions): void {
+  if (bundleOptions.config.devServer?.lazyDynamicImports) {
+    throw new EditBatchRequestError(
+      "UNSUPPORTED_BATCH_CONFIGURATION",
+      "Edit batches do not support lazyDynamicImports; realtime serving remains available",
+    );
+  }
+}
+
+async function assertExplicitEditBatchSupport(
+  bundleOptions: BundleOptions,
+): Promise<void> {
+  assertBatchConfiguration(bundleOptions);
+  const binding = await import("../binding.js");
+  if (
+    typeof binding.projectSetWatchBatchHold !== "function" ||
+    typeof binding.projectFlushWatchBatch !== "function"
+  ) {
+    throw new EditBatchRequestError(
+      "UNSUPPORTED_BATCH_CONFIGURATION",
+      "Edit batches require a matching Node @utoo/pack native binding with watch hold and flush support",
+    );
+  }
+}
+
 async function runDev(
   options: BundleOptions,
   projectPath?: string,
   rootPath?: string,
   serverOptions?: StartServerOptions,
 ): Promise<DevServerHandle> {
+  const editBatchPolicy = resolveEditBatchPolicy(serverOptions?.editBatch);
   blockStdout();
   process.title = "utoopack-dev-server";
 
@@ -342,17 +382,34 @@ async function runDev(
     serveOptsBase,
   } = await resolveDevConfig(options, projectPath, rootPath, serverOptions);
 
+  if (serverOptions?.editBatch !== undefined) {
+    await assertExplicitEditBatchSupport(bundleOptions);
+  }
+
   const hotReloader: HotReloaderInterface = await createHotReloader(
     bundleOptions,
     projectPathResolved,
     rootPathResolved,
     serverOptions?.onClientBuild,
   );
-  const agentHmr = createAgentHmrController(async (held) => {
-    const project = hotReloader.turbopackProject;
-    if (!project) throw new Error("Agent HMR requires a watched project");
-    await project.setWatchBatchHold(held);
-  });
+  const editBatches = createEditBatchController(
+    {
+      assertSupported() {
+        assertBatchConfiguration(bundleOptions);
+      },
+      async setWatchBatchHold(held) {
+        const project = hotReloader.turbopackProject;
+        if (!project) throw new Error("Edit batches require a watched project");
+        await project.setWatchBatchHold(held);
+      },
+      build: (batchId) => hotReloader.buildEditBatch(batchId),
+      close: () => closeResources(),
+    },
+    {
+      editBatch: editBatchPolicy,
+      onEditBatchEvent: serverOptions?.onEditBatchEvent,
+    },
+  );
   let server: ReturnType<typeof honoServe> | undefined;
   let webSocket: ReturnType<typeof createNodeWebSocket> | undefined;
   let closePromise: Promise<void> | undefined;
@@ -411,13 +468,7 @@ async function runDev(
         else resolve();
       });
     });
-    const closeProject = async () => {
-      try {
-        await agentHmr.close();
-      } finally {
-        await hotReloader.close();
-      }
-    };
+    const closeProject = () => hotReloader.close();
     const results = await Promise.allSettled([
       closeHttp,
       closeWebSocket,
@@ -439,11 +490,12 @@ async function runDev(
       }
       return hotReloader.writeAllEntrypointsToDisk();
     },
-    beginHmrBatch: agentHmr.begin,
-    endHmrBatch: agentHmr.end,
+    beginEditBatch: editBatches.begin,
+    commitEditBatch: editBatches.commit,
+    waitForEditBatch: editBatches.wait,
     close() {
       // Keep handling forwarded signals until the pending cache flush finishes.
-      closePromise ??= closeResources().finally(() => {
+      closePromise ??= editBatches.close().finally(() => {
         process.off("SIGTERM", onSignal);
       });
       return closePromise;
@@ -466,7 +518,10 @@ async function runDev(
       serverOptions?.agentHmrToken ?? process.env.UTOO_PACK_AGENT_HMR_TOKEN
     )?.trim();
     if (agentHmrToken) {
-      app.route(AGENT_HMR_PATH, createAgentHmrRoutes(agentHmrToken, agentHmr));
+      app.route(
+        AGENT_HMR_PATH,
+        createAgentHmrRoutes(agentHmrToken, editBatches),
+      );
     }
     webSocket = createNodeWebSocket({ app });
     const { injectWebSocket, upgradeWebSocket } = webSocket;

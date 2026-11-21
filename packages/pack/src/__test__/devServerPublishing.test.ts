@@ -3,15 +3,26 @@ import http from "http";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NapiIssue, NapiWrittenEndpoint } from "../binding";
-import type { Endpoint, RawEntrypoints } from "../core/types";
+import type {
+  NapiIssue,
+  NapiUpdateMessage,
+  NapiWrittenEndpoint,
+} from "../binding";
+import type {
+  Endpoint,
+  EntrypointsSnapshot,
+  RawEntrypoints,
+} from "../core/types";
 
 const projectMocks = vi.hoisted(() => ({ projectFactory: vi.fn() }));
 
 vi.mock("../core/project", () => ({
   projectFactory: projectMocks.projectFactory,
 }));
-vi.mock("../binding", () => ({}));
+vi.mock("../binding", () => ({
+  projectSetWatchBatchHold: vi.fn(),
+  projectFlushWatchBatch: vi.fn(),
+}));
 
 import {
   type DevServerHandle,
@@ -58,6 +69,7 @@ function createStream<T>() {
   closeStreams.push(() => stream.return!());
   return {
     stream,
+    isClosed: () => closed,
     push(value: T) {
       if (pending) {
         const resolve = pending;
@@ -83,7 +95,12 @@ function createIssue(severity: "warning" | "error" | "fatal"): NapiIssue {
 }
 
 function createProject(entryNames = ["main"]) {
-  const state = { marker: "A", issues: [] as NapiIssue[] };
+  const state = {
+    marker: "A",
+    issues: [] as NapiIssue[],
+    revision: 0,
+    layout: undefined as Endpoint[] | undefined,
+  };
   const outputDir = path.join(projectPath, "dist");
   const nativeResults: TurbopackResult<RawEntrypoints>[] = [];
   const clientChangeStreams = entryNames.map(() =>
@@ -93,6 +110,7 @@ function createProject(entryNames = ["main"]) {
     createStream<TurbopackResult>(),
   );
   const entrypoints = createStream<TurbopackResult<RawEntrypoints>>();
+  const updates = createStream<NapiUpdateMessage>();
   fs.writeFileSync(path.join(projectPath, "entry.js"), "export default 1;\n");
 
   function writeAsset(name: string): NapiWrittenEndpoint {
@@ -117,8 +135,16 @@ function createProject(entryNames = ["main"]) {
         ...writeAsset(entryNames[index]),
         issues: [],
       })),
-      clientChanged: vi.fn(async () => clientChangeStreams[index].stream),
-      serverChanged: vi.fn(async () => serverChangeStreams[index].stream),
+      clientChanged: vi.fn(async () => {
+        if (clientChangeStreams[index].isClosed())
+          clientChangeStreams[index] = createStream<TurbopackResult>();
+        return clientChangeStreams[index].stream;
+      }),
+      serverChanged: vi.fn(async () => {
+        if (serverChangeStreams[index].isClosed())
+          serverChangeStreams[index] = createStream<TurbopackResult>();
+        return serverChangeStreams[index].stream;
+      }),
     };
   }
 
@@ -126,7 +152,24 @@ function createProject(entryNames = ["main"]) {
     createEndpoint(index),
   );
   entrypoints.push({ apps: subscribedEndpoints, libraries: [], issues: [] });
+  const snapshots = new WeakMap<EntrypointsSnapshot, number>();
   const project = {
+    setWatchBatchHold: vi.fn(async (_held: boolean) => {}),
+    flushWatchBatch: vi.fn(async (id: string) => id),
+    readEntrypoints: vi.fn(async () => {
+      const snapshot: EntrypointsSnapshot = {
+        entrypoints: {
+          apps: state.layout ?? subscribedEndpoints,
+          libraries: [],
+          issues: [...state.issues],
+        },
+        sameAs(other) {
+          return snapshots.get(snapshot) === snapshots.get(other);
+        },
+      };
+      snapshots.set(snapshot, state.revision);
+      return snapshot;
+    }),
     entrypointsSubscribe: () => entrypoints.stream,
     writeAllEntrypointsToDisk: vi.fn(async () => {
       // The binding creates new EndpointImpl objects for every all-write result.
@@ -144,13 +187,18 @@ function createProject(entryNames = ["main"]) {
       nativeResults.push(result);
       return result;
     }),
-    updateInfoSubscribe: () => (async function* () {})(),
+    updateInfoSubscribe: () => updates.stream,
     onExit: vi.fn(async () => {}),
     shutdown: vi.fn(async () => {}),
   };
   projectMocks.projectFactory.mockReturnValue(async () => project);
   return {
-    clientChanges: clientChangeStreams[0],
+    get clientChanges() {
+      return clientChangeStreams[0];
+    },
+    entrypoints,
+    updates,
+    createEndpoint,
     clientChangeStreams,
     nativeResults,
     project,
@@ -302,7 +350,7 @@ describe("dev server publishing pipeline", () => {
         },
       }),
     ).rejects.toBe(error);
-    expect(fixture.project.onExit).toHaveBeenCalledOnce();
+    expect(fixture.project.shutdown).toHaveBeenCalledOnce();
   });
 
   it("publishes HTML with fresh content hashes and preserves the native result", async () => {
@@ -447,13 +495,13 @@ describe("dev server publishing pipeline", () => {
       fixture.clientChanges.push({ issues: [] });
       await vi.waitFor(() => expect(generate).toHaveBeenCalledOnce());
       const closing = handle.close();
-      expect(fixture.project.onExit).not.toHaveBeenCalled();
+      expect(fixture.project.shutdown).not.toHaveBeenCalled();
       release();
       await closing;
     } finally {
       release();
     }
-    expect(fixture.project.onExit).toHaveBeenCalledOnce();
+    expect(fixture.project.shutdown).toHaveBeenCalledOnce();
     expect(onClientBuild).toHaveBeenCalledOnce();
   });
 
@@ -524,4 +572,237 @@ describe("dev server publishing pipeline", () => {
       expect(onClientBuild).toHaveBeenCalledTimes(2);
     },
   );
+});
+
+describe("controlled edit batch output", () => {
+  const editBatch = {
+    timeout: { action: "none" as const },
+    afterBuild: "hold" as const,
+  };
+
+  it.each([false, true])(
+    "waits for actual HTML and publication, ignoring an old build end (stats: %s)",
+    async (stats) => {
+      const fixture = createProject();
+      const onClientBuild = vi.fn();
+      const events = vi.fn();
+      const handle = await startServer(
+        { editBatch, onClientBuild, onEditBatchEvent: events },
+        stats,
+      );
+      const id = await handle.beginEditBatch();
+      fixture.state.marker = "B";
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      onClientBuild.mockImplementationOnce(() => gate);
+      let settled = false;
+      const result = handle.commitEditBatch(id).then((value) => {
+        settled = true;
+        return value;
+      });
+      await vi.waitFor(() => expect(onClientBuild).toHaveBeenCalledTimes(2));
+      fixture.updates.push({
+        updateType: "end",
+        value: { duration: 1, tasks: 1 },
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(events).not.toHaveBeenCalled();
+      expect(await readHttp(handle)).toContain('src="main.bbbbbbbb.js"');
+      release();
+      expect(await result).toMatchObject({
+        batchId: id,
+        outcome: "built",
+        watchState: "held",
+      });
+      expect(fixture.project.flushWatchBatch).toHaveBeenCalledWith(id);
+      expect(fixture.project.readEntrypoints).toHaveBeenCalledTimes(2);
+      expect(events).toHaveBeenCalledWith({
+        type: "settled",
+        result: await result,
+      });
+    },
+  );
+
+  it("keeps same-batch commit and wait pending until the publication callback returns", async () => {
+    createProject();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ editBatch, onClientBuild });
+    const id = await handle.beginEditBatch();
+    let joinedCommit:
+      | ReturnType<DevServerHandle["commitEditBatch"]>
+      | undefined;
+    let joinedWait: ReturnType<DevServerHandle["waitForEditBatch"]> | undefined;
+    onClientBuild.mockImplementationOnce(async () => {
+      joinedCommit = handle.commitEditBatch(id);
+      joinedWait = handle.waitForEditBatch(id);
+      let settled = false;
+      void joinedCommit.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      // A publisher must return instead of awaiting its own completion barrier.
+    });
+    const result = await handle.commitEditBatch(id);
+    expect(await joinedCommit).toBe(result);
+    expect(await joinedWait).toBe(result);
+  });
+
+  it("coalesces endpoint/subscription/public output requests into one owner without queue reentry", async () => {
+    const fixture = createProject();
+    const handle = await startServer({ editBatch });
+    const id = await handle.beginEditBatch();
+    let flush!: (id: string) => void;
+    fixture.project.flushWatchBatch.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          flush = resolve;
+        }),
+    );
+    fixture.state.marker = "B";
+    const commit = handle.commitEditBatch(id);
+    fixture.clientChanges.push({ issues: [] });
+    fixture.entrypoints.push({
+      apps: [fixture.createEndpoint(0)],
+      libraries: [],
+      issues: [],
+    });
+    const joined = handle.writeAllEntrypointsToDisk();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(fixture.project.writeAllEntrypointsToDisk).not.toHaveBeenCalled();
+    flush(id);
+    expect(await commit).toMatchObject({ outcome: "built" });
+    expect((await joined).appPaths?.[0].clientPaths).toEqual([
+      "main.bbbbbbbb.js",
+    ]);
+    expect(fixture.project.flushWatchBatch).toHaveBeenCalledTimes(1);
+    expect(fixture.project.writeAllEntrypointsToDisk).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts fresh endpoint identities and repeats the existing chain when an effect changes the graph", async () => {
+    const fixture = createProject();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ editBatch, onClientBuild });
+    const freshEndpoint = fixture.createEndpoint(0);
+    fixture.state.marker = "B";
+    onClientBuild.mockImplementationOnce(() => {
+      fixture.state.layout = [freshEndpoint];
+      ++fixture.state.revision;
+      fixture.state.marker = "C";
+    });
+    expect(
+      await handle.commitEditBatch(await handle.beginEditBatch()),
+    ).toMatchObject({ outcome: "built" });
+    expect(fixture.project.writeAllEntrypointsToDisk).toHaveBeenCalledTimes(2);
+    expect(freshEndpoint.clientChanged).toHaveBeenCalled();
+    expect(await readHttp(handle)).toContain('src="main.cccccccc.js"');
+    expect(await readHttp(handle, "/main.cccccccc.js")).toContain('"C"');
+  });
+
+  it("retains raw compilation diagnostics and succeeds only after a new repair commit", async () => {
+    const fixture = createProject();
+    const onClientBuild = vi.fn();
+    const handle = await startServer({ editBatch, onClientBuild });
+    fixture.state.issues = [createIssue("error")];
+    const a = await handle.beginEditBatch();
+    const failed = await handle.commitEditBatch(a);
+    expect(failed).toMatchObject({
+      outcome: "failed",
+      errors: [
+        {
+          code: "COMPILATION_FAILED",
+          issues: fixture.state.issues,
+          message: expect.stringContaining("Publishing fixture diagnostic"),
+        },
+      ],
+    });
+    expect(onClientBuild).toHaveBeenCalledOnce();
+    expect(await readHttp(handle)).toContain('src="main.aaaaaaaa.js"');
+    fixture.state.issues = [];
+    fixture.state.marker = "B";
+    expect(
+      await handle.commitEditBatch(await handle.beginEditBatch()),
+    ).toMatchObject({ outcome: "built" });
+    expect(await handle.waitForEditBatch(a)).toBe(failed);
+    expect(await readHttp(handle)).toContain('src="main.bbbbbbbb.js"');
+  });
+
+  it.each(["write", "html", "publish"] as const)(
+    "classifies a %s failure with its actual cause and recovers on the next commit",
+    async (stage) => {
+      const fixture = createProject();
+      const onClientBuild = vi.fn();
+      const handle = await startServer({ editBatch, onClientBuild });
+      const error = Object.assign(new Error(`${stage} unavailable`), {
+        code: "EIO",
+        path: `/dist/${stage}`,
+      });
+      if (stage === "write")
+        fixture.project.writeAllEntrypointsToDisk.mockRejectedValueOnce(error);
+      if (stage === "html")
+        vi.spyOn(HtmlPlugin.prototype, "generate").mockRejectedValueOnce(error);
+      if (stage === "publish") onClientBuild.mockRejectedValueOnce(error);
+      const result = await handle.commitEditBatch(
+        await handle.beginEditBatch(),
+      );
+      const codes = {
+        write: "OUTPUT_WRITE_FAILED",
+        html: "HTML_GENERATION_FAILED",
+        publish: "PUBLISH_CALLBACK_FAILED",
+      };
+      expect(result).toMatchObject({
+        outcome: "failed",
+        watchState: "held",
+        errors: [
+          {
+            code: codes[stage],
+            message: `${stage} unavailable`,
+            causes: [
+              {
+                name: "Error",
+                message: `${stage} unavailable`,
+                code: "EIO",
+                path: `/dist/${stage}`,
+              },
+            ],
+          },
+        ],
+      });
+      fixture.state.marker = "B";
+      expect(
+        await handle.commitEditBatch(await handle.beginEditBatch()),
+      ).toMatchObject({ outcome: "built" });
+    },
+  );
+
+  it("propagates an actual project shutdown failure into the active batch close result", async () => {
+    const fixture = createProject();
+    const handle = await startServer({ editBatch });
+    const id = await handle.beginEditBatch();
+    fixture.project.shutdown.mockRejectedValueOnce(
+      Object.assign(new Error("native shutdown failed"), { code: "EIO" }),
+    );
+    await expect(handle.close()).rejects.toThrow(
+      "Failed to close the dev server",
+    );
+    expect(await handle.waitForEditBatch(id)).toMatchObject({
+      outcome: "failed",
+      reason: "close",
+      watchState: "unknown",
+      errors: [
+        {
+          code: "CLOSE_FAILED",
+          causes: expect.arrayContaining([
+            expect.objectContaining({
+              message: "native shutdown failed",
+              code: "EIO",
+            }),
+          ]),
+        },
+      ],
+    });
+  });
 });

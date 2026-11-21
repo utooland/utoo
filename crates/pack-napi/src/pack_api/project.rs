@@ -37,7 +37,7 @@ use pack_api::{
     },
     operation::EntrypointsOperation,
     project::{
-        PartialProjectOptions, ProjectContainer, ProjectOptions, WatchOptions,
+        PartialProjectOptions, Project, ProjectContainer, ProjectOptions, WatchOptions,
         activate_lazy_chunk_operation,
     },
     source_map::get_source_map_rope,
@@ -54,7 +54,7 @@ use tracing_subscriber::{
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
     OperationValue, OperationVc, PrettyPrintError, ReadRef, ResolvedVc, TransientInstance,
-    TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects,
+    TryJoinIterExt, TurboTasksApi, UpdateInfo, Vc, read_strongly_consistent_and_apply_effects,
 };
 use turbo_tasks_backend::EvictionMode;
 use turbo_tasks_fs::{FileContent, FileSystem, util::uri_from_file};
@@ -62,7 +62,7 @@ use turbo_unix_path::get_relative_path_to;
 use turbopack_core::{
     PROJECT_FILESYSTEM_NAME, SOURCE_URL_PROTOCOL,
     source_map::{SourceMap, Token},
-    version::{PartialUpdate, TotalUpdate, Update, Version},
+    version::{PartialUpdate, TotalUpdate, Update, Version, VersionState},
 };
 use turbopack_ecmascript_hmr_protocol::{ClientUpdateInstruction, ResourceIdentifier};
 use turbopack_trace_utils::{
@@ -370,6 +370,8 @@ pub struct ProjectInstance {
     pub turbopack_ctx: TurbopackContext,
     pub container: ResolvedVc<ProjectContainer>,
     pub exit_receiver: tokio::sync::Mutex<Option<ExitReceiver>>,
+    // None after close: no observer may retain a new Node callback afterwards.
+    update_info_tasks: std::sync::Mutex<Option<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
 #[napi(ts_return_type = "Promise<{ __napiType: \"Project\" }>")]
@@ -560,6 +562,7 @@ pub fn project_new<'env>(
                     turbopack_ctx,
                     container,
                     exit_receiver: tokio::sync::Mutex::new(Some(exit_receiver)),
+                    update_info_tasks: std::sync::Mutex::new(Some(Vec::new())),
                 },
                 100,
             ))
@@ -597,6 +600,20 @@ pub async fn project_set_watch_batch_hold(
         .await
 }
 
+/// Input invalidation barrier only; Node completes its existing output pipeline afterwards.
+#[napi]
+pub async fn project_flush_watch_batch(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+    batch_id: String,
+) -> napi::Result<String> {
+    let ctx = &project.turbopack_ctx;
+    let container = project.container;
+    ctx.turbo_tasks()
+        .run(async move { container.flush_watch_batch(batch_id).await })
+        .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
+        .await
+}
+
 /// Runs exit handlers for the project registered using the [`ExitHandler`] API.
 ///
 /// This is called by `project_shutdown`, so if you're calling that API, you shouldn't call this
@@ -604,29 +621,53 @@ pub async fn project_set_watch_batch_hold(
 #[napi]
 pub async fn project_on_exit(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
-) {
+) -> napi::Result<()> {
     project_on_exit_internal(project).await
 }
 
-async fn project_on_exit_internal(project: &ProjectInstance) {
+async fn project_on_exit_internal(project: &ProjectInstance) -> napi::Result<()> {
+    let observers = project
+        .update_info_tasks
+        .lock()
+        .map_err(|_| napi::Error::from_reason("Update-info observer lock was poisoned"))?
+        .take()
+        .unwrap_or_default();
+    for observer in &observers {
+        observer.abort();
+    }
+    for observer in observers {
+        if let Err(error) = observer.await
+            && !error.is_cancelled()
+        {
+            return Err(napi::Error::from_reason(format!(
+                "Update-info observer failed while closing: {error}"
+            )));
+        }
+    }
     let exit_receiver = project.exit_receiver.lock().await.take();
     exit_receiver
         .expect("`project.onExitSync` must only be called once")
         .run_exit_handler()
         .await;
+    Ok(())
 }
 
-/// Runs `project_on_exit`, and then waits for turbo_tasks to gracefully shut down.
+/// Stops the input watcher, shuts down turbo-tasks, and runs project exit handlers.
 ///
 /// This is used in builds where it's important that we completely persist turbo-tasks to disk, but
-/// it's skipped in the development server (`project_on_exit` is used instead with a short timeout),
-/// where we prioritize fast exit and user responsiveness over all else.
+/// embedded development servers also use it to release native roots before returning from close.
 #[napi]
 pub async fn project_shutdown(
     #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
-) {
-    project.turbopack_ctx.turbo_tasks().stop_and_wait().await;
-    project_on_exit_internal(project).await;
+) -> napi::Result<()> {
+    let ctx = &project.turbopack_ctx;
+    let container = project.container;
+    ctx.turbo_tasks()
+        .run(async move { container.stop_watching_for_shutdown().await })
+        .or_else(|e| ctx.throw_turbopack_internal_result(&e.into()))
+        .await?;
+    ctx.turbo_tasks().stop_and_wait().await;
+    project_on_exit_internal(project).await
 }
 
 #[napi(object, object_from_js = false)]
@@ -667,6 +708,116 @@ impl NapiEntrypoints {
             library_paths: None,
         })
     }
+}
+
+// Freeze authoritative project inputs alongside the ordered endpoint handles.
+// Both pick-by-index operations and resolved endpoint cells can be reused in
+// place, so handle identity alone misses equal-length entry layout changes.
+#[turbo_tasks::value(shared, serialization = "skip")]
+struct EditBatchEntrypointsSnapshot {
+    options: ProjectOptions,
+    entrypoints_with_issues: ReadRef<EntrypointsWithIssues>,
+    apps: Vec<Option<ResolvedVc<Box<dyn Endpoint>>>>,
+    libraries: Vec<Option<ResolvedVc<Box<dyn Endpoint>>>>,
+}
+
+#[turbo_tasks::function(operation, root)]
+async fn edit_batch_entrypoints_snapshot_operation(
+    container: ResolvedVc<ProjectContainer>,
+) -> Result<Vc<EditBatchEntrypointsSnapshot>> {
+    let options = container.edit_batch_options_snapshot().await?;
+    let entrypoints_with_issues = get_entrypoints_with_issues_operation(container)
+        .connect()
+        .await?;
+    let apps = entrypoints_with_issues
+        .entrypoints
+        .apps
+        .iter()
+        .map(|endpoint| async move { Ok(*endpoint.connect().await?) })
+        .try_join()
+        .await?;
+    let libraries = entrypoints_with_issues
+        .entrypoints
+        .libraries
+        .iter()
+        .map(|endpoint| async move { Ok(*endpoint.connect().await?) })
+        .try_join()
+        .await?;
+    Ok(EditBatchEntrypointsSnapshot {
+        options,
+        entrypoints_with_issues,
+        apps,
+        libraries,
+    }
+    .cell())
+}
+
+pub struct ExternalEntrypointsSnapshot {
+    turbopack_ctx: TurbopackContext,
+    value: ReadRef<EditBatchEntrypointsSnapshot>,
+}
+
+#[napi(object, object_from_js = false)]
+pub struct NapiEntrypointsSnapshot {
+    pub entrypoints: NapiEntrypoints,
+    #[napi(ts_type = "{ __napiType: \"EntrypointsSnapshot\" }")]
+    pub snapshot: External<ExternalEntrypointsSnapshot>,
+}
+
+/// No output queue is entered here. The Node output owner adopts this fresh layout
+/// before running the existing private write/stats/HTML/publish chain.
+#[napi]
+pub async fn project_read_entrypoints(
+    #[napi(ts_arg_type = "{ __napiType: \"Project\" }")] project: &External<ProjectInstance>,
+) -> napi::Result<TurbopackResult<NapiEntrypointsSnapshot>> {
+    let ctx = &project.turbopack_ctx;
+    let container = project.container;
+    let value = ctx
+        .turbo_tasks()
+        .run(async move {
+            read_strongly_consistent_and_apply_effects(
+                edit_batch_entrypoints_snapshot_operation(container),
+                |value| &value.entrypoints_with_issues.effects,
+            )
+            .await
+        })
+        .or_else(|error| ctx.throw_turbopack_internal_result(&error.into()))
+        .await?;
+    let entrypoints =
+        NapiEntrypoints::from_entrypoints_op(&value.entrypoints_with_issues.entrypoints, ctx)?;
+    let issues = value
+        .entrypoints_with_issues
+        .issues
+        .iter()
+        .map(|issue| NapiIssue::from(&**issue))
+        .collect();
+    Ok(TurbopackResult {
+        result: NapiEntrypointsSnapshot {
+            entrypoints,
+            snapshot: External::new(ExternalEntrypointsSnapshot {
+                value,
+                turbopack_ctx: ctx.clone(),
+            }),
+        },
+        issues,
+    })
+}
+
+#[napi]
+pub fn entrypoints_snapshots_equal(
+    #[napi(ts_arg_type = "{ __napiType: \"EntrypointsSnapshot\" }")] left: &External<
+        ExternalEntrypointsSnapshot,
+    >,
+    #[napi(ts_arg_type = "{ __napiType: \"EntrypointsSnapshot\" }")] right: &External<
+        ExternalEntrypointsSnapshot,
+    >,
+) -> bool {
+    Arc::ptr_eq(
+        left.turbopack_ctx.turbo_tasks(),
+        right.turbopack_ctx.turbo_tasks(),
+    ) && left.value.options == right.value.options
+        && left.value.apps == right.value.apps
+        && left.value.libraries == right.value.libraries
 }
 
 #[turbo_tasks::function(operation, root)]
@@ -871,6 +1022,35 @@ pub fn project_entrypoints_subscribe(
     )
 }
 
+#[turbo_tasks::value(shared, serialization = "skip")]
+struct HmrSession {
+    project: ResolvedVc<Project>,
+    state: ResolvedVc<VersionState>,
+    current_version: RcStr,
+}
+
+// The subscription callback is a top-level task. Resolve project and session
+// state inside a narrow operation, then strongly read it after input invalidation.
+#[turbo_tasks::function(operation, root)]
+async fn hmr_session_operation(
+    container: ResolvedVc<ProjectContainer>,
+    identifier: RcStr,
+    session: TransientInstance<()>,
+) -> Result<Vc<HmrSession>> {
+    let project = container.project().to_resolved().await?;
+    let state = project
+        .hmr_version_state(identifier, session)
+        .to_resolved()
+        .await?;
+    let current_version = state.get().id().owned().await?;
+    Ok(HmrSession {
+        project,
+        state,
+        current_version,
+    }
+    .cell())
+}
+
 #[tracing::instrument(level = "debug", name = "get HMR events", skip(env, project, func))]
 #[napi(async_runtime, ts_return_type = "{ __napiType: \"RootTask\" }")]
 pub fn project_hmr_events(
@@ -903,16 +1083,16 @@ pub fn project_hmr_events(
                 let expected_version = expected_version.clone();
                 let check_expected_version = check_expected_version.clone();
                 async move {
-                    let project = project.project().to_resolved().await?;
-                    let state = project
-                        .hmr_version_state(identifier.clone(), session)
-                        .to_resolved()
+                    let session = hmr_session_operation(project, identifier.clone(), session)
+                        .read_strongly_consistent()
                         .await?;
+                    let project = session.project;
+                    let state = session.state;
                     let should_check_expected_version =
                         check_expected_version.load(Ordering::Acquire);
                     let version_mismatch = if should_check_expected_version {
                         if let Some(expected_version) = expected_version {
-                            state.get().id().owned().await? != expected_version
+                            session.current_version != expected_version
                         } else {
                             false
                         }
@@ -1123,7 +1303,14 @@ pub fn project_update_info_subscribe(
         .callee_handled::<true>()
         .build_callback(|ctx| Ok(NapiUpdateMessage::from(ctx.value)))?;
     let turbo_tasks = project.turbopack_ctx.turbo_tasks().clone();
-    tokio::spawn(async move {
+    let mut observers = project
+        .update_info_tasks
+        .lock()
+        .map_err(|_| napi::Error::from_reason("Update-info observer lock was poisoned"))?;
+    let observers = observers
+        .as_mut()
+        .ok_or_else(|| napi::Error::from_reason("Project update-info observers are closed"))?;
+    let observer = tokio::spawn(async move {
         loop {
             let update_info = turbo_tasks
                 .aggregated_update_info(Duration::ZERO, Duration::ZERO)
@@ -1157,6 +1344,7 @@ pub fn project_update_info_subscribe(
             }
         }
     });
+    observers.push(observer);
     Ok(())
 }
 

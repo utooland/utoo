@@ -11,6 +11,11 @@ const serverMocks = vi.hoisted(() => ({
   servers: [] as import("http").Server[],
 }));
 
+vi.mock("../binding.js", () => ({
+  projectSetWatchBatchHold: () => {},
+  projectFlushWatchBatch: undefined,
+}));
+
 vi.mock("../core/hmr", () => ({
   createHotReloader: serverMocks.createHotReloader,
 }));
@@ -27,6 +32,7 @@ vi.mock("@hono/node-server", async (importOriginal) => {
 });
 
 import { type DevServerHandle, serve } from "../commands/dev";
+import { batchFailure, EditBatchBuildError } from "../core/editBatch";
 
 const listenerEvents = [
   "SIGINT",
@@ -97,6 +103,7 @@ function createRuntime() {
   fs.writeFileSync(entryPath, 'import heading from "./dependency.js";\n');
   const project = {
     setWatchBatchHold: vi.fn(async (_held: boolean) => {}),
+    flushWatchBatch: vi.fn(async (id: string) => id),
     writeAllEntrypointsToDisk: vi.fn(async function (this: unknown) {
       expect(this).toBe(project);
       const heading = fs.readFileSync(sourcePath, "utf8");
@@ -120,6 +127,10 @@ function createRuntime() {
   const runtime = {
     turbopackProject: project,
     writeAllEntrypointsToDisk: vi.fn(() => project.writeAllEntrypointsToDisk()),
+    buildEditBatch: vi.fn(async (id: string) => {
+      await project.flushWatchBatch(id);
+      await project.writeAllEntrypointsToDisk();
+    }),
     start: vi.fn(async () => {
       await project.writeAllEntrypointsToDisk();
     }),
@@ -190,87 +201,247 @@ afterEach(async () => {
 });
 
 describe("dev server handle", () => {
-  it("only opens and releases an agent HMR batch for the authorized caller", async () => {
-    const { project } = createRuntime();
+  it.each([
+    [true, "lazyDynamicImports"],
+    [false, "matching Node @utoo/pack native binding"],
+  ] as const)(
+    "rejects explicit edit batches before hot reload for lazyDynamicImports=%s",
+    async (lazyDynamicImports, message) => {
+      await expect(
+        serve(
+          {
+            config: {
+              entry: [{ name: "main", import: "./entry.js" }],
+              output: { path: "./dist" },
+              devServer: { lazyDynamicImports },
+            },
+          },
+          projectPath,
+          projectPath,
+          {
+            port: await getAvailablePort(),
+            editBatch: { timeout: { action: "none" }, afterBuild: "hold" },
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "UNSUPPORTED_BATCH_CONFIGURATION",
+        message: expect.stringContaining(message),
+      });
+      expect(serverMocks.createHotReloader).not.toHaveBeenCalled();
+      expect(serverMocks.servers).toHaveLength(0);
+    },
+  );
+
+  it("authenticates begin, commit and recovery reads on the same Node controller", async () => {
+    const { project, runtime } = createRuntime();
     const token = "test-agent-token";
     const handle = await startServer(false, undefined, token);
-    const post = (route: string, authorized = true) =>
+    const request = (route: string, method = "POST", authorized = true) =>
       fetch(`http://127.0.0.1:${handle.port}/__utoopack/agent-hmr${route}`, {
-        method: "POST",
+        method,
         headers: authorized ? { Authorization: `Bearer ${token}` } : {},
       });
-
-    expect((await post("/begin", false)).status).toBe(401);
+    expect((await request("/begin", "POST", false)).status).toBe(401);
+    expect((await request("/active", "GET", false)).status).toBe(401);
     expect(project.setWatchBatchHold).not.toHaveBeenCalled();
-    const begin = await post("/begin");
-    expect(begin.status).toBe(200);
-    const { id } = (await begin.json()) as { id: string };
-    expect(id).toBeTruthy();
-    expect((await post("/begin")).status).toBe(409);
-    expect((await post("/end/another-batch")).status).toBe(404);
-    expect(project.setWatchBatchHold.mock.calls).toEqual([[true]]);
-    expect((await post(`/end/${id}`)).status).toBe(204);
-    expect(project.setWatchBatchHold.mock.calls).toEqual([[true], [false]]);
-    expect((await post("/begin")).status).toBe(200);
+    const begin = await request("/begin");
+    const { batchId } = (await begin.json()) as { batchId: string };
+    expect(batchId).toBeTruthy();
+    expect((await request("/begin")).status).toBe(409);
+    expect((await request("/commit/unknown")).status).toBe(404);
+    // The begin response may have been lost: read the same active ID, never begin again.
+    expect(await (await request("/active", "GET")).json()).toEqual({ batchId });
+    const commit = await request(`/commit/${batchId}`);
+    expect(commit.status).toBe(200);
+    const result = await commit.json();
+    expect(result).toMatchObject({
+      batchId,
+      outcome: "built",
+      watchState: "watching",
+    });
+    expect(await (await request(`/wait/${batchId}`, "GET")).json()).toEqual(
+      result,
+    );
+    expect(await handle.commitEditBatch(batchId)).toEqual(result);
+    expect(runtime.buildEditBatch).toHaveBeenCalledTimes(1);
+    expect(project.flushWatchBatch).toHaveBeenCalledWith(batchId);
+    await handle.beginEditBatch();
     await handle.close();
+    // Closing an uncommitted batch does not publish its draft by releasing it.
     expect(project.setWatchBatchHold.mock.calls).toEqual([
       [true],
       [false],
       [true],
-      [false],
     ]);
   });
 
-  it("shares the HMR batch between the dev server handle and HTTP callers", async () => {
-    const { project } = createRuntime();
-    const token = "test-agent-token";
+  it("returns 202 for an exhausted HTTP wait budget while the accepted build continues", async () => {
+    const { runtime, project } = createRuntime();
+    let finish!: () => void;
+    runtime.buildEditBatch.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const token = "pending-token";
     const handle = await startServer(false, undefined, token);
-    const post = (route: string) =>
-      fetch(`http://127.0.0.1:${handle.port}/__utoopack/agent-hmr${route}`, {
+    const id = await handle.beginEditBatch();
+    const url = `http://127.0.0.1:${handle.port}/__utoopack/agent-hmr`;
+    const response = await fetch(`${url}/commit/${id}?timeoutMs=5`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ batchId: id, outcome: "pending" });
+    expect(project.setWatchBatchHold.mock.calls).toEqual([[true]]);
+    finish();
+    const result = await handle.waitForEditBatch(id);
+    expect(result.outcome).toBe("built");
+    expect(
+      await (
+        await fetch(`${url}/wait/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).json(),
+    ).toEqual(result);
+    expect(runtime.buildEditBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains begin hold-control diagnostics and rejects new batches when ACK failed", async () => {
+    const { project } = createRuntime();
+    project.setWatchBatchHold.mockRejectedValueOnce(
+      Object.assign(new Error("watch control channel closed"), {
+        code: "EPIPE",
+        path: "/project/src",
+      }),
+    );
+    const token = "hold-failure";
+    const handle = await startServer(false, undefined, token);
+    const response = await fetch(
+      `http://127.0.0.1:${handle.port}/__utoopack/agent-hmr/begin`,
+      {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
-      });
-
-    const batchId = await handle.beginHmrBatch();
-    expect((await post("/begin")).status).toBe(409);
-    expect((await post(`/end/${batchId}`)).status).toBe(204);
-
-    const response = await post("/begin");
-    expect(response.status).toBe(200);
-    const { id } = (await response.json()) as { id: string };
-    await expect(handle.beginHmrBatch()).rejects.toThrow(/already open/);
-    await expect(handle.endHmrBatch(batchId)).rejects.toThrow(/expired/);
-    await handle.endHmrBatch(id);
-    expect(project.setWatchBatchHold.mock.calls).toEqual([
-      [true],
-      [false],
-      [true],
-      [false],
-    ]);
-
+      },
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "WATCH_CONTROL_FAILED",
+      message: "watch control channel closed",
+      failure: { causes: [{ code: "EPIPE", path: "/project/src" }] },
+    });
+    await expect(handle.beginEditBatch()).rejects.toMatchObject({
+      code: "WATCH_STATE_UNKNOWN",
+    });
     await handle.close();
-    await expect(handle.beginHmrBatch()).rejects.toThrow(/closing/);
   });
 
-  it("releases an abandoned HMR batch and accepts a new one", async () => {
-    const { project } = createRuntime();
-    const handle = await startServer(false);
+  it("continues the accepted commit after an HTTP client disconnects", async () => {
+    const { runtime } = createRuntime();
+    let finish!: () => void;
+    let entered!: () => void;
+    const building = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    runtime.buildEditBatch.mockImplementationOnce(() => {
+      entered();
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const token = "disconnected-client";
+    const handle = await startServer(false, undefined, token);
+    const id = await handle.beginEditBatch();
+    const abort = new AbortController();
+    const url = `http://127.0.0.1:${handle.port}/__utoopack/agent-hmr`;
+    const request = fetch(`${url}/commit/${id}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: abort.signal,
+    });
+    const disconnected = expect(request).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await building;
+    abort.abort();
+    await disconnected;
+    finish();
+    const result = await handle.waitForEditBatch(id);
+    expect(result.outcome).toBe("built");
+    const recovered = await fetch(`${url}/wait/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(await recovered.json()).toEqual(result);
+    expect(runtime.buildEditBatch).toHaveBeenCalledTimes(1);
+  });
 
+  it("returns specific accepted build diagnostics instead of a release-only 204", async () => {
+    const { runtime } = createRuntime();
+    runtime.buildEditBatch.mockRejectedValueOnce(
+      new EditBatchBuildError(
+        batchFailure(
+          "OUTPUT_WRITE_FAILED",
+          Object.assign(new Error("output is read-only"), {
+            code: "EACCES",
+            path: "/dist/main.js",
+          }),
+        ),
+      ),
+    );
+    const token = "failed-token";
+    const handle = await startServer(false, undefined, token);
+    const id = await handle.beginEditBatch();
+    const response = await fetch(
+      `http://127.0.0.1:${handle.port}/__utoopack/agent-hmr/commit/${id}`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      outcome: "failed",
+      errors: [
+        {
+          code: "OUTPUT_WRITE_FAILED",
+          message: "output is read-only",
+          causes: [{ code: "EACCES", path: "/dist/main.js" }],
+        },
+      ],
+    });
+  });
+
+  it("rejects an invalid transport budget before accepting a commit", async () => {
+    const { runtime } = createRuntime();
+    const token = "invalid-budget";
+    const handle = await startServer(false, undefined, token);
+    const id = await handle.beginEditBatch();
+    const response = await fetch(
+      `http://127.0.0.1:${handle.port}/__utoopack/agent-hmr/commit/${id}?timeoutMs=0`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(response.status).toBe(400);
+    expect(runtime.buildEditBatch).not.toHaveBeenCalled();
+    expect(await handle.commitEditBatch(id)).toMatchObject({
+      outcome: "built",
+    });
+  });
+
+  it("keeps an abandoned batch's expired result and accepts a new batch", async () => {
+    const { runtime, project } = createRuntime();
+    const handle = await startServer(false);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const expiredId = await handle.beginHmrBatch();
+      const id = await handle.beginEditBatch();
       await vi.advanceTimersByTimeAsync(30_000);
+      expect(await handle.commitEditBatch(id)).toMatchObject({
+        outcome: "expired",
+        reason: "timeout",
+        error: { code: "HOLD_TIMEOUT_RELEASED" },
+      });
+      expect(runtime.buildEditBatch).not.toHaveBeenCalled();
       expect(project.setWatchBatchHold.mock.calls).toEqual([[true], [false]]);
-      await expect(handle.endHmrBatch(expiredId)).rejects.toThrow(/expired/);
-
-      const nextId = await handle.beginHmrBatch();
-      await handle.endHmrBatch(nextId);
-      expect(project.setWatchBatchHold.mock.calls).toEqual([
-        [true],
-        [false],
-        [true],
-        [false],
-      ]);
+      expect(
+        await handle.commitEditBatch(await handle.beginEditBatch()),
+      ).toMatchObject({ outcome: "built" });
     } finally {
       vi.useRealTimers();
     }
