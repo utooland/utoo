@@ -102,7 +102,8 @@
     "clean": "rm -rf analyzer cjs esm",
     "prepublishOnly": "npm run build:js && napi pre-publish -t npm --no-gh-release",
     "version": "napi version",
-    "generate-features-list": "node ./scripts/generate-feature-list.js"
+    "generate-features-list": "node ./scripts/generate-feature-list.js",
+    "test:native:edit-batch": "node test/run-edit-batch.cjs"
   },
   "repository": {
     "type": "git",

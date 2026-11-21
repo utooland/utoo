@@ -50,3 +50,17 @@ export type WebpackConfig = webpackCompat.WebpackConfig;
 namespace utoopack {
   export type WebpackConfig = webpackCompat.WebpackConfig;
 }
+
+export type {
+  EditBatchErrorCode,
+  EditBatchEvent,
+  EditBatchFailure,
+  EditBatchPolicy,
+  EditBatchResult,
+  EditBatchTimeoutPolicy,
+  EditBatchWaitOptions,
+} from "./core/editBatch";
+export {
+  EditBatchRequestError,
+  EditBatchWaitTimeoutError,
+} from "./core/editBatch";

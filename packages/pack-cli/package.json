@@ -31,7 +31,8 @@
   "scripts": {
     "build": "rm -rf cjs && tsc -b",
     "clean": "rm -rf cjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
   },
   "types": "cjs/index.d.ts"
 }

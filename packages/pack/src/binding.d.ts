@@ -13,6 +13,8 @@ export declare function endpointServerChangedSubscribe(endpoint: { __napiType: "
 
 export declare function endpointWriteToDisk(endpoint: { __napiType: "Endpoint" }): Promise<TurbopackResult<NapiWrittenEndpoint>>
 
+export declare function entrypointsSnapshotsEqual(left: { __napiType: "EntrypointsSnapshot" }, right: { __napiType: "EntrypointsSnapshot" }): boolean
+
 /**
  * Capability of the loaded native binary, used by framework integrations to
  * reject unsupported module replacement instead of compiling original sources.
@@ -72,6 +74,11 @@ export interface NapiEntrypoints {
   libraries?: Array<{ __napiType: "Endpoint" }>
   appPaths?: Array<NapiWrittenEndpoint>
   libraryPaths?: Array<NapiWrittenEndpoint>
+}
+
+export interface NapiEntrypointsSnapshot {
+  entrypoints: NapiEntrypoints
+snapshot: { __napiType: "EntrypointsSnapshot" }
 }
 
 export interface NapiEnvVar {
@@ -256,6 +263,9 @@ export declare function projectActivateLazyChunk(project: { __napiType: "Project
 
 export declare function projectEntrypointsSubscribe(project: { __napiType: "Project" }, func: (err: Error, value: TurbopackResult<NapiEntrypoints>) => void): { __napiType: "RootTask" }
 
+/** Input invalidation barrier only; Node completes its existing output pipeline afterwards. */
+export declare function projectFlushWatchBatch(project: { __napiType: "Project" }, batchId: string): Promise<string>
+
 export declare function projectGetCompletedTaskCount(project: { __napiType: "Project" }): number
 
 export declare function projectGetSourceForAsset(project: { __napiType: "Project" }, filePath: string): Promise<string | null>
@@ -278,14 +288,19 @@ export declare function projectNew(options: NapiProjectOptions, turboEngineOptio
  */
 export declare function projectOnExit(project: { __napiType: "Project" }): Promise<void>
 
+/**
+ * No output queue is entered here. The Node output owner adopts this fresh layout
+ * before running the existing private write/stats/HTML/publish chain.
+ */
+export declare function projectReadEntrypoints(project: { __napiType: "Project" }): Promise<TurbopackResult<NapiEntrypointsSnapshot>>
+
 export declare function projectSetWatchBatchHold(project: { __napiType: "Project" }, held: boolean): Promise<void>
 
 /**
- * Runs `project_on_exit`, and then waits for turbo_tasks to gracefully shut down.
+ * Stops the input watcher, shuts down turbo-tasks, and runs project exit handlers.
  *
  * This is used in builds where it's important that we completely persist turbo-tasks to disk, but
- * it's skipped in the development server (`project_on_exit` is used instead with a short timeout),
- * where we prioritize fast exit and user responsiveness over all else.
+ * embedded development servers also use it to release native roots before returning from close.
  */
 export declare function projectShutdown(project: { __napiType: "Project" }): Promise<void>
 

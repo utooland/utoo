@@ -586,6 +586,62 @@ impl ProjectContainer {
             .await?;
         project_fs.set_watch_batch_hold(held).await
     }
+
+    /// Prevent watcher invalidations from touching storage after native shutdown.
+    /// Call inside `TurboTasks::run`, outside of a memoized task.
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    pub async fn stop_watching_for_shutdown(self: ResolvedVc<Self>) -> Result<()> {
+        let watching = self
+            .await?
+            .options_state
+            .get()
+            .as_ref()
+            .context("Project options must be initialized before shutdown")?
+            .watch
+            .enable;
+        if !watching {
+            return Ok(());
+        }
+        let project = project_operation(self)
+            .resolve()
+            .strongly_consistent()
+            .await?;
+        let project_fs = project_fs_operation(project)
+            .read_strongly_consistent()
+            .await?;
+        // Ordered ACK prevents any queued file/rescan event from invalidating the
+        // backend while stop_watching disconnects the native watcher channel.
+        project_fs.set_watch_batch_hold(true).await?;
+        project_fs.stop_watching().await;
+        Ok(())
+    }
+
+    /// Freeze the authoritative graph inputs; resolved task-cell identities can be
+    /// reused in place when an equal-length entry layout changes.
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    pub async fn edit_batch_options_snapshot(self: ResolvedVc<Self>) -> Result<ProjectOptions> {
+        Ok(self
+            .await?
+            .options_state
+            .get()
+            .as_ref()
+            .context("Project options must be initialized before taking a snapshot")?
+            .clone())
+    }
+
+    /// Register all tracked input invalidations and acknowledge without releasing the watcher.
+    /// Call inside `TurboTasks::run`, outside of a memoized task.
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    pub async fn flush_watch_batch(self: ResolvedVc<Self>, batch_id: String) -> Result<String> {
+        let project = project_operation(self)
+            .resolve()
+            .strongly_consistent()
+            .await?;
+        let project_fs = project_fs_operation(project)
+            .read_strongly_consistent()
+            .await?;
+        project_fs.flush_watch_batch(batch_id).await
+    }
 }
 
 #[turbo_tasks::value_impl]

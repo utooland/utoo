@@ -28,6 +28,7 @@ import { moduleReferencesVersion } from "./moduleReferences";
 import {
   AnalyzeData,
   Endpoint,
+  EntrypointsSnapshot,
   Project,
   ProjectOptions,
   RawEntrypoints,
@@ -445,6 +446,10 @@ export function projectFactory(endpointWatchOptions?: {
 }) {
   const cancel = new (class Cancel extends Error {})();
   const diagnosticSources = new WeakMap<object, DiagnosticSources>();
+  const nativeSnapshots = new WeakMap<
+    EntrypointsSnapshot,
+    { __napiType: "EntrypointsSnapshot" }
+  >();
 
   function subscribe<T>(
     useBuffer: boolean,
@@ -558,6 +563,36 @@ export function projectFactory(endpointWatchOptions?: {
       return withErrorCause(() =>
         binding.projectSetWatchBatchHold(this._nativeProject, held),
       );
+    }
+
+    flushWatchBatch(batchId: string): Promise<string> {
+      return withErrorCause(() =>
+        binding.projectFlushWatchBatch(this._nativeProject, batchId),
+      );
+    }
+
+    async readEntrypoints(): Promise<EntrypointsSnapshot> {
+      return withErrorCause(async () => {
+        const sources = diagnosticSources.get(this)!;
+        const raw = sources.intern(
+          await binding.projectReadEntrypoints(this._nativeProject),
+        );
+        const snapshot: EntrypointsSnapshot = {
+          entrypoints: napiEntrypointsToRawEntrypoints(
+            { ...raw.entrypoints, issues: raw.issues },
+            sources,
+          ),
+          sameAs(other) {
+            const token = nativeSnapshots.get(other);
+            return (
+              token !== undefined &&
+              binding.entrypointsSnapshotsEqual(raw.snapshot, token)
+            );
+          },
+        };
+        nativeSnapshots.set(snapshot, raw.snapshot);
+        return snapshot;
+      });
     }
 
     async writeAllEntrypointsToDisk(): Promise<

@@ -37,6 +37,7 @@ import {
 } from "../utils/taskProgress";
 import { validateEntryPaths } from "../utils/validateEntry";
 import { forwardBrowserLogs, isBrowserLogsMessage } from "./browserLogs";
+import { batchFailure, EditBatchBuildError } from "./editBatch";
 import { consumeHmrSubscription } from "./hmrSubscription";
 import { projectFactory } from "./project";
 import {
@@ -143,6 +144,8 @@ export interface HotReloaderInterface {
   getClientPaths(): string[];
   /** Write current assets, check diagnostics and regenerate their HTML. */
   writeAllEntrypointsToDisk: Project["writeAllEntrypointsToDisk"];
+  /** Held flush and the existing output chain, without queue reentry. */
+  buildEditBatch(batchId: string): Promise<void>;
   setHmrServerError(error: Error | null): void;
   clearHmrServerError(): void;
   start(): Promise<void>;
@@ -337,6 +340,7 @@ export async function createHotReloader(
   const progress = showProgress ? new TaskProgress(project) : undefined;
 
   const entrypointsSubscription = project.entrypointsSubscribe();
+  const updateInfoSubscription = project.updateInfoSubscribe(30);
 
   let currentEntriesHandlingResolve: ((value?: unknown) => void) | undefined;
   let currentEntriesHandling = new Promise(
@@ -358,8 +362,19 @@ export async function createHotReloader(
   let backgroundWatchersStarted = false;
   let backgroundWatchGeneration = 0;
   let outputWriteTask = Promise.resolve();
+  let editBatchOutputOwner:
+    | {
+        revision: number;
+        errors: unknown[];
+        output: Promise<TurbopackResult<RawEntrypoints>>;
+      }
+    | undefined;
   let closed = false;
   let closePromise: Promise<void> | undefined;
+
+  function currentOutputOwner() {
+    return editBatchOutputOwner;
+  }
 
   function queueOutputWrite<T>(write: () => Promise<T>): Promise<T> {
     const task = outputWriteTask.then(() => {
@@ -373,11 +388,20 @@ export async function createHotReloader(
     return task;
   }
 
-  async function notifyClientBuild(isRebuild: boolean) {
-    if (closed || hasBlockingIssues(currentEntryIssues)) return;
+  async function notifyClientBuild(isRebuild: boolean, forEditBatch = false) {
+    if (closed || (!forEditBatch && hasBlockingIssues(currentEntryIssues)))
+      return;
     const clientPaths = hotReloader.getClientPaths();
     if (clientPaths.length > 0) {
-      await onClientBuild?.({ clientPaths, isRebuild });
+      try {
+        await onClientBuild?.({ clientPaths, isRebuild });
+      } catch (error) {
+        if (forEditBatch)
+          throw new EditBatchBuildError(
+            batchFailure("PUBLISH_CALLBACK_FAILED", error),
+          );
+        throw error;
+      }
     }
   }
 
@@ -476,8 +500,41 @@ export async function createHotReloader(
     updateWrittenEndpointPaths(entrypoints.libraries, entrypoints.libraryPaths);
   }
 
-  async function writeAllEntrypointsToDisk() {
-    const result = await project.writeAllEntrypointsToDisk();
+  function checkBatchIssues(result: TurbopackResult) {
+    if (hasBlockingResultIssues(result)) {
+      const message = result.issues
+        .filter(
+          (issue) => issue.severity === "error" || issue.severity === "fatal",
+        )
+        .map((issue) => formatIssue(issue, false))
+        .join("\n");
+      throw new EditBatchBuildError(
+        batchFailure("COMPILATION_FAILED", new Error(message), result.issues),
+      );
+    }
+  }
+
+  function adoptEntrypoints(entrypoints: RawEntrypoints) {
+    currentEntrypoints = entrypoints;
+    currentWatchedEntrypoints = [
+      ...(entrypoints.apps ?? []),
+      ...(entrypoints.libraries ?? []),
+    ];
+    setEntrypoints(entrypoints);
+  }
+
+  async function writeAllEntrypointsToDisk(forEditBatch = false) {
+    let result: TurbopackResult<RawEntrypoints>;
+    try {
+      result = await project.writeAllEntrypointsToDisk();
+    } catch (error) {
+      if (forEditBatch)
+        throw new EditBatchBuildError(
+          batchFailure("OUTPUT_WRITE_FAILED", error),
+        );
+      throw error;
+    }
+    if (forEditBatch) checkBatchIssues(result);
     processIssues(result, true, true);
     // All-write results contain new EndpointImpl objects. Keep the identities
     // used by subscriptions so subsequent endpoint writes update the same HTML groups.
@@ -486,7 +543,15 @@ export async function createHotReloader(
       apps: currentEntrypoints.apps,
       libraries: currentEntrypoints.libraries,
     });
-    await htmlGenerationManager.generateAll();
+    try {
+      await htmlGenerationManager.generateAll();
+    } catch (error) {
+      if (forEditBatch)
+        throw new EditBatchBuildError(
+          batchFailure("HTML_GENERATION_FAILED", error),
+        );
+      throw error;
+    }
     return result;
   }
 
@@ -529,15 +594,23 @@ export async function createHotReloader(
       return;
     }
 
+    if (editBatchOutputOwner) {
+      ++editBatchOutputOwner.revision;
+      return;
+    }
     currentEntriesHandling
-      .then(() =>
-        queueOutputWrite(async () => {
+      .then(() => {
+        if (editBatchOutputOwner) {
+          ++editBatchOutputOwner.revision;
+          return;
+        }
+        return queueOutputWrite(async () => {
           if (generation !== backgroundWatchGeneration) return;
           markHmrEvent();
           await writeOutputToDisk(entrypoint);
           await notifyClientBuild(true);
-        }),
-      )
+        });
+      })
       .catch((error) => {
         if (!closed) console.error(error);
       });
@@ -592,6 +665,11 @@ export async function createHotReloader(
             }
           } catch (error) {
             if (!closed && generation === backgroundWatchGeneration) {
+              if (editBatchOutputOwner) {
+                editBatchOutputOwner.errors.push(error);
+                ++editBatchOutputOwner.revision;
+                return;
+              }
               console.error(error);
               process.exit(1);
             }
@@ -664,6 +742,10 @@ export async function createHotReloader(
   async function handleEntrypointsSubscription() {
     for await (const entrypoints of entrypointsSubscription) {
       if (closed) return;
+      if (editBatchOutputOwner) {
+        ++editBatchOutputOwner.revision;
+        continue;
+      }
       ++backgroundWatchGeneration;
       if (!currentEntriesHandlingResolve) {
         currentEntriesHandling = new Promise(
@@ -673,12 +755,7 @@ export async function createHotReloader(
       }
 
       await queueOutputWrite(async () => {
-        currentEntrypoints = entrypoints;
-        currentWatchedEntrypoints = [
-          ...(entrypoints.apps ?? []),
-          ...(entrypoints.libraries ?? []),
-        ];
-        setEntrypoints(entrypoints);
+        adoptEntrypoints(entrypoints);
         if (shouldCreateWebpackStats) {
           await writeAllEntrypointsToDisk();
         } else {
@@ -715,12 +792,86 @@ export async function createHotReloader(
     },
 
     async writeAllEntrypointsToDisk() {
+      if (editBatchOutputOwner) {
+        ++editBatchOutputOwner.revision;
+        return editBatchOutputOwner.output;
+      }
       await currentEntriesHandling;
+      const owner = currentOutputOwner();
+      if (owner) {
+        ++owner.revision;
+        return owner.output;
+      }
       return queueOutputWrite(async () => {
         const result = await writeAllEntrypointsToDisk();
         await notifyClientBuild(true);
         return result;
       });
+    },
+
+    async buildEditBatch(batchId) {
+      if (closed || editBatchOutputOwner)
+        throw new Error("The output pipeline is closing or already owned");
+      let resolveOutput!: (result: TurbopackResult<RawEntrypoints>) => void;
+      let rejectOutput!: (error: unknown) => void;
+      const output = new Promise<TurbopackResult<RawEntrypoints>>(
+        (resolve, reject) => {
+          resolveOutput = resolve;
+          rejectOutput = reject;
+        },
+      );
+      // The controller receives the actual error; a batch may have no public all-write joiner.
+      void output.catch(() => {});
+      const owner = { revision: 0, errors: [] as unknown[], output };
+      editBatchOutputOwner = owner;
+      try {
+        try {
+          const acknowledgement = await project.flushWatchBatch(batchId);
+          if (acknowledgement !== batchId)
+            throw new Error(
+              `Flush acknowledged a different batch: ${acknowledgement}`,
+            );
+        } catch (error) {
+          throw new EditBatchBuildError(
+            batchFailure("WATCH_CONTROL_FAILED", error),
+          );
+        }
+        // This fresh read and every subsequent validation read stay OUTSIDE the queue.
+        let snapshot = await project.readEntrypoints();
+        for (;;) {
+          const revision = owner.revision;
+          if (owner.errors.length)
+            throw new AggregateError(
+              owner.errors,
+              "Batch input subscription failed",
+            );
+          const adopted = snapshot;
+          const result = await queueOutputWrite(async () => {
+            adoptEntrypoints(adopted.entrypoints);
+            checkBatchIssues(adopted.entrypoints);
+            const result = await writeAllEntrypointsToDisk(true);
+            await refreshBackgroundWatchers();
+            await notifyClientBuild(true, true);
+            return result;
+          });
+          const fresh = await project.readEntrypoints();
+          if (owner.errors.length)
+            throw new AggregateError(
+              owner.errors,
+              "Batch input subscription failed",
+            );
+          if (revision === owner.revision && adopted.sameAs(fresh)) {
+            resolveOutput(result);
+            return;
+          }
+          snapshot = fresh;
+        }
+      } catch (error) {
+        rejectOutput(error);
+        throw error;
+      } finally {
+        if (editBatchOutputOwner === owner) editBatchOutputOwner = undefined;
+      }
     },
 
     onHMR(req, socket: Socket, head, onUpgrade) {
@@ -1012,12 +1163,14 @@ export async function createHotReloader(
       hmrEventHappened = false;
       progress?.stop();
       closed = true;
-      const disposePromise = disposeBackgroundWatchSubscriptions();
+      const disposePromise = Promise.all([
+        disposeBackgroundWatchSubscriptions(),
+        entrypointsSubscription.return?.(),
+        updateInfoSubscription.return?.(),
+      ]);
       closePromise ??= outputWriteTask
-        .then(() => (persistentCaching ? project.shutdown() : project.onExit()))
-        .catch((err) => {
-          console.error(err);
-        })
+        // Embedded close must release native roots in both cache modes.
+        .then(() => project.shutdown())
         .finally(() => {
           persistentCacheLock?.unlockSync();
         });
@@ -1036,6 +1189,11 @@ export async function createHotReloader(
 
   handleEntrypointsSubscription().catch((err) => {
     if (closed) return;
+    if (editBatchOutputOwner) {
+      editBatchOutputOwner.errors.push(err);
+      ++editBatchOutputOwner.revision;
+      return;
+    }
     console.error(err);
     process.exit(1);
   });
@@ -1046,7 +1204,7 @@ export async function createHotReloader(
   finishHmrEvent(Date.now() - initialBuildStart);
 
   async function handleProjectUpdates() {
-    for await (const updateMessage of project.updateInfoSubscribe(30)) {
+    for await (const updateMessage of updateInfoSubscription) {
       switch (updateMessage.updateType) {
         case "start": {
           hotReloader.send({ action: HMR_ACTIONS_SENT_TO_BROWSER.BUILDING });

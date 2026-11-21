@@ -99,7 +99,9 @@ await `writeAllEntrypointsToDisk()` before publishing build results: it checks
 compilation diagnostics and regenerates HTML with the current asset paths before
 resolving. Compilation and HTML generation errors reject the call. Await
 `close()` to release the HTTP server, HMR connections and project resources.
-Calling `close()` does not exit the process. To manage the surrounding process
+Explicit close stops this Project's input watcher before shutting down its native
+task engine, including when persistent caching is disabled. Calling `close()`
+does not exit the process. To manage the surrounding process
 yourself, pass `{ port: 3000, returnHandle: true, handleSignals: false }` as the fourth argument.
 
 Pass `onClientBuild({ clientPaths, isRebuild })` in the fourth argument to publish
@@ -111,42 +113,160 @@ Do not call `writeAllEntrypointsToDisk()` or await `close()` inside this callbac
 Startup callback failures reject `serve()`; background failures are logged and
 later builds can retry. Failed compilations do not invoke the callback.
 
-### Batch edits from an agent
+### Edit batches from an agent (Node only)
 
-In the dev server process, use the handle returned by `serve()` with
-`returnHandle: true`. Await `beginHmrBatch()` before the first write and release
-the batch after the final write.
+An edit batch groups filesystem watcher changes in the Node dev server. Start it
+before writing files, finish **all** asynchronous writes, and do not write again
+until the commit result arrives. It is not a filesystem rollback or whole-project
+transaction. The hold covers watcher-driven edits by every writer sharing this
+Project, including ordinary editor saves. Existing in-flight builds are not cancelled.
+
+Configure the policy only through the fourth `serve()` argument:
 
 ```javascript
-const batchId = await server.beginHmrBatch();
-try {
-  await writeFiles();
-} finally {
-  await server.endHmrBatch(batchId);
-}
+const server = await serve(options, projectPath, rootPath, {
+  port: 3000,
+  returnHandle: true,
+  editBatch: {
+    timeout: { action: "none" },
+    afterBuild: "hold",
+  },
+  onEditBatchEvent(event) {
+    // Observation only. The result can always be read again by ID.
+    if (event.type === "settled") reportResult(event.result);
+  },
+});
+
+const batchId = await server.beginEditBatch();
+await writeFiles(); // Must drain writes before committing.
+const result = await server.commitEditBatch(batchId);
+if (result.outcome === "failed") reportErrors(result.errors);
 ```
 
-For an agent in another process, set `UTOO_PACK_AGENT_HMR_TOKEN` to a shared
-secret in both processes. Start `up dev`, then use its listening port.
+Do not commit in a `finally` block: a failed writer may have left a partial edit.
+With `none` or `keep-held`, finish or repair the edit before committing the same
+batch, or explicitly close the server without releasing its draft.
+
+`commitEditBatch()` resolves after this batch's tracked input invalidations,
+fresh strongly consistent entry graph, required output/stats/HTML writes, and
+the awaited `onClientBuild` publication callback. It then confirms the
+`afterBuild` policy before recording its result. The existing HMR transport is
+used; no extra refresh is sent. Browser download/execution/DOM acknowledgement
+is not part of this completion condition, and no browser connection is required.
+
+| Policy | Meaning |
+| --- | --- |
+| `timeout: { action: "none" }` | Keep held until explicit commit or close. |
+| `timeout: { action: "keep-held", afterMs }` | Notify once at the deadline, keep the same ID held, and allow a later commit. |
+| `timeout: { action: "release", afterMs }` | Release and record `expired` after its ACK. The writer might still be editing, so this is never a controlled `built` result. |
+| `afterBuild: "hold"` | Keep the confirmed hold after success or failure; repair requires a new batch and commit. |
+| `afterBuild: "resume"` | Confirm watcher release before recording the commit result. |
+
+Omitting `editBatch` defaults to a **30-second release deadline** and
+`afterBuild: "resume"`. Explicit-only integrations should choose `none` or
+`keep-held`. `afterMs` and wait `timeoutMs` must be positive integers at most
+2,147,483,647. The hold deadline starts after native hold acknowledgement and is
+cleared when commit wins; a commit and deadline cannot both flush the batch.
+`afterBuild` does not re-hold a timeout release.
+
+Results have one of these outcomes:
+
+- `built`: `reason: "commit"`, with confirmed `watchState: "held" | "watching"`.
+- `failed`: `reason: "commit" | "timeout" | "close"`, a nonempty `errors` array,
+  and the confirmed watch state or `unknown`.
+- `expired`: `reason: "timeout"`, `watchState: "watching"`, and
+  `error.code: "HOLD_TIMEOUT_RELEASED"`. Subsequent realtime output does not
+  change this result into a successful commit.
+
+Failures retain native `NapiIssue` fields (including source positions when
+available) and serializable name/message/code/path causes, at most eight levels
+per cause chain. Compilation, output I/O, HTML, publication and watcher-control
+failures are distinguished. A failed watcher release does not overwrite the
+original compilation error. If control fails or is lost and its state cannot be
+confirmed, the result is `unknown`; the requested `hold` policy is not evidence
+of an actual hold. Close this server before starting another batch.
+
+`waitForEditBatch(batchId, { timeoutMs, signal })` rejoins the existing result
+without rebuilding. Its timeout throws `EditBatchWaitTimeoutError` carrying the
+ID; abort only ends that waiter. Neither cancels a commit nor releases the hold.
+Repeated commits join the same operation or return the same immutable terminal
+result. One active batch and the latest 32 terminal results are retained for the
+current server lifetime; unknown or evicted IDs return `BATCH_NOT_FOUND`.
+Starting another batch while one is active returns `BATCH_BUSY`.
+
+`onEditBatchEvent` receives `hold-timeout` reminders and `settled` results after
+storage. Observer throws/rejections are logged and cannot change the result.
+By contrast, `onClientBuild` remains an awaited publication step, so its failure
+becomes `PUBLISH_CALLBACK_FAILED`. Never await the same batch's commit/wait, a
+public all-write, or server close from inside `onClientBuild`: those operations
+would wait on their own publication. A `settled` observer may read the stored
+result without that self-wait.
+
+Close synchronously prevents a new unrecorded success from winning. After the
+existing resources close, an active batch records `failed/SERVER_CLOSED/closed`;
+close errors retain their causes and report `unknown`. Pending shutdown is not
+reported as closed. An already stored batch result is never rewritten. Closing
+an uncommitted batch does not release its draft. The server also disposes its
+owned entrypoint/update observers; this adds no global build cancellation API.
+
+For another process, share `UTOO_PACK_AGENT_HMR_TOKEN` with `up dev` (or pass
+`agentHmrToken` to `serve()`). The existing HTTP control prefix accepts only
+authenticated loopback requests:
 
 ```sh
 batch_id=$(up hmr begin --port 3000)
-# Write all files that need to change together.
-up hmr end "$batch_id" --port 3000
+# Write and drain all edits.
+up hmr commit "$batch_id" --port 3000
+# Reconnect after a pending response or a lost connection. This does not build again.
+up hmr wait "$batch_id" --port 3000
+# If the begin response was lost, omit the ID to read and wait on the active batch.
+up hmr wait --port 3000
 ```
 
-The Node API and CLI share one active batch per server. The watcher keeps
-collecting edits from all writers during the batch. An in-progress build can
-finish. `end` returns after releasing the hold, and rebuilding and browser
-updates happen asynchronously. Opening a new batch immediately can also defer
-pending edits from the previous batch. The server automatically releases an
-abandoned batch after 30 seconds, and an expired batch ID returns an error.
-Saves outside a batch update normally.
+CLI commit/wait print the structured result. Exit codes are 0 for built, 1 for
+failed/expired, and 2 for pending. Failed results include their concrete
+diagnostics; expired is reported as `HOLD_TIMEOUT_RELEASED`, not a compilation
+failure. HTTP commit returns a result instead of the old release-only 204.
+A transport wait budget (10 seconds by default, overridable by `timeoutMs` in
+HTTP reads/commit requests) returns **202 + batchId** if the operation remains
+pending. A disconnected request has no response to send; the server operation
+continues. `GET /__utoopack/agent-hmr/active` recovers the active ID, and
+`GET /__utoopack/agent-hmr/wait/:id` waits or reads its retained result. No replay
+service, persistent idempotency protocol or second policy source is added.
+For HTTPS, pass `--https` and ensure Node trusts the certificate.
 
-The Node API works without a token. The CLI uses a local HTTP endpoint that
-requires a token and only accepts loopback requests. When starting the server
-via `serve()`, you can pass its token as `agentHmrToken` in the fourth argument.
-For an HTTPS server, pass `--https` and ensure Node trusts the certificate.
+#### Scope and native regression probes
+
+This capability uses Node NAPI/native watcher control only. `@utoo/web`,
+browser-hosted builds, WASM, Workers, Service Workers and their delivery systems
+are outside its scope. A browser used in the tests only consumes Node-produced
+assets and HMR.
+
+The native flush invalidates existing tracked input read/directory/metadata
+sets while held; it does not recursively scan the filesystem, touch the output
+filesystem's invalidators, or assume the last OS notification has arrived.
+It may cause a full graph recomputation. Delayed events can still produce
+ordinary realtime work after resume; exactly-once build counts and zero HTML
+writes are not promised.
+
+Watcher hold does **not** isolate direct input-filesystem effect writes or new
+request-triggered work. The native input-effect regression probe deliberately
+demonstrates that bypass. With `lazyDynamicImports`, an explicit `editBatch`
+option rejects startup. A realtime server started without that option remains
+available and rejects batch requests before installing hold. Arbitrary plugin
+behaviour is not statically detected. Integrations requiring stricter isolation
+must validate their fixed plugin/configuration combination; these APIs do not
+claim that guarantee for an unverified combination.
+
+Run controller/output/HTTP regressions with the normal Pack tests and CLI
+regressions with the Pack CLI tests. After building the local NAPI binary and
+Pack CJS output (copying the platform `.node` next to that output), run
+`ut run test:native:edit-batch --workspace @utoo/pack`. The committed native
+probe covers real file edits, structured syntax errors and recovery, the lazy
+configuration boundary, and Node-produced browser HMR/React state. It requires
+the repository's Playwright Chromium installation. Run the held filesystem
+probes from the `next.js` Cargo workspace with
+`cargo test -p turbo-tasks-fs held_`.
 
 ### Native Bundle Analyzer
 

@@ -65,6 +65,12 @@ export interface Project {
   /** Holds or releases pending filesystem watcher batches. */
   setWatchBatchHold(held: boolean): Promise<void>;
 
+  /** Invalidates tracked inputs and acknowledges the same batch without releasing hold. */
+  flushWatchBatch(batchId: string): Promise<string>;
+
+  /** One-shot strongly consistent graph read; does not enter the output queue. */
+  readEntrypoints(): Promise<EntrypointsSnapshot>;
+
   writeAllEntrypointsToDisk(): Promise<TurbopackResult<RawEntrypoints>>;
 
   /** Writes native analysis data for browser entries, without emitting bundles. */
@@ -122,6 +128,12 @@ export interface AnalyzeEntry {
 
 export interface AnalyzeData {
   entries: AnalyzeEntry[];
+}
+
+export interface EntrypointsSnapshot {
+  entrypoints: TurbopackResult<RawEntrypoints>;
+  /** Exact native endpoint identities and order, not JS wrapper identity or a hash. */
+  sameAs(other: EntrypointsSnapshot): boolean;
 }
 
 export interface RawEntrypoints {
