@@ -1,0 +1,23 @@
+packages/pack/README.md
+  s_d9c15402d5894b::t_9b635d254fbcdd 311-313
+crates/pack-api/src/source_file_systems.rs
+  s_d9c15402d5894b::t_f3a5c7a1c3b3a7 258,263-266,271,275-276
+next.js
+  s_d9c15402d5894b::t_99939c8454989c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "86d1f3047e1a43aaa2032b01010e152f11fc0a74",
+  "prompts": {},
+  "sessions": {
+    "s_d9c15402d5894b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20640-463d-7e73-aab1-eb21c2999f20",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
