@@ -1,0 +1,19 @@
+next.js
+  s_d9c15402d5894b::t_7b0e993c3df243 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "368e5320652150ca491bab2071658f066222e1a5",
+  "prompts": {},
+  "sessions": {
+    "s_d9c15402d5894b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20640-463d-7e73-aab1-eb21c2999f20",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
