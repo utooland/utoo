@@ -281,6 +281,16 @@ export interface ConfigComplete {
   mode?: "production" | "development";
   module?: ModuleOptions;
   resolve?: ResolveOptions;
+  /** Named filesystem roots that symlinked dependencies can resolve into. */
+  additionalRoots?: Record<
+    string,
+    {
+      /** Directory to make available. Relative paths resolve from the project path. */
+      path: string;
+      /** Skip this root if the directory does not exist. Defaults to false. */
+      ignoreIfMissing?: boolean;
+    }
+  >;
   /**
    * External dependencies for client and Node-target builds. Server entries and
    * Server Functions also use this map unless `server.externals` is provided.

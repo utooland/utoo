@@ -27,6 +27,10 @@ pub struct CompleteConfig {
     #[schemars(description = "Resolve configuration")]
     pub resolve: Option<SchemaResolveConfig>,
 
+    /// Named filesystem roots that symlinked dependencies can resolve into.
+    #[serde(default)]
+    pub additional_roots: HashMap<String, SchemaAdditionalRootConfig>,
+
     /// External dependencies configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(
@@ -141,6 +145,16 @@ pub struct CompleteConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(description = "Experimental features")]
     pub experimental: Option<SchemaExperimentalConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaAdditionalRootConfig {
+    /// Directory to make available. Relative paths resolve from the project path.
+    pub path: String,
+    /// Skip this root if the directory does not exist.
+    #[serde(default)]
+    pub ignore_if_missing: bool,
 }
 
 // ---------------------------------------------------------------------------
