@@ -1,0 +1,19 @@
+.github/workflows/pack-integration.yml
+  s_d9c15402d5894b::t_d12d3906146429 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5907e6aa7e916a35472a5650fe31ee47844d5744",
+  "prompts": {},
+  "sessions": {
+    "s_d9c15402d5894b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20640-463d-7e73-aab1-eb21c2999f20",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
