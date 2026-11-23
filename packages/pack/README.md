@@ -308,8 +308,9 @@ directory containing the intermediate symlink.
 
 Relative paths resolve from the project directory. Each root must be disjoint
 from the main root and all other additional roots. Pack crosses these boundaries
-when following symlinks. Set `ignoreIfMissing` to `true` for an optional directory
-that may be absent when Pack starts.
+when following symlinks. Watch filters apply to paths relative to each additional
+root. Set `ignoreIfMissing` to `true` for an optional directory that may be absent
+when Pack starts.
 
 To use a single filesystem root for worktrees or linked dependencies, set
 `UTOO_ROOT_PATH` to a common parent containing the project and every directory

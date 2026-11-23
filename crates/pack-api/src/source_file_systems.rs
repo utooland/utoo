@@ -255,20 +255,25 @@ async fn create_source_file_systems(
         Vc::cell(options.root),
         options.denied_paths,
         options.watcher_config,
-        options.watched_ignored,
+        options.watched_ignored.clone(),
         map,
     )
     .to_resolved()
     .await?;
+    let additional_watcher_config = DiskWatcherConfig {
+        ignore_paths_relative_to_root: true,
+        ..options.watcher_config
+    };
     let additional = options
         .additional_roots
         .into_iter()
         .map(|root| {
-            DiskFileSystem::new_with_options(
+            DiskFileSystem::new_with_options_and_watched_ignored(
                 root.name,
                 Vc::cell(root.path),
                 root.cache_directory.into_iter().collect(),
-                options.watcher_config,
+                additional_watcher_config,
+                options.watched_ignored.clone(),
                 map,
             )
             .to_resolved()
