@@ -311,6 +311,16 @@ pub struct ServerOutputConfig {
 /// and other internal files.
 pub const DEFAULT_CACHE_DIRECTORY: &str = ".turbopack";
 
+#[derive(
+    Clone, Debug, PartialEq, Eq, Deserialize, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AdditionalRootConfig {
+    pub path: String,
+    #[serde(default)]
+    pub ignore_if_missing: bool,
+}
+
 #[turbo_tasks::value(serialization = "custom", eq = "manual")]
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, OperationValue, Encode, Decode)]
 #[serde(rename_all = "camelCase")]
@@ -343,6 +353,9 @@ pub struct Config {
     plugin_runtime_strategy: Option<PluginRuntimeStrategy>,
     persistent_caching: Option<bool>,
     cache_directory: Option<RcStr>,
+    #[serde(default)]
+    #[bincode(with = "turbo_bincode::indexmap")]
+    additional_roots: FxIndexMap<String, AdditionalRootConfig>,
     #[bincode(with = "turbo_bincode::serde_self_describing")]
     turbopack_memory_eviction: Option<serde_json::Value>,
     node_polyfill: Option<bool>,
@@ -356,6 +369,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn additional_roots(&self) -> &FxIndexMap<String, AdditionalRootConfig> {
+        &self.additional_roots
+    }
+
     fn bundle_source_map_type(&self) -> Option<SourceMapType> {
         if self.bundle_analysis {
             // Keep output attribution on the files Turbopack resolved, so source

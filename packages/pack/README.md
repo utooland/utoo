@@ -292,8 +292,28 @@ Node.js, or library builds.
 
 ### Worktree and Symlink Debugging
 
-Set `UTOO_ROOT_PATH` to a common parent containing the project and the real paths
-of linked dependencies when debugging worktrees or symlinks:
+Use `additionalRoots` to let Pack follow symlinks into named directories outside
+its main filesystem root. For a package linked through a global prefix, add the
+directory containing the intermediate symlink.
+
+```json
+{
+  "additionalRoots": {
+    "linkedPackages": {
+      "path": "/path/to/global-prefix/lib/node_modules"
+    }
+  }
+}
+```
+
+Relative paths resolve from the project directory. Each root must be disjoint
+from the main root and all other additional roots. Pack crosses these boundaries
+when following symlinks. Set `ignoreIfMissing` to `true` for an optional directory
+that may be absent when Pack starts.
+
+To use a single filesystem root for worktrees or linked dependencies, set
+`UTOO_ROOT_PATH` to a common parent containing the project and every directory
+the symlink chain passes through.
 
 ```bash
 UTOO_ROOT_PATH=/path/to/common-parent utx up dev

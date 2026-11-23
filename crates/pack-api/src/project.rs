@@ -48,7 +48,6 @@ use turbopack_ecmascript::async_chunk::proxy::{
 use turbopack::evaluate_context::node_build_environment;
 
 use turbopack_core::{
-    PROJECT_FILESYSTEM_NAME,
     changed::content_changed,
     chunk::{ChunkingContext, EvaluatableAssets, chunk_id_strategy::ModuleIdStrategy},
     compile_time_info::CompileTimeInfo,
@@ -80,6 +79,10 @@ use crate::{
     endpoint::{Endpoint, Endpoints},
     entrypoint::Entrypoints,
     library::{LibraryEntrypoint, LibraryProject, OptionLibraryProject},
+    source_file_systems::{
+        SourceFileSystemOptions, SourceFileSystems, emit_additional_root_warnings,
+        read_source_file_systems, resolve_additional_roots, source_file_systems,
+    },
     versioned_content_map::VersionedContentMap,
 };
 
@@ -157,7 +160,7 @@ fn path_prefix_len(path: &str, root: &str) -> Option<usize> {
     }
 }
 
-fn strip_root_prefix(path: &str, root: &str) -> Option<String> {
+pub(crate) fn strip_root_prefix(path: &str, root: &str) -> Option<String> {
     let path_normalized = normalize_path_for_prefix_match(path);
     let root_normalized = normalize_path_for_prefix_match(root);
 
@@ -179,7 +182,7 @@ fn to_file_system_path(path: &str) -> String {
     trim_leading_path_separators(&path.replace('\\', "/")).to_owned()
 }
 
-fn strip_root_prefix_for_file_system(path: &str, root: &str) -> Option<String> {
+pub(crate) fn strip_root_prefix_for_file_system(path: &str, root: &str) -> Option<String> {
     strip_root_prefix(path, root).map(|relative| to_file_system_path(&relative))
 }
 
@@ -278,8 +281,7 @@ async fn import_meta_env_base_url(config: ResolvedVc<Config>) -> Result<RcStr> {
 )]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectOptions {
-    /// A root path from which all files must be nested under. Trying to access
-    /// a file outside this root will fail. Think of this as a chroot.
+    /// The primary filesystem root. Symlinks may also reach configured additional roots.
     pub root_path: RcStr,
 
     /// A path inside the root_path which contains the app directories.
@@ -308,8 +310,7 @@ pub struct ProjectOptions {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialProjectOptions {
-    /// A root path from which all files must be nested under. Trying to access
-    /// a file outside this root will fail. Think of this as a chroot.
+    /// The primary filesystem root. Symlinks may also reach configured additional roots.
     pub root_path: Option<RcStr>,
 
     /// A path inside the root_path which contains the app/pages directories.
@@ -372,10 +373,13 @@ fn update_project_option_paths(
 #[serde(rename_all = "camelCase")]
 pub struct DefineEnv(pub Vec<(RcStr, RcStr)>);
 
-#[turbo_tasks::value]
+#[turbo_tasks::value(evict = "never", eq = "manual", cell = "new")]
 pub struct ProjectContainer {
     name: RcStr,
     options_state: State<Option<ProjectOptions>>,
+    #[turbo_tasks(debug_ignore, unsafe_ignore)]
+    #[bincode(skip)]
+    options_update_lock: tokio::sync::Mutex<()>,
     versioned_content_map: Option<ResolvedVc<VersionedContentMap>>,
 }
 
@@ -393,24 +397,166 @@ impl ProjectContainer {
                 None
             },
             options_state: State::new(None),
+            options_update_lock: tokio::sync::Mutex::new(()),
         }
         .cell())
     }
 }
 
 #[turbo_tasks::function(operation, root)]
-fn project_operation(project: ResolvedVc<ProjectContainer>) -> Vc<Project> {
-    project.project()
+fn output_fs_operation(root: RcStr) -> Vc<DiskFileSystem> {
+    DiskFileSystem::new(rcstr!("output"), Vc::cell(root))
+}
+
+fn contains_file_system(
+    file_systems: &[ReadRef<DiskFileSystem>],
+    fs: &ReadRef<DiskFileSystem>,
+) -> bool {
+    file_systems.iter().any(|other| ReadRef::ptr_eq(other, fs))
+}
+
+async fn activate_source_file_systems(
+    file_systems: &[ReadRef<DiskFileSystem>],
+    previous: &[ReadRef<DiskFileSystem>],
+    watch: bool,
+) -> Result<()> {
+    let mut starting = Vec::new();
+    for fs in file_systems
+        .iter()
+        .filter(|fs| !contains_file_system(previous, fs))
+    {
+        if watch {
+            starting.push(fs);
+            if let Err(error) = fs.start_watching().await {
+                for fs in starting {
+                    fs.stop_watching().await;
+                }
+                return Err(error);
+            }
+        } else {
+            fs.invalidate_with_reason(|path| invalidation::Initialize {
+                path: RcStr::from(path.to_string_lossy()),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[turbo_tasks::function(operation, root)]
-fn project_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
-    project.project_fs(project.dist_dir())
+async fn prepare_source_file_systems_operation(
+    root_path: RcStr,
+    project_path: RcStr,
+    pack_path: RcStr,
+    config: RcStr,
+    watch: WatchOptions,
+) -> Result<Vc<SourceFileSystems>> {
+    let config = Config::from_string(Vc::cell(config)).to_resolved().await?;
+    let denied_path = project_dist_dir(config, &project_path).await?;
+    configure_source_file_systems(
+        &root_path,
+        &project_path,
+        &pack_path,
+        config,
+        &watch,
+        &denied_path,
+    )
+    .await
 }
 
-#[turbo_tasks::function(operation, root)]
-fn output_fs_operation(project: ResolvedVc<Project>) -> Vc<DiskFileSystem> {
-    project.output_fs()
+fn prepare_source_file_systems(options: &ProjectOptions) -> OperationVc<SourceFileSystems> {
+    prepare_source_file_systems_operation(
+        options.root_path.clone(),
+        options.project_path.clone(),
+        options.pack_path.clone(),
+        options.config.clone(),
+        options.watch.clone(),
+    )
+}
+
+async fn project_dist_dir(config: ResolvedVc<Config>, project_path: &str) -> Result<RcStr> {
+    let output = config.output().await?;
+    let dist_path = output.path.as_deref().unwrap_or("dist");
+    let relative_dist_path = convert_to_project_relative(dist_path, project_path)?;
+    Ok(to_file_system_path(
+        relative_dist_path
+            .strip_prefix("./")
+            .unwrap_or(&relative_dist_path),
+    )
+    .into())
+}
+
+async fn configure_source_file_systems(
+    root_path: &RcStr,
+    project_path: &RcStr,
+    pack_path: &str,
+    config: ResolvedVc<Config>,
+    watch: &WatchOptions,
+    denied_path: &str,
+) -> Result<Vc<SourceFileSystems>> {
+    let mut denied_paths = Vec::new();
+    let unix_relative_project =
+        strip_root_prefix_for_file_system(project_path, root_path).unwrap_or_default();
+
+    if !denied_path.is_empty() {
+        let unix_denied = to_file_system_path(denied_path);
+        if let Some(normalized) = join_path(&unix_relative_project, &unix_denied)
+            && !normalized.is_empty()
+        {
+            denied_paths.push(RcStr::from(normalized));
+        }
+    }
+
+    if let Some(relative_pack_path) = strip_root_prefix_for_file_system(pack_path, root_path)
+        && let Some(turbopack_path_normalized) = join_path(&relative_pack_path, ".turbopack")
+        && !turbopack_path_normalized.is_empty()
+    {
+        let turbopack_path_normalized = RcStr::from(turbopack_path_normalized);
+        if !denied_paths.contains(&turbopack_path_normalized) {
+            denied_paths.push(turbopack_path_normalized);
+        }
+    }
+
+    // turbo-tasks writes into the cache directory itself, so it must never be watched.
+    // Additional filesystems exclude the cache separately when it lies inside them.
+    let cache_directory = config.cache_directory().await?;
+    let cache_directory = if is_absolute_path(&cache_directory) {
+        strip_root_prefix_for_file_system(&cache_directory, root_path)
+    } else {
+        join_path(
+            &unix_relative_project,
+            &to_file_system_path(&cache_directory),
+        )
+    };
+    if let Some(cache_directory) = cache_directory
+        && !cache_directory.is_empty()
+    {
+        let cache_directory = RcStr::from(cache_directory);
+        if !denied_paths.contains(&cache_directory) {
+            denied_paths.push(cache_directory);
+        }
+    }
+    let roots = if config.await?.additional_roots().is_empty() {
+        None
+    } else {
+        Some(resolve_additional_roots(*config, root_path.clone(), project_path.clone()).await?)
+    };
+    let file_systems = source_file_systems(SourceFileSystemOptions {
+        root: root_path.clone(),
+        denied_paths,
+        watcher_config: DiskWatcherConfig {
+            poll_interval: watch.poll_interval,
+            report_invalidation_reason: true,
+            ..Default::default()
+        },
+        watched_ignored: watch.ignored.clone(),
+        additional_roots: roots
+            .as_ref()
+            .map_or_else(Vec::new, |roots| roots.roots.clone()),
+    });
+    if let Some(roots) = roots {
+        emit_additional_root_warnings(file_systems.await?.project, &roots.warnings).await?;
+    }
+    Ok(file_systems)
 }
 
 impl ProjectContainer {
@@ -434,37 +580,16 @@ impl ProjectContainer {
 
         async move {
             normalize_project_options_paths(&mut options)?;
-            let watch = options.watch.clone();
-
-            this.options_state.set(Some(options));
-
-            #[turbo_tasks::function(operation, root)]
-            fn project_from_container_operation(
-                container: OperationVc<ProjectContainer>,
-            ) -> Vc<Project> {
-                container.connect().project()
-            }
-            let project = project_from_container_operation(this_op)
-                .resolve()
-                .strongly_consistent()
-                .await?;
-            let project_fs = project_fs_operation(project)
+            let source_file_systems =
+                read_source_file_systems(prepare_source_file_systems(&options)).await?;
+            let output_fs = output_fs_operation(options.root_path.clone())
                 .read_strongly_consistent()
                 .await?;
-            if watch.enable {
-                project_fs.start_watching().await?;
-            } else {
-                project_fs.invalidate_with_reason(|path| invalidation::Initialize {
-                    // this path is just used for display purposes
-                    path: RcStr::from(path.to_string_lossy()),
-                });
-            }
-            let output_fs = output_fs_operation(project)
-                .read_strongly_consistent()
-                .await?;
+            activate_source_file_systems(&source_file_systems, &[], options.watch.enable).await?;
             output_fs.invalidate_with_reason(|path| invalidation::Initialize {
                 path: RcStr::from(path.to_string_lossy()),
             });
+            this.options_state.set(Some(options));
             Ok(())
         }
         .instrument(span_clone)
@@ -493,6 +618,7 @@ impl ProjectContainer {
             let this = project_container_operation_hack(self)
                 .read_strongly_consistent()
                 .await?;
+            let _guard = this.options_update_lock.lock().await;
             let PartialProjectOptions {
                 root_path,
                 project_path,
@@ -507,6 +633,9 @@ impl ProjectContainer {
                 .get()
                 .clone()
                 .context("ProjectContainer need to be initialized with initialize()")?;
+            let previous_watch = new_options.watch.enable;
+            let previous_sources = prepare_source_file_systems(&new_options);
+            let previous_root = new_options.root_path.clone();
 
             update_project_option_paths(&mut new_options, root_path, project_path, pack_path)?;
             if let Some(config) = config {
@@ -525,39 +654,30 @@ impl ProjectContainer {
             }
 
             // TODO: Handle mode switch, should prevent mode being switched.
-            let watch = new_options.watch.clone();
+            let watch = new_options.watch.enable;
 
-            let project = project_operation(self)
-                .resolve()
-                .strongly_consistent()
-                .await?;
-            let prev_project_fs = project_fs_operation(project)
-                .read_strongly_consistent()
-                .await?;
-            let prev_output_fs = output_fs_operation(project)
+            let previous_file_systems = read_source_file_systems(previous_sources).await?;
+            let prev_output_fs = output_fs_operation(previous_root)
                 .read_strongly_consistent()
                 .await?;
 
+            let next_file_systems =
+                read_source_file_systems(prepare_source_file_systems(&new_options)).await?;
+            let output_fs = output_fs_operation(new_options.root_path.clone())
+                .read_strongly_consistent()
+                .await?;
+            let previous = if previous_watch == watch {
+                previous_file_systems.as_slice()
+            } else {
+                &[]
+            };
+            activate_source_file_systems(&next_file_systems, previous, watch).await?;
             this.options_state.set(Some(new_options));
-            let project = project_operation(self)
-                .resolve()
-                .strongly_consistent()
-                .await?;
-            let project_fs = project_fs_operation(project)
-                .read_strongly_consistent()
-                .await?;
-            let output_fs = output_fs_operation(project)
-                .read_strongly_consistent()
-                .await?;
-            if !ReadRef::ptr_eq(&prev_project_fs, &project_fs) {
-                if watch.enable {
-                    // TODO stop watching: prev_project_fs.stop_watching()?;
-                    project_fs.start_watching().await?;
-                } else {
-                    project_fs.invalidate_with_reason(|path| invalidation::Initialize {
-                        // this path is just used for display purposes
-                        path: RcStr::from(path.to_string_lossy()),
-                    });
+            if previous_watch {
+                for fs in previous_file_systems {
+                    if !watch || !contains_file_system(&next_file_systems, &fs) {
+                        fs.stop_watching().await;
+                    }
                 }
             }
             if !ReadRef::ptr_eq(&prev_output_fs, &output_fs) {
@@ -584,6 +704,7 @@ impl ProjectContainer {
         let watch;
         let build_id;
         let pack_path;
+        let source_file_systems;
         {
             let options = self.options_state.get();
             let options = options
@@ -597,6 +718,7 @@ impl ProjectContainer {
             watch = options.watch.clone();
             build_id = options.build_id.clone();
             pack_path = options.pack_path.clone();
+            source_file_systems = prepare_source_file_systems(options);
         }
 
         Ok(Project {
@@ -608,6 +730,7 @@ impl ProjectContainer {
             versioned_content_map: self.versioned_content_map,
             build_id,
             pack_path,
+            source_file_systems,
         }
         .cell())
     }
@@ -643,8 +766,7 @@ impl ProjectContainer {
 #[derive(Clone)]
 #[turbo_tasks::value]
 pub struct Project {
-    /// A root path from which all files must be nested under. Trying to access
-    /// a file outside this root will fail. Think of this as a chroot.
+    /// The primary filesystem root. Symlinks may also reach configured additional roots.
     root_path: RcStr,
 
     /// A path inside the root_path which contains the app/pages directories.
@@ -665,6 +787,8 @@ pub struct Project {
 
     /// Absolute path for `@utoo/pack`.
     pack_path: RcStr,
+
+    source_file_systems: OperationVc<SourceFileSystems>,
 }
 
 async fn is_client_hmr_enabled(project: &Project) -> Result<bool> {
@@ -811,69 +935,6 @@ impl Project {
     }
 
     #[turbo_tasks::function]
-    pub async fn project_fs(&self, denied_path: Vc<RcStr>) -> Result<Vc<DiskFileSystem>> {
-        let mut denied_paths = Vec::new();
-        let unix_relative_project =
-            strip_root_prefix_for_file_system(&self.project_path, &self.root_path)
-                .unwrap_or_default();
-
-        let denied_path = denied_path.await?;
-        if !denied_path.is_empty() {
-            let unix_denied = to_file_system_path(&denied_path);
-            if let Some(normalized) = join_path(&unix_relative_project, &unix_denied)
-                && !normalized.is_empty()
-            {
-                denied_paths.push(RcStr::from(normalized));
-            }
-        }
-
-        if let Some(relative_pack_path) =
-            strip_root_prefix_for_file_system(&self.pack_path, &self.root_path)
-            && let Some(turbopack_path_normalized) = join_path(&relative_pack_path, ".turbopack")
-            && !turbopack_path_normalized.is_empty()
-        {
-            let turbopack_path_normalized = RcStr::from(turbopack_path_normalized);
-            if !denied_paths.contains(&turbopack_path_normalized) {
-                denied_paths.push(turbopack_path_normalized);
-            }
-        }
-
-        // turbo-tasks writes into the cache directory itself, so it must never be watched. A
-        // directory outside the root filesystem cannot be watched in the first place.
-        let cache_directory = self.config.cache_directory().await?;
-        let cache_directory = if is_absolute_path(&cache_directory) {
-            strip_root_prefix_for_file_system(&cache_directory, &self.root_path)
-        } else {
-            join_path(
-                &unix_relative_project,
-                &to_file_system_path(&cache_directory),
-            )
-        };
-        if let Some(cache_directory) = cache_directory
-            && !cache_directory.is_empty()
-        {
-            let cache_directory = RcStr::from(cache_directory);
-            if !denied_paths.contains(&cache_directory) {
-                denied_paths.push(cache_directory);
-            }
-        }
-        // Get watched ignored paths from configuration
-        let watched_ignored = self.watch.ignored.clone();
-
-        Ok(DiskFileSystem::new_with_options_and_watched_ignored(
-            PROJECT_FILESYSTEM_NAME,
-            Vc::cell(self.root_path.clone()),
-            denied_paths,
-            DiskWatcherConfig {
-                poll_interval: self.watch.poll_interval,
-                report_invalidation_reason: true,
-                ..Default::default()
-            },
-            watched_ignored,
-        ))
-    }
-
-    #[turbo_tasks::function]
     pub fn client_fs(self: Vc<Self>) -> Vc<Box<dyn FileSystem>> {
         let virtual_fs = VirtualFileSystem::new_with_name("client-fs".into());
         Vc::upcast(virtual_fs)
@@ -881,7 +942,7 @@ impl Project {
 
     #[turbo_tasks::function]
     pub fn output_fs(&self) -> Vc<DiskFileSystem> {
-        DiskFileSystem::new(rcstr!("output"), Vc::cell(self.root_path.clone()))
+        output_fs_operation(self.root_path.clone()).connect()
     }
 
     #[turbo_tasks::function]
@@ -904,28 +965,16 @@ impl Project {
 
     #[turbo_tasks::function]
     pub async fn project_root(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
-        Ok(self.project_fs(self.dist_dir()).root())
+        let this = self.await?;
+        Ok(this.source_file_systems.connect().await?.project.root())
     }
 
     #[turbo_tasks::function]
     pub async fn dist_dir(self: Vc<Self>) -> Result<Vc<RcStr>> {
         let this = self.await?;
-        let dist_path = this
-            .config
-            .output()
-            .await?
-            .path
-            .clone()
-            .unwrap_or("dist".into());
-
-        let relative_dist_path = convert_to_project_relative(&dist_path, &this.project_path)?;
-        let relative_dist_path = to_file_system_path(
-            relative_dist_path
-                .strip_prefix("./")
-                .unwrap_or(&relative_dist_path),
-        );
-
-        Ok(Vc::cell(relative_dist_path.into()))
+        Ok(Vc::cell(
+            project_dist_dir(this.config, &this.project_path).await?,
+        ))
     }
 
     #[turbo_tasks::function]

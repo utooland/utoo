@@ -11,6 +11,7 @@ pub mod library;
 pub mod operation;
 pub mod paths;
 pub mod project;
+mod source_file_systems;
 pub mod source_map;
 pub mod turbo_tasks;
 pub mod utils;
