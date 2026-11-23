@@ -100,7 +100,7 @@ Generated from [features-list.json](./features-list.json). After editing the JSO
 | Caching | `persistentCaching` | ✅ | [Cache configuration](../src/utils/env.ts) | Enabled by default in development and production; disable with `persistentCaching: false` or `DISABLE_PERSISTENT_CACHE=1` |
 |  | `turbopackMemoryEviction` | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Memory eviction modes: `false`, `"auto"` (default) or `"full"`; `true` also selects full eviction |
 |  | `cacheDirectory` | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Directory for cache data, locks and traces; defaults to `.turbopack`. Relative paths resolve from the project path |
-|  | `turbopackGc` | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Opt-in reference-counting GC for unreachable turbo-tasks; disabled by default. Read/write persistent cache mode requires memory eviction |
+|  | `turbopackGc` | ✅ | [Shared configuration types](../../pack-shared/src/config.ts) | Enabled by default during persistent cache snapshots. Set `turbopackGc: false` to disable it. GC during background snapshots requires memory eviction. |
 | Bundler Tracing Log | `log file` | ✅ | [Tracing implementation](../../../crates/pack-napi/src/pack_api/project.rs) | `TURBOPACK_TRACING` writes `.trace-turbopack` in `cacheDirectory` (default `.turbopack`) |
 |  | `log viewer` | ✅ | [Turbopack Trace Viewer](https://turbo-trace-viewer.vercel.app/) | Enable `TURBOPACK_TRACING=1` and `TURBOPACK_TRACE_SERVER=1` |
 |  | Chrome Trace | ✅ | [Tracing implementation](../../../crates/pack-napi/src/pack_api/project.rs) | Set `TRACING_CHROME=1` or a file path to capture Chrome Trace events |

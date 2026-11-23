@@ -116,9 +116,11 @@ pub struct CompleteConfig {
     #[schemars(description = "Turbopack memory eviction mode for the persistent cache")]
     pub turbopack_memory_eviction: Option<SchemaTurbopackMemoryEviction>,
 
-    /// Run the turbo-tasks reference-counting garbage collector
+    /// Collect unreachable TurboTasks work during persistent cache snapshots
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(description = "Run the turbo-tasks reference-counting garbage collector")]
+    #[schemars(
+        description = "Collect unreachable TurboTasks work during persistent cache snapshots. Defaults to true. Set to false to disable it. GC during background snapshots requires memory eviction."
+    )]
     pub turbopack_gc: Option<bool>,
 
     /// Cache handler configuration

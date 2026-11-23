@@ -239,7 +239,7 @@
       ]
     },
     "turbopackGc": {
-      "description": "Run the turbo-tasks reference-counting garbage collector",
+      "description": "Collect unreachable TurboTasks work during persistent cache snapshots. Defaults to true. Set to false to disable it. GC during background snapshots requires memory eviction.",
       "type": [
         "boolean",
         "null"
