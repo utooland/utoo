@@ -1,0 +1,23 @@
+packages/pack/package.json
+  s_d68240cf90c185::t_ee21a56682478c 70-71
+examples/with-less/utoopack.config.js
+  s_d68240cf90c185::t_e3e6f6eedd6f13 1-2,4-8,10-11,13-18,20-24,26-27
+examples/with-less/package.json
+  s_d68240cf90c185::t_ff265d3e9311cc 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c413e696da9a286d9c23ae6279b85ef8775ea251",
+  "prompts": {},
+  "sessions": {
+    "s_d68240cf90c185": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c65-a6fd-7de2-9fc7-2973d963ed33",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "zoomdong <1344492820@qq.com>"
+    }
+  }
+}
