@@ -67,8 +67,8 @@
   },
   "peerDependencies": {
     "less": "^4.0.0",
-    "less-loader": "^12.0.0",
-    "postcss": "8.4.31",
+    "less-loader": "^11.1.0 || ^12.0.0",
+    "postcss": "^8.4.31",
     "resolve-url-loader": "^5.0.0",
     "sass": "1.54.0",
     "sass-loader": "^13.2.0",

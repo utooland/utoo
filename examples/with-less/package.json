@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@utoo/pack-cli": "*",
+    "less-loader": "11.1.0",
     "serve": "^14.2.4"
   },
   "repository": "git@github.com:utooland/utoo.git"
