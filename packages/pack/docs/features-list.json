@@ -698,7 +698,7 @@
           "featureLevel2": "`turbopackGc`",
           "featureStatus": "✅",
           "featureDetails": "[Shared configuration types](../../pack-shared/src/config.ts)",
-          "remarks": "Opt-in reference-counting GC for unreachable turbo-tasks; disabled by default. Read/write persistent cache mode requires memory eviction"
+          "remarks": "Enabled by default during persistent cache snapshots. Set `turbopackGc: false` to disable it. GC during background snapshots requires memory eviction."
         }
       ]
     },

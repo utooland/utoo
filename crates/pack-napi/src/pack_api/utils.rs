@@ -68,7 +68,7 @@ pub fn create_turbo_tasks(
                 num_workers: Some(tokio::runtime::Handle::current().metrics().num_workers()),
                 eviction_mode,
                 small_preallocation,
-                gc,
+                gc: Some(gc.unwrap_or(true)),
                 ..Default::default()
             },
             backing_storage,

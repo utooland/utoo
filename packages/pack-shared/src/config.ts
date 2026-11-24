@@ -451,9 +451,9 @@ export interface ConfigComplete {
    */
   turbopackMemoryEviction?: boolean | "auto" | "full";
   /**
-   * Runs the turbo-tasks reference-counting garbage collector so tasks that
-   * become unreachable are dropped from memory during long dev sessions.
-   * Defaults to the `TURBO_ENGINE_GC` environment variable (off).
+   * Collects unreachable TurboTasks work during persistent cache snapshots.
+   * Defaults to `true`. Set to `false` to disable it. GC during background
+   * snapshots requires memory eviction.
    */
   turbopackGc?: boolean;
   nodePolyfill?: boolean;

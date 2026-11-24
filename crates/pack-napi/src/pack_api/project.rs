@@ -188,8 +188,8 @@ pub struct NapiTurboEngineOptions {
     pub turbopack_memory_eviction: Option<MemoryEvictionMode>,
     /// Avoid large backend preallocations to reduce startup memory.
     pub small_preallocation: Option<bool>,
-    /// Run the turbo-tasks reference-counting garbage collector. Defaults to the
-    /// `TURBO_ENGINE_GC` environment variable.
+    /// Run the turbo-tasks reference-counting garbage collector. Defaults to true
+    /// when persistent caching is enabled.
     pub turbopack_gc: Option<bool>,
     /// Absolute directory for the persistent cache, lock file and traces.
     /// Defaults to `.turbopack` inside the project path.
