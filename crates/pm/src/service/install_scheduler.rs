@@ -11,7 +11,7 @@ use crate::service::auth;
 use crate::util::cloner::{ClonePolicy, PackageClone, clone_package_sync};
 use crate::util::downloader::download_bytes;
 use crate::util::package_cache::{
-    CachePlan, ExtractOutcome, extract_non_registry_to_target, extract_to_cache,
+    CachePlan, ExtractOutcome, PackageSource, extract_non_registry_to_target, extract_to_cache,
     registry_cache_lookup, resolve_cache_plan,
 };
 use crate::util::user_config::{get_manifests_concurrency_limit_sync, is_registry_tarball};
@@ -46,21 +46,8 @@ impl<R: EventReceiver> EventReceiver for InstallEventReceiver<R> {
 }
 
 #[derive(Clone, Debug)]
-struct PackageRef {
-    name: String,
-    version: String,
-    tarball_url: String,
-}
-
-impl PackageRef {
-    fn key(&self) -> String {
-        format!("{}@{}", self.name, self.version)
-    }
-}
-
-#[derive(Clone, Debug)]
 struct CloneSpec {
-    package: PackageRef,
+    package: PackageSource,
     target: PathBuf,
     parent: Option<PathBuf>,
     policy: ClonePolicy,
@@ -72,14 +59,14 @@ struct ReadyClone {
 }
 
 struct DownloadedPackage {
-    package: PackageRef,
+    package: PackageSource,
     bytes: Bytes,
 }
 
 type CloneResponder = oneshot::Sender<Result<(), String>>;
 
 enum Command {
-    PrefetchDownload(PackageRef),
+    PrefetchDownload(PackageSource),
     EnsureClone(CloneSpec, CloneResponder),
     Shutdown,
 }
@@ -94,7 +81,7 @@ enum StageReport {
         result: Result<CachePlan, String>,
     },
     Download {
-        package: PackageRef,
+        package: PackageSource,
         result: Result<DownloadOutcome, String>,
     },
     Extract {
@@ -167,19 +154,15 @@ impl InstallSchedulerHandle {
 }
 
 impl InstallScheduler {
-    pub(crate) fn prefetch_download(&self, name: String, version: String, tarball_url: String) {
+    pub(crate) fn prefetch_download(&self, package: PackageSource) {
         // Only registry-host tarballs use the global download cache; git and
         // non-registry (file:/untrusted-https) tarballs are not prefetched here
         // (git is cloned in BFS; non-registry tarballs are materialized straight
         // into node_modules at clone time).
-        if !is_registry_tarball(&tarball_url) {
+        if !is_registry_tarball(&package.tarball_url) {
             return;
         }
-        let _ = self.tx.send(Command::PrefetchDownload(PackageRef {
-            name,
-            version,
-            tarball_url,
-        }));
+        let _ = self.tx.send(Command::PrefetchDownload(package));
     }
 
     /// Single prefetch gate shared by the resolver event path
@@ -192,19 +175,19 @@ impl InstallScheduler {
         if info.is_platform_compatible()
             && let Some(url) = info.tarball_url
         {
-            self.prefetch_download(
-                info.name.to_string(),
-                info.version.to_string(),
-                url.to_string(),
-            );
+            self.prefetch_download(PackageSource {
+                name: info.name.to_string(),
+                version: info.version.to_string(),
+                tarball_url: url.to_string(),
+                integrity: info.integrity.map(str::to_owned),
+                shasum: None,
+            });
         }
     }
 
     pub(crate) async fn ensure_clone(
         &self,
-        name: String,
-        version: String,
-        tarball_url: String,
+        package: PackageSource,
         target: PathBuf,
         policy: ClonePolicy,
     ) -> Result<()> {
@@ -212,11 +195,7 @@ impl InstallScheduler {
         self.tx
             .send(Command::EnsureClone(
                 CloneSpec {
-                    package: PackageRef {
-                        name,
-                        version,
-                        tarball_url,
-                    },
+                    package,
                     target,
                     parent: None,
                     policy,
@@ -271,7 +250,7 @@ struct SchedulerState {
     download_done: HashMap<String, PathBuf>,
     download_active: HashSet<String>,
     fetch_waiters: HashMap<String, Vec<CloneSpec>>,
-    download_queue: VecDeque<PackageRef>,
+    download_queue: VecDeque<PackageSource>,
     extract_active: HashSet<String>,
     extract_queue: VecDeque<DownloadedPackage>,
     direct_extract_limit: usize,
@@ -431,7 +410,7 @@ impl SchedulerState {
         }));
     }
 
-    fn ensure_download(&mut self, package: PackageRef, waiter: Option<CloneSpec>) {
+    fn ensure_download(&mut self, package: PackageSource, waiter: Option<CloneSpec>) {
         let key = package.key();
         if let Some(cache_path) = self.download_done.get(&key).cloned() {
             if let Some(spec) = waiter {
@@ -464,12 +443,12 @@ impl SchedulerState {
             &mut self.download_queue,
             &mut self.download_active,
             self.download_limit,
-            PackageRef::key,
+            PackageSource::key,
             |key| done.contains_key(key),
         );
         for (package, _key) in admitted {
             self.async_ops.push(tokio::spawn(async move {
-                let result = match registry_cache_lookup(&package.name, &package.version).await {
+                let result = match registry_cache_lookup(&package).await {
                     Ok(Some(cache_path)) => Ok(DownloadOutcome::Cached(cache_path)),
                     Ok(None) => {
                         let token = auth::token_for_url(&package.tarball_url).await;
@@ -496,13 +475,9 @@ impl SchedulerState {
         );
         for (downloaded, key) in admitted {
             self.async_ops.push(tokio::spawn(async move {
-                let result = extract_to_cache(
-                    &downloaded.package.name,
-                    &downloaded.package.version,
-                    downloaded.bytes,
-                )
-                .await
-                .map_err(|e| format!("{e:#}"));
+                let result = extract_to_cache(&downloaded.package, downloaded.bytes)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
                 StageReport::Extract { key, result }
             }));
         }
@@ -552,10 +527,9 @@ impl SchedulerState {
         );
         for (spec, target) in admitted {
             self.async_ops.push(tokio::spawn(async move {
-                let result =
-                    extract_non_registry_to_target(&spec.package.tarball_url, &spec.target)
-                        .await
-                        .map_err(|e| format!("{e:#}"));
+                let result = extract_non_registry_to_target(&spec.package, &spec.target)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
                 StageReport::DirectExtract { target, result }
             }));
         }
@@ -701,11 +675,13 @@ fn extract_concurrency_limit() -> usize {
 mod tests {
     use super::*;
 
-    fn package(name: &str, version: &str) -> PackageRef {
-        PackageRef {
+    fn package(name: &str, version: &str) -> PackageSource {
+        PackageSource {
             name: name.to_string(),
             version: version.to_string(),
             tarball_url: format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz"),
+            integrity: None,
+            shasum: None,
         }
     }
 
@@ -729,11 +705,12 @@ mod tests {
         let package = package("react", "18.2.0");
         let waiter = clone_spec("react", "18.2.0", "/tmp/project/node_modules/react");
 
+        let key = package.key();
         state.ensure_download(package.clone(), Some(waiter));
         state.ensure_download(package, None);
 
         assert_eq!(state.download_queue.len(), 1);
-        assert_eq!(state.fetch_waiters["react@18.2.0"].len(), 1);
+        assert_eq!(state.fetch_waiters[&key].len(), 1);
     }
 
     #[test]
