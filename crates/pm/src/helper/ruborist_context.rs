@@ -95,7 +95,10 @@ impl Context {
         let mut builder = UnifiedRegistry::builder()
             .registry(get_registry())
             .auth_token(auth::cached_token().await)
-            .store(Arc::new(DiskManifestStore::new(get_cache_dir())));
+            .store(Arc::new(DiskManifestStore::new(
+                get_cache_dir(),
+                &get_registry(),
+            )));
         if let Some(semver) = get_supports_semver() {
             builder = builder.supports_semver(semver);
         }
