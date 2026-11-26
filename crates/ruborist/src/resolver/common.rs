@@ -107,9 +107,9 @@ pub fn finalize_non_registry_manifest(
 /// this helper writes it afterwards so the final rename is atomic: any
 /// directory at `package_dir` containing `_resolved` is fully populated).
 ///
-/// If another process wins the race (EEXIST / ENOTEMPTY on rename), the
-/// staging dir is discarded silently and the winner's committed dir is
-/// left untouched.
+/// If a failed rename finds a committed slot, the staging directory is
+/// discarded and the existing slot is reused. On Windows, transient access
+/// and sharing errors are retried before giving up.
 #[cfg(any(feature = "native-git", feature = "http-tarball"))]
 pub fn commit_cache_dir_atomic<F>(package_dir: &Path, write: F) -> Result<()>
 where
@@ -141,24 +141,38 @@ where
 
     // `keep()` consumes the TempDir without deleting it on success.
     let tmp_path = tmp_dir.keep();
-    match std::fs::rename(&tmp_path, package_dir) {
-        Ok(()) => Ok(()),
-        // On Linux/macOS, rename(2) over an existing non-empty directory
-        // yields ENOTEMPTY rather than EEXIST, so we check both.
-        Err(e)
-            if e.kind() == std::io::ErrorKind::AlreadyExists
-                || e.raw_os_error() == Some(libc::ENOTEMPTY) =>
+    let resolved_path = package_dir.join("_resolved");
+    // A scanner can briefly hold a handle to a freshly extracted file.
+    // Keep the total backoff below one second, since access denied can also
+    // indicate a permanent permissions issue.
+    let mut retry_delays = [20, 40, 80, 160, 250, 400].into_iter();
+    loop {
+        let Err(error) = std::fs::rename(&tmp_path, package_dir) else {
+            return Ok(());
+        };
+
+        if resolved_path.is_file() {
+            let _ = std::fs::remove_dir_all(&tmp_path);
+            return Ok(());
+        }
+
+        // ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+        if cfg!(windows)
+            && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+            && let Some(delay_ms) = retry_delays.next()
         {
-            let _ = std::fs::remove_dir_all(&tmp_path);
-            Ok(())
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            continue;
         }
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&tmp_path);
-            Err(anyhow!(
-                "failed to commit cache dir {}: {e}",
-                package_dir.display()
-            ))
-        }
+
+        let _ = std::fs::remove_dir_all(&tmp_path);
+        return Err(error).with_context(|| {
+            format!(
+                "failed to commit cache dir {} from {}",
+                package_dir.display(),
+                tmp_path.display()
+            )
+        });
     }
 }
 
@@ -266,5 +280,48 @@ mod tests {
         // Winner's files remain; loser's files are discarded.
         assert!(target.join("first.txt").exists());
         assert!(!target.join("second.txt").exists());
+    }
+
+    #[cfg(any(feature = "native-git", feature = "http-tarball"))]
+    #[test]
+    fn commit_atomic_rejects_existing_slot_without_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("1.0.0");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("stale.txt"), b"stale").unwrap();
+
+        let error = commit_cache_dir_atomic(&target, |_| Ok(())).unwrap_err();
+        assert!(error.downcast_ref::<std::io::Error>().is_some());
+        assert!(target.join("stale.txt").is_file());
+        assert!(!target.join("_resolved").exists());
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(all(windows, any(feature = "native-git", feature = "http-tarball")))]
+    #[test]
+    fn commit_atomic_retries_while_staged_file_is_locked() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::time::Duration;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("1.0.0");
+        std::thread::scope(|scope| {
+            commit_cache_dir_atomic(&target, |stage| {
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .share_mode(0)
+                    .open(stage.join("package.json"))?;
+                scope.spawn(move || {
+                    std::thread::sleep(Duration::from_millis(100));
+                    drop(file);
+                });
+                Ok(())
+            })
+            .unwrap();
+        });
+        assert!(target.join("package.json").is_file());
+        assert!(target.join("_resolved").is_file());
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
     }
 }
