@@ -130,6 +130,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             test: |
               cargo test -p utoo-pm --target x86_64-pc-windows-msvc -- --nocapture
+              cargo test -p utoo-ruborist --features native-git --target x86_64-pc-windows-msvc commit_atomic -- --nocapture
 
     name: utoopm-ci-${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
