@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::cli::ConfigCommands;
 use crate::error::CliError;
-use crate::model::cli_output::{ConfigGetResult, ConfigListResult, ConfigSetResult};
+use crate::model::cli_output::{
+    ConfigDeleteResult, ConfigGetResult, ConfigListResult, ConfigSetResult,
+};
 use crate::util::cli_enum::ConfigScope;
 use crate::util::config_file::Config;
 use crate::util::presenter::emit;
@@ -22,6 +24,7 @@ pub async fn run(command: ConfigCommands) -> Result<()> {
             override_values,
         } => handle_config_get(key, global.into(), override_values).await,
         ConfigCommands::List { global } => handle_config_list(global.into()).await,
+        ConfigCommands::Delete { key, global } => handle_config_delete(key, global.into()).await,
     }
 }
 
@@ -47,6 +50,26 @@ pub async fn handle_config_set(key: String, value: String, scope: ConfigScope) -
     };
     emit("config", &output, || {
         println!("Successfully set {key} ({label})");
+        Ok(())
+    })
+}
+
+pub async fn handle_config_delete(key: String, scope: ConfigScope) -> Result<()> {
+    let mut config = Config::load(scope).await?;
+    let deleted = config.get(&key)?.is_some();
+    config.delete(&key, scope)?;
+    let label = if scope == ConfigScope::Global {
+        "global"
+    } else {
+        "local"
+    };
+    let output = ConfigDeleteResult {
+        key: key.clone(),
+        scope: label.to_string(),
+        deleted,
+    };
+    emit("config", &output, || {
+        println!("Successfully deleted {key} ({label})");
         Ok(())
     })
 }
